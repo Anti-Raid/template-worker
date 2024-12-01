@@ -36,7 +36,7 @@ impl LuaUserData for TemplateContext {
                 return Ok(v.clone());
             }
 
-            log::debug!("TemplateContext: Serializing data");
+            log::trace!("TemplateContext: Serializing data");
             let v = lua.to_value(&this.template_data)?;
 
             *cached_data = Some(v.clone());

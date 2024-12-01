@@ -113,7 +113,7 @@ impl LuaUserData for Event {
             Ok(name)
         });
         fields.add_field_method_get("data", |lua, this| {
-            log::info!("Event: Serializing data");
+            log::trace!("Event: Serializing data");
             let v = lua.to_value(&this.data)?;
             Ok(v)
         });
