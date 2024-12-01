@@ -1,12 +1,12 @@
-use botox::cache::CacheHttpImpl;
-use silverpelt::Error;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+
+use arc_swap::ArcSwap;
+use silverpelt::Error;
 
 /// Props
 pub struct Props {
-    pub cache_http: Arc<RwLock<Option<CacheHttpImpl>>>,
-    pub shard_manager: Arc<RwLock<Option<Arc<serenity::all::ShardManager>>>>,
+    pub cache: ArcSwap<Option<Arc<serenity::all::Cache>>>,
+    pub shard_manager: ArcSwap<Option<Arc<serenity::all::ShardManager>>>,
 }
 
 #[async_trait::async_trait]
@@ -21,9 +21,7 @@ impl silverpelt::data::Props for Props {
     }
 
     async fn shards(&self) -> Result<Vec<u16>, Error> {
-        let guard = self.shard_manager.read().await;
-
-        if let Some(shard_manager) = guard.as_ref() {
+        if let Some(shard_manager) = self.shard_manager.load().as_ref() {
             let mut shards = Vec::new();
 
             for (id, _) in shard_manager.runners.lock().await.iter() {
@@ -37,10 +35,10 @@ impl silverpelt::data::Props for Props {
     }
 
     async fn shard_count(&self) -> Result<u16, Error> {
-        let guard = self.cache_http.read().await;
+        let guard = self.cache.load();
 
-        if let Some(cache_http) = guard.as_ref() {
-            Ok(cache_http.cache.shard_count().get())
+        if let Some(cache) = guard.as_ref() {
+            Ok(cache.shard_count().get())
         } else {
             Ok(1)
         }
@@ -51,9 +49,7 @@ impl silverpelt::data::Props for Props {
         &self,
         shard_id: serenity::all::ShardId,
     ) -> Result<serenity::all::ShardMessenger, Error> {
-        let guard = self.shard_manager.read().await;
-
-        if let Some(shard_manager) = guard.as_ref() {
+        if let Some(shard_manager) = self.shard_manager.load().as_ref() {
             let runners = shard_manager.runners.lock().await;
             let runner = runners
                 .get(&shard_id)
@@ -66,24 +62,24 @@ impl silverpelt::data::Props for Props {
     }
 
     async fn total_guilds(&self) -> Result<u64, Error> {
-        let guard = self.cache_http.read().await;
+        let guard = self.cache.load();
 
-        if let Some(cache_http) = guard.as_ref() {
-            Ok(cache_http.cache.guilds().len() as u64)
+        if let Some(cache) = guard.as_ref() {
+            Ok(cache.guilds().len() as u64)
         } else {
             Ok(0)
         }
     }
 
     async fn total_users(&self) -> Result<u64, Error> {
-        let guard = self.cache_http.read().await;
+        let guard = self.cache.load();
 
-        if let Some(cache_http) = guard.as_ref() {
+        if let Some(cache) = guard.as_ref() {
             let mut count = 0;
 
-            for guild in cache_http.cache.guilds() {
+            for guild in cache.guilds() {
                 {
-                    let guild = guild.to_guild_cached(&cache_http.cache);
+                    let guild = guild.to_guild_cached(&cache);
 
                     if let Some(guild) = guild {
                         count += guild.member_count;

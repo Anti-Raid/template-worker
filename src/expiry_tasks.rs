@@ -1,3 +1,7 @@
+use std::time::Duration;
+
+use serenity::futures::FutureExt;
+
 pub async fn punishment_expiry_task(
     ctx: &serenity::all::client::Context,
 ) -> Result<(), silverpelt::Error> {
@@ -148,4 +152,23 @@ pub async fn stings_expiry_task(
     }
 
     Ok(())
+}
+
+pub fn tasks() -> Vec<botox::taskman::Task> {
+    vec![
+        botox::taskman::Task {
+            name: "sting_expiry",
+            description: "Check for expired stings and dispatch the required event",
+            enabled: true,
+            duration: Duration::from_secs(60),
+            run: Box::new(move |ctx| crate::expiry_tasks::stings_expiry_task(ctx).boxed()),
+        },
+        botox::taskman::Task {
+            name: "punishment_expiry",
+            description: "Check for expired punishments and dispatch the required event",
+            enabled: true,
+            duration: Duration::from_secs(60),
+            run: Box::new(move |ctx| crate::expiry_tasks::punishment_expiry_task(ctx).boxed()),
+        },
+    ]
 }

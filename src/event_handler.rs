@@ -1,8 +1,7 @@
-use std::time::Duration;
-
+use crate::dispatch::discord_event_dispatch;
+use crate::expiry_tasks::tasks;
 use async_trait::async_trait;
 use serenity::all::Framework;
-use serenity::futures::FutureExt;
 use serenity::gateway::client::Context;
 
 static ONCE: std::sync::Once = std::sync::Once::new();
@@ -16,6 +15,7 @@ impl Framework for EventFramework {
             ONCE.call_once(|| {
                 let ctx1 = ctx.clone();
                 let data1 = ctx.data::<silverpelt::data::Data>();
+
                 tokio::task::spawn(async move {
                     log::info!("Starting RPC server");
 
@@ -36,7 +36,7 @@ impl Framework for EventFramework {
 
                 tokio::task::spawn(async move {
                     log::info!("Calling on_startup");
-                    crate::startup::on_startup(ctx2)
+                    crate::on_startup::on_startup(ctx2)
                         .await
                         .expect("Failed to call on_startup");
                 });
@@ -46,28 +46,13 @@ impl Framework for EventFramework {
                     log::info!("Starting up tasks");
 
                     tokio::task::spawn(async move {
-                        botox::taskman::start_all_tasks(vec![
-                            botox::taskman::Task {
-                                name: "sting_expiry",
-                                description: "Check for expired stings and dispatch the required event",
-                                enabled: true,
-                                duration: Duration::from_secs(60),
-                                run: Box::new(move |ctx| crate::expiry_tasks::stings_expiry_task(ctx).boxed()),
-                            },
-                            botox::taskman::Task {
-                                name: "punishment_expiry",
-                                description: "Check for expired punishments and dispatch the required event",
-                                enabled: true,
-                                duration: Duration::from_secs(60),
-                                run: Box::new(move |ctx| crate::expiry_tasks::punishment_expiry_task(ctx).boxed()),
-                            },
-                        ], ctx3).await;
+                        botox::taskman::start_all_tasks(tasks(), ctx3).await;
                     });
                 });
             });
         }
 
-        match crate::dispatch::discord_event_dispatch(event, ctx).await {
+        match discord_event_dispatch(event, ctx).await {
             Ok(_) => {}
             Err(e) => {
                 log::error!("Error dispatching event: {:?}", e);

@@ -51,7 +51,7 @@ blake3 = { version = "=1.5.0", features = ["traits-preview"] }
 permissions = { path = "../../../../core/rust/rust.permissions" }
 limits = { path = "../../../../core/rust/rust.limits" }
 splashcore_rs = { path = "../../../../core/rust/rust.std" }
-silverpelt = { path = "../../../../core/rust/rust.silverpelt" }
+silverpelt = { path = "../../../../core/rust/rust.silverpelt", features = ["template-worker-dispatch"] }
 captcha = { git = "https://github.com/Anti-Raid/captcha", branch = "master" }
 sandwich_driver = { path = "../../../../core/rust/rust.sandwich_driver" }
 templating_docgen = { path = "../rust.templating.docgen" }

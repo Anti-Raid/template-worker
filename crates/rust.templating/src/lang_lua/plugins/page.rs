@@ -40,9 +40,9 @@ impl SettingView for LuaSettingExecutor {
         let result: Vec<indexmap::IndexMap<String, splashcore_rs::value::Value>> = crate::execute(
             context.guild_id,
             self.template.clone(),
-            context.data.pool.clone(),
+            context.data.data.pool.clone(),
             context.data.serenity_context.clone(),
-            context.data.reqwest.clone(),
+            context.data.data.reqwest.clone(),
             crate::event::Event::new(
                 "(Anti-Raid) View Setting".to_string(),
                 "Settings/View".to_string(),
@@ -79,9 +79,9 @@ impl SettingCreator for LuaSettingExecutor {
         let result: indexmap::IndexMap<String, splashcore_rs::value::Value> = crate::execute(
             context.guild_id,
             self.template.clone(),
-            context.data.pool.clone(),
+            context.data.data.pool.clone(),
             context.data.serenity_context.clone(),
-            context.data.reqwest.clone(),
+            context.data.data.reqwest.clone(),
             crate::event::Event::new(
                 "(Anti-Raid) Create Setting".to_string(),
                 "Settings/Create".to_string(),
@@ -118,9 +118,9 @@ impl SettingUpdater for LuaSettingExecutor {
         let result: indexmap::IndexMap<String, splashcore_rs::value::Value> = crate::execute(
             context.guild_id,
             self.template.clone(),
-            context.data.pool.clone(),
+            context.data.data.pool.clone(),
             context.data.serenity_context.clone(),
-            context.data.reqwest.clone(),
+            context.data.data.reqwest.clone(),
             crate::event::Event::new(
                 "(Anti-Raid) Update Setting".to_string(),
                 "Settings/Update".to_string(),
@@ -158,9 +158,9 @@ impl SettingDeleter for LuaSettingExecutor {
         let _: () = crate::execute(
             context.guild_id,
             self.template.clone(),
-            context.data.pool.clone(),
+            context.data.data.pool.clone(),
             context.data.serenity_context.clone(),
-            context.data.reqwest.clone(),
+            context.data.data.reqwest.clone(),
             crate::event::Event::new(
                 "(Anti-Raid) Delete Setting".to_string(),
                 "Settings/Delete".to_string(),

@@ -1,7 +1,7 @@
 [package]
 name = "template-worker"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -13,9 +13,9 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 dashmap = { version = "6", features = ["serde", "inline", "rayon"] }
 async-trait = "0.1.80"
 serde_json = "1.0"
-indexmap = { version = "2", features = ["serde"] }
 axum = { version = "0.7.5", features = ["macros"] }
 clap = { version = "4.5.16", features = ["derive"] }
+arc-swap = "1"
 
 templating = { path = "./crates/rust.templating" }
 templating_docgen = { path = "./crates/rust.templating.docgen" }

@@ -11,7 +11,6 @@ pub struct DiscordActionExecutor {
     guild_id: serenity::all::GuildId,
     serenity_context: serenity::all::Context,
     shard_messenger: serenity::all::ShardMessenger,
-    cache_http: botox::cache::CacheHttpImpl,
     reqwest_client: reqwest::Client,
     ratelimits: Arc<state::LuaRatelimits>,
 }
@@ -37,7 +36,8 @@ impl DiscordActionExecutor {
 
     pub async fn user_in_guild(&self, user_id: serenity::all::UserId) -> Result<(), crate::Error> {
         let Some(member) = sandwich_driver::member_in_guild(
-            &self.cache_http,
+            &self.serenity_context.cache,
+            &self.serenity_context.http,
             &self.reqwest_client,
             self.guild_id,
             user_id,
@@ -59,11 +59,17 @@ impl DiscordActionExecutor {
         user_id: serenity::all::UserId,
         needed_permissions: serenity::all::Permissions,
     ) -> Result<(), crate::Error> {
-        let guild =
-            sandwich_driver::guild(&self.cache_http, &self.reqwest_client, self.guild_id).await?; // Get the guild
+        let guild = sandwich_driver::guild(
+            &self.serenity_context.cache,
+            &self.serenity_context.http,
+            &self.reqwest_client,
+            self.guild_id,
+        )
+        .await?; // Get the guild
 
         let Some(member) = sandwich_driver::member_in_guild(
-            &self.cache_http,
+            &self.serenity_context.cache,
+            &self.serenity_context.http,
             &self.reqwest_client,
             self.guild_id,
             user_id,
@@ -92,11 +98,17 @@ impl DiscordActionExecutor {
         target_id: serenity::all::UserId,
         needed_permissions: serenity::all::Permissions,
     ) -> Result<(), crate::Error> {
-        let guild =
-            sandwich_driver::guild(&self.cache_http, &self.reqwest_client, self.guild_id).await?; // Get the guild
+        let guild = sandwich_driver::guild(
+            &self.serenity_context.cache,
+            &self.serenity_context.http,
+            &self.reqwest_client,
+            self.guild_id,
+        )
+        .await?; // Get the guild
 
         let Some(member) = sandwich_driver::member_in_guild(
-            &self.cache_http,
+            &self.serenity_context.cache,
+            &self.serenity_context.http,
             &self.reqwest_client,
             self.guild_id,
             user_id,
@@ -117,7 +129,8 @@ impl DiscordActionExecutor {
         }
 
         let Some(target_member) = sandwich_driver::member_in_guild(
-            &self.cache_http,
+            &self.serenity_context.cache,
+            &self.serenity_context.http,
             &self.reqwest_client,
             self.guild_id,
             target_id,
@@ -1860,7 +1873,8 @@ impl LuaUserData for DiscordActionExecutor {
 
             // Perform required checks
             let channel = sandwich_driver::channel(
-                &this.cache_http,
+                &this.serenity_context.cache,
+                &this.serenity_context.http,
                 &this.reqwest_client,
                 Some(this.guild_id),
                 data.channel_id,
@@ -1883,7 +1897,8 @@ impl LuaUserData for DiscordActionExecutor {
             let bot_user_id = this.serenity_context.cache.current_user().id;
 
             let bot_user = sandwich_driver::member_in_guild(
-                &this.cache_http,
+                &this.serenity_context.cache,
+                &this.serenity_context.http,
                 &this.reqwest_client,
                 this.guild_id,
                 bot_user_id,
@@ -1895,10 +1910,14 @@ impl LuaUserData for DiscordActionExecutor {
                 return Err(LuaError::external("Bot user not found"));
             };
 
-            let guild =
-                sandwich_driver::guild(&this.cache_http, &this.reqwest_client, this.guild_id)
-                    .await
-                    .map_err(LuaError::external)?;
+            let guild = sandwich_driver::guild(
+                &this.serenity_context.cache,
+                &this.serenity_context.http,
+                &this.reqwest_client,
+                this.guild_id,
+            )
+            .await
+            .map_err(LuaError::external)?;
 
             // Check if the bot has permissions to send messages in the given channel
             if !guild
@@ -1984,7 +2003,6 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
             let executor = DiscordActionExecutor {
                 template_data: token.template_data.clone(),
                 guild_id: data.guild_id,
-                cache_http: botox::cache::CacheHttpImpl::from_ctx(&data.serenity_context),
                 serenity_context: data.serenity_context.clone(),
                 shard_messenger: data.shard_messenger.clone(),
                 reqwest_client: data.reqwest_client.clone(),

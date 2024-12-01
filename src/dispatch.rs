@@ -1,7 +1,14 @@
-use std::sync::Arc;
-
-use serenity::all::FullEvent;
+use serenity::all::{
+    Context, CreateActionRow, CreateButton, CreateEmbed, CreateMessage, FullEvent, GuildId,
+};
 use silverpelt::ar_event::{AntiraidEvent, EventHandlerContext};
+use silverpelt::data::Data;
+use std::sync::Arc;
+use templating::{
+    cache::get_all_guild_templates,
+    event::{ArcOrNormal, Event},
+    GuildTemplate, Template,
+};
 
 use crate::temporary_punishments;
 
@@ -17,10 +24,10 @@ const fn not_audit_loggable_event() -> &'static [&'static str] {
 }
 
 pub async fn discord_event_dispatch(
-    event: &serenity::all::FullEvent,
-    serenity_context: &serenity::all::Context,
+    event: &FullEvent,
+    serenity_context: &Context,
 ) -> Result<(), silverpelt::Error> {
-    let data = serenity_context.data::<silverpelt::data::Data>();
+    let data = serenity_context.data::<Data>();
 
     let Some(guild_id) = gwevent::core::get_event_guild_id(&event) else {
         return Ok(());
@@ -63,11 +70,11 @@ pub async fn discord_event_dispatch(
     dispatch(
         serenity_context,
         &data,
-        templating::event::Event::new(
+        Event::new(
             event_titlename,
             "Discord".to_string(),
             event.snake_case_name().to_uppercase(),
-            templating::event::ArcOrNormal::Arc(Arc::new(serde_json::to_value(event)?)),
+            ArcOrNormal::Arc(Arc::new(serde_json::to_value(event)?)),
             false,
             user_id.map(|u| u.to_string()),
         ),
@@ -84,11 +91,11 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
             dispatch(
                 ctx,
                 &ectx.data,
-                templating::event::Event::new(
+                Event::new(
                     event.event_titlename.clone(),
                     "Custom".to_string(),
                     event.event_name.clone(),
-                    templating::event::ArcOrNormal::Arc(Arc::new(event.event_data.clone())),
+                    ArcOrNormal::Arc(Arc::new(event.event_data.clone())),
                     false,
                     None,
                 ),
@@ -100,11 +107,11 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
             dispatch(
                 ctx,
                 &ectx.data,
-                templating::event::Event::new(
+                Event::new(
                     "(Anti Raid) Sting Created".to_string(),
                     "StingCreate".to_string(),
                     "StingCreate".to_string(),
-                    templating::event::ArcOrNormal::Arc(Arc::new(serde_json::to_value(&sting)?)),
+                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(&sting)?)),
                     false,
                     None,
                 ),
@@ -118,11 +125,11 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
             dispatch(
                 ctx,
                 &ectx.data,
-                templating::event::Event::new(
+                Event::new(
                     "(Anti Raid) Sting Expired".to_string(),
                     "StingExpire".to_string(),
                     "StingExpire".to_string(),
-                    templating::event::ArcOrNormal::Arc(Arc::new(serde_json::to_value(&sting)?)),
+                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(&sting)?)),
                     false,
                     None,
                 ),
@@ -136,11 +143,11 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
             dispatch(
                 ctx,
                 &ectx.data,
-                templating::event::Event::new(
+                Event::new(
                     "(Anti Raid) Sting Deleted".to_string(),
                     "StingDelete".to_string(),
                     "StingDelete".to_string(),
-                    templating::event::ArcOrNormal::Arc(Arc::new(serde_json::to_value(&sting)?)),
+                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(&sting)?)),
                     false,
                     None,
                 ),
@@ -154,13 +161,11 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
             dispatch(
                 ctx,
                 &ectx.data,
-                templating::event::Event::new(
+                Event::new(
                     "(Anti Raid) Punishment Created".to_string(),
                     "PunishmentCreate".to_string(),
                     "PunishmentCreate".to_string(),
-                    templating::event::ArcOrNormal::Arc(Arc::new(
-                        serde_json::to_value(&punishment)?.into(),
-                    )),
+                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(&punishment)?.into())),
                     false,
                     None,
                 ),
@@ -174,13 +179,11 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
             dispatch(
                 ctx,
                 &ectx.data,
-                templating::event::Event::new(
+                Event::new(
                     "(Anti Raid) Punishment Expired".to_string(),
                     "PunishmentExpire".to_string(),
                     "PunishmentExpire".to_string(),
-                    templating::event::ArcOrNormal::Arc(Arc::new(serde_json::to_value(
-                        &punishment,
-                    )?)),
+                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(&punishment)?)),
                     false,
                     None,
                 ),
@@ -196,11 +199,11 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
             dispatch(
                 ctx,
                 &ectx.data,
-                templating::event::Event::new(
+                Event::new(
                     "(Anti Raid) On Startup".to_string(),
                     "OnStartup".to_string(),
                     "OnStartup".to_string(),
-                    templating::event::ArcOrNormal::Arc(Arc::new(serde_json::json!({
+                    ArcOrNormal::Arc(Arc::new(serde_json::json!({
                             "targets": modified
                         }
                     ))),
@@ -241,12 +244,12 @@ fn should_dispatch_event(event_name: &str, filters: &[String]) -> bool {
 }
 
 pub async fn dispatch(
-    ctx: &serenity::all::client::Context,
-    data: &silverpelt::data::Data,
-    event: templating::event::Event,
-    guild_id: serenity::model::id::GuildId,
+    ctx: &Context,
+    data: &Data,
+    event: Event,
+    guild_id: GuildId,
 ) -> Result<(), silverpelt::Error> {
-    let templates = templating::cache::get_all_guild_templates(guild_id, &data.pool).await?;
+    let templates = get_all_guild_templates(guild_id, &data.pool).await?;
 
     if templates.is_empty() {
         return Ok(());
@@ -255,7 +258,6 @@ pub async fn dispatch(
     for template in templates.iter().filter(|template| {
         should_dispatch_event(&event.name(), {
             // False positive, unwrap_or_default cannot be used here as it moves the event out of the sink
-            #[allow(clippy::manual_unwrap_or_default)]
             if let Some(ref events) = template.events {
                 events
             } else {
@@ -265,7 +267,7 @@ pub async fn dispatch(
     }) {
         match templating::execute::<Option<()>>(
             guild_id,
-            templating::Template::Named(template.name.clone()),
+            Template::Named(template.name.clone()),
             data.pool.clone(),
             ctx.clone(),
             data.reqwest.clone(),
@@ -284,13 +286,13 @@ pub async fn dispatch(
 
 /// Dispatches an error event
 async fn dispatch_error(
-    ctx: &serenity::all::client::Context,
-    data: &silverpelt::data::Data,
+    ctx: &Context,
+    data: &Data,
     error: &str,
-    guild_id: serenity::model::id::GuildId,
-    template: &templating::GuildTemplate,
+    guild_id: GuildId,
+    template: &GuildTemplate,
 ) -> Result<(), silverpelt::Error> {
-    let templates = templating::cache::get_all_guild_templates(guild_id, &data.pool).await?;
+    let templates = get_all_guild_templates(guild_id, &data.pool).await?;
 
     if templates.is_empty() {
         return Ok(());
@@ -298,13 +300,9 @@ async fn dispatch_error(
 
     match template.error_channel {
         Some(c) => {
-            let Some(channel) = sandwich_driver::channel(
-                &botox::cache::CacheHttpImpl::from_ctx(ctx),
-                &data.reqwest,
-                Some(guild_id),
-                c,
-            )
-            .await?
+            let Some(channel) =
+                sandwich_driver::channel(&ctx.cache, &ctx.http, &data.reqwest, Some(guild_id), c)
+                    .await?
             else {
                 return Ok(());
             };
@@ -319,19 +317,17 @@ async fn dispatch_error(
 
             c.send_message(
                 &ctx.http,
-                serenity::all::CreateMessage::new()
+                CreateMessage::new()
                     .embed(
-                        serenity::all::CreateEmbed::new()
+                        CreateEmbed::new()
                             .title("Error executing template")
                             .field("Error", error, false)
                             .field("Template", template.name.clone(), false),
                     )
-                    .components(vec![serenity::all::CreateActionRow::Buttons(
+                    .components(vec![CreateActionRow::Buttons(
                         vec![
-                            serenity::all::CreateButton::new_link(
-                                &config::CONFIG.meta.support_server_invite,
-                            )
-                            .label("Support Server"),
+                            CreateButton::new_link(&config::CONFIG.meta.support_server_invite)
+                                .label("Support Server"),
                         ]
                         .into(),
                     )]),
@@ -342,15 +338,15 @@ async fn dispatch_error(
             // Try firing the error event
             templating::execute::<Option<()>>(
                 guild_id,
-                templating::Template::Named(template.name.clone()),
+                Template::Named(template.name.clone()),
                 data.pool.clone(),
                 ctx.clone(),
                 data.reqwest.clone(),
-                templating::event::Event::new(
+                Event::new(
                     "Error".to_string(),
                     "Error".to_string(),
                     "Error".to_string(),
-                    templating::event::ArcOrNormal::Normal(error.into()),
+                    ArcOrNormal::Normal(error.into()),
                     false,
                     None,
                 ),

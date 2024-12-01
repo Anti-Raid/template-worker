@@ -12,14 +12,19 @@ pub async fn handle_expired_punishment(
         _ => return Ok(()),
     };
 
-    let cache_http = botox::cache::CacheHttpImpl::from_ctx(&serenity_context);
-
     let bot_id = serenity_context.cache.current_user().id;
 
-    let guild = sandwich_driver::guild(&cache_http, &data.reqwest, punishment.guild_id).await?;
+    let guild = sandwich_driver::guild(
+        &serenity_context.cache,
+        &serenity_context.http,
+        &data.reqwest,
+        punishment.guild_id,
+    )
+    .await?;
 
     let current_user = match sandwich_driver::member_in_guild(
-        &cache_http,
+        &serenity_context.cache,
+        &serenity_context.http,
         &data.reqwest,
         punishment.guild_id,
         bot_id,
