@@ -1,3 +1,5 @@
+pub use silverpelt::templates::LuaKVConstraints;
+
 pub mod captcha {
     #[derive(serde::Serialize, serde::Deserialize)]
     pub struct Captcha {
@@ -13,6 +15,7 @@ pub mod templating_core {
 
     use std::str::FromStr;
 
+    pub use silverpelt::templates::{create_shop_template, parse_shop_template};
     use silverpelt::Error;
 
     #[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
@@ -81,22 +84,6 @@ pub mod templating_core {
                 Self::Lua => write!(f, "lang_lua"),
             }
         }
-    }
-
-    /// Parses a shop template of form template_name#version
-    pub fn parse_shop_template(s: &str) -> Result<(String, String), Error> {
-        let s = s.trim_start_matches("$shop/");
-        let (template, version) = match s.split_once('#') {
-            Some((template, version)) => (template, version),
-            None => return Err("Invalid shop template".into()),
-        };
-
-        Ok((template.to_string(), version.to_string()))
-    }
-
-    /// Creates a shop template string given name and version
-    pub fn create_shop_template(template: &str, version: &str) -> String {
-        format!("$shop/{}#{}", template, version)
     }
 
     #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]

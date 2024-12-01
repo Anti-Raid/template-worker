@@ -24,6 +24,7 @@ gwevent = { path = "../../core/rust/rust.gwevent" }
 sandwich_driver = { path = "../../core/rust/rust.sandwich_driver" }
 config = { path = "../../core/rust/rust.config" }
 rust_rpc_server = { path = "../../core/rust/rust.rpc_server" }
+splashcore_rs = { path = "../../core/rust/rust.std" }
 
 [dependencies.tokio]
 version = "1"

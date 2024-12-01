@@ -3,6 +3,8 @@ use std::sync::Arc;
 use serenity::all::FullEvent;
 use silverpelt::ar_event::{AntiraidEvent, EventHandlerContext};
 
+use crate::temporary_punishments;
+
 #[inline]
 const fn not_audit_loggable_event() -> &'static [&'static str] {
     &[
@@ -185,6 +187,8 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
                 ectx.guild_id,
             )
             .await?;
+
+            temporary_punishments::handle_expired_punishment(&ectx.data, ctx, punishment).await?;
 
             Ok(())
         }

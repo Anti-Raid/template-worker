@@ -1,9 +1,11 @@
 mod dispatch;
+mod docgen;
 mod event_handler;
 mod expiry_tasks;
 mod http;
 mod props;
 mod startup;
+mod temporary_punishments;
 
 use clap::Parser;
 use log::{error, info};
@@ -25,6 +27,26 @@ pub struct CmdArgs {
 
 #[tokio::main]
 async fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
+    match args.get(1).map(|s| s.as_str()) {
+        Some("templatedocs") => {
+            let docs = docgen::create_documentation();
+
+            println!("{}", docs)
+        }
+        Some("start") => {
+            start().await;
+        }
+        _ => {
+            println!(
+                "No/unknown command specified.\n\nstart: [start the template worker itself]\ntemplatedocs: [generate template docs]"
+            );
+        }
+    };
+}
+
+async fn start() {
     const POSTGRES_MAX_CONNECTIONS: u32 = 70; // max connections to the database, we don't need too many here
 
     let cmd_args = Arc::new(CmdArgs::parse());
@@ -36,7 +58,7 @@ async fn main() {
     let mut env_builder = env_logger::builder();
 
     let default_filter =
-        "serenity=error,rust_bot=info,bot_binutils=info,rust_rpc_server=info,rust_rpc_server_bot=info,botox=info,templating=debug,sqlx=error".to_string();
+        "serenity=error,template-worker=info,rust_rpc_server=info,rust_rpc_server_bot=info,botox=info,templating=debug,sqlx=error".to_string();
 
     env_builder
         .format(move |buf, record| {
@@ -114,12 +136,6 @@ async fn main() {
 
     let client_builder = serenity::all::ClientBuilder::new_with_http(http, intents);
 
-    // Empty silverpelt cache in template worker
-    let silverpelt_cache = {
-        let silverpelt_cache = silverpelt::cache::SilverpeltCache::default();
-        Arc::new(silverpelt_cache)
-    };
-
     info!("Connecting to database");
 
     let pg_pool = PgPoolOptions::new()
@@ -150,7 +166,6 @@ async fn main() {
         reqwest,
         extra_data: dashmap::DashMap::new(),
         props: props.clone(),
-        silverpelt_cache,
     };
 
     let mut client = client_builder

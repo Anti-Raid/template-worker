@@ -30,6 +30,11 @@ async fn dispatch_event(
     Path(guild_id): Path<serenity::all::GuildId>,
     Json(event): Json<silverpelt::ar_event::AntiraidEvent>,
 ) -> Response<()> {
+    // Clear cache if event is OnStartup
+    if let silverpelt::ar_event::AntiraidEvent::OnStartup(_) = event {
+        templating::cache::clear_cache(guild_id).await;
+    }
+
     match crate::dispatch::event_listener(silverpelt::ar_event::EventHandlerContext {
         guild_id,
         data: data.clone(),
