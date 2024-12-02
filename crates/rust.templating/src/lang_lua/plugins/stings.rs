@@ -2,6 +2,242 @@ use crate::lang_lua::state;
 use mlua::prelude::*;
 use std::sync::Arc;
 
+/*
+/// Data required to create a sting
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StingCreate {
+    /// The module name
+    pub module: String,
+    /// Src of the sting, this can be useful if a module wants to store the source of the sting
+    pub src: Option<String>,
+    /// The number of stings
+    pub stings: i32,
+    /// The reason for the stings (optional)
+    pub reason: Option<String>,
+    /// The reason the stings were voided
+    pub void_reason: Option<String>,
+    /// The guild ID the sting targets
+    pub guild_id: serenity::all::GuildId,
+    /// The creator of the sting
+    pub creator: StingTarget,
+    /// The target of the sting
+    pub target: StingTarget,
+    /// The state of the sting
+    pub state: StingState,
+    /// When the sting expires as a chrono duration
+    pub duration: Option<std::time::Duration>,
+    /// The data/metadata present within the sting, if any
+    pub sting_data: Option<serde_json::Value>,
+}
+
+/// Represents a sting on AntiRaid
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Sting {
+    /// The sting ID
+    pub id: sqlx::types::Uuid,
+    /// Src of the sting, this can be useful to store the source of a sting
+    pub src: Option<String>,
+    /// The number of stings
+    pub stings: i32,
+    /// The reason for the stings (optional)
+    pub reason: Option<String>,
+    /// The reason the stings were voided
+    pub void_reason: Option<String>,
+    /// The guild ID the sting targets
+    pub guild_id: serenity::all::GuildId,
+    /// The creator of the sting
+    pub creator: StingTarget,
+    /// The target of the sting
+    pub target: StingTarget,
+    /// The state of the sting
+    pub state: StingState,
+    /// When the sting was created
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    /// When the sting expires as a chrono duration
+    pub duration: Option<std::time::Duration>,
+    /// The data/metadata present within the sting, if any
+    pub sting_data: Option<serde_json::Value>,
+    /// Is Handled
+    pub is_handled: bool,
+    /// The handle log encountered while handling the sting
+    pub handle_log: serde_json::Value,
+}
+*/
+
+pub fn plugin_docs() -> templating_docgen::Plugin {
+    templating_docgen::Plugin::default()
+        .name("@antiraid/stings")
+        .description("List, get, create, update and delete stings on Anti-Raid.")
+        .type_mut(
+            "StingCreate",
+            "A type representing a new sting to be created.",
+            |t| {
+                t
+                .example(std::sync::Arc::new(silverpelt::stings::StingCreate {
+                    src: Some("test".to_string()),
+                    stings: 10,
+                    reason: Some("test".to_string()),
+                    void_reason: None,
+                    guild_id: serenity::all::GuildId::new(128384),
+                    creator: silverpelt::stings::StingTarget::System,
+                    target: silverpelt::stings::StingTarget::User(serenity::all::UserId::new(1945824)),
+                    state: silverpelt::stings::StingState::Active,
+                    duration: Some(std::time::Duration::from_secs(60)),
+                    sting_data: Some(serde_json::json!({"a": "b"})),
+                }))
+                .field("module", |f| {
+                    f.typ("string").description("The module name.")
+                })
+                .field("src", |f| {
+                    f.typ("string?").description("The source of the sting.")
+                })
+                .field("stings", |f| {
+                    f.typ("number").description("The number of stings.")
+                })
+                .field("reason", |f| {
+                    f.typ("string?").description("The reason for the stings.")
+                })
+                .field("void_reason", |f| {
+                    f.typ("string?")
+                        .description("The reason the stings were voided.")
+                })
+                .field("guild_id", |f| {
+                    f.typ("string")
+                        .description("The guild ID the sting targets. **MUST MATCH THE GUILD ID THE TEMPLATE IS RUNNING ON**")
+                })
+                .field("creator", |f| {
+                    f.typ("StingTarget")
+                        .description("The creator of the sting.")
+                })
+                .field("target", |f| {
+                    f.typ("StingTarget").description("The target of the sting.")
+                })
+                .field("state", |f| {
+                    f.typ("StingState").description("The state of the sting.")
+                })
+                .field("created_at", |f| {
+                    f.typ("string")
+                        .description("When the sting was created as a chrono datetime.")
+                })
+                .field("duration", |f| {
+                    f.typ("Duration?")
+                        .description("When the sting expires as a duration.")
+                })
+                .field("sting_data", |f| {
+                    f.typ("any?")
+                        .description("The data/metadata present within the sting, if any.")
+                })
+            },
+        )
+        .type_mut("Sting", "Represents a sting on AntiRaid", |t| {
+            t
+                .example(std::sync::Arc::new(silverpelt::stings::Sting {
+                    id: sqlx::types::Uuid::parse_str("470a2958-3827-4e59-8b97-928a583a37a3").unwrap(),
+                    src: Some("test".to_string()),
+                    stings: 10,
+                    reason: Some("test".to_string()),
+                    void_reason: None,
+                    guild_id: serenity::all::GuildId::new(128384),
+                    creator: silverpelt::stings::StingTarget::System,
+                    target: silverpelt::stings::StingTarget::User(serenity::all::UserId::new(1945824)),
+                    state: silverpelt::stings::StingState::Active,
+                    created_at: chrono::Utc::now(),
+                    duration: Some(std::time::Duration::from_secs(60)),
+                    sting_data: Some(serde_json::json!({"a": "b"})),
+                    is_handled: false,
+                    handle_log: serde_json::json!({"a": "b"}),
+                }))
+                .field("id", |f| {
+                    f.typ("string").description("The sting ID.")
+                })
+                .field("module", |f| {
+                    f.typ("string").description("The module name.")
+                })
+                .field("src", |f| {
+                    f.typ("string?").description("The source of the sting.")
+                })
+                .field("stings", |f| {
+                    f.typ("number").description("The number of stings.")
+                })
+                .field("reason", |f| {
+                    f.typ("string?").description("The reason for the stings.")
+                })
+                .field("void_reason", |f| {
+                    f.typ("string?")
+                        .description("The reason the stings were voided.")
+                })
+                .field("guild_id", |f| {
+                    f.typ("string")
+                        .description("The guild ID the sting targets. **MUST MATCH THE GUILD ID THE TEMPLATE IS RUNNING ON**")
+                })
+                .field("creator", |f| {
+                    f.typ("StingTarget")
+                        .description("The creator of the sting.")
+                })
+                .field("target", |f| {
+                    f.typ("StingTarget").description("The target of the sting.")
+                })
+                .field("state", |f| {
+                    f.typ("StingState").description("The state of the sting.")
+                })
+                .field("duration", |f| {
+                    f.typ("Duration?")
+                        .description("When the sting expires as a duration.")
+                })
+                .field("sting_data", |f| {
+                    f.typ("any?")
+                        .description("The data/metadata present within the sting, if any.")
+                })
+                .field("is_handled", |f| {
+                    f.typ("boolean").description("Is Handled")
+                })
+                .field("handle_log", |f| {
+                    f.typ("any").description("The handle log encountered while handling the sting.")
+                })
+        })
+        .type_mut("StingExecutor", "An sting executor is used to execute actions related to stings from Lua templates", |mut t| {
+            t.method_mut("list", |mut m| {
+                m
+                .parameter("page", |p| {
+                    p.typ("number").description("The page number to fetch.")
+                })
+                .return_("stings", |r| {
+                    r.typ("{Sting}").description("The list of stings.")
+                })
+            })
+            .method_mut("get", |mut m| {
+                m
+                .parameter("id", |p| {
+                    p.typ("string").description("The sting ID.")
+                })
+                .return_("sting", |r| {
+                    r.typ("Sting").description("The sting.")
+                })
+            })
+            .method_mut("create", |mut m| {
+                m
+                .parameter("data", |p| {
+                    p.typ("StingCreate").description("The sting data.")
+                })
+                .return_("id", |r| {
+                    r.typ("string").description("The sting ID of the created sting.")
+                })
+            })
+            .method_mut("update", |mut m| {
+                m
+                .parameter("data", |p| {
+                    p.typ("Sting").description("The sting to update to. Note that if an invalid ID is used, this method may either do nothing or error out.")
+                })
+            })
+            .method_mut("delete", |mut m| {
+                m
+                .parameter("id", |p| {
+                    p.typ("string").description("The sting ID.")
+                })
+            })
+        })
+}
+
 /// An sting executor is used to execute actions related to stings from Lua
 /// templates
 pub struct StingExecutor {
@@ -44,6 +280,27 @@ impl LuaUserData for StingExecutor {
             Ok(v)
         });
 
+        methods.add_async_method("get", |lua, this, id: String| async move {
+            let id = sqlx::types::Uuid::parse_str(&id).map_err(|e| {
+                LuaError::FromLuaConversionError {
+                    from: "string",
+                    to: "uuid".to_string(),
+                    message: Some(e.to_string()),
+                }
+            })?;
+
+            this.check_action("get".to_string())
+                .map_err(LuaError::external)?;
+
+            let sting = silverpelt::stings::Sting::get(&this.pool, this.guild_id, id)
+                .await
+                .map_err(LuaError::external)?;
+
+            let v = lua.to_value(&sting)?;
+
+            Ok(v)
+        });
+
         methods.add_async_method("create", |lua, this, data: LuaValue| async move {
             let sting = lua.from_value::<silverpelt::stings::StingCreate>(data)?;
 
@@ -62,13 +319,45 @@ impl LuaUserData for StingExecutor {
             Ok(sting.to_string())
         });
 
+        methods.add_async_method("update", |lua, this, data: LuaValue| async move {
+            let sting = lua.from_value::<silverpelt::stings::Sting>(data)?;
+
+            this.check_action("update".to_string())
+                .map_err(LuaError::external)?;
+
+            if sting.guild_id != this.guild_id {
+                return Err(LuaError::external("Guild ID mismatch"));
+            }
+
+            sting
+                .update_and_dispatch(&this.pool, this.serenity_context.clone())
+                .await
+                .map_err(LuaError::external)?;
+
+            Ok(())
+        });
+
         methods.add_async_method("delete", |lua, this, id: LuaValue| async move {
-            let id = lua.from_value::<sqlx::types::Uuid>(id)?;
+            let id = lua.from_value::<sqlx::types::Uuid>(id).map_err(|e| {
+                LuaError::FromLuaConversionError {
+                    from: "string",
+                    to: "uuid".to_string(),
+                    message: Some(e.to_string()),
+                }
+            })?;
 
             this.check_action("delete".to_string())
                 .map_err(LuaError::external)?;
 
-            silverpelt::stings::Sting::delete_by_id(&this.pool, this.guild_id, id)
+            let Some(sting) = silverpelt::stings::Sting::get(&this.pool, this.guild_id, id)
+                .await
+                .map_err(LuaError::external)?
+            else {
+                return Err(LuaError::external("Sting not found"));
+            };
+
+            sting
+                .delete_and_dispatch(&this.pool, this.serenity_context.clone())
                 .await
                 .map_err(LuaError::external)?;
 

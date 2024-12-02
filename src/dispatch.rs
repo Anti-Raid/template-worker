@@ -40,7 +40,6 @@ pub async fn discord_event_dispatch(
 
     let user_id = gwevent::core::get_event_user_id(&event);
 
-    // Ignore ourselves as well as interaction creates that are reserved
     match event {
         FullEvent::GuildAuditLogEntryCreate { .. } => {}
         FullEvent::InteractionCreate { interaction } => {
@@ -56,6 +55,7 @@ pub async fn discord_event_dispatch(
                 _ => {} // Allow Component+Modal interactions to freely passed through
             }
         }
+        // Ignore ourselves as well as interaction creates that are reserved
         _ => match user_id {
             Some(user_id) => {
                 if user_id == serenity_context.cache.current_user().id {
@@ -124,6 +124,24 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
                     "(Anti Raid) Sting Created".to_string(),
                     "StingCreate".to_string(),
                     "StingCreate".to_string(),
+                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(&sting)?)),
+                    false,
+                    None,
+                ),
+                ectx.guild_id,
+            )
+            .await?;
+
+            Ok(())
+        }
+        AntiraidEvent::StingUpdate(ref sting) => {
+            dispatch(
+                ctx,
+                &ectx.data,
+                Event::new(
+                    "(Anti Raid) Sting Updated".to_string(),
+                    "StingUpdate".to_string(),
+                    "StingUpdate".to_string(),
                     ArcOrNormal::Arc(Arc::new(serde_json::to_value(&sting)?)),
                     false,
                     None,
