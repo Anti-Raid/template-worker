@@ -1,5 +1,6 @@
 use serenity::all::{
     Context, CreateActionRow, CreateButton, CreateEmbed, CreateMessage, FullEvent, GuildId,
+    Interaction,
 };
 use silverpelt::ar_event::{AntiraidEvent, EventHandlerContext};
 use silverpelt::data::Data;
@@ -16,7 +17,6 @@ use crate::temporary_punishments;
 const fn not_audit_loggable_event() -> &'static [&'static str] {
     &[
         "CACHE_READY",         // Internal
-        "INTERACTION_CREATE",  // Spams too much / is useless
         "RATELIMIT",           // Internal
         "GUILD_CREATE",        // Internal
         "GUILD_MEMBERS_CHUNK", // Internal
@@ -40,9 +40,22 @@ pub async fn discord_event_dispatch(
 
     let user_id = gwevent::core::get_event_user_id(&event);
 
-    // Ignore ourselves
+    // Ignore ourselves as well as interaction creates that are reserved
     match event {
         FullEvent::GuildAuditLogEntryCreate { .. } => {}
+        FullEvent::InteractionCreate { interaction } => {
+            match interaction {
+                Interaction::Ping(_) => return Ok(()),
+                Interaction::Command(i) | Interaction::Autocomplete(i) => {
+                    if limits::command_name_limits::RESERVED_COMMAND_NAMES
+                        .contains(&i.data.name.as_str())
+                    {
+                        return Ok(());
+                    }
+                }
+                _ => {} // Allow Component+Modal interactions to freely passed through
+            }
+        }
         _ => match user_id {
             Some(user_id) => {
                 if user_id == serenity_context.cache.current_user().id {

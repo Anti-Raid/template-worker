@@ -25,6 +25,7 @@ sandwich_driver = { path = "../../core/rust/rust.sandwich_driver" }
 config = { path = "../../core/rust/rust.config" }
 rust_rpc_server = { path = "../../core/rust/rust.rpc_server" }
 splashcore_rs = { path = "../../core/rust/rust.std" }
+limits = { path = "../../core/rust/rust.limits" }
 
 [dependencies.tokio]
 version = "1"
