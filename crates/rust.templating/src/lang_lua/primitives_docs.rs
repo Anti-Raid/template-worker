@@ -86,20 +86,6 @@ pub fn document_primitives() -> templating_docgen::PrimitiveListBuilder {
             )
         })
         .add("function", "function", "A Lua function.", |p| p)
-        .method_mut("array", |f| {
-            f
-            .description("Helper method to create an array from a list of tables, setting the array_metatable on the result.")
-            .parameter("...", |p| {
-                p
-                .typ("unknown")
-                .description("The elements used to form the array.")
-            })
-            .return_("table", |p| {
-                p
-                .typ("{unknown}")
-                .description("The array table.")
-            })
-        })
         .type_mut("Event", "An event that has been dispatched to the template. This is what `args` is in the template.", |mut t| {
             t
             .field("title", |f| {

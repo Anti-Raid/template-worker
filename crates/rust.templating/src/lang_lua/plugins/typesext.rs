@@ -16,7 +16,7 @@ pub fn plugin_docs() -> templating_docgen::Plugin {
                 .method_mut("next", |m| {
                     m.description("Returns the next item in the stream.")
                     .return_("item", |r| {
-                        r.typ("<T>").description("The next item in the stream.")
+                        r.typ("<T>?").description("The next item in the stream.")
                     })
                 })
                 .method_mut("for_each", |m| {
