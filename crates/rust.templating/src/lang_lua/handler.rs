@@ -19,7 +19,6 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
                 content,
                 template.clone(),
                 &tis_ref.bytecode_cache,
-                &tis_ref.compiler,
             )
             .await
             {

@@ -59,21 +59,15 @@ pub type BytecodeCache = scc::HashMap<crate::Template, (Vec<u8>, u64)>;
 struct ArLua {
     /// The last execution time of the Lua VM
     last_execution_time: Arc<atomicinstant::AtomicInstant>,
+
     /// The thread handle for the Lua VM
     handle: tokio::sync::mpsc::UnboundedSender<(
         LuaVmAction,
         tokio::sync::oneshot::Sender<LuaVmResult>,
     )>,
+
     /// Is the VM broken/needs to be remade
     broken: Arc<std::sync::atomic::AtomicBool>,
-    #[allow(dead_code)]
-    /// The compiler for the Lua VM
-    compiler: Arc<mlua::Compiler>,
-    #[allow(dead_code)]
-    /// The bytecode cache maps template to (bytecode, source hash)
-    ///
-    /// If source hash does not match expected source hash (the template changed), the template is recompiled
-    bytecode_cache: Arc<BytecodeCache>,
 }
 
 pub struct ArLuaThreadInnerState {
@@ -83,9 +77,6 @@ pub struct ArLuaThreadInnerState {
     /// The bytecode cache maps template to (bytecode, source hash)
     bytecode_cache: Arc<BytecodeCache>,
 
-    /// The compiler for the Lua VM
-    compiler: Arc<mlua::Compiler>,
-
     /// Is the VM broken/needs to be remade
     broken: Arc<std::sync::atomic::AtomicBool>,
 
@@ -93,17 +84,18 @@ pub struct ArLuaThreadInnerState {
     pub global_table: mlua::Table,
 }
 
-/// Create a new Lua VM complete with sandboxing and modules pre-loaded
-///
-/// Note that callers should instead call the render_template functions
-///
-/// As such, this function is private and should not be used outside of this module
-async fn create_lua_vm(
-    guild_id: GuildId,
-    pool: sqlx::PgPool,
-    serenity_context: serenity::all::Context,
-    reqwest_client: reqwest::Client,
-) -> LuaResult<ArLua> {
+pub(crate) fn create_lua_compiler() -> mlua::Compiler {
+    mlua::Compiler::new()
+        .set_optimization_level(2)
+        .set_type_info_level(1)
+}
+
+/// Configures a raw Lua VM. Note that userdata is not set in this function
+pub(crate) fn configure_lua_vm(
+    broken: Arc<std::sync::atomic::AtomicBool>,
+    last_execution_time: Arc<atomicinstant::AtomicInstant>,
+    bytecode_cache: Arc<BytecodeCache>,
+) -> LuaResult<ArLuaThreadInnerState> {
     let lua = Lua::new_with(
         LuaStdLib::ALL_SAFE,
         LuaOptions::new().catch_rust_panics(true),
@@ -197,14 +189,9 @@ async fn create_lua_vm(
 
     lua.globals().set_readonly(true);
 
-    let last_execution_time =
-        Arc::new(atomicinstant::AtomicInstant::new(std::time::Instant::now()));
-
-    let last_execution_time_interrupt_ref = last_execution_time.clone();
-
     // Create an interrupt to limit the execution time of a template
     lua.set_interrupt(move |_| {
-        if last_execution_time_interrupt_ref
+        if last_execution_time
             .load(std::sync::atomic::Ordering::Acquire)
             .elapsed()
             >= MAX_TEMPLATES_EXECUTION_TIME
@@ -214,56 +201,57 @@ async fn create_lua_vm(
         Ok(LuaVmState::Continue)
     });
 
-    let compiler = Arc::new(compiler);
+    Ok(ArLuaThreadInnerState {
+        lua,
+        bytecode_cache,
+        broken,
+        global_table: global_tab,
+    })
+}
 
-    let bytecode_cache: Arc<BytecodeCache> = Arc::new(scc::HashMap::new());
-
-    // Set lua user data
-    let user_data = state::LuaUserData {
+pub(crate) fn create_lua_vm_userdata(
+    last_execution_time: Arc<atomicinstant::AtomicInstant>,
+    vm_bytecode_cache: Arc<BytecodeCache>,
+    guild_id: GuildId,
+    pool: sqlx::PgPool,
+    serenity_context: serenity::all::Context,
+    reqwest_client: reqwest::Client,
+    shard_messenger: serenity::all::ShardMessenger,
+) -> Result<state::LuaUserData, silverpelt::Error> {
+    Ok(state::LuaUserData {
         pool,
         guild_id,
-        shard_messenger: shard_messenger_for_guild(&serenity_context, guild_id)
-            .await
-            .map_err(|e| LuaError::external(e.to_string()))?,
+        shard_messenger,
         serenity_context,
         reqwest_client,
         kv_constraints: state::LuaKVConstraints::default(),
-        kv_ratelimits: Arc::new(
-            state::LuaRatelimits::new_kv_rl().map_err(|e| LuaError::external(e.to_string()))?,
-        ),
-        actions_ratelimits: Arc::new(
-            state::LuaRatelimits::new_action_rl().map_err(|e| LuaError::external(e.to_string()))?,
-        ),
-        sting_ratelimits: Arc::new(
-            state::LuaRatelimits::new_stings_rl().map_err(|e| LuaError::external(e.to_string()))?,
-        ),
-        last_execution_time: last_execution_time.clone(),
-        vm_bytecode_cache: bytecode_cache.clone(),
-        compiler: compiler.clone(),
-    };
-
-    lua.set_app_data(user_data);
-
-    let broken = Arc::new(std::sync::atomic::AtomicBool::new(false));
-
-    let thread_inner_state = Arc::new(ArLuaThreadInnerState {
-        lua: lua.clone(),
-        bytecode_cache: bytecode_cache.clone(),
-        compiler: compiler.clone(),
-        broken: broken.clone(),
-        global_table: global_tab,
-    });
-
-    let ar_lua = ArLua {
+        kv_ratelimits: Arc::new(state::LuaRatelimits::new_kv_rl()?),
+        actions_ratelimits: Arc::new(state::LuaRatelimits::new_action_rl()?),
+        sting_ratelimits: Arc::new(state::LuaRatelimits::new_stings_rl()?),
         last_execution_time,
-        #[cfg(feature = "thread_proc")]
-        handle: thread_proc::lua_thread_impl(thread_inner_state.clone(), guild_id)?,
-        broken,
-        compiler,
-        bytecode_cache,
-    };
+        vm_bytecode_cache,
+    })
+}
 
-    Ok(ar_lua)
+/// Create a new Lua VM complete with sandboxing and modules pre-loaded
+///
+/// Note that callers should instead call the render_template functions
+///
+/// As such, this function is private and should not be used outside of this module
+async fn create_lua_vm(
+    guild_id: GuildId,
+    pool: sqlx::PgPool,
+    serenity_context: serenity::all::Context,
+    reqwest_client: reqwest::Client,
+) -> Result<ArLua, silverpelt::Error> {
+    #[cfg(feature = "thread_proc")]
+    thread_proc::lua_thread_impl(
+        guild_id,
+        pool,
+        shard_messenger_for_guild(&serenity_context, guild_id).await?,
+        serenity_context,
+        reqwest_client,
+    )
 }
 
 /// Helper method to fetch a template from bytecode or compile it if it doesnt exist in bytecode cache
@@ -271,7 +259,6 @@ pub(crate) async fn resolve_template_to_bytecode(
     template_content: String,
     template: crate::Template,
     bytecode_cache_ref: &BytecodeCache,
-    compiler_ref: &mlua::Compiler,
 ) -> Result<Vec<u8>, LuaError> {
     // Check if the source hash matches the expected source hash
     let mut hasher = std::hash::DefaultHasher::new();
@@ -290,7 +277,7 @@ pub(crate) async fn resolve_template_to_bytecode(
         return Ok(bytecode);
     }
 
-    let bytecode = compiler_ref.compile(&template_content)?;
+    let bytecode = create_lua_compiler().compile(&template_content)?;
 
     let _ = bytecode_cache_ref
         .insert_async(template, (bytecode.clone(), cur_hash))
@@ -307,7 +294,7 @@ async fn get_lua_vm(
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
     reqwest_client: reqwest::Client,
-) -> LuaResult<ArLua> {
+) -> Result<ArLua, silverpelt::Error> {
     match VMS.get(&guild_id).await {
         Some(vm) => {
             if vm.broken.load(std::sync::atomic::Ordering::Acquire) {
@@ -393,7 +380,7 @@ pub async fn render_template<Response: serde::de::DeserializeOwned>(
             },
             tx,
         ))
-        .map_err(|e| LuaError::external(format!("Could not send data to Lua thread: {}", e)))?;
+        .map_err(|e| format!("Could not send data to Lua thread: {}", e))?;
 
     tokio::select! {
         _ = tokio::time::sleep(MAX_TEMPLATES_EXECUTION_TIME) => {

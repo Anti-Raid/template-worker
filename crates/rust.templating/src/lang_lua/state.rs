@@ -161,7 +161,4 @@ pub struct LuaUserData {
 
     /// The bytecode cache
     pub vm_bytecode_cache: Arc<super::BytecodeCache>,
-
-    /// Stores the luau compiler
-    pub compiler: Arc<mlua::Compiler>,
 }

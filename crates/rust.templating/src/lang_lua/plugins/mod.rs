@@ -54,7 +54,7 @@ pub async fn require(lua: Lua, (plugin_name, args): (String, LuaValue)) -> LuaRe
         || plugin_name.starts_with("../")
         || plugin_name.starts_with("$shop/")
     {
-        let (pool, guild_id, compiler, vm_bytecode_cache) = {
+        let (pool, guild_id, vm_bytecode_cache) = {
             let Some(data) = lua.app_data_ref::<state::LuaUserData>() else {
                 return Err(LuaError::external("No app data found"));
             };
@@ -62,7 +62,6 @@ pub async fn require(lua: Lua, (plugin_name, args): (String, LuaValue)) -> LuaRe
             (
                 data.pool.clone(),
                 data.guild_id,
-                data.compiler.clone(),
                 data.vm_bytecode_cache.clone(),
             )
         };
@@ -101,7 +100,6 @@ pub async fn require(lua: Lua, (plugin_name, args): (String, LuaValue)) -> LuaRe
             template_content.content,
             crate::Template::Named(resolved_path.clone()),
             &vm_bytecode_cache,
-            &compiler,
         )
         .await
         .map_err(|_| LuaError::external("Failed to compile template"))?;
