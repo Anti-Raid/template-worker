@@ -108,11 +108,11 @@ pub(crate) fn configure_lua_vm(
 
     // Setup the global table using a metatable
     let global_mt = lua.create_table()?;
-    global_mt.set_safeenv(true);
 
+    let globals_ref_a = lua.globals();
     global_mt.raw_set(
         "__index",
-        lua.create_function(|lua, (tab, key): (LuaTable, LuaValue)| {
+        lua.create_function(move |_lua, (tab, key): (LuaTable, LuaValue)| {
             match key {
                 LuaValue::String(ref s) => {
                     if s == "_G" || s == "__stack" {
@@ -122,7 +122,7 @@ pub(crate) fn configure_lua_vm(
                 _ => {}
             }
 
-            let v = lua.globals().get::<LuaValue>(key.clone())?;
+            let v = globals_ref_a.get::<LuaValue>(key.clone())?;
 
             if v.is_nil() {
                 tab.raw_get::<LuaValue>(key)
@@ -133,23 +133,30 @@ pub(crate) fn configure_lua_vm(
     )?;
 
     // Forward to _G if key is in globals, otherwise to the table
+    let globals_ref_b = lua.globals();
     global_mt.set(
         "__newindex",
-        lua.create_function(|lua, (tab, key, value): (LuaTable, LuaValue, LuaValue)| {
-            let v = lua.globals().get::<LuaValue>(key.clone())?;
+        lua.create_function(
+            move |_lua, (tab, key, value): (LuaTable, LuaValue, LuaValue)| {
+                let v = globals_ref_b.get::<LuaValue>(key.clone())?;
 
-            if !v.is_nil() {
-                lua.globals().set(key, value)
-            } else {
-                tab.raw_set(key, value)
-            }
-        })?,
+                if !v.is_nil() {
+                    globals_ref_b.set(key, value)
+                } else {
+                    tab.raw_set(key, value)
+                }
+            },
+        )?,
     )?;
 
     let global_tab = lua.create_table()?;
 
     // Set __index on global_tab to point to _G
     global_tab.set_metatable(Some(global_mt));
+
+    // Override require function for plugin support and increased security
+    lua.globals()
+        .set("require", lua.create_async_function(plugins::require)?)?;
 
     // Prelude code providing some basic functions directly to the Lua VM
     lua.load(
@@ -173,8 +180,6 @@ pub(crate) fn configure_lua_vm(
             end
             table.insert(_G.stdout, str)
         end
-
-        _G.require = function() error("Require is not yet available") end
     "#,
     )
     .set_name("prelude")
@@ -183,10 +188,6 @@ pub(crate) fn configure_lua_vm(
 
     lua.sandbox(true)?; // We explicitly want globals to be shared across all scripts in this VM
     lua.set_memory_limit(MAX_TEMPLATE_MEMORY_USAGE)?;
-
-    // Override require function for plugin support and increased security
-    lua.globals()
-        .set("require", lua.create_async_function(plugins::require)?)?;
 
     lua.globals().set_readonly(true);
 
