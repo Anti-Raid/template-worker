@@ -49,6 +49,7 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
                 .load(&template_bytecode)
                 .set_name(&exec_name)
                 .set_mode(mlua::ChunkMode::Binary) // Ensure auto-detection never selects binary mode
+                .set_environment(tis_ref.global_table.clone())
                 .call_async((event, template_context))
                 .await
             {

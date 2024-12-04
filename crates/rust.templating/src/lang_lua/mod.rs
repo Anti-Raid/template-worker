@@ -77,10 +77,20 @@ struct ArLua {
 }
 
 pub struct ArLuaThreadInnerState {
+    /// The Lua VM
     lua: Lua,
+
+    /// The bytecode cache maps template to (bytecode, source hash)
     bytecode_cache: Arc<BytecodeCache>,
+
+    /// The compiler for the Lua VM
     compiler: Arc<mlua::Compiler>,
+
+    /// Is the VM broken/needs to be remade
     broken: Arc<std::sync::atomic::AtomicBool>,
+
+    /// Stores the servers global table
+    pub global_table: mlua::Table,
 }
 
 /// Create a new Lua VM complete with sandboxing and modules pre-loaded
@@ -104,55 +114,88 @@ async fn create_lua_vm(
         .set_type_info_level(1);
     lua.set_compiler(compiler.clone());
 
+    // Setup the global table using a metatable
+    let global_mt = lua.create_table()?;
+
+    global_mt.raw_set(
+        "__index",
+        lua.create_function(|lua, (tab, key): (LuaTable, LuaValue)| {
+            match key {
+                LuaValue::String(ref s) => {
+                    if s == "_G" || s == "__stack" {
+                        return Ok(LuaValue::Table(tab));
+                    }
+                }
+                _ => {}
+            }
+
+            let v = lua.globals().get::<LuaValue>(key.clone())?;
+
+            if v.is_nil() {
+                tab.raw_get::<LuaValue>(key)
+            } else {
+                Ok(v)
+            }
+        })?,
+    )?;
+
+    // Forward to _G if key is in globals, otherwise to the table
+    global_mt.set(
+        "__newindex",
+        lua.create_function(|lua, (tab, key, value): (LuaTable, LuaValue, LuaValue)| {
+            let v = lua.globals().get::<LuaValue>(key.clone())?;
+
+            if !v.is_nil() {
+                lua.globals().set(key, value)
+            } else {
+                tab.raw_set(key, value)
+            }
+        })?,
+    )?;
+
+    let global_tab = lua.create_table()?;
+
+    // Set __index on global_tab to point to _G
+    global_tab.set_metatable(Some(global_mt));
+
     // Prelude code providing some basic functions directly to the Lua VM
     lua.load(
         r#"
-        -- Override print function with function that appends to __stack.stdout table
+        -- Override print function with function that appends to stdout table
         -- We do this by executing a lua script
         _G.print = function(...)
             local args = {...}
 
-            if not _G.__stack then
-                error("No __stack found")
-            end
-
-            if not _G.__stack.stdout then
-                _G.__stack.stdout = {}
+            if not _G.stdout then
+                _G.stdout = {}
             end
 
             if #args == 0 then
-                table.insert(__stack.stdout, "nil")
+                table.insert(_G.stdout, "nil")
             end
 
             local str = ""
             for i = 1, #args do
                 str = str .. tostring(args[i])
             end
-            table.insert(__stack.stdout, str)
+            table.insert(_G.stdout, str)
         end
 
-        -- Set AntiRaid version
-        _G.ANTIRAID_VER = "1"
-
-        -- To allow locking down _G, we need to create a table to store user data (__stack)
-        -- Note: this becomes read-write later and is the ONLY global variable that is read-write
-        _G.__stack = {}
-        _G.require = function() error("Not yet set") end
+        _G.require = function() error("Require is not yet available") end
     "#,
     )
     .set_name("prelude")
+    .set_environment(global_tab.clone())
     .exec()?;
 
     lua.sandbox(true)?; // We explicitly want globals to be shared across all scripts in this VM
     lua.set_memory_limit(MAX_TEMPLATE_MEMORY_USAGE)?;
 
-    // Make __stack read-write
-    let stack = lua.globals().get::<LuaTable>("__stack")?;
-    stack.set_readonly(false);
-
     // Override require function for plugin support and increased security
     lua.globals()
         .set("require", lua.create_async_function(plugins::require)?)?;
+
+    lua.globals().set_readonly(true);
 
     let last_execution_time =
         Arc::new(atomicinstant::AtomicInstant::new(std::time::Instant::now()));
@@ -208,6 +251,7 @@ async fn create_lua_vm(
         bytecode_cache: bytecode_cache.clone(),
         compiler: compiler.clone(),
         broken: broken.clone(),
+        global_table: global_tab,
     });
 
     let ar_lua = ArLua {

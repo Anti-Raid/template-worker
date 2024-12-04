@@ -213,7 +213,7 @@ fn ensure_not_destroyed(inst: &Instance) -> LuaResult<()> {
 */
 fn instance_property_get(lua: &Lua, this: &Instance, prop_name: String) -> LuaResult<LuaValue> {
     match prop_name.as_str() {
-        "ClassName" => return this.get_class_name().into_lua(lua),
+        "ClassName" | "className" => return this.get_class_name().into_lua(lua),
         "Parent" => {
             return this.get_parent().into_lua(lua);
         }
@@ -299,7 +299,7 @@ fn instance_property_set(
     ensure_not_destroyed(this)?;
 
     match prop_name.as_str() {
-        "ClassName" => {
+        "ClassName" | "className" => {
             return Err(LuaError::RuntimeError(
                 "Failed to set ClassName - property is read-only".to_string(),
             ));
