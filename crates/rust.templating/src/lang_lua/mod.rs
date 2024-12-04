@@ -107,8 +107,9 @@ pub(crate) fn configure_lua_vm(
     lua.set_compiler(compiler.clone());
 
     // Setup the global table using a metatable
+    //
+    // SAFETY: This works because the global table will not change in the VM
     let global_mt = lua.create_table()?;
-
     let globals_ref_a = lua.globals();
     global_mt.raw_set(
         "__index",
