@@ -130,7 +130,7 @@ pub async fn compress(
         return spawn_blocking(move || compress_lz4(source))
             .await
             .into_lua_err()?
-            .into_lua_err();
+            .map_err(|e| LuaError::runtime(e.to_string()));
     }
 
     let mut bytes = Vec::new();
@@ -175,7 +175,7 @@ pub async fn decompress(
         return spawn_blocking(move || decompress_lz4(source))
             .await
             .into_lua_err()?
-            .into_lua_err();
+            .map_err(|e| LuaError::runtime(e.to_string()));
     }
 
     let mut bytes = Vec::new();
@@ -204,7 +204,7 @@ pub async fn decompress(
 // necessary, using lz4 create instead of lz4-flex, but we must remove
 // it in a major version to not unexpectedly break compatibility
 
-fn compress_lz4(input: Vec<u8>) -> LuaResult<Vec<u8>> {
+fn compress_lz4(input: Vec<u8>) -> Result<Vec<u8>, silverpelt::Error> {
     let mut input = Cursor::new(input);
     let mut output = Cursor::new(Vec::new());
 
@@ -225,7 +225,7 @@ fn compress_lz4(input: Vec<u8>) -> LuaResult<Vec<u8>> {
     Ok(output.into_inner())
 }
 
-fn decompress_lz4(input: Vec<u8>) -> LuaResult<Vec<u8>> {
+fn decompress_lz4(input: Vec<u8>) -> Result<Vec<u8>, silverpelt::Error> {
     let mut input = Cursor::new(input);
 
     // Skip size for compatibility with old lz4-flex implementation

@@ -68,7 +68,7 @@ ar_settings = { path = "../../../../core/rust/rust.settings" }
 async-trait = "0.1.80"
 
 # Template language support
-mlua = { git = "https://github.com/mlua-rs/mlua", features = ["async", "luau", "serialize", "macros", "send"] } # Supported by default
+mlua = { git = "https://github.com/mlua-rs/mlua", features = ["async", "luau", "serialize", "macros"] } # Supported by default
 
 [dependencies.tokio]
 version = "1"

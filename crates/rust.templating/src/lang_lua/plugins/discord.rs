@@ -19,22 +19,26 @@ pub struct DiscordActionExecutor {
 //
 // Executes actions on discord
 impl DiscordActionExecutor {
-    pub fn check_action(&self, action: String) -> Result<(), crate::Error> {
+    pub fn check_action(&self, action: String) -> LuaResult<()> {
         if !self
             .template_data
             .pragma
             .allowed_caps
             .contains(&format!("discord:{}", action))
         {
-            return Err("Discord action not allowed in this template context".into());
+            return Err(LuaError::runtime(
+                "Discord action not allowed in this template context",
+            ));
         }
 
-        self.ratelimits.check(&action)?;
+        self.ratelimits
+            .check(&action)
+            .map_err(|e| LuaError::external(e.to_string()))?;
 
         Ok(())
     }
 
-    pub async fn user_in_guild(&self, user_id: serenity::all::UserId) -> Result<(), crate::Error> {
+    pub async fn user_in_guild(&self, user_id: serenity::all::UserId) -> LuaResult<()> {
         let Some(member) = sandwich_driver::member_in_guild(
             &self.serenity_context.cache,
             &self.serenity_context.http,
@@ -42,13 +46,14 @@ impl DiscordActionExecutor {
             self.guild_id,
             user_id,
         )
-        .await?
+        .await
+        .map_err(|e| LuaError::external(e.to_string()))?
         else {
-            return Err("User not found in guild".into());
+            return Err(LuaError::runtime("User not found in guild"));
         };
 
         if member.user.id != user_id {
-            return Err("User not found in guild".into());
+            return Err(LuaError::runtime("User not found in guild"));
         }
 
         Ok(())
@@ -58,14 +63,16 @@ impl DiscordActionExecutor {
         &self,
         user_id: serenity::all::UserId,
         needed_permissions: serenity::all::Permissions,
-    ) -> Result<(), crate::Error> {
+    ) -> LuaResult<()> {
+        // Get the guild
         let guild = sandwich_driver::guild(
             &self.serenity_context.cache,
             &self.serenity_context.http,
             &self.reqwest_client,
             self.guild_id,
         )
-        .await?; // Get the guild
+        .await
+        .map_err(|e| LuaError::external(e.to_string()))?;
 
         let Some(member) = sandwich_driver::member_in_guild(
             &self.serenity_context.cache,
@@ -74,19 +81,19 @@ impl DiscordActionExecutor {
             self.guild_id,
             user_id,
         )
-        .await?
+        .await
+        .map_err(|e| LuaError::external(e.to_string()))?
         else {
-            return Err("Bot user not found in guild".into());
+            return Err(LuaError::runtime("Bot user not found in guild"));
         }; // Get the bot user
 
         if !splashcore_rs::serenity_backport::member_permissions(&guild, &member)
             .contains(needed_permissions)
         {
-            return Err(format!(
-                "Bot does not have the required permissions: {:?}",
-                needed_permissions
-            )
-            .into());
+            return Err(LuaError::WithContext {
+                context: needed_permissions.to_string(),
+                cause: LuaError::runtime("Bot does not have the required permissions").into(),
+            });
         }
 
         Ok(())
@@ -97,14 +104,15 @@ impl DiscordActionExecutor {
         user_id: serenity::all::UserId,
         target_id: serenity::all::UserId,
         needed_permissions: serenity::all::Permissions,
-    ) -> Result<(), crate::Error> {
+    ) -> LuaResult<()> {
         let guild = sandwich_driver::guild(
             &self.serenity_context.cache,
             &self.serenity_context.http,
             &self.reqwest_client,
             self.guild_id,
         )
-        .await?; // Get the guild
+        .await
+        .map_err(|e| LuaError::external(e.to_string()))?; // Get the guild
 
         let Some(member) = sandwich_driver::member_in_guild(
             &self.serenity_context.cache,
@@ -113,19 +121,22 @@ impl DiscordActionExecutor {
             self.guild_id,
             user_id,
         )
-        .await?
+        .await
+        .map_err(|e| LuaError::external(e.to_string()))?
         else {
-            return Err(format!("User not found in guild: {}", user_id.mention()).into());
+            return Err(LuaError::runtime(format!(
+                "User not found in guild: {}",
+                user_id.mention()
+            )));
         }; // Get the bot user
 
         if !splashcore_rs::serenity_backport::member_permissions(&guild, &member)
             .contains(needed_permissions)
         {
-            return Err(format!(
+            return Err(LuaError::runtime(format!(
                 "User does not have the required permissions: {:?}: {}",
                 needed_permissions, user_id
-            )
-            .into());
+            )));
         }
 
         let Some(target_member) = sandwich_driver::member_in_guild(
@@ -135,26 +146,26 @@ impl DiscordActionExecutor {
             self.guild_id,
             target_id,
         )
-        .await?
+        .await
+        .map_err(|e| LuaError::external(e.to_string()))?
         else {
-            return Err("Target user not found in guild".into());
+            return Err(LuaError::runtime("Target user not found in guild"));
         }; // Get the target user
 
         let higher_id = guild
             .greater_member_hierarchy(&member, &target_member)
             .ok_or_else(|| {
-                format!(
+                LuaError::runtime(format!(
                     "User does not have a higher role than the target user: {}",
                     user_id.mention()
-                )
+                ))
             })?;
 
         if higher_id != member.user.id {
-            return Err(format!(
+            return Err(LuaError::runtime(format!(
                 "User does not have a higher role than the target user: {}",
                 user_id.mention()
-            )
-            .into());
+            )));
         }
 
         Ok(())
@@ -1868,8 +1879,8 @@ impl LuaUserData for DiscordActionExecutor {
             this.check_action("create_message".to_string())
                 .map_err(LuaError::external)?;
 
-            let msg =
-                types::messages::to_discord_reply(data.message).map_err(LuaError::external)?;
+            let msg = types::messages::to_discord_reply(data.message)
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             // Perform required checks
             let channel = sandwich_driver::channel(
@@ -1880,7 +1891,7 @@ impl LuaUserData for DiscordActionExecutor {
                 data.channel_id,
             )
             .await
-            .map_err(LuaError::external)?;
+            .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             let Some(channel) = channel else {
                 return Err(LuaError::external("Channel not found"));
@@ -1904,7 +1915,7 @@ impl LuaUserData for DiscordActionExecutor {
                 bot_user_id,
             )
             .await
-            .map_err(LuaError::external)?;
+            .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             let Some(bot_user) = bot_user else {
                 return Err(LuaError::external("Bot user not found"));
@@ -1917,7 +1928,7 @@ impl LuaUserData for DiscordActionExecutor {
                 this.guild_id,
             )
             .await
-            .map_err(LuaError::external)?;
+            .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             // Check if the bot has permissions to send messages in the given channel
             if !guild

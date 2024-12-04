@@ -269,11 +269,11 @@ impl LuaUserData for StingExecutor {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_async_method("list", |lua, this, page: usize| async move {
             this.check_action("list".to_string())
-                .map_err(LuaError::external)?;
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             let stings = silverpelt::stings::Sting::list(&this.pool, this.guild_id, page)
                 .await
-                .map_err(LuaError::external)?;
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             let v = lua.to_value(&stings)?;
 
@@ -290,11 +290,11 @@ impl LuaUserData for StingExecutor {
             })?;
 
             this.check_action("get".to_string())
-                .map_err(LuaError::external)?;
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             let sting = silverpelt::stings::Sting::get(&this.pool, this.guild_id, id)
                 .await
-                .map_err(LuaError::external)?;
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             let v = lua.to_value(&sting)?;
 
@@ -305,7 +305,7 @@ impl LuaUserData for StingExecutor {
             let sting = lua.from_value::<silverpelt::stings::StingCreate>(data)?;
 
             this.check_action("create".to_string())
-                .map_err(LuaError::external)?;
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             if sting.guild_id != this.guild_id {
                 return Err(LuaError::external("Guild ID mismatch"));
@@ -314,7 +314,7 @@ impl LuaUserData for StingExecutor {
             let sting = sting
                 .create_and_dispatch_returning_id(this.serenity_context.clone(), &this.pool)
                 .await
-                .map_err(LuaError::external)?;
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             Ok(sting.to_string())
         });
@@ -323,7 +323,7 @@ impl LuaUserData for StingExecutor {
             let sting = lua.from_value::<silverpelt::stings::Sting>(data)?;
 
             this.check_action("update".to_string())
-                .map_err(LuaError::external)?;
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             if sting.guild_id != this.guild_id {
                 return Err(LuaError::external("Guild ID mismatch"));
@@ -332,7 +332,7 @@ impl LuaUserData for StingExecutor {
             sting
                 .update_and_dispatch(&this.pool, this.serenity_context.clone())
                 .await
-                .map_err(LuaError::external)?;
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             Ok(())
         });
@@ -347,11 +347,11 @@ impl LuaUserData for StingExecutor {
             })?;
 
             this.check_action("delete".to_string())
-                .map_err(LuaError::external)?;
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             let Some(sting) = silverpelt::stings::Sting::get(&this.pool, this.guild_id, id)
                 .await
-                .map_err(LuaError::external)?
+                .map_err(|e| LuaError::runtime(e.to_string()))?
             else {
                 return Err(LuaError::external("Sting not found"));
             };
@@ -359,7 +359,7 @@ impl LuaUserData for StingExecutor {
             sting
                 .delete_and_dispatch(&this.pool, this.serenity_context.clone())
                 .await
-                .map_err(LuaError::external)?;
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             Ok(())
         });

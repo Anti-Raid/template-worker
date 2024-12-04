@@ -5,7 +5,7 @@
 /// SPDX-License-Identifier: MPL-2.0
 use std::future::Future;
 
-use mlua::prelude::*;
+use mlua::{prelude::*, MaybeSend};
 
 /**
     Utility struct for building Lua tables.
@@ -109,10 +109,10 @@ impl<'lua> TableBuilder<'lua> {
     pub fn with_async_function<K, A, R, F, FR>(self, key: K, func: F) -> LuaResult<Self>
     where
         K: IntoLua,
-        A: FromLuaMulti + Send + Sync + 'static,
+        A: FromLuaMulti + MaybeSend + 'static,
         R: IntoLuaMulti,
-        F: Fn(Lua, A) -> FR + Send + Sync + 'static,
-        FR: Future<Output = LuaResult<R>> + Send + Sync + 'static,
+        F: Fn(Lua, A) -> FR + MaybeSend + 'static,
+        FR: Future<Output = LuaResult<R>> + MaybeSend + 'static,
     {
         let f = self.lua.create_async_function(func)?;
         self.with_value(key, LuaValue::Function(f))

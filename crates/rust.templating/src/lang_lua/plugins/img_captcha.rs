@@ -192,7 +192,7 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
             let (text, image) = config
                 .create_captcha(CREATE_TIMEOUT)
                 .await
-                .map_err(LuaError::external)?;
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             let captcha = crate::core::captcha::Captcha {
                 text,

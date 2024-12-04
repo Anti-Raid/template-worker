@@ -1,7 +1,7 @@
 use crate::lang_lua::state;
 use mlua::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{num::TryFromIntError, sync::Arc};
 
 /// An kv executor is used to execute key-value ops from Lua
 /// templates
@@ -116,7 +116,7 @@ impl LuaUserData for KvExecutor {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_async_method("find", |lua, this, key: String| async move {
             this.check("find".to_string(), key.clone())
-                .map_err(LuaError::external)?;
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             // Check key length
             if key.len() > this.kv_constraints.max_key_length {
@@ -130,7 +130,7 @@ impl LuaUserData for KvExecutor {
             )
             .fetch_all(&this.pool)
             .await
-            .map_err(LuaError::external)?;
+            .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             let mut records = vec![];
 
@@ -153,7 +153,7 @@ impl LuaUserData for KvExecutor {
 
         methods.add_async_method("get", |lua, this, key: String| async move {
             this.check("get".to_string(), key.clone())
-                .map_err(LuaError::external)?;
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             // Check key length
             if key.len() > this.kv_constraints.max_key_length {
@@ -186,7 +186,7 @@ impl LuaUserData for KvExecutor {
 
         methods.add_async_method("getrecord", |lua, this, key: String| async move {
             this.check("get".to_string(), key.clone())
-                .map_err(LuaError::external)?;
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             // Check key length
             if key.len() > this.kv_constraints.max_key_length {
@@ -225,7 +225,7 @@ impl LuaUserData for KvExecutor {
 
         methods.add_async_method("set", |lua, this, (key, value): (String, LuaValue)| async move {
             this.check("set".to_string(), key.clone())
-            .map_err(LuaError::external)?;
+            .map_err(|e| LuaError::runtime(e.to_string()))?;
             
             let data = lua.from_value::<serde_json::Value>(value)?;
             
@@ -236,14 +236,14 @@ impl LuaUserData for KvExecutor {
 
             // Check bytes length
             let data_str = serde_json::to_string(&data)
-                .map_err(LuaError::external)?;
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             if data_str.as_bytes().len() > this.kv_constraints.max_value_bytes {
                 return Err(LuaError::external("Value length too long"));
             }
 
             let mut tx = this.pool.begin().await
-                .map_err(LuaError::external)?;
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             let rec = sqlx::query!(
                 "SELECT COUNT(*) FROM guild_templates_kv WHERE guild_id = $1",
@@ -251,9 +251,9 @@ impl LuaUserData for KvExecutor {
             )
             .fetch_one(&mut *tx)
             .await
-            .map_err(LuaError::external)?;
+            .map_err(|e| LuaError::runtime(e.to_string()))?;
 
-            if rec.count.unwrap_or(0) >= this.kv_constraints.max_keys.try_into().map_err(LuaError::external)? {
+            if rec.count.unwrap_or(0) >= this.kv_constraints.max_keys.try_into().map_err(|e: TryFromIntError| LuaError::runtime(e.to_string()))? {
                 return Err(LuaError::external("Max keys limit reached"));
             }
 
@@ -265,17 +265,17 @@ impl LuaUserData for KvExecutor {
             )
             .execute(&mut *tx)
             .await
-            .map_err(LuaError::external)?;
+            .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             tx.commit().await
-            .map_err(LuaError::external)?;
+            .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             Ok(())
         });
 
         methods.add_async_method("delete", |_lua, this, key: String| async move {            
             this.check("delete".to_string(), key.clone())
-            .map_err(LuaError::external)?;
+            .map_err(|e| LuaError::runtime(e.to_string()))?;
             
             // Check key length
             if key.len() > this.kv_constraints.max_key_length {
@@ -289,7 +289,7 @@ impl LuaUserData for KvExecutor {
             )
             .execute(&this.pool)
             .await
-            .map_err(LuaError::external)?;
+            .map_err(|e| LuaError::runtime(e.to_string()))?;
 
             Ok(())
         });

@@ -108,6 +108,7 @@ pub(crate) fn configure_lua_vm(
 
     // Setup the global table using a metatable
     let global_mt = lua.create_table()?;
+    global_mt.set_safeenv(true);
 
     global_mt.raw_set(
         "__index",
