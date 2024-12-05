@@ -238,7 +238,7 @@ impl LuaUserData for KvExecutor {
             let data_str = serde_json::to_string(&data)
                 .map_err(|e| LuaError::runtime(e.to_string()))?;
 
-            if data_str.as_bytes().len() > this.kv_constraints.max_value_bytes {
+            if data_str.len() > this.kv_constraints.max_value_bytes {
                 return Err(LuaError::external("Value length too long"));
             }
 

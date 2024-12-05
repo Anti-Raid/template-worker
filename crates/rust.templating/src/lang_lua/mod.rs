@@ -20,6 +20,11 @@ use std::hash::Hasher;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
+#[cfg(feature = "send")]
+pub type XRc<T> = Arc<T>;
+#[cfg(not(feature = "send"))]
+pub type XRc<T> = std::rc::Rc<T>;
+
 #[cfg(feature = "thread_proc")]
 mod thread_proc;
 
@@ -110,47 +115,30 @@ pub(crate) fn configure_lua_vm(
     //
     // SAFETY: This works because the global table will not change in the VM
     let global_mt = lua.create_table()?;
-    let globals_ref_a = lua.globals();
-    global_mt.raw_set(
-        "__index",
-        lua.create_function(move |_lua, (tab, key): (LuaTable, LuaValue)| {
-            match key {
-                LuaValue::String(ref s) => {
-                    if s == "_G" || s == "__stack" {
-                        return Ok(LuaValue::Table(tab));
-                    }
-                }
-                _ => {}
-            }
+    let global_tab = lua.create_table()?;
 
-            let v = globals_ref_a.get::<LuaValue>(key.clone())?;
+    // Proxy reads to globals if key is in globals, otherwise to the table
+    global_mt.set("__index", lua.globals())?;
+    global_tab.set("_G", global_tab.clone())?;
+    global_tab.set("__stack", global_tab.clone())?;
 
-            if v.is_nil() {
-                tab.raw_get::<LuaValue>(key)
-            } else {
-                Ok(v)
-            }
-        })?,
-    )?;
-
+    // Provies writes
     // Forward to _G if key is in globals, otherwise to the table
-    let globals_ref_b = lua.globals();
+    let globals_ref = lua.globals();
     global_mt.set(
         "__newindex",
         lua.create_function(
             move |_lua, (tab, key, value): (LuaTable, LuaValue, LuaValue)| {
-                let v = globals_ref_b.get::<LuaValue>(key.clone())?;
+                let v = globals_ref.get::<LuaValue>(key.clone())?;
 
                 if !v.is_nil() {
-                    globals_ref_b.set(key, value)
+                    globals_ref.set(key, value)
                 } else {
                     tab.raw_set(key, value)
                 }
             },
         )?,
     )?;
-
-    let global_tab = lua.create_table()?;
 
     // Set __index on global_tab to point to _G
     global_tab.set_metatable(Some(global_mt));
@@ -384,7 +372,7 @@ pub async fn render_template<Response: serde::de::DeserializeOwned>(
                 LuaVmResult::LuaError { err } => Err(err.into()),
                 LuaVmResult::VmBroken {} => {
                     // Rerun render_template
-                    return Err("Lua VM is broken".into());
+                    Err("Lua VM is broken".into())
                 },
             }
         }

@@ -1184,7 +1184,7 @@ mod types {
         }
 
         impl<'a> DiscordReply<'a> {
-            pub fn to_create_message(self) -> serenity::all::CreateMessage<'a> {
+            pub fn create_message(self) -> serenity::all::CreateMessage<'a> {
                 let mut message = serenity::all::CreateMessage::default();
 
                 if let Some(content) = self.content {
@@ -1201,7 +1201,7 @@ mod types {
             }
 
             #[allow(dead_code)]
-            pub fn to_edit_message(self) -> serenity::all::EditMessage<'a> {
+            pub fn edit_message(self) -> serenity::all::EditMessage<'a> {
                 let mut message = serenity::all::EditMessage::default();
 
                 if let Some(content) = self.content {
@@ -1940,7 +1940,7 @@ impl LuaUserData for DiscordActionExecutor {
                 ));
             }
 
-            let cm = msg.to_create_message();
+            let cm = msg.create_message();
 
             let msg = guild_channel
                 .send_message(&this.serenity_context.http, cm)

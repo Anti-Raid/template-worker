@@ -95,7 +95,7 @@ async fn get_template(
                 updated_by: rec.last_updated_by,
                 updated_at: rec.last_updated_at,
             }),
-            None => return Err("Template not found".into()),
+            None => Err("Template not found".into()),
         }
     }
 }
@@ -133,19 +133,20 @@ pub async fn execute<RenderResult: serde::de::DeserializeOwned>(
     let (template_content, pragma) = TemplatePragma::parse(&template_content)?;
 
     match pragma.lang {
-        TemplateLanguage::Lua => lang_lua::render_template(
-            event,
-            lang_lua::ParseCompileState {
-                serenity_context,
-                reqwest_client,
-                guild_id,
-                template,
-                pragma,
-                template_content: template_content.to_string(),
-                pool,
-            },
-        )
-        .await
-        .map_err(|e| e.into()),
+        TemplateLanguage::Lua => {
+            lang_lua::render_template(
+                event,
+                lang_lua::ParseCompileState {
+                    serenity_context,
+                    reqwest_client,
+                    guild_id,
+                    template,
+                    pragma,
+                    template_content: template_content.to_string(),
+                    pool,
+                },
+            )
+            .await
+        }
     }
 }

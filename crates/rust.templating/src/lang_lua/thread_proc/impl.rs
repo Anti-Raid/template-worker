@@ -1,4 +1,8 @@
-use crate::{handle_event, lang_lua::ArLua, LuaVmAction, LuaVmResult, MAX_VM_THREAD_STACK_SIZE};
+use crate::{
+    handle_event,
+    lang_lua::{ArLua, XRc},
+    LuaVmAction, LuaVmResult, MAX_VM_THREAD_STACK_SIZE,
+};
 use serenity::all::GuildId;
 use std::{panic::PanicHookInfo, sync::Arc};
 
@@ -56,7 +60,7 @@ pub fn lua_thread_impl(
                     })
                 }
 
-                let tis_ref = Arc::new(
+                let tis_ref = XRc::new(
                     match crate::lang_lua::configure_lua_vm(
                         broken_ref,
                         last_execution_time_ref,

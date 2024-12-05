@@ -12,7 +12,7 @@ impl<T: Sized> Deref for ArcOrNormal<T> {
     fn deref(&self) -> &Self::Target {
         match self {
             ArcOrNormal::Arc(a) => a.as_ref(),
-            ArcOrNormal::Normal(b) => &b,
+            ArcOrNormal::Normal(b) => b,
         }
     }
 }

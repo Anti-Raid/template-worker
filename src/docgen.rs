@@ -166,7 +166,7 @@ fn enum_to_string(enu: &Enum, heading_level: usize) -> String {
         ));
 
         enu.variants.iter().for_each(|variant| {
-            markdown.push_str(&enum_variant_to_string(enu, &variant, heading_level + 1));
+            markdown.push_str(&enum_variant_to_string(enu, variant, heading_level + 1));
         });
     }
 

@@ -90,3 +90,4 @@ branch = "main"
 [features]
 default = ["thread_proc"]
 thread_proc = [] # Use threads for the Lua VM
+send = ["mlua/send"]

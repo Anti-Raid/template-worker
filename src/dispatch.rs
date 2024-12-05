@@ -29,7 +29,7 @@ pub async fn discord_event_dispatch(
 ) -> Result<(), silverpelt::Error> {
     let data = serenity_context.data::<Data>();
 
-    let Some(guild_id) = gwevent::core::get_event_guild_id(&event) else {
+    let Some(guild_id) = gwevent::core::get_event_guild_id(event) else {
         return Ok(());
     };
 
@@ -38,7 +38,7 @@ pub async fn discord_event_dispatch(
         return Ok(());
     }
 
-    let user_id = gwevent::core::get_event_user_id(&event);
+    let user_id = gwevent::core::get_event_user_id(event);
 
     match event {
         FullEvent::GuildAuditLogEntryCreate { .. } => {}
@@ -56,14 +56,13 @@ pub async fn discord_event_dispatch(
             }
         }
         // Ignore ourselves as well as interaction creates that are reserved
-        _ => match user_id {
-            Some(user_id) => {
+        _ => {
+            if let Some(user_id) = user_id {
                 if user_id == serenity_context.cache.current_user().id {
                     return Ok(());
                 }
             }
-            None => {}
-        },
+        }
     }
 
     // Convert to titlecase by capitalizing the first letter of each word
@@ -124,7 +123,7 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
                     "(Anti Raid) Sting Created".to_string(),
                     "StingCreate".to_string(),
                     "StingCreate".to_string(),
-                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(&sting)?)),
+                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
                     false,
                     None,
                 ),
@@ -142,7 +141,7 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
                     "(Anti Raid) Sting Updated".to_string(),
                     "StingUpdate".to_string(),
                     "StingUpdate".to_string(),
-                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(&sting)?)),
+                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
                     false,
                     None,
                 ),
@@ -160,7 +159,7 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
                     "(Anti Raid) Sting Expired".to_string(),
                     "StingExpire".to_string(),
                     "StingExpire".to_string(),
-                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(&sting)?)),
+                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
                     false,
                     None,
                 ),
@@ -178,7 +177,7 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
                     "(Anti Raid) Sting Deleted".to_string(),
                     "StingDelete".to_string(),
                     "StingDelete".to_string(),
-                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(&sting)?)),
+                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
                     false,
                     None,
                 ),
@@ -196,7 +195,7 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
                     "(Anti Raid) Punishment Created".to_string(),
                     "PunishmentCreate".to_string(),
                     "PunishmentCreate".to_string(),
-                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(&punishment)?.into())),
+                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(punishment)?)),
                     false,
                     None,
                 ),
@@ -214,7 +213,7 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
                     "(Anti Raid) Punishment Expired".to_string(),
                     "PunishmentExpire".to_string(),
                     "PunishmentExpire".to_string(),
-                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(&punishment)?)),
+                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(punishment)?)),
                     false,
                     None,
                 ),
@@ -287,8 +286,9 @@ pub async fn dispatch(
     }
 
     for template in templates.iter().filter(|template| {
-        should_dispatch_event(&event.name(), {
+        should_dispatch_event(event.name(), {
             // False positive, unwrap_or_default cannot be used here as it moves the event out of the sink
+            #[allow(clippy::manual_unwrap_or_default)]
             if let Some(ref events) = template.events {
                 events
             } else {

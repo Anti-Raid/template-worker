@@ -14,8 +14,7 @@ pub static TEMPLATES_CACHE: LazyLock<Cache<GuildId, Arc<Vec<GuildTemplate>>>> =
             .build()
     });
 
-pub static PAGES: LazyLock<scc::HashMap<GuildId, Vec<Page>>> =
-    LazyLock::new(|| scc::HashMap::new());
+pub static PAGES: LazyLock<scc::HashMap<GuildId, Vec<Page>>> = LazyLock::new(scc::HashMap::new);
 
 /// Gets all templates for a guild
 #[allow(dead_code)]
@@ -112,12 +111,12 @@ pub async fn take_page(guild_id: GuildId, page_id: String) -> Result<Page, crate
 
             if let Some(index) = index {
                 let page = (*pages).remove(index);
-                return Ok(page);
+                Ok(page)
             } else {
-                return Err("Page not found".into());
+                Err("Page not found".into())
             }
         }
-        None => return Err("No pages found".into()),
+        None => Err("No pages found".into()),
     }
 }
 

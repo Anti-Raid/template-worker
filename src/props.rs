@@ -79,7 +79,7 @@ impl silverpelt::data::Props for Props {
 
             for guild in cache.guilds() {
                 {
-                    let guild = guild.to_guild_cached(&cache);
+                    let guild = guild.to_guild_cached(cache);
 
                     if let Some(guild) = guild {
                         count += guild.member_count;

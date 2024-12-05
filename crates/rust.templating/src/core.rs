@@ -46,7 +46,7 @@ pub mod templating_core {
             // Remove out the @pragma and serde parse it
             let first_line = first_line.replace("@pragma ", "");
 
-            if first_line.as_bytes().len() > MAX_PRAGMA_SIZE {
+            if first_line.len() > MAX_PRAGMA_SIZE {
                 return Err("Pragma too large".into());
             }
 

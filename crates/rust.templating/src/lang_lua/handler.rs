@@ -70,12 +70,8 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
             };
 
             match tis_ref.lua.from_value::<serde_json::Value>(v) {
-                Ok(v) => {
-                    return LuaVmResult::Ok { result_val: v };
-                }
-                Err(e) => {
-                    return LuaVmResult::LuaError { err: e.to_string() };
-                }
+                Ok(v) => LuaVmResult::Ok { result_val: v },
+                Err(e) => LuaVmResult::LuaError { err: e.to_string() },
             }
         }
         LuaVmAction::Stop {} => {
@@ -83,27 +79,21 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
             tis_ref
                 .broken
                 .store(true, std::sync::atomic::Ordering::Release);
-            return LuaVmResult::Ok {
+            LuaVmResult::Ok {
                 result_val: serde_json::Value::Null,
-            };
+            }
         }
         LuaVmAction::GetMemoryUsage {} => {
             let used = tis_ref.lua.used_memory();
-            return LuaVmResult::Ok {
+            LuaVmResult::Ok {
                 result_val: serde_json::Value::Number(used.into()),
-            };
+            }
         }
-        LuaVmAction::SetMemoryLimit { limit } => {
-            match tis_ref.lua.set_memory_limit(limit) {
-                Ok(limit) => {
-                    return LuaVmResult::Ok {
-                        result_val: serde_json::Value::Number(limit.into()),
-                    };
-                }
-                Err(e) => {
-                    return LuaVmResult::LuaError { err: e.to_string() };
-                }
-            };
-        }
+        LuaVmAction::SetMemoryLimit { limit } => match tis_ref.lua.set_memory_limit(limit) {
+            Ok(limit) => LuaVmResult::Ok {
+                result_val: serde_json::Value::Number(limit.into()),
+            },
+            Err(e) => LuaVmResult::LuaError { err: e.to_string() },
+        },
     }
 }

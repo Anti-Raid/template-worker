@@ -27,7 +27,7 @@ pub async fn punishment_expiry_task(
 
         // Dispatch event
         let punishment_id = punishment.id;
-        let event = silverpelt::ar_event::AntiraidEvent::PunishmentExpire(punishment.into());
+        let event = silverpelt::ar_event::AntiraidEvent::PunishmentExpire(punishment);
 
         let event_handler_context = silverpelt::ar_event::EventHandlerContext {
             event,
@@ -103,7 +103,7 @@ pub async fn stings_expiry_task(
 
         // Dispatch event
         let sting_id = sting.id;
-        let event = silverpelt::ar_event::AntiraidEvent::StingExpire(sting.into());
+        let event = silverpelt::ar_event::AntiraidEvent::StingExpire(sting);
 
         let event_handler_context = silverpelt::ar_event::EventHandlerContext {
             event,
