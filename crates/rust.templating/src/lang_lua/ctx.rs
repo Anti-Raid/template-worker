@@ -43,5 +43,22 @@ impl LuaUserData for TemplateContext {
 
             Ok(v)
         });
+
+        fields.add_field_method_get("guild_id", |lua, _| {
+            let Some(data) = lua.app_data_ref::<crate::lang_lua::state::LuaUserData>() else {
+                return Err(LuaError::external("No app data found"));
+            };
+
+            Ok(data.guild_id.to_string())
+        });
+
+        fields.add_field_method_get("current_user", |lua, _| {
+            let Some(data) = lua.app_data_ref::<crate::lang_lua::state::LuaUserData>() else {
+                return Err(LuaError::external("No app data found"));
+            };
+
+            let v = lua.to_value(&data.serenity_context.cache.current_user().clone())?;
+            Ok(v)
+        });
     }
 }

@@ -326,37 +326,11 @@ pub struct ParseCompileState {
     pub pool: sqlx::PgPool,
 }
 
-// If the code in question is a function expression starting with `function`, we need to unravel it
-fn unravel_function_expression(template_content: String) -> String {
-    let template_content = template_content.trim().to_string();
-    if template_content.starts_with("function") && template_content.ends_with("end") {
-        let mut lines = template_content.lines().collect::<Vec<&str>>();
-        lines.remove(0);
-        lines.pop();
-        let uw = lines.join("\n");
-
-        format!(
-            "
-local args, token = ...
-{}
-        ",
-            uw
-        )
-    } else {
-        template_content
-    }
-}
-
 /// Render a template
 pub async fn render_template<Response: serde::de::DeserializeOwned>(
     event: event::Event,
     state: ParseCompileState,
 ) -> Result<Response, silverpelt::Error> {
-    let state = ParseCompileState {
-        template_content: unravel_function_expression(state.template_content),
-        ..state
-    };
-
     let lua = get_lua_vm(
         state.guild_id,
         state.pool,

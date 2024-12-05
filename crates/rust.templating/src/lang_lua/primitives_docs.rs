@@ -166,6 +166,14 @@ pub fn document_primitives() -> templating_docgen::PrimitiveListBuilder {
                     .typ("TemplateData")
                     .description("The data associated with the template.")
                 })
+                .field("guild_id", |m| {
+                    m.description("The current guild ID the template is running on.")
+                    .typ("string")
+                })
+                .field("current_user", |m| {
+                    m.description("Returns AntiRaid's discord user object [the current discord bot user driving the template].")
+                    .typ("Serenity.User")
+                })
             },
         )
 }
