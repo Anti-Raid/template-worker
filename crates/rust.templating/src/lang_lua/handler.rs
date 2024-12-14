@@ -55,16 +55,12 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
                 Ok(f) => f,
                 Err(e) => {
                     // Mark memory error'd VMs as broken automatically to avoid user grief/pain
-                    match e {
-                        LuaError::MemoryError(_) => {
-                            // Mark VM as broken
-                            tis_ref
-                                .broken
-                                .store(true, std::sync::atomic::Ordering::Release);
-                        }
-                        _ => {}
+                    if let LuaError::MemoryError(_) = e {
+                        // Mark VM as broken
+                        tis_ref
+                            .broken
+                            .store(true, std::sync::atomic::Ordering::Release);
                     }
-
                     return LuaVmResult::LuaError { err: e.to_string() };
                 }
             };

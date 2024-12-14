@@ -158,7 +158,4 @@ pub struct LuaUserData {
 
     /// Stores the lua sting ratelimiters
     pub sting_ratelimits: Arc<LuaRatelimits>,
-
-    /// The bytecode cache
-    pub vm_bytecode_cache: Arc<super::BytecodeCache>,
 }

@@ -17,6 +17,7 @@ use moka::future::Cache;
 use serenity::all::GuildId;
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
@@ -55,7 +56,22 @@ pub enum LuaVmResult {
     VmBroken {},
 }
 
-pub type BytecodeCache = scc::HashMap<crate::Template, (Vec<u8>, u64)>;
+pub struct BytecodeCache(scc::HashMap<crate::Template, (Vec<u8>, u64)>);
+
+impl BytecodeCache {
+    /// Create a new bytecode cache
+    pub fn new() -> Self {
+        BytecodeCache(scc::HashMap::new())
+    }
+}
+
+impl Deref for BytecodeCache {
+    type Target = scc::HashMap<crate::Template, (Vec<u8>, u64)>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// ArLua provides a handle to a Lua VM
 ///
@@ -80,7 +96,7 @@ pub struct ArLuaThreadInnerState {
     lua: Lua,
 
     /// The bytecode cache maps template to (bytecode, source hash)
-    bytecode_cache: Arc<BytecodeCache>,
+    bytecode_cache: BytecodeCache,
 
     /// Is the VM broken/needs to be remade
     broken: Arc<std::sync::atomic::AtomicBool>,
@@ -99,7 +115,7 @@ pub(crate) fn create_lua_compiler() -> mlua::Compiler {
 pub(crate) fn configure_lua_vm(
     broken: Arc<std::sync::atomic::AtomicBool>,
     last_execution_time: Arc<atomicinstant::AtomicInstant>,
-    bytecode_cache: Arc<BytecodeCache>,
+    bytecode_cache: BytecodeCache,
 ) -> LuaResult<ArLuaThreadInnerState> {
     let lua = Lua::new_with(
         LuaStdLib::ALL_SAFE,
@@ -145,7 +161,7 @@ pub(crate) fn configure_lua_vm(
 
     // Override require function for plugin support and increased security
     lua.globals()
-        .set("require", lua.create_async_function(plugins::require)?)?;
+        .set("require", lua.create_function(plugins::require)?)?;
 
     // Prelude code providing some basic functions directly to the Lua VM
     lua.load(
@@ -202,7 +218,6 @@ pub(crate) fn configure_lua_vm(
 
 pub(crate) fn create_lua_vm_userdata(
     last_execution_time: Arc<atomicinstant::AtomicInstant>,
-    vm_bytecode_cache: Arc<BytecodeCache>,
     guild_id: GuildId,
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
@@ -220,7 +235,6 @@ pub(crate) fn create_lua_vm_userdata(
         actions_ratelimits: Arc::new(state::LuaRatelimits::new_action_rl()?),
         sting_ratelimits: Arc::new(state::LuaRatelimits::new_stings_rl()?),
         last_execution_time,
-        vm_bytecode_cache,
     })
 }
 

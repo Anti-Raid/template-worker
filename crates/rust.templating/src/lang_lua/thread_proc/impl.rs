@@ -1,6 +1,6 @@
 use crate::{
     handle_event,
-    lang_lua::{ArLua, XRc},
+    lang_lua::{ArLua, BytecodeCache, XRc},
     LuaVmAction, LuaVmResult, MAX_VM_THREAD_STACK_SIZE,
 };
 use serenity::all::GuildId;
@@ -17,11 +17,9 @@ pub fn lua_thread_impl(
     let last_execution_time = Arc::new(crate::atomicinstant::AtomicInstant::new(
         std::time::Instant::now(),
     ));
-    let bytecode_cache = Arc::new(scc::HashMap::new());
 
     let userdata = crate::lang_lua::create_lua_vm_userdata(
         last_execution_time.clone(),
-        bytecode_cache.clone(),
         guild_id,
         pool,
         serenity_context,
@@ -59,6 +57,8 @@ pub fn lua_thread_impl(
                         broken_ref.store(true, std::sync::atomic::Ordering::Release);
                     })
                 }
+
+                let bytecode_cache = BytecodeCache::new();
 
                 let tis_ref = XRc::new(
                     match crate::lang_lua::configure_lua_vm(
