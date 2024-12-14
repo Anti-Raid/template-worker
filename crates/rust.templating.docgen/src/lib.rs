@@ -247,6 +247,7 @@ pub struct Method {
     pub description: String,
     pub parameters: Vec<Parameter>,
     pub returns: Vec<Parameter>,
+    pub is_promise: bool,
 }
 
 // Method builder code
@@ -316,6 +317,12 @@ impl Method {
         }
 
         self.clone()
+    }
+
+    pub fn is_promise(self, is_promise: bool) -> Self {
+        let mut m = self;
+        m.is_promise = is_promise;
+        m
     }
 
     pub fn build(self) -> Method {

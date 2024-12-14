@@ -77,6 +77,26 @@ pub async fn add_page(guild_id: GuildId, page: Page) -> Result<(), crate::Error>
     Ok(())
 }
 
+/// Adds a page to the page cache
+pub fn add_page_sync(guild_id: GuildId, page: Page) -> Result<(), crate::Error> {
+    match PAGES.get(&guild_id) {
+        Some(mut pages) => {
+            for existing_page in pages.iter() {
+                if existing_page.page_id == page.page_id {
+                    return Err("Page already exists".into());
+                }
+            }
+            pages.push(page);
+        }
+        None => {
+            let pages = vec![page];
+            PAGES.upsert(guild_id, pages);
+        }
+    }
+
+    Ok(())
+}
+
 /// Returns a setting from the page cache given the setting ID
 pub async fn get_setting(
     guild_id: GuildId,
@@ -120,9 +140,56 @@ pub async fn take_page(guild_id: GuildId, page_id: String) -> Result<Page, crate
     }
 }
 
+/// Takes out the page from the page cache by page ID
+pub fn take_page_sync(guild_id: GuildId, page_id: String) -> Result<Page, crate::Error> {
+    match PAGES.get(&guild_id) {
+        Some(mut pages) => {
+            let mut index = None;
+            for (i, page) in pages.iter().enumerate() {
+                if page.page_id == page_id {
+                    index = Some(i);
+                    break;
+                }
+            }
+
+            if let Some(index) = index {
+                let page = (*pages).remove(index);
+                Ok(page)
+            } else {
+                Err("Page not found".into())
+            }
+        }
+        None => Err("No pages found".into()),
+    }
+}
+
 /// Removes a page from the page cache by page ID
 pub async fn remove_page(guild_id: GuildId, page_id: String) -> Result<(), crate::Error> {
     match PAGES.get_async(&guild_id).await {
+        Some(mut pages) => {
+            let mut index = None;
+            for (i, page) in pages.iter().enumerate() {
+                if page.page_id == page_id {
+                    index = Some(i);
+                    break;
+                }
+            }
+
+            if let Some(index) = index {
+                (*pages).remove(index);
+            } else {
+                return Err("Page not found".into());
+            }
+        }
+        None => return Err("No pages found".into()),
+    }
+
+    Ok(())
+}
+
+/// Removes a page from the page cache by page ID
+pub fn remove_page_sync(guild_id: GuildId, page_id: String) -> Result<(), crate::Error> {
+    match PAGES.get(&guild_id) {
         Some(mut pages) => {
             let mut index = None;
             for (i, page) in pages.iter().enumerate() {

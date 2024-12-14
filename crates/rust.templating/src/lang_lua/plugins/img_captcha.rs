@@ -1,3 +1,4 @@
+use super::promise::lua_promise;
 use captcha::filters::Filter;
 use mlua::prelude::*;
 
@@ -179,6 +180,7 @@ pub fn plugin_docs() -> templating_docgen::Plugin {
             .return_("captcha", |r| {
                 r.typ("{u8}").description("The created CAPTCHA object.")
             })
+            .is_promise(true)
         })
 }
 
@@ -187,20 +189,23 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
 
     module.set(
         "new",
-        lua.create_async_function(|lua, (config,): (LuaValue,)| async move {
-            let config: CaptchaConfig = lua.from_value(config)?;
-            let (text, image) = config
-                .create_captcha(CREATE_TIMEOUT)
-                .await
-                .map_err(|e| LuaError::runtime(e.to_string()))?;
+        lua.create_function(|_, (config,): (LuaValue,)| {
+            Ok(lua_promise!(config, |lua, config|, {
+                let config: CaptchaConfig = lua.from_value(config)?;
 
-            let captcha = crate::core::captcha::Captcha {
-                text,
-                image: Some(image),
-                content: Some("Please enter the text from the image".to_string()),
-            };
+                let (text, image) = config
+                    .create_captcha(CREATE_TIMEOUT)
+                    .await
+                    .map_err(|e| LuaError::runtime(e.to_string()))?;
 
-            lua.to_value(&captcha) // Return the captcha object
+                let captcha = crate::core::captcha::Captcha {
+                    text,
+                    image: Some(image),
+                    content: Some("Please enter the text from the image".to_string()),
+                };
+
+                lua.to_value(&captcha) // Return the captcha object
+            }))
         })?,
     )?;
 

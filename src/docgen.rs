@@ -279,6 +279,13 @@ fn method_to_string(method: &Method, cls: Option<String>, heading_level: usize) 
         markdown.push_str(&format!("\n\n{}", method.description));
     }
 
+    if method.is_promise {
+        markdown.push_str(&format!(
+            "\n\n**Note that this method returns a promise that must be yielded using {} to actually execute and return results.**\n\n",
+            type_link("promise.yield", "promise.yield")
+        ));
+    }
+
     if !method.parameters.is_empty() {
         markdown.push_str(&format!(
             "\n\n{} Parameters\n\n",
@@ -324,6 +331,10 @@ fn typeref_to_link(tref: &str) -> String {
         let type_param = LuaParamaterTypeMetadata::from_type(tref);
         type_param.raw_type
     })
+}
+
+fn type_link(name: &str, tref: &str) -> String {
+    format!("[`{}`](#type.{})", name, tref)
 }
 
 /// Helper function to generate a string of `#` characters

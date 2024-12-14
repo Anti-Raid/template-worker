@@ -5,6 +5,7 @@ use ar_settings::types::{
 use mlua::prelude::*;
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct CreatePage {
     pub page_id: String,
     pub guild_id: serenity::all::GuildId,
@@ -274,9 +275,9 @@ impl LuaUserData for CreatePage {
 
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         // Adds a setting to the page
-        methods.add_async_method_mut(
+        methods.add_method_mut(
             "add_setting",
-            |_lua, mut this, setting: CreatePageSetting| async move {
+            |_lua, this, setting: CreatePageSetting| {
                 if this.is_created {
                     return Err(LuaError::runtime("Page is already created"));
                 }
@@ -329,7 +330,7 @@ impl LuaUserData for CreatePage {
         ); // Implement the method
 
         // Creates the page
-        methods.add_async_method_mut("create", |_lua, mut this, _: ()| async move {
+        methods.add_method_mut("create", |_lua, this, _: ()| {
             if this.is_created {
                 return Err(LuaError::runtime("Page is already created"));
             }
@@ -344,8 +345,7 @@ impl LuaUserData for CreatePage {
             };
 
             // Add the page to the cache
-            crate::cache::add_page(this.guild_id, page)
-                .await
+            crate::cache::add_page_sync(this.guild_id, page)
                 .map_err(|e| LuaError::external(e.to_string()))?;
 
             this.is_created = true;
@@ -353,13 +353,12 @@ impl LuaUserData for CreatePage {
         });
 
         // Removes the page (by page ID)
-        methods.add_async_method_mut("remove", |_lua, mut this, _: ()| async move {
+        methods.add_method_mut("remove", |_lua, this, _: ()| {
             if !this.is_created {
                 return Err(LuaError::runtime("Page is not created"));
             }
 
-            crate::cache::remove_page(this.guild_id, this.page_id.clone())
-                .await
+            crate::cache::remove_page_sync(this.guild_id, this.page_id.clone())
                 .map_err(|e| LuaError::external(e.to_string()))?;
 
             this.is_created = false;
@@ -369,9 +368,8 @@ impl LuaUserData for CreatePage {
         // Pulls out a page (by page ID) and populates the user data with it
         //
         // Note that the CreatePage being modified is overwritten with the page data of the pulled page
-        methods.add_async_method_mut("pull", |_lua, mut this, _: ()| async move {
-            let page = crate::cache::take_page(this.guild_id, this.page_id.clone())
-                .await
+        methods.add_method_mut("pull", |_lua, this, _: ()| {
+            let page = crate::cache::take_page_sync(this.guild_id, this.page_id.clone())
                 .map_err(|e| LuaError::external(e.to_string()))?;
 
             *this = CreatePage {

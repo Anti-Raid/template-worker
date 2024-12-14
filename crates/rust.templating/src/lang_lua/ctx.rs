@@ -1,10 +1,10 @@
 use mlua::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::rc::Rc;
 
 #[derive(Serialize, Deserialize)]
 pub struct TemplateContext {
-    pub template_data: Arc<super::state::TemplateData>,
+    pub template_data: Rc<super::state::TemplateData>,
 
     #[serde(skip)]
     #[serde(default = "std::sync::Mutex::default")]
@@ -15,7 +15,7 @@ pub struct TemplateContext {
 impl TemplateContext {
     pub fn new(template_data: super::state::TemplateData) -> Self {
         Self {
-            template_data: Arc::new(template_data),
+            template_data: Rc::new(template_data),
             cached_template_data: std::sync::Mutex::default(),
         }
     }

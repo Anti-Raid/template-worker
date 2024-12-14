@@ -18,6 +18,7 @@ use serenity::all::GuildId;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::ops::Deref;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
@@ -231,9 +232,9 @@ pub(crate) fn create_lua_vm_userdata(
         serenity_context,
         reqwest_client,
         kv_constraints: state::LuaKVConstraints::default(),
-        kv_ratelimits: Arc::new(state::LuaRatelimits::new_kv_rl()?),
-        actions_ratelimits: Arc::new(state::LuaRatelimits::new_action_rl()?),
-        sting_ratelimits: Arc::new(state::LuaRatelimits::new_stings_rl()?),
+        kv_ratelimits: Rc::new(state::LuaRatelimits::new_kv_rl()?),
+        actions_ratelimits: Rc::new(state::LuaRatelimits::new_action_rl()?),
+        sting_ratelimits: Rc::new(state::LuaRatelimits::new_stings_rl()?),
         last_execution_time,
     })
 }

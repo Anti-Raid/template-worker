@@ -18,15 +18,6 @@ pub fn lua_thread_impl(
         std::time::Instant::now(),
     ));
 
-    let userdata = crate::lang_lua::create_lua_vm_userdata(
-        last_execution_time.clone(),
-        guild_id,
-        pool,
-        serenity_context,
-        reqwest_client,
-        shard_messenger,
-    )?;
-
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(
         LuaVmAction,
         tokio::sync::oneshot::Sender<LuaVmResult>,
@@ -39,6 +30,16 @@ pub fn lua_thread_impl(
         .name(format!("lua-vm-{}", guild_id))
         .stack_size(MAX_VM_THREAD_STACK_SIZE)
         .spawn(move || {
+            let userdata = crate::lang_lua::create_lua_vm_userdata(
+                last_execution_time_ref.clone(),
+                guild_id,
+                pool,
+                serenity_context,
+                reqwest_client,
+                shard_messenger,
+            )
+            .expect("Failed to create Lua VM userdata");
+
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()

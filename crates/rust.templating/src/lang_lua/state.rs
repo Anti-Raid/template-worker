@@ -2,6 +2,7 @@ use governor::clock::Clock;
 use governor::{clock::QuantaClock, DefaultKeyedRateLimiter};
 pub use silverpelt::templates::LuaKVConstraints;
 use std::num::NonZeroU32;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -151,11 +152,11 @@ pub struct LuaUserData {
     pub kv_constraints: LuaKVConstraints,
 
     /// Stores the lua actions ratelimiters
-    pub actions_ratelimits: Arc<LuaRatelimits>,
+    pub actions_ratelimits: Rc<LuaRatelimits>,
 
     /// Stores the lua kv ratelimiters
-    pub kv_ratelimits: Arc<LuaRatelimits>,
+    pub kv_ratelimits: Rc<LuaRatelimits>,
 
     /// Stores the lua sting ratelimiters
-    pub sting_ratelimits: Arc<LuaRatelimits>,
+    pub sting_ratelimits: Rc<LuaRatelimits>,
 }

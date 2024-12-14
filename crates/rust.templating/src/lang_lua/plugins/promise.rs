@@ -43,33 +43,61 @@ impl LuaPromise {
     }
 }
 
-#[derive(Clone)]
-pub struct TestPromise {
-    pub i: std::rc::Rc<usize>,
-}
+/// Macro lua_promise!(arg1, arg2: Type2, |lua, {args}|, {
+///     // Future code
+/// })
+///
+/// Creates:
+///
+/// LuaPromise::new_generic(move |lua| {
+///     let arg1 = arg1.clone();
+///     let arg2 = arg2.clone();
+///     ... (for each arg)
+///   
+///
+///     async move {
+///        let c = |lua, arg1, arg2| {
+///          // Future code
+///        };
+///
+///        c(lua, args).await    
+///    }
+/// })
+///
+/// Clones all arguments and the lua instance
+macro_rules! lua_promise {
+    ($($arg:ident),* $(,)?, |$lua:ident, $($args:ident),*|, $code:block) => {
+        {
+            use crate::lang_lua::plugins::promise::LuaPromise;
+            // let arg1 = arg1.clone();
+            // let arg2 = arg2.clone();
+            $(
+                let $arg = $arg.clone();
+            )*
 
-impl LuaUserData for TestPromise {
-    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("my_promise", |_lua, t| {
-            let t = t.clone();
-            let promise = LuaPromise::new_generic(move |_lua| {
-                let t = t.clone();
+            LuaPromise::new_generic(move |$lua| {
+                // let arg1 = arg1.clone();
+                // let arg2 = arg2.clone();
+                // ...
+                $(
+                    let $arg = $arg.clone();
+                )*
+                let $lua = $lua.clone();
+
                 async move {
-                    if 0 == 1 {
-                        return Err(mlua::Error::RuntimeError("Error".to_string()));
-                    }
-                    if *t.i != 0 {
-                        return Ok(*t.i);
-                    }
+                    $(
+                        let $args = $args.clone();
+                    )*
 
-                    Ok(0)
+                    let $lua = $lua.clone();
+
+                    $code
                 }
-            });
-
-            Ok(promise)
-        });
-    }
+            })
+        }
+    };
 }
+pub(super) use lua_promise;
 
 pub type LuaPromiseRef = LuaUserDataRefMut<LuaPromise>;
 

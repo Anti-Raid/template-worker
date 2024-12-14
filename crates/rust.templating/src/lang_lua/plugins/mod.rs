@@ -7,6 +7,7 @@ pub mod page;
 pub mod permissions;
 pub mod promise;
 pub mod stings;
+pub mod stream;
 pub mod typesext;
 
 use mlua::prelude::*;
@@ -23,6 +24,7 @@ pub static PLUGINS: LazyLock<indexmap::IndexMap<String, (ModuleFn, Option<Module
             "@antiraid/permissions".to_string() => (permissions::init_plugin as ModuleFn, Some(permissions::plugin_docs as ModuleDocFn)),
             "@antiraid/promise".to_string() => (promise::init_plugin as ModuleFn, None),
             "@antiraid/stings".to_string() => (stings::init_plugin as ModuleFn, Some(stings::plugin_docs as ModuleDocFn)),
+            "@antiraid/stream".to_string() => (stream::init_plugin as ModuleFn, Some(stream::plugin_docs as ModuleDocFn)),
             "@antiraid/typesext".to_string() => (typesext::init_plugin as ModuleFn, Some(typesext::plugin_docs as ModuleDocFn)),
 
             // External plugins
