@@ -5,6 +5,10 @@ pub mod samples;
 pub(crate) mod state;
 
 mod plugins;
+use mlua_scheduler::taskmgr::SchedulerFeedback;
+use mlua_scheduler::TaskManager;
+use mlua_scheduler_ext::feedbacks::{MultipleSchedulerFeedback, ThreadTracker};
+use mlua_scheduler_ext::Scheduler;
 pub use plugins::PLUGINS;
 
 mod handler;
@@ -104,6 +108,9 @@ pub struct ArLuaThreadInnerState {
 
     /// Stores the servers global table
     pub global_table: mlua::Table,
+
+    /// The scheduler
+    pub scheduler: Scheduler,
 }
 
 pub(crate) fn create_lua_compiler() -> mlua::Compiler {
@@ -164,6 +171,22 @@ pub(crate) fn configure_lua_vm(
     lua.globals()
         .set("require", lua.create_function(plugins::require)?)?;
 
+    // Also create the mlua scheduler in the app data
+    let thread_tracker = ThreadTracker::new();
+    let ter = ThreadErrorTracker::new(thread_tracker.clone());
+
+    let scheduler_feedback = MultipleSchedulerFeedback::new(vec![
+        Box::new(thread_tracker.clone()),
+        Box::new(ter.clone()),
+    ]);
+
+    lua.set_app_data(thread_tracker);
+    lua.set_app_data(ter);
+
+    let scheduler = Scheduler::new(TaskManager::new(lua.clone(), Rc::new(scheduler_feedback)));
+
+    scheduler.attach(&lua);
+
     // Prelude code providing some basic functions directly to the Lua VM
     lua.load(
         r#"
@@ -192,6 +215,11 @@ pub(crate) fn configure_lua_vm(
     .set_environment(global_tab.clone())
     .exec()?;
 
+    // Patch coroutine and enable task
+    mlua_scheduler::userdata::patch_coroutine_lib(&lua)?;
+    lua.globals()
+        .set("task", mlua_scheduler::userdata::task_lib(&lua)?)?;
+
     lua.sandbox(true)?; // We explicitly want globals to be shared across all scripts in this VM
     lua.set_memory_limit(MAX_TEMPLATE_MEMORY_USAGE)?;
 
@@ -214,6 +242,7 @@ pub(crate) fn configure_lua_vm(
         bytecode_cache,
         broken,
         global_table: global_tab,
+        scheduler,
     })
 }
 
@@ -382,4 +411,67 @@ async fn shard_messenger_for_guild(
     }
 
     Ok(serenity_context.shard.clone())
+}
+
+#[derive(Clone)]
+pub struct ThreadErrorTracker {
+    pub tracker: ThreadTracker,
+}
+
+impl ThreadErrorTracker {
+    /// Creates a new thread error tracker
+    pub fn new(tracker: ThreadTracker) -> Self {
+        Self { tracker }
+    }
+}
+
+impl SchedulerFeedback for ThreadErrorTracker {
+    fn on_response(
+        &self,
+        _label: &str,
+        tm: &TaskManager,
+        th: &mlua::Thread,
+        result: Option<&mlua::Result<mlua::MultiValue>>,
+    ) {
+        if let Some(Err(e)) = result {
+            let initiator = self.tracker.get_initiator(th).unwrap_or_else(|| th.clone());
+
+            let Some(template_name) = self.tracker.get_metadata(&initiator) else {
+                return; // We can't do anything without metadata
+            };
+
+            let e = e.to_string();
+            let inner = tm.inner.clone();
+            tokio::task::spawn_local(async move {
+                log::error!("Lua thread error: {}: {}", template_name, e);
+
+                let user_data = inner
+                    .lua
+                    .app_data_ref::<crate::lang_lua::state::LuaUserData>()
+                    .unwrap();
+
+                let Ok(template) = crate::cache::get_guild_template(
+                    user_data.guild_id,
+                    &template_name,
+                    &user_data.pool,
+                )
+                .await
+                else {
+                    log::error!("Failed to get template data for error reporting");
+                    return;
+                };
+
+                if let Err(e) = crate::dispatch_error(
+                    &user_data.serenity_context,
+                    &e,
+                    user_data.guild_id,
+                    &template,
+                )
+                .await
+                {
+                    log::error!("Failed to dispatch error: {}", e);
+                }
+            });
+        }
+    }
 }

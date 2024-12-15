@@ -65,6 +65,13 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
                 }
             };
 
+            // Mark thread with template name
+            let thread_tracker = tis_ref
+                .lua
+                .app_data_ref::<mlua_scheduler_ext::feedbacks::ThreadTracker>()
+                .unwrap();
+            thread_tracker.set_metadata(thread.clone(), exec_name);
+
             match tis_ref
                 .lua
                 .push_thread_front(thread, (event, template_context))
