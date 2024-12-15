@@ -255,11 +255,7 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
 fn should_dispatch_event(event_name: &str, filters: &[String]) -> bool {
     if event_name == "MESSAGE" || event_name == "AR/CheckCommand" || event_name == "AR/OnStartup" {
         // Message should only be fired if the template explicitly wants the event
-        if !filters.contains(&event_name.to_string()) {
-            return false;
-        }
-
-        return true;
+        return filters.contains(&event_name.to_string());
     }
 
     // If empty, always return Ok
@@ -282,6 +278,8 @@ pub async fn dispatch(
         return Ok(());
     }
 
+    println!("Dispatching event: {}", event.name());
+
     for template in templates.iter().filter(|template| {
         should_dispatch_event(event.name(), {
             // False positive, unwrap_or_default cannot be used here as it moves the event out of the sink
@@ -293,6 +291,8 @@ pub async fn dispatch(
             }
         })
     }) {
+        log::info!("Dispatching event: {} to {}", event.name(), template.name);
+
         match templating::execute(
             guild_id,
             Template::Named(template.name.clone()),

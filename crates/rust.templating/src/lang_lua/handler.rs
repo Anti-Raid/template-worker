@@ -15,6 +15,11 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
                 return LuaVmResult::VmBroken {};
             }
 
+            let exec_name = match template {
+                crate::Template::Raw(_) => "script".to_string(),
+                crate::Template::Named(ref name) => name.to_string(),
+            };
+
             // Check bytecode cache first, compile template if not found
             let template_bytecode = match resolve_template_to_bytecode(
                 content,
@@ -25,13 +30,11 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
             {
                 Ok(bytecode) => bytecode,
                 Err(e) => {
-                    return LuaVmResult::LuaError { err: e.to_string() };
+                    return LuaVmResult::LuaError {
+                        err: e.to_string(),
+                        template_name: Some(exec_name),
+                    };
                 }
-            };
-
-            let exec_name = match template {
-                crate::Template::Raw(_) => "script".to_string(),
-                crate::Template::Named(ref name) => name.to_string(),
             };
 
             // Now, create the template context that should be passed to the template
@@ -61,7 +64,11 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
                             .broken
                             .store(true, std::sync::atomic::Ordering::Release);
                     }
-                    return LuaVmResult::LuaError { err: e.to_string() };
+
+                    return LuaVmResult::LuaError {
+                        err: e.to_string(),
+                        template_name: Some(exec_name),
+                    };
                 }
             };
 
@@ -70,11 +77,11 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
                 .lua
                 .app_data_ref::<mlua_scheduler_ext::feedbacks::ThreadTracker>()
                 .unwrap();
-            thread_tracker.set_metadata(thread.clone(), exec_name);
+            thread_tracker.set_metadata(thread.clone(), exec_name.clone());
 
             match tis_ref
                 .lua
-                .push_thread_front(thread, (event, template_context))
+                .push_thread_back(thread, (event, template_context))
             {
                 Ok(f) => f,
                 Err(e) => {
@@ -85,7 +92,11 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
                             .broken
                             .store(true, std::sync::atomic::Ordering::Release);
                     }
-                    return LuaVmResult::LuaError { err: e.to_string() };
+
+                    return LuaVmResult::LuaError {
+                        err: e.to_string(),
+                        template_name: Some(exec_name),
+                    };
                 }
             };
 
@@ -113,7 +124,10 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
             Ok(limit) => LuaVmResult::Ok {
                 result_val: serde_json::Value::Number(limit.into()),
             },
-            Err(e) => LuaVmResult::LuaError { err: e.to_string() },
+            Err(e) => LuaVmResult::LuaError {
+                err: e.to_string(),
+                template_name: None,
+            },
         },
     }
 }

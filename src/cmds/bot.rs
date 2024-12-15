@@ -25,65 +25,17 @@ pub async fn start() {
 
     let cmd_args = Arc::new(CmdArgs::parse_from(env_args));
 
-    // Setup logging
-    let debug_mode = std::env::var("DEBUG").unwrap_or_default() == "true";
-    let debug_opts = std::env::var("DEBUG_OPTS").unwrap_or_default();
-
     let mut env_builder = env_logger::builder();
 
-    let default_filter =
-        "serenity=error,template-worker=info,rust_rpc_server=info,rust_rpc_server_bot=info,botox=info,templating=debug,sqlx=error".to_string();
-
-    env_builder
-        .format(move |buf, record| {
-            writeln!(
-                buf,
-                "({}) {} - {}",
-                record.target(),
-                record.level(),
-                record.args()
-            )
-        })
-        .parse_filters(&default_filter)
-        .filter(None, log::LevelFilter::Info);
-
-    // Set custom log levels
-    for opt in debug_opts.split(',') {
-        let opt = opt.trim();
-
-        if opt.is_empty() {
-            continue;
-        }
-
-        let (target, level) = if opt.contains('=') {
-            let mut split = opt.split('=');
-            let target = split.next().unwrap();
-            let level = split.next().unwrap();
-            (target, level)
-        } else {
-            (opt, "debug")
-        };
-
-        let level = match level {
-            "trace" => log::LevelFilter::Trace,
-            "debug" => log::LevelFilter::Debug,
-            "info" => log::LevelFilter::Info,
-            "warn" => log::LevelFilter::Warn,
-            "error" => log::LevelFilter::Error,
-            _ => {
-                error!("Invalid log level: {}", level);
-                continue;
-            }
-        };
-
-        env_builder.filter(Some(target), level);
-    }
-
-    if debug_mode {
-        env_builder.filter(None, log::LevelFilter::Debug);
-    } else {
-        env_builder.filter(None, log::LevelFilter::Error);
-    }
+    env_builder.format(move |buf, record| {
+        writeln!(
+            buf,
+            "({}) {} - {}",
+            record.target(),
+            record.level(),
+            record.args()
+        )
+    });
 
     env_builder.init();
 

@@ -108,6 +108,32 @@ pub fn lua_thread_impl(
                     local.spawn_local(async move {
                         let result = handle_event(action, &tis_ref).await;
 
+                        #[allow(clippy::single_match)]
+                        match result {
+                            LuaVmResult::LuaError {
+                                ref err,
+                                ref template_name,
+                            } => {
+                                let template_name = template_name.clone();
+                                log::error!(
+                                    "Lua error in template {}: {}",
+                                    template_name
+                                        .clone()
+                                        .unwrap_or_else(|| "Unknown".to_string()),
+                                    err
+                                );
+
+                                if let Some(template_name) = template_name.as_ref() {
+                                    crate::lang_lua::log_error(
+                                        tis_ref.lua.clone(),
+                                        template_name.clone(),
+                                        format!("Lua error in template {}: {}", template_name, err),
+                                    )
+                                }
+                            }
+                            _ => {}
+                        }
+
                         let _ = callback.send(result);
                     });
                 }

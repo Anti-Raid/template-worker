@@ -55,9 +55,15 @@ pub enum LuaVmAction {
     SetMemoryLimit { limit: usize },
 }
 
+#[derive(Debug)]
 pub enum LuaVmResult {
-    Ok { result_val: serde_json::Value },
-    LuaError { err: String },
+    Ok {
+        result_val: serde_json::Value,
+    },
+    LuaError {
+        err: String,
+        template_name: Option<String>,
+    },
     VmBroken {},
 }
 
@@ -413,6 +419,38 @@ async fn shard_messenger_for_guild(
     Ok(serenity_context.shard.clone())
 }
 
+pub fn log_error(lua: mlua::Lua, template_name: String, e: String) {
+    tokio::task::spawn_local(async move {
+        log::error!("Lua thread error: {}: {}", template_name, e);
+
+        let tm = lua.app_data_ref::<mlua_scheduler::TaskManager>().unwrap();
+        let inner = tm.inner.clone();
+        let user_data = inner
+            .lua
+            .app_data_ref::<crate::lang_lua::state::LuaUserData>()
+            .unwrap();
+
+        let Ok(template) =
+            crate::cache::get_guild_template(user_data.guild_id, &template_name, &user_data.pool)
+                .await
+        else {
+            log::error!("Failed to get template data for error reporting");
+            return;
+        };
+
+        if let Err(e) = crate::dispatch_error(
+            &user_data.serenity_context,
+            &e,
+            user_data.guild_id,
+            &template,
+        )
+        .await
+        {
+            log::error!("Failed to dispatch error: {}", e);
+        }
+    });
+}
+
 #[derive(Clone)]
 pub struct ThreadErrorTracker {
     pub tracker: ThreadTracker,
@@ -441,37 +479,8 @@ impl SchedulerFeedback for ThreadErrorTracker {
             };
 
             let e = e.to_string();
-            let inner = tm.inner.clone();
-            tokio::task::spawn_local(async move {
-                log::error!("Lua thread error: {}: {}", template_name, e);
 
-                let user_data = inner
-                    .lua
-                    .app_data_ref::<crate::lang_lua::state::LuaUserData>()
-                    .unwrap();
-
-                let Ok(template) = crate::cache::get_guild_template(
-                    user_data.guild_id,
-                    &template_name,
-                    &user_data.pool,
-                )
-                .await
-                else {
-                    log::error!("Failed to get template data for error reporting");
-                    return;
-                };
-
-                if let Err(e) = crate::dispatch_error(
-                    &user_data.serenity_context,
-                    &e,
-                    user_data.guild_id,
-                    &template,
-                )
-                .await
-                {
-                    log::error!("Failed to dispatch error: {}", e);
-                }
-            });
+            log_error(tm.inner.lua.clone(), template_name, e);
         }
     }
 }
