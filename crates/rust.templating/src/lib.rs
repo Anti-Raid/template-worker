@@ -117,14 +117,14 @@ pub async fn parse(
 }
 
 /// Executes a template
-pub async fn execute<RenderResult: serde::de::DeserializeOwned>(
+pub async fn execute(
     guild_id: serenity::all::GuildId,
     template: Template,
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
     reqwest_client: reqwest::Client,
     event: event::Event,
-) -> Result<RenderResult, Error> {
+) -> Result<(), Error> {
     let template_content = match template {
         Template::Raw(ref template) => template.clone(),
         Template::Named(ref template) => get_template(guild_id, template, &pool).await?.content,
@@ -149,4 +149,73 @@ pub async fn execute<RenderResult: serde::de::DeserializeOwned>(
             .await
         }
     }
+}
+
+/// Dispatches an error to a channel
+pub async fn dispatch_error(
+    ctx: &serenity::all::Context,
+    error: &str,
+    guild_id: serenity::all::GuildId,
+    template: &GuildTemplate,
+) -> Result<(), silverpelt::Error> {
+    let data = ctx.data::<silverpelt::data::Data>();
+
+    match template.error_channel {
+        Some(c) => {
+            let Some(channel) =
+                sandwich_driver::channel(&ctx.cache, &ctx.http, &data.reqwest, Some(guild_id), c)
+                    .await?
+            else {
+                return Ok(());
+            };
+
+            let Some(guild_channel) = channel.guild() else {
+                return Ok(());
+            };
+
+            if guild_channel.guild_id != guild_id {
+                return Ok(());
+            }
+
+            c.send_message(
+                &ctx.http,
+                serenity::all::CreateMessage::new()
+                    .embed(
+                        serenity::all::CreateEmbed::new()
+                            .title("Error executing template")
+                            .field("Error", error, false)
+                            .field("Template", template.name.clone(), false),
+                    )
+                    .components(vec![serenity::all::CreateActionRow::Buttons(
+                        vec![serenity::all::CreateButton::new_link(
+                            &config::CONFIG.meta.support_server_invite,
+                        )
+                        .label("Support Server")]
+                        .into(),
+                    )]),
+            )
+            .await?;
+        }
+        None => {
+            // Try firing the error event
+            execute(
+                guild_id,
+                Template::Named(template.name.clone()),
+                data.pool.clone(),
+                ctx.clone(),
+                data.reqwest.clone(),
+                event::Event::new(
+                    "Error".to_string(),
+                    "Error".to_string(),
+                    "Error".to_string(),
+                    event::ArcOrNormal::Normal(error.into()),
+                    false,
+                    None,
+                ),
+            )
+            .await?;
+        }
+    }
+
+    Ok(())
 }

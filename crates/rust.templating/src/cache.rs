@@ -51,6 +51,23 @@ pub async fn get_all_guild_templates(
     Ok(templates)
 }
 
+/// Gets a guild template by name
+pub async fn get_guild_template(
+    guild_id: GuildId,
+    name: &str,
+    pool: &sqlx::PgPool,
+) -> Result<GuildTemplate, crate::Error> {
+    let template = get_all_guild_templates(guild_id, pool).await?;
+
+    for t in template.iter() {
+        if t.name == name {
+            return Ok(t.clone());
+        }
+    }
+
+    Err("Template not found".into())
+}
+
 /// Clears the template cache for a guild
 pub async fn clear_cache(guild_id: GuildId) {
     TEMPLATES_CACHE.remove(&guild_id).await;

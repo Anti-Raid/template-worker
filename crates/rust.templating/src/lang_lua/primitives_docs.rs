@@ -108,10 +108,15 @@ pub fn document_primitives() -> templating_docgen::PrimitiveListBuilder {
                 .typ("unknown")
                 .description("The data of the event.")
             })
-            .field("is_deniable", |f| {
+            .field("can_respond", |f| {
                 f
                 .typ("boolean")
-                .description("Whether the event can be denied.")
+                .description("Whether the event can be responded to.")
+            })
+            .field("response", |f| {
+                f
+                .typ("unknown")
+                .description("The current response of the event. This can be overwritten by the template by just setting it to a new value.")
             })
             .field("uid", |f| {
                 f

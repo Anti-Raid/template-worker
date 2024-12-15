@@ -1,14 +1,11 @@
-use serenity::all::{
-    Context, CreateActionRow, CreateButton, CreateEmbed, CreateMessage, FullEvent, GuildId,
-    Interaction,
-};
+use serenity::all::{Context, FullEvent, GuildId, Interaction};
 use silverpelt::ar_event::{AntiraidEvent, EventHandlerContext};
 use silverpelt::data::Data;
 use std::sync::Arc;
 use templating::{
     cache::get_all_guild_templates,
     event::{ArcOrNormal, Event},
-    GuildTemplate, Template,
+    Template,
 };
 
 use crate::temporary_punishments;
@@ -296,7 +293,7 @@ pub async fn dispatch(
             }
         })
     }) {
-        match templating::execute::<Option<()>>(
+        match templating::execute(
             guild_id,
             Template::Named(template.name.clone()),
             data.pool.clone(),
@@ -308,83 +305,9 @@ pub async fn dispatch(
         {
             Ok(_) => {}
             Err(e) => {
-                dispatch_error(ctx, data, &e.to_string(), guild_id, template).await?;
+                templating::dispatch_error(ctx, &e.to_string(), guild_id, template).await?;
             }
         }
     }
-    Ok(())
-}
-
-/// Dispatches an error event
-async fn dispatch_error(
-    ctx: &Context,
-    data: &Data,
-    error: &str,
-    guild_id: GuildId,
-    template: &GuildTemplate,
-) -> Result<(), silverpelt::Error> {
-    let templates = get_all_guild_templates(guild_id, &data.pool).await?;
-
-    if templates.is_empty() {
-        return Ok(());
-    }
-
-    match template.error_channel {
-        Some(c) => {
-            let Some(channel) =
-                sandwich_driver::channel(&ctx.cache, &ctx.http, &data.reqwest, Some(guild_id), c)
-                    .await?
-            else {
-                return Ok(());
-            };
-
-            let Some(guild_channel) = channel.guild() else {
-                return Ok(());
-            };
-
-            if guild_channel.guild_id != guild_id {
-                return Ok(());
-            }
-
-            c.send_message(
-                &ctx.http,
-                CreateMessage::new()
-                    .embed(
-                        CreateEmbed::new()
-                            .title("Error executing template")
-                            .field("Error", error, false)
-                            .field("Template", template.name.clone(), false),
-                    )
-                    .components(vec![CreateActionRow::Buttons(
-                        vec![
-                            CreateButton::new_link(&config::CONFIG.meta.support_server_invite)
-                                .label("Support Server"),
-                        ]
-                        .into(),
-                    )]),
-            )
-            .await?;
-        }
-        None => {
-            // Try firing the error event
-            templating::execute::<Option<()>>(
-                guild_id,
-                Template::Named(template.name.clone()),
-                data.pool.clone(),
-                ctx.clone(),
-                data.reqwest.clone(),
-                Event::new(
-                    "Error".to_string(),
-                    "Error".to_string(),
-                    "Error".to_string(),
-                    ArcOrNormal::Normal(error.into()),
-                    false,
-                    None,
-                ),
-            )
-            .await?;
-        }
-    }
-
     Ok(())
 }

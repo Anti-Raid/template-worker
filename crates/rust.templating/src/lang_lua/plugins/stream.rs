@@ -1,5 +1,6 @@
 use futures_util::{Stream, StreamExt};
 use mlua::prelude::*;
+use mlua_scheduler::LuaSchedulerAsync;
 use std::pin::Pin;
 
 pub type StreamValue = Box<dyn FnOnce(&Lua) -> LuaResult<LuaValue>>;
@@ -47,7 +48,7 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
 
     module.set(
         "next",
-        lua.create_async_function(|lua, mut stream: LuaStreamRef| async move {
+        lua.create_scheduler_async_function(|lua, mut stream: LuaStreamRef| async move {
             match stream.inner.next().await {
                 Some(item) => match item(&lua) {
                     Ok(value) => Ok(value),

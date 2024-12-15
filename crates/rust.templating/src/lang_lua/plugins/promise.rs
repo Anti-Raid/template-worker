@@ -1,4 +1,5 @@
 use mlua::prelude::*;
+use mlua_scheduler::LuaSchedulerAsync;
 use std::{future::Future, pin::Pin};
 
 pub type LuaPromiseFut = Pin<Box<dyn Future<Output = LuaResult<LuaMultiValue>>>>;
@@ -52,9 +53,7 @@ impl LuaPromise {
 /// LuaPromise::new_generic(move |lua| {
 ///     let arg1 = arg1.clone();
 ///     let arg2 = arg2.clone();
-///     ... (for each arg)
 ///   
-///
 ///     async move {
 ///        let c = |lua, arg1, arg2| {
 ///          // Future code
@@ -108,7 +107,7 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
 
     module.set(
         "yield",
-        lua.create_async_function(|lua, promise: LuaPromiseRef| async move {
+        lua.create_scheduler_async_function(|lua, promise: LuaPromiseRef| async move {
             let fut = (promise.inner)(lua);
             fut.await
         })?,

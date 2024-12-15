@@ -6,6 +6,7 @@
 use std::future::Future;
 
 use mlua::{prelude::*, MaybeSend};
+use mlua_scheduler::LuaSchedulerAsync;
 
 /**
     Utility struct for building Lua tables.
@@ -110,11 +111,11 @@ impl<'lua> TableBuilder<'lua> {
     where
         K: IntoLua,
         A: FromLuaMulti + MaybeSend + 'static,
-        R: IntoLuaMulti,
-        F: Fn(Lua, A) -> FR + MaybeSend + 'static,
+        R: IntoLuaMulti + 'static,
+        F: Fn(Lua, A) -> FR + MaybeSend + Clone + 'static,
         FR: Future<Output = LuaResult<R>> + MaybeSend + 'static,
     {
-        let f = self.lua.create_async_function(func)?;
+        let f = self.lua.create_scheduler_async_function(func)?;
         self.with_value(key, LuaValue::Function(f))
     }
 

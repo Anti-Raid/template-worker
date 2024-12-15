@@ -330,10 +330,10 @@ pub struct ParseCompileState {
 }
 
 /// Render a template
-pub async fn render_template<Response: serde::de::DeserializeOwned>(
+pub async fn render_template(
     event: event::Event,
     state: ParseCompileState,
-) -> Result<Response, silverpelt::Error> {
+) -> Result<(), silverpelt::Error> {
     let lua = get_lua_vm(
         state.guild_id,
         state.pool,
@@ -348,7 +348,7 @@ pub async fn render_template<Response: serde::de::DeserializeOwned>(
         std::sync::atomic::Ordering::Release,
     );
 
-    let (tx, rx) = tokio::sync::oneshot::channel();
+    let (tx, _rx) = tokio::sync::oneshot::channel();
 
     lua.handle
         .send((
@@ -362,36 +362,7 @@ pub async fn render_template<Response: serde::de::DeserializeOwned>(
         ))
         .map_err(|e| format!("Could not send data to Lua thread: {}", e))?;
 
-    tokio::select! {
-        _ = tokio::time::sleep(MAX_TEMPLATES_EXECUTION_TIME) => {
-            Err("Template took too long to compile".into())
-        }
-        value = rx => {
-            let Ok(value) = value else {
-                return Err("Could not receive data from Lua thread".into());
-            };
-            match value {
-                LuaVmResult::Ok { result_val: value }=> {
-                    // Check for __error
-                    if let serde_json::Value::Object(ref map) = value {
-                        if let Some(value) = map.get("__error") {
-                            return Err(value.to_string().into());
-                        }
-                    }
-
-                    let v: Response = serde_json::from_value(value)
-                        .map_err(|e| e.to_string())?;
-
-                    Ok(v)
-                }
-                LuaVmResult::LuaError { err } => Err(err.into()),
-                LuaVmResult::VmBroken {} => {
-                    // Rerun render_template
-                    Err("Lua VM is broken".into())
-                },
-            }
-        }
-    }
+    Ok(())
 }
 
 async fn shard_messenger_for_guild(

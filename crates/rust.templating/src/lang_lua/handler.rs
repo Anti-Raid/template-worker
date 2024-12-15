@@ -1,5 +1,6 @@
 use super::{resolve_template_to_bytecode, ArLuaThreadInnerState, LuaVmAction, LuaVmResult};
 use mlua::prelude::*;
+use mlua_scheduler_ext::traits::{IntoLuaThread, LuaSchedulerExt};
 
 /// Handles a Lua VM action, returning a result
 pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) -> LuaVmResult {
@@ -43,14 +44,13 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
                 pragma,
             });
 
-            let v: LuaValue = match tis_ref
+            let thread = match tis_ref
                 .lua
                 .load(&template_bytecode)
                 .set_name(&exec_name)
                 .set_mode(mlua::ChunkMode::Binary) // Ensure auto-detection never selects binary mode
                 .set_environment(tis_ref.global_table.clone())
-                .call_async((event, template_context))
-                .await
+                .into_lua_thread(&tis_ref.lua)
             {
                 Ok(f) => f,
                 Err(e) => {
@@ -65,9 +65,26 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
                 }
             };
 
-            match tis_ref.lua.from_value::<serde_json::Value>(v) {
-                Ok(v) => LuaVmResult::Ok { result_val: v },
-                Err(e) => LuaVmResult::LuaError { err: e.to_string() },
+            match tis_ref
+                .lua
+                .push_thread_front(thread, (event, template_context))
+            {
+                Ok(f) => f,
+                Err(e) => {
+                    // Mark memory error'd VMs as broken automatically to avoid user grief/pain
+                    if let LuaError::MemoryError(_) = e {
+                        // Mark VM as broken
+                        tis_ref
+                            .broken
+                            .store(true, std::sync::atomic::Ordering::Release);
+                    }
+                    return LuaVmResult::LuaError { err: e.to_string() };
+                }
+            };
+
+            // Send acknoledgement
+            LuaVmResult::Ok {
+                result_val: serde_json::Value::Number(1.into()),
             }
         }
         LuaVmAction::Stop {} => {

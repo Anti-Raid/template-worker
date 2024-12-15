@@ -16,6 +16,8 @@ scc = "2"
 governor = "0.6"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "rustls-tls-native-roots"] }
 include_dir = "0.7.3" # Needed to load templates etc.
+mlua_scheduler = { git = "https://github.com/anti-raid/mlua_scheduler"}
+mlua_scheduler_ext = { git = "https://github.com/anti-raid/mlua_scheduler"}
 
 # @lune/datetime
 chrono_lc = "0.1"
@@ -65,10 +67,11 @@ captcha = { git = "https://github.com/Anti-Raid/captcha", branch = "master" }
 sandwich_driver = { path = "../../../../core/rust/rust.sandwich_driver" }
 templating_docgen = { path = "../rust.templating.docgen" }
 ar_settings = { path = "../../../../core/rust/rust.settings" }
+config = { path = "../../../../core/rust/rust.config" }
 async-trait = "0.1.80"
 
 # Template language support
-mlua = { git = "https://github.com/mlua-rs/mlua", features = ["async", "luau", "serialize", "macros"] } # Supported by default
+mlua = { version = "0.10", features = ["async", "luau", "serialize", "macros"] } # Supported by default
 
 [dependencies.tokio]
 version = "1"
