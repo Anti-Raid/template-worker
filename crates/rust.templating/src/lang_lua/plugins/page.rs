@@ -37,49 +37,47 @@ impl SettingView for LuaSettingExecutor {
         &self,
         context: HookContext<'a>,
         filters: indexmap::IndexMap<String, splashcore_rs::value::Value>,
-    ) -> Result<Vec<indexmap::IndexMap<String, splashcore_rs::value::Value>>, SettingsError> {
-        let mut event = crate::event::Event::new(
-            "(Anti-Raid) View Setting".to_string(),
-            "Settings/View".to_string(),
-            self.name.clone(),
-            crate::event::ArcOrNormal::Normal(
-                serde_json::to_value(filters).map_err(|e| SettingsError::Generic {
-                    message: e.to_string(),
-                    src: "LuaSettingExecutor".to_string(),
-                    typ: "internal".to_string(),
-                })?
-            ),
-            true,
-            Some(context.author.to_string()),
-        );
+    ) -> Result<Vec<indexmap::IndexMap<String, splashcore_rs::value::Value>>, SettingsError> {        
         
-        crate::execute(
-            context.guild_id,
-            self.template.clone(),
-            context.data.data.pool.clone(),
-            context.data.serenity_context.clone(),
-            context.data.data.reqwest.clone(),
-            event.clone(),
+        let result = crate::execute(
+            crate::event::Event::new(
+                "(Anti-Raid) View Setting".to_string(),
+                "Settings/View".to_string(),
+                self.name.clone(),
+                crate::event::ArcOrNormal::Normal(
+                    serde_json::to_value(filters).map_err(|e| SettingsError::Generic {
+                        message: e.to_string(),
+                        src: "LuaSettingExecutor".to_string(),
+                        typ: "internal".to_string(),
+                    })?
+                ),
+                Some(context.author.to_string()),
+            ),
+            crate::ParseCompileState {
+                serenity_context: context.data.serenity_context.clone(),
+                pool: context.data.data.pool.clone(),
+                reqwest_client: context.data.data.reqwest.clone(),
+                guild_id: context.guild_id,
+            },
+            self.template.to_parsed_template(context.guild_id, &context.data.data.pool).await
+            .map_err(|e| SettingsError::Generic {
+                message: e.to_string(),
+                src: "LuaSettingExecutor".to_string(),
+                typ: "internal".to_string(),
+            })?
         )
         .await
         .map_err(|e| SettingsError::Generic {
             message: e.to_string(),
             src: "LuaSettingExecutor".to_string(),
             typ: "internal".to_string(),
-        })?;
-
-        let Some(result) = event.response() else {
-            return Err(SettingsError::Generic {
-                message: "No response from template".to_string(),
-                src: "LuaSettingExecutor".to_string(),
-                typ: "internal".to_string(),
-            });
-        };
-
-        let result: Vec<indexmap::IndexMap<String, splashcore_rs::value::Value>> = serde_json::from_value(result).map_err(|e| SettingsError::Generic {
+        })?
+        .wait_timeout_then_response::<Vec<indexmap::IndexMap<String, splashcore_rs::value::Value>>>(crate::MAX_TEMPLATES_RETURN_WAIT_TIME)
+        .await
+        .map_err(|e| SettingsError::Generic {
             message: e.to_string(),
             src: "LuaSettingExecutor".to_string(),
-            typ: "internal".to_string(),
+            typ: "internal#wait_timeout".to_string(),
         })?;
 
         Ok(result)
@@ -92,49 +90,46 @@ impl SettingCreator for LuaSettingExecutor {
         &self,
         context: HookContext<'a>,
         state: indexmap::IndexMap<String, splashcore_rs::value::Value>,
-    ) -> Result<indexmap::IndexMap<String, splashcore_rs::value::Value>, SettingsError> {
-        let mut event = crate::event::Event::new(
-            "(Anti-Raid) Create Setting".to_string(),
-            "Settings/Create".to_string(),
-            self.name.clone(),
-            crate::event::ArcOrNormal::Normal(
-                serde_json::to_value(state).map_err(|e| SettingsError::Generic {
-                    message: e.to_string(),
-                    src: "LuaSettingExecutor".to_string(),
-                    typ: "internal".to_string(),
-                })?
+    ) -> Result<indexmap::IndexMap<String, splashcore_rs::value::Value>, SettingsError> {        
+        let result = crate::execute(
+            crate::event::Event::new(
+                "(Anti-Raid) Create Setting".to_string(),
+                "Settings/Create".to_string(),
+                self.name.clone(),
+                crate::event::ArcOrNormal::Normal(
+                    serde_json::to_value(state).map_err(|e| SettingsError::Generic {
+                        message: e.to_string(),
+                        src: "LuaSettingExecutor".to_string(),
+                        typ: "internal".to_string(),
+                    })?
+                ),
+                Some(context.author.to_string()),
             ),
-            true,
-            Some(context.author.to_string()),
-        );
-        
-        crate::execute(
-            context.guild_id,
-            self.template.clone(),
-            context.data.data.pool.clone(),
-            context.data.serenity_context.clone(),
-            context.data.data.reqwest.clone(),
-            event.clone(),
+            crate::ParseCompileState {
+                serenity_context: context.data.serenity_context.clone(),
+                pool: context.data.data.pool.clone(),
+                reqwest_client: context.data.data.reqwest.clone(),
+                guild_id: context.guild_id,
+            },
+            self.template.to_parsed_template(context.guild_id, &context.data.data.pool).await
+            .map_err(|e| SettingsError::Generic {
+                message: e.to_string(),
+                src: "LuaSettingExecutor".to_string(),
+                typ: "internal".to_string(),
+            })?
         )
         .await
         .map_err(|e| SettingsError::Generic {
             message: e.to_string(),
             src: "LuaSettingExecutor".to_string(),
             typ: "internal".to_string(),
-        })?;
-
-        let Some(result) = event.response() else {
-            return Err(SettingsError::Generic {
-                message: "No response from template".to_string(),
-                src: "LuaSettingExecutor".to_string(),
-                typ: "internal".to_string(),
-            });
-        };
-
-        let result: indexmap::IndexMap<String, splashcore_rs::value::Value> = serde_json::from_value(result).map_err(|e| SettingsError::Generic {
+        })?
+        .wait_timeout_then_response::<indexmap::IndexMap<String, splashcore_rs::value::Value>>(crate::MAX_TEMPLATES_RETURN_WAIT_TIME)
+        .await
+        .map_err(|e| SettingsError::Generic {
             message: e.to_string(),
             src: "LuaSettingExecutor".to_string(),
-            typ: "internal".to_string(),
+            typ: "internal#wait_timeout".to_string(),
         })?;
 
         Ok(result)
@@ -147,48 +142,45 @@ impl SettingUpdater for LuaSettingExecutor {
         &self,
         context: HookContext<'a>,
         state: indexmap::IndexMap<String, splashcore_rs::value::Value>,
-    ) -> Result<indexmap::IndexMap<String, splashcore_rs::value::Value>, SettingsError> {
-        let mut event = crate::event::Event::new(
-            "(Anti-Raid) Update Setting".to_string(),
-            "Settings/Update".to_string(),
-            self.name.clone(),
-            crate::event::ArcOrNormal::Normal(
-                serde_json::to_value(state).map_err(|e| SettingsError::Generic {
-                    message: e.to_string(),
-                    src: "LuaSettingExecutor".to_string(),
-                    typ: "internal".to_string(),
-                })?),
-            true,
-            Some(context.author.to_string()),
-        );
-        
-       crate::execute(
-            context.guild_id,
-            self.template.clone(),
-            context.data.data.pool.clone(),
-            context.data.serenity_context.clone(),
-            context.data.data.reqwest.clone(),
-            event.clone(),
+    ) -> Result<indexmap::IndexMap<String, splashcore_rs::value::Value>, SettingsError> {        
+       let result = crate::execute(
+            crate::event::Event::new(
+                "(Anti-Raid) Update Setting".to_string(),
+                "Settings/Update".to_string(),
+                self.name.clone(),
+                crate::event::ArcOrNormal::Normal(
+                    serde_json::to_value(state).map_err(|e| SettingsError::Generic {
+                        message: e.to_string(),
+                        src: "LuaSettingExecutor".to_string(),
+                        typ: "internal".to_string(),
+                    })?),
+                Some(context.author.to_string()),
+            ),
+            crate::ParseCompileState {
+                serenity_context: context.data.serenity_context.clone(),
+                pool: context.data.data.pool.clone(),
+                reqwest_client: context.data.data.reqwest.clone(),
+                guild_id: context.guild_id,
+            },
+            self.template.to_parsed_template(context.guild_id, &context.data.data.pool).await
+            .map_err(|e| SettingsError::Generic {
+                message: e.to_string(),
+                src: "LuaSettingExecutor".to_string(),
+                typ: "internal".to_string(),
+            })?
         )
         .await
         .map_err(|e| SettingsError::Generic {
             message: e.to_string(),
             src: "LuaSettingExecutor".to_string(),
             typ: "internal".to_string(),
-        })?;
-
-        let Some(result) = event.response() else {
-            return Err(SettingsError::Generic {
-                message: "No response from template".to_string(),
-                src: "LuaSettingExecutor".to_string(),
-                typ: "internal".to_string(),
-            });
-        };
-
-        let result: indexmap::IndexMap<String, splashcore_rs::value::Value> = serde_json::from_value(result).map_err(|e| SettingsError::Generic {
+        })?
+        .wait_timeout_then_response::<indexmap::IndexMap<String, splashcore_rs::value::Value>>(crate::MAX_TEMPLATES_RETURN_WAIT_TIME)
+        .await
+        .map_err(|e| SettingsError::Generic {
             message: e.to_string(),
             src: "LuaSettingExecutor".to_string(),
-            typ: "internal".to_string(),
+            typ: "internal#wait_timeout".to_string(),
         })?;
 
         Ok(result)
@@ -203,37 +195,48 @@ impl SettingDeleter for LuaSettingExecutor {
         context: HookContext<'a>,
         pkey: splashcore_rs::value::Value,
     ) -> Result<(), SettingsError> {
-        let mut event = crate::event::Event::new(
-            "(Anti-Raid) Delete Setting".to_string(),
-            "Settings/Delete".to_string(),
-            self.name.clone(),
-            crate::event::ArcOrNormal::Normal(pkey.to_json()),
-            true,
-            Some(context.author.to_string()),
-        );
-
-        crate::execute(
-            context.guild_id,
-            self.template.clone(),
-            context.data.data.pool.clone(),
-            context.data.serenity_context.clone(),
-            context.data.data.reqwest.clone(),
-            event.clone(),
+        let result = crate::execute(
+            crate::event::Event::new(
+                "(Anti-Raid) Delete Setting".to_string(),
+                "Settings/Delete".to_string(),
+                self.name.clone(),
+                crate::event::ArcOrNormal::Normal(pkey.to_json()),
+                Some(context.author.to_string()),
+            ),
+            crate::ParseCompileState {
+                serenity_context: context.data.serenity_context.clone(),
+                pool: context.data.data.pool.clone(),
+                reqwest_client: context.data.data.reqwest.clone(),
+                guild_id: context.guild_id,
+            },
+            self.template.to_parsed_template(context.guild_id, &context.data.data.pool).await
+            .map_err(|e| SettingsError::Generic {
+                message: e.to_string(),
+                src: "LuaSettingExecutor".to_string(),
+                typ: "internal".to_string(),
+            })?
         )
         .await
         .map_err(|e| SettingsError::Generic {
             message: e.to_string(),
             src: "LuaSettingExecutor".to_string(),
             typ: "internal".to_string(),
+        })?
+        .wait_timeout_then_response::<bool>(crate::MAX_TEMPLATES_RETURN_WAIT_TIME)
+        .await
+        .map_err(|e| SettingsError::Generic {
+            message: e.to_string(),
+            src: "LuaSettingExecutor".to_string(),
+            typ: "internal#wait_timeout".to_string(),
         })?;
 
-        let Some(_) = event.response() else {
+        if !result {
             return Err(SettingsError::Generic {
-                message: "No response from template".to_string(),
+                message: "No records have been deleted by the template.".to_string(),
                 src: "LuaSettingExecutor".to_string(),
-                typ: "internal".to_string(),
+                typ: "template#no_records_deleted".to_string(),
             });
-        };
+        }
 
         Ok(())
     }

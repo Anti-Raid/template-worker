@@ -19,6 +19,8 @@ use crate::{MAX_TEMPLATES_EXECUTION_TIME, MAX_TEMPLATE_LIFETIME, MAX_TEMPLATE_ME
 use mlua::prelude::*;
 use moka::future::Cache;
 use serenity::all::GuildId;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::ops::Deref;
@@ -65,6 +67,22 @@ pub enum LuaVmResult {
         template_name: Option<String>,
     },
     VmBroken {},
+}
+
+impl LuaVmResult {
+    /// Convert the result to a response if possible, returning an error if the result is an error
+    pub fn to_response<T: serde::de::DeserializeOwned>(self) -> Result<T, silverpelt::Error> {
+        match self {
+            LuaVmResult::Ok { result_val } => {
+                let res = serde_json::from_value(result_val)?;
+                Ok(res)
+            }
+            LuaVmResult::LuaError { err, template_name } => {
+                Err(format!("Lua error: {:?}: {}", template_name, err).into())
+            }
+            LuaVmResult::VmBroken {} => Err("Lua VM is marked as broken".into()),
+        }
+    }
 }
 
 pub struct BytecodeCache(scc::HashMap<crate::Template, (Vec<u8>, u64)>);
@@ -358,17 +376,15 @@ pub struct ParseCompileState {
     pub serenity_context: serenity::all::Context,
     pub reqwest_client: reqwest::Client,
     pub guild_id: GuildId,
-    pub template: crate::Template,
-    pub pragma: crate::TemplatePragma,
-    pub template_content: String,
     pub pool: sqlx::PgPool,
 }
 
-/// Render a template
-pub async fn render_template(
+/// Render a template given an event, state and template
+pub async fn execute(
     event: event::Event,
     state: ParseCompileState,
-) -> Result<(), silverpelt::Error> {
+    template: crate::ParsedTemplate,
+) -> Result<RenderTemplateHandle, silverpelt::Error> {
     let lua = get_lua_vm(
         state.guild_id,
         state.pool,
@@ -383,21 +399,65 @@ pub async fn render_template(
         std::sync::atomic::Ordering::Release,
     );
 
-    let (tx, _rx) = tokio::sync::oneshot::channel();
+    let (tx, rx) = tokio::sync::oneshot::channel();
 
     lua.handle
         .send((
             LuaVmAction::Exec {
-                template: state.template,
-                content: state.template_content,
-                pragma: state.pragma,
+                template: template.template,
+                content: template.template_content,
+                pragma: template.pragma,
                 event,
             },
             tx,
         ))
         .map_err(|e| format!("Could not send data to Lua thread: {}", e))?;
 
-    Ok(())
+    Ok(RenderTemplateHandle { rx })
+}
+
+/// A handle to allow waiting for a template to render
+pub struct RenderTemplateHandle {
+    rx: tokio::sync::oneshot::Receiver<LuaVmResult>,
+}
+
+impl RenderTemplateHandle {
+    /// Wait for the template to render
+    pub async fn wait(self) -> Result<LuaVmResult, silverpelt::Error> {
+        self.rx
+            .await
+            .map_err(|e| format!("Could not receive data from Lua thread: {}", e).into())
+    }
+
+    /// Wait for the template to render with a timeout
+    pub async fn wait_timeout(
+        self,
+        timeout: std::time::Duration,
+    ) -> Result<Option<LuaVmResult>, silverpelt::Error> {
+        match tokio::time::timeout(timeout, self.rx).await {
+            Ok(Ok(res)) => Ok(Some(res)),
+            Ok(Err(e)) => Err(format!("Could not receive data from Lua thread: {}", e).into()),
+            Err(_) => Ok(None),
+        }
+    }
+
+    /// Wait for the template to render with a timeout, returning an error if the timeout is reached
+    pub async fn wait_timeout_or_err(
+        self,
+        timeout: std::time::Duration,
+    ) -> Result<LuaVmResult, silverpelt::Error> {
+        self.wait_timeout(timeout)
+            .await?
+            .ok_or("Lua VM timed out when rendering template".into())
+    }
+
+    /// Wait for the template to render with a timeout, returning an error if the timeout is reached
+    pub async fn wait_timeout_then_response<T: serde::de::DeserializeOwned>(
+        self,
+        timeout: std::time::Duration,
+    ) -> Result<T, silverpelt::Error> {
+        self.wait_timeout_or_err(timeout).await?.to_response()
+    }
 }
 
 async fn shard_messenger_for_guild(
@@ -438,7 +498,7 @@ pub fn log_error(lua: mlua::Lua, template_name: String, e: String) {
             return;
         };
 
-        if let Err(e) = crate::dispatch_error(
+        if let Err(e) = dispatch_error(
             &user_data.serenity_context,
             &e,
             user_data.guild_id,
@@ -451,15 +511,147 @@ pub fn log_error(lua: mlua::Lua, template_name: String, e: String) {
     });
 }
 
+/// Dispatches an error to a channel
+pub async fn dispatch_error(
+    ctx: &serenity::all::Context,
+    error: &str,
+    guild_id: serenity::all::GuildId,
+    template: &crate::GuildTemplate,
+) -> Result<(), silverpelt::Error> {
+    let data = ctx.data::<silverpelt::data::Data>();
+
+    match template.error_channel {
+        Some(c) => {
+            let Some(channel) =
+                sandwich_driver::channel(&ctx.cache, &ctx.http, &data.reqwest, Some(guild_id), c)
+                    .await?
+            else {
+                return Ok(());
+            };
+
+            let Some(guild_channel) = channel.guild() else {
+                return Ok(());
+            };
+
+            if guild_channel.guild_id != guild_id {
+                return Ok(());
+            }
+
+            c.send_message(
+                &ctx.http,
+                serenity::all::CreateMessage::new()
+                    .embed(
+                        serenity::all::CreateEmbed::new()
+                            .title("Error executing template")
+                            .field("Error", error, false)
+                            .field("Template", template.name.clone(), false),
+                    )
+                    .components(vec![serenity::all::CreateActionRow::Buttons(
+                        vec![serenity::all::CreateButton::new_link(
+                            &config::CONFIG.meta.support_server_invite,
+                        )
+                        .label("Support Server")]
+                        .into(),
+                    )]),
+            )
+            .await?;
+        }
+        None => {
+            // Try firing the error event
+            execute(
+                event::Event::new(
+                    "Error".to_string(),
+                    "Error".to_string(),
+                    "Error".to_string(),
+                    event::ArcOrNormal::Normal(error.into()),
+                    None,
+                ),
+                ParseCompileState {
+                    serenity_context: ctx.clone(),
+                    reqwest_client: data.reqwest.clone(),
+                    guild_id,
+                    pool: data.pool.clone(),
+                },
+                template.to_parsed_template()?,
+            )
+            .await?;
+        }
+    }
+
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct ThreadErrorTracker {
     pub tracker: ThreadTracker,
+    pub track_results_set: Rc<RefCell<Vec<String>>>,
+    pub returns: Rc<RefCell<HashMap<String, mlua::MultiValue>>>,
 }
 
 impl ThreadErrorTracker {
     /// Creates a new thread error tracker
     pub fn new(tracker: ThreadTracker) -> Self {
-        Self { tracker }
+        Self {
+            tracker,
+            track_results_set: Rc::new(RefCell::new(Vec::new())),
+            returns: Rc::new(RefCell::new(HashMap::new())),
+        }
+    }
+
+    pub fn thread_string(&self, th: &mlua::Thread) -> String {
+        format!("{:?}", th.to_pointer())
+    }
+
+    /// Track a threads result
+    #[allow(dead_code)]
+    pub fn track_thread(&self, th: mlua::Thread) {
+        self.track_results_set
+            .borrow_mut()
+            .push(self.thread_string(&th));
+    }
+
+    /// Wait for a threads result
+    #[allow(dead_code)]
+    pub async fn wait_for_result(&self, th: mlua::Thread) -> Option<mlua::MultiValue> {
+        let thread_string = self.thread_string(&th);
+
+        loop {
+            {
+                let returns = self.returns.borrow();
+                if let Some(mv) = returns.get(&thread_string) {
+                    return Some(mv.clone());
+                }
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Waits for a threads result with timeout
+    #[allow(dead_code)]
+    pub async fn wait_for_result_timeout(
+        &self,
+        th: mlua::Thread,
+        timeout: std::time::Duration,
+    ) -> Option<mlua::MultiValue> {
+        let thread_string = self.thread_string(&th);
+
+        let start = std::time::Instant::now();
+
+        loop {
+            {
+                let returns = self.returns.borrow();
+                if let Some(mv) = returns.get(&thread_string) {
+                    return Some(mv.clone());
+                }
+            }
+
+            if start.elapsed() > timeout {
+                return None;
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
     }
 }
 
@@ -478,9 +670,27 @@ impl SchedulerFeedback for ThreadErrorTracker {
                 return; // We can't do anything without metadata
             };
 
+            if self
+                .track_results_set
+                .borrow()
+                .contains(&self.thread_string(th))
+            {
+                let mut returns = self.returns.borrow_mut();
+                returns.insert(self.thread_string(th), mlua::MultiValue::from_vec(vec![]));
+            }
+
             let e = e.to_string();
 
             log_error(tm.inner.lua.clone(), template_name, e);
+        } else if let Some(Ok(mv)) = result {
+            if self
+                .track_results_set
+                .borrow()
+                .contains(&self.thread_string(th))
+            {
+                let mut returns = self.returns.borrow_mut();
+                returns.insert(self.thread_string(th), mv.clone());
+            }
         }
     }
 }

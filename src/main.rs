@@ -22,7 +22,7 @@ async fn main() {
         }
         _ => {
             println!(
-                "No/unknown command specified.\n\nstart: [start the template worker itself]\ntemplatedocs: [generate template docs]"
+                "No/unknown command specified!\n\nstart: [start the template worker itself]\ntemplatedocs: [generate template docs]"
             );
             std::process::exit(1);
         }

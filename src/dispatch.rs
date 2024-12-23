@@ -5,7 +5,6 @@ use std::sync::Arc;
 use templating::{
     cache::get_all_guild_templates,
     event::{ArcOrNormal, Event},
-    Template,
 };
 
 use crate::temporary_punishments;
@@ -84,7 +83,6 @@ pub async fn discord_event_dispatch(
             "Discord".to_string(),
             event.snake_case_name().to_uppercase(),
             ArcOrNormal::Arc(Arc::new(serde_json::to_value(event)?)),
-            false,
             user_id.map(|u| u.to_string()),
         ),
         guild_id,
@@ -105,7 +103,6 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
                     "Custom".to_string(),
                     event.event_name.clone(),
                     ArcOrNormal::Arc(Arc::new(event.event_data.clone())),
-                    false,
                     None,
                 ),
                 ectx.guild_id,
@@ -121,8 +118,7 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
                     "StingCreate".to_string(),
                     "StingCreate".to_string(),
                     ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
-                    false,
-                    None,
+                    Some(sting.creator.to_string()),
                 ),
                 ectx.guild_id,
             )
@@ -139,8 +135,7 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
                     "StingUpdate".to_string(),
                     "StingUpdate".to_string(),
                     ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
-                    false,
-                    None,
+                    Some(sting.creator.to_string()),
                 ),
                 ectx.guild_id,
             )
@@ -157,8 +152,7 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
                     "StingExpire".to_string(),
                     "StingExpire".to_string(),
                     ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
-                    false,
-                    None,
+                    Some(sting.creator.to_string()),
                 ),
                 ectx.guild_id,
             )
@@ -175,8 +169,7 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
                     "StingDelete".to_string(),
                     "StingDelete".to_string(),
                     ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
-                    false,
-                    None,
+                    Some(sting.creator.to_string()),
                 ),
                 ectx.guild_id,
             )
@@ -193,8 +186,7 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
                     "PunishmentCreate".to_string(),
                     "PunishmentCreate".to_string(),
                     ArcOrNormal::Arc(Arc::new(serde_json::to_value(punishment)?)),
-                    false,
-                    None,
+                    Some(punishment.creator.to_string()),
                 ),
                 ectx.guild_id,
             )
@@ -211,8 +203,7 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
                     "PunishmentExpire".to_string(),
                     "PunishmentExpire".to_string(),
                     ArcOrNormal::Arc(Arc::new(serde_json::to_value(punishment)?)),
-                    false,
-                    None,
+                    Some(punishment.creator.to_string()),
                 ),
                 ectx.guild_id,
             )
@@ -234,7 +225,6 @@ pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt:
                             "targets": modified
                         }
                     ))),
-                    false,
                     None,
                 ),
                 ectx.guild_id,
@@ -294,12 +284,14 @@ pub async fn dispatch(
         log::info!("Dispatching event: {} to {}", event.name(), template.name);
 
         match templating::execute(
-            guild_id,
-            Template::Named(template.name.clone()),
-            data.pool.clone(),
-            ctx.clone(),
-            data.reqwest.clone(),
             event.clone(),
+            templating::ParseCompileState {
+                serenity_context: ctx.clone(),
+                pool: data.pool.clone(),
+                reqwest_client: data.reqwest.clone(),
+                guild_id,
+            },
+            template.to_parsed_template()?,
         )
         .await
         {

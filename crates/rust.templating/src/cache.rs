@@ -39,7 +39,7 @@ pub async fn get_all_guild_templates(
     let mut templates = Vec::new();
 
     for name in names {
-        let template = crate::get_template(guild_id, &name, pool).await?;
+        let template = crate::GuildTemplate::get(guild_id, &name, pool).await?;
         templates.push(template);
     }
 

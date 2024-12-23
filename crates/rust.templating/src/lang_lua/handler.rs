@@ -77,9 +77,10 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
                 .lua
                 .app_data_ref::<mlua_scheduler_ext::feedbacks::ThreadTracker>()
                 .unwrap();
+
             thread_tracker.set_metadata(thread.clone(), exec_name.clone());
 
-            match tis_ref
+            let th = match tis_ref
                 .lua
                 .push_thread_back(thread, (event, template_context))
             {
@@ -100,9 +101,52 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
                 }
             };
 
+            let thread_error_tracker = tis_ref
+                .lua
+                .app_data_ref::<crate::lang_lua::ThreadErrorTracker>()
+                .unwrap();
+
+            let value = thread_error_tracker
+                .wait_for_result_timeout(th, crate::MAX_TEMPLATES_RETURN_WAIT_TIME)
+                .await;
+
+            let json_value = if let Some(values) = value {
+                if values.len() > 1 {
+                    let mut arr = Vec::with_capacity(values.len());
+
+                    for v in values {
+                        match tis_ref.lua.from_value::<serde_json::Value>(v) {
+                            Ok(v) => arr.push(v),
+                            Err(e) => {
+                                return LuaVmResult::LuaError {
+                                    err: e.to_string(),
+                                    template_name: Some(exec_name),
+                                };
+                            }
+                        }
+                    }
+
+                    serde_json::Value::Array(arr)
+                } else {
+                    let value = values.into_iter().next().unwrap();
+
+                    match tis_ref.lua.from_value::<serde_json::Value>(value) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            return LuaVmResult::LuaError {
+                                err: e.to_string(),
+                                template_name: Some(exec_name),
+                            };
+                        }
+                    }
+                }
+            } else {
+                serde_json::Value::Null
+            };
+
             // Send acknoledgement
             LuaVmResult::Ok {
-                result_val: serde_json::Value::Number(1.into()),
+                result_val: json_value,
             }
         }
         LuaVmAction::Stop {} => {

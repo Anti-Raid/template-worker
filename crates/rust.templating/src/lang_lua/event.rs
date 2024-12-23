@@ -1,8 +1,5 @@
 pub use mlua::prelude::*;
-use std::{
-    ops::Deref,
-    sync::{Arc, RwLock},
-};
+use std::{ops::Deref, sync::Arc};
 
 pub enum ArcOrNormal<T: Sized> {
     Arc(Arc<T>),
@@ -62,10 +59,6 @@ pub struct InnerEvent {
     uid: sqlx::types::Uuid,
     /// The author, if any, of the event
     author: Option<String>,
-    /// Whether this event can be explicitly responded to
-    can_respond: bool,
-    /// Stores the current response the event has
-    current_response: RwLock<Option<serde_json::Value>>,
 }
 
 /// An `Event` is an object that can be passed to a Lua template
@@ -81,7 +74,6 @@ impl Event {
         base_name: String,
         name: String,
         data: ArcOrNormal<serde_json::Value>,
-        can_respond: bool,
         author: Option<String>,
     ) -> Self {
         Self {
@@ -90,10 +82,8 @@ impl Event {
                 base_name,
                 name,
                 data,
-                can_respond,
                 uid: sqlx::types::Uuid::new_v4(),
                 author,
-                current_response: RwLock::new(None),
             }),
         }
     }
@@ -108,11 +98,6 @@ impl Event {
     /// Returns the name (NOT the base name) of the event
     pub fn name(&self) -> &str {
         &self.inner.name
-    }
-
-    /// Takes out the current response of the event
-    pub fn response(&mut self) -> Option<serde_json::Value> {
-        self.inner.current_response.write().unwrap().take()
     }
 }
 
@@ -142,25 +127,6 @@ impl LuaUserData for Event {
         fields.add_field_method_get("author", |lua, this| {
             let author = lua.to_value(&this.inner.author)?;
             Ok(author)
-        });
-        fields.add_field_method_get("can_respond", |_, this| Ok(this.inner.can_respond));
-
-        fields.add_field_method_get("response", |lua, this| {
-            let current_response = this.inner.current_response.read().unwrap();
-            let response = lua.to_value(&*current_response)?;
-            Ok(response)
-        });
-
-        fields.add_field_method_set("response", |lua, this, response: LuaValue| {
-            if !this.inner.can_respond {
-                return Err(LuaError::external("Cannot respond to this event"));
-            }
-
-            let response = lua.from_value::<serde_json::Value>(response)?;
-
-            let mut current_response = this.inner.current_response.write().unwrap();
-            *current_response = Some(response);
-            Ok(())
         });
     }
 }
