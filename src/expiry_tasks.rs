@@ -12,14 +12,14 @@ pub async fn punishment_expiry_task(
 
     let mut set = tokio::task::JoinSet::new();
 
-    let shard_count = data.props.shard_count().await?.try_into()?;
-    let shards = data.props.shards().await?;
+    let shard_count = templating::shard_count()?;
+    let shards = templating::shard_ids()?;
 
     for punishment in punishments {
         let guild_id = punishment.guild_id;
 
         // Ensure shard id
-        let shard_id = serenity::utils::shard_id(guild_id, shard_count);
+        let shard_id = serenity::all::ShardId(serenity::utils::shard_id(guild_id, shard_count));
 
         if !shards.contains(&shard_id) {
             continue;
@@ -88,14 +88,14 @@ pub async fn stings_expiry_task(
 
     let mut set = tokio::task::JoinSet::new();
 
-    let shard_count = data.props.shard_count().await?.try_into()?;
-    let shards = data.props.shards().await?;
+    let shard_count = templating::shard_count()?;
+    let shards = templating::shard_ids()?;
 
     for sting in stings {
         let guild_id = sting.guild_id;
 
         // Ensure shard id
-        let shard_id = serenity::utils::shard_id(guild_id, shard_count);
+        let shard_id = serenity::all::ShardId(serenity::utils::shard_id(guild_id, shard_count));
 
         if !shards.contains(&shard_id) {
             continue;

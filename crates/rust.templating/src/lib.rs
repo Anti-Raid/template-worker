@@ -15,8 +15,9 @@ pub use lang_lua::samples;
 pub use lang_lua::state::LuaKVConstraints;
 pub use lang_lua::PLUGINS;
 pub use lang_lua::{
-    dispatch_error, execute, handle_event, ArLuaThreadInnerState, LuaVmAction, LuaVmResult,
-    ParseCompileState, RenderTemplateHandle,
+    dispatch_error, execute, handle_event, setup_shard_messenger, shard_count, shard_ids,
+    shard_messenger_for_guild, ArLuaThreadInnerState, LuaVmAction, LuaVmResult, ParseCompileState,
+    RenderTemplateHandle,
 };
 
 pub const MAX_TEMPLATE_MEMORY_USAGE: usize = 1024 * 1024 * 3; // 3MB maximum memory

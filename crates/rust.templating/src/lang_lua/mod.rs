@@ -25,8 +25,8 @@ use std::hash::Hash;
 use std::hash::Hasher;
 use std::ops::Deref;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::LazyLock;
+use std::sync::{Arc, OnceLock};
 
 #[cfg(feature = "send")]
 pub type XRc<T> = Arc<T>;
@@ -36,6 +36,7 @@ pub type XRc<T> = std::rc::Rc<T>;
 #[cfg(feature = "thread_proc")]
 mod thread_proc;
 
+/// VM cache
 static VMS: LazyLock<Cache<GuildId, ArLua>> =
     LazyLock::new(|| Cache::builder().time_to_idle(MAX_TEMPLATE_LIFETIME).build());
 
@@ -276,13 +277,12 @@ pub(crate) fn create_lua_vm_userdata(
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
     reqwest_client: reqwest::Client,
-    shard_messenger: serenity::all::ShardMessenger,
 ) -> Result<state::LuaUserData, silverpelt::Error> {
     Ok(state::LuaUserData {
         pool,
         guild_id,
-        shard_messenger,
         serenity_context,
+        shard_messenger: shard_messenger_for_guild(guild_id)?,
         reqwest_client,
         kv_constraints: state::LuaKVConstraints::default(),
         kv_ratelimits: Rc::new(state::LuaRatelimits::new_kv_rl()?),
@@ -304,13 +304,7 @@ async fn create_lua_vm(
     reqwest_client: reqwest::Client,
 ) -> Result<ArLua, silverpelt::Error> {
     #[cfg(feature = "thread_proc")]
-    thread_proc::lua_thread_impl(
-        guild_id,
-        pool,
-        shard_messenger_for_guild(&serenity_context, guild_id).await?,
-        serenity_context,
-        reqwest_client,
-    )
+    thread_proc::lua_thread_impl(guild_id, pool, serenity_context, reqwest_client)
 }
 
 /// Helper method to fetch a template from bytecode or compile it if it doesnt exist in bytecode cache
@@ -380,6 +374,8 @@ pub struct ParseCompileState {
 }
 
 /// Render a template given an event, state and template
+///
+/// Pre-conditions: the serenity context's shard matches the guild itself
 pub async fn execute(
     event: event::Event,
     state: ParseCompileState,
@@ -458,25 +454,6 @@ impl RenderTemplateHandle {
     ) -> Result<T, silverpelt::Error> {
         self.wait_timeout_or_err(timeout).await?.to_response()
     }
-}
-
-async fn shard_messenger_for_guild(
-    serenity_context: &serenity::all::Context,
-    guild_id: serenity::all::GuildId,
-) -> Result<serenity::all::ShardMessenger, crate::Error> {
-    let data = serenity_context.data::<silverpelt::data::Data>();
-
-    let guild_shard_count = data.props.shard_count().await?;
-    let guild_shard_count =
-        std::num::NonZeroU16::new(guild_shard_count).ok_or("No shards available")?;
-    let guild_shard_id = serenity::all::utils::shard_id(guild_id, guild_shard_count);
-    let guild_shard_id = serenity::all::ShardId(guild_shard_id);
-
-    if serenity_context.shard_id != guild_shard_id {
-        return data.props.shard_messenger(guild_shard_id).await;
-    }
-
-    Ok(serenity_context.shard.clone())
 }
 
 pub fn log_error(lua: mlua::Lua, template_name: String, e: String) {
@@ -693,4 +670,65 @@ impl SchedulerFeedback for ThreadErrorTracker {
             }
         }
     }
+}
+
+/// Serenity shard messenger cache
+///
+/// Used to store shard messengers for each shard
+struct ShardMessengerCache {
+    cache: std::collections::HashMap<serenity::all::ShardId, serenity::all::ShardMessenger>,
+}
+
+static SHARD_MESSENGERS: OnceLock<ShardMessengerCache> = OnceLock::new();
+
+/// Returns the total number of shards
+pub fn shard_count() -> Result<std::num::NonZeroU16, crate::Error> {
+    let cache = SHARD_MESSENGERS
+        .get()
+        .ok_or_else(|| "Shard messenger cache not initialized")?;
+
+    let shard_count =
+        std::num::NonZeroU16::new(cache.cache.len().try_into()?).ok_or("No shards available")?;
+    Ok(shard_count)
+}
+
+/// Returns the shard ids available
+pub fn shard_ids() -> Result<Vec<serenity::all::ShardId>, crate::Error> {
+    let cache = SHARD_MESSENGERS
+        .get()
+        .ok_or_else(|| "Shard messenger cache not initialized")?;
+
+    Ok(cache.cache.keys().cloned().collect())
+}
+
+/// Get the shard messenger for a guild
+pub fn shard_messenger_for_guild(
+    guild_id: serenity::all::GuildId,
+) -> Result<serenity::all::ShardMessenger, crate::Error> {
+    let cache = SHARD_MESSENGERS
+        .get()
+        .ok_or_else(|| "Shard messenger cache not initialized")?;
+
+    let guild_shard_count =
+        std::num::NonZeroU16::new(cache.cache.len().try_into()?).ok_or("No shards available")?;
+    let guild_shard_id = serenity::all::utils::shard_id(guild_id, guild_shard_count);
+    let guild_shard_id = serenity::all::ShardId(guild_shard_id);
+
+    Ok(cache
+        .cache
+        .get(&guild_shard_id)
+        .cloned()
+        .ok_or("Shard not found")?)
+}
+
+/// Sets up the shard manager given client
+pub async fn setup_shard_messenger(client: &serenity::all::Client) {
+    let guard = client.shard_manager.runners.lock().await;
+    let mut cache = std::collections::HashMap::new();
+
+    for (shard_id, runner_info) in guard.iter() {
+        cache.insert(*shard_id, runner_info.runner_tx.clone());
+    }
+
+    SHARD_MESSENGERS.get_or_init(|| ShardMessengerCache { cache });
 }

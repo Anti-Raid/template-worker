@@ -1,11 +1,25 @@
 use axum::{
-    Json, Router,
     extract::{Path, State},
     http::StatusCode,
     routing::post,
+    Json, Router,
 };
-use rust_rpc_server::AppData;
 use std::sync::Arc;
+
+#[derive(Clone)]
+pub struct AppData {
+    pub data: Arc<silverpelt::data::Data>,
+    pub serenity_context: serenity::all::Context,
+}
+
+impl AppData {
+    pub fn new(data: Arc<silverpelt::data::Data>, ctx: &serenity::all::Context) -> Self {
+        Self {
+            data,
+            serenity_context: ctx.clone(),
+        }
+    }
+}
 
 type Response<T> = Result<Json<T>, (StatusCode, String)>;
 
@@ -13,8 +27,8 @@ pub fn create(
     data: Arc<silverpelt::data::Data>,
     ctx: &serenity::all::Context,
 ) -> axum::routing::IntoMakeService<Router> {
-    let router = rust_rpc_server::create_blank_rpc_server()
-        // Returns the list of modules [Modules]
+    let router = Router::new()
+        .layer(tower_http::trace::TraceLayer::new_for_http())
         .route("/dispatch-event/:guild_id", post(dispatch_event));
     let router: Router<()> = router.with_state(AppData::new(data, ctx));
     router.into_make_service()

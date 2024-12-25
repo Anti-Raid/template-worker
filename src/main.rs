@@ -5,7 +5,6 @@ mod event_handler;
 mod expiry_tasks;
 mod http;
 mod on_startup;
-mod props;
 mod temporary_punishments;
 
 /// The main function is just a command handling function

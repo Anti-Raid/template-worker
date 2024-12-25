@@ -14,6 +14,7 @@ dashmap = { version = "6", features = ["serde", "inline", "rayon"] }
 async-trait = "0.1.80"
 serde_json = "1.0"
 axum = { version = "0.7.5", features = ["macros"] }
+tower-http = { version = "0.5.2", features = ["trace"] }
 clap = { version = "4.5.16", features = ["derive"] }
 arc-swap = "1"
 

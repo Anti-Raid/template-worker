@@ -9,7 +9,6 @@ use std::{panic::PanicHookInfo, sync::Arc, time::Duration};
 pub fn lua_thread_impl(
     guild_id: GuildId,
     pool: sqlx::PgPool,
-    shard_messenger: serenity::all::ShardMessenger,
     serenity_context: serenity::all::Context,
     reqwest_client: reqwest::Client,
 ) -> Result<ArLua, silverpelt::Error> {
@@ -36,7 +35,6 @@ pub fn lua_thread_impl(
                 pool,
                 serenity_context,
                 reqwest_client,
-                shard_messenger,
             )
             .expect("Failed to create Lua VM userdata");
 

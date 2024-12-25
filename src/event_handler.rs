@@ -10,6 +10,11 @@ pub struct EventFramework {}
 
 #[async_trait]
 impl Framework for EventFramework {
+    async fn init(&mut self, client: &serenity::all::Client) {
+        // Set up the shard messenger
+        templating::setup_shard_messenger(client).await;
+    }
+
     async fn dispatch(&self, ctx: &Context, event: &serenity::all::FullEvent) {
         if let serenity::all::FullEvent::Ready { .. } = event {
             ONCE.call_once(|| {

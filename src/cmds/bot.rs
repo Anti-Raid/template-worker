@@ -1,6 +1,4 @@
 use crate::event_handler::EventFramework;
-use crate::props::Props;
-use arc_swap::ArcSwap;
 use clap::Parser;
 use log::{error, info};
 use serenity::all::HttpBuilder;
@@ -76,11 +74,6 @@ pub async fn start() {
         .build()
         .expect("Could not initialize reqwest client");
 
-    let props = Arc::new(Props {
-        cache: ArcSwap::new(None.into()),
-        shard_manager: ArcSwap::new(None.into()),
-    });
-
     let data = Data {
         object_store: Arc::new(
             config::CONFIG
@@ -90,8 +83,6 @@ pub async fn start() {
         ),
         pool: pg_pool.clone(),
         reqwest,
-        extra_data: dashmap::DashMap::new(),
-        props: props.clone(),
     };
 
     let mut client = client_builder
@@ -100,11 +91,6 @@ pub async fn start() {
         .wait_time_between_shard_start(Duration::from_secs(0)) // Disable wait time between shard start due to Sandwich
         .await
         .expect("Error creating client");
-
-    props.cache.store(Arc::new(Some(client.cache.clone())));
-    props
-        .shard_manager
-        .store(Arc::new(Some(client.shard_manager.clone())));
 
     client.cache.set_max_messages(10000);
 
