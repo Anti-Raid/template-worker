@@ -17,6 +17,7 @@ impl Framework for EventFramework {
 
     async fn dispatch(&self, ctx: &Context, event: &serenity::all::FullEvent) {
         if let serenity::all::FullEvent::Ready { .. } = event {
+            templating::update_shard_messengers().await;
             ONCE.call_once(|| {
                 let ctx1 = ctx.clone();
                 let data1 = ctx.data::<silverpelt::data::Data>();

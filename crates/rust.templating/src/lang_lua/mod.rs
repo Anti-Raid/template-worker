@@ -676,7 +676,8 @@ impl SchedulerFeedback for ThreadErrorTracker {
 ///
 /// Used to store shard messengers for each shard
 struct ShardMessengerCache {
-    cache: std::collections::HashMap<serenity::all::ShardId, serenity::all::ShardMessenger>,
+    manager: Arc<serenity::all::ShardManager>,
+    cache: dashmap::DashMap<serenity::all::ShardId, serenity::all::ShardMessenger>,
 }
 
 static SHARD_MESSENGERS: OnceLock<ShardMessengerCache> = OnceLock::new();
@@ -698,7 +699,13 @@ pub fn shard_ids() -> Result<Vec<serenity::all::ShardId>, crate::Error> {
         .get()
         .ok_or_else(|| "Shard messenger cache not initialized")?;
 
-    Ok(cache.cache.keys().cloned().collect())
+    let mut shard_ids = Vec::new();
+
+    for refmut in cache.cache.iter() {
+        shard_ids.push(*refmut.key());
+    }
+
+    Ok(shard_ids)
 }
 
 /// Get the shard messenger for a guild
@@ -714,21 +721,37 @@ pub fn shard_messenger_for_guild(
     let guild_shard_id = serenity::all::utils::shard_id(guild_id, guild_shard_count);
     let guild_shard_id = serenity::all::ShardId(guild_shard_id);
 
-    Ok(cache
-        .cache
-        .get(&guild_shard_id)
-        .cloned()
-        .ok_or("Shard not found")?)
+    if let Some(shard) = cache.cache.get(&guild_shard_id) {
+        return Ok(shard.value().clone());
+    }
+
+    Err("Shard not found".into())
 }
 
 /// Sets up the shard manager given client
 pub async fn setup_shard_messenger(client: &serenity::all::Client) {
     let guard = client.shard_manager.runners.lock().await;
-    let mut cache = std::collections::HashMap::new();
+    let cache = dashmap::DashMap::new();
 
     for (shard_id, runner_info) in guard.iter() {
         cache.insert(*shard_id, runner_info.runner_tx.clone());
     }
 
-    SHARD_MESSENGERS.get_or_init(|| ShardMessengerCache { cache });
+    let shard_manager = client.shard_manager.clone();
+    SHARD_MESSENGERS.get_or_init(|| ShardMessengerCache {
+        cache,
+        manager: shard_manager,
+    });
+}
+
+pub async fn update_shard_messengers() {
+    let sm = SHARD_MESSENGERS
+        .get()
+        .expect("Shard messenger cache not initialized");
+    let guard = sm.manager.runners.lock().await;
+
+    sm.cache.clear();
+    for (shard_id, runner_info) in guard.iter() {
+        sm.cache.insert(*shard_id, runner_info.runner_tx.clone());
+    }
 }
