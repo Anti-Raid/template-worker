@@ -1,13 +1,11 @@
 use serenity::all::{Context, FullEvent, GuildId, Interaction};
-use silverpelt::ar_event::{AntiraidEvent, EventHandlerContext};
+use silverpelt::ar_event::AntiraidEvent;
 use silverpelt::data::Data;
 use std::sync::Arc;
 use templating::{
     cache::get_all_guild_templates,
     event::{ArcOrNormal, Event},
 };
-
-use crate::temporary_punishments;
 
 #[inline]
 const fn not_audit_loggable_event() -> &'static [&'static str] {
@@ -90,170 +88,69 @@ pub async fn discord_event_dispatch(
     .await
 }
 
-pub async fn event_listener(ectx: EventHandlerContext) -> Result<(), silverpelt::Error> {
-    let ctx = &ectx.serenity_context;
-
-    match ectx.event {
-        AntiraidEvent::Custom(ref event) => {
-            dispatch(
-                ctx,
-                &ectx.data,
-                Event::new(
-                    event.event_titlename.clone(),
-                    "Custom".to_string(),
-                    event.event_name.clone(),
-                    ArcOrNormal::Arc(Arc::new(event.event_data.clone())),
-                    None,
-                ),
-                ectx.guild_id,
-            )
-            .await
-        }
-        AntiraidEvent::StingCreate(ref sting) => {
-            dispatch(
-                ctx,
-                &ectx.data,
-                Event::new(
-                    "(Anti Raid) Sting Created".to_string(),
-                    "StingCreate".to_string(),
-                    "StingCreate".to_string(),
-                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
-                    Some(sting.creator.to_string()),
-                ),
-                ectx.guild_id,
-            )
-            .await?;
-
-            Ok(())
-        }
-        AntiraidEvent::StingUpdate(ref sting) => {
-            dispatch(
-                ctx,
-                &ectx.data,
-                Event::new(
-                    "(Anti Raid) Sting Updated".to_string(),
-                    "StingUpdate".to_string(),
-                    "StingUpdate".to_string(),
-                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
-                    Some(sting.creator.to_string()),
-                ),
-                ectx.guild_id,
-            )
-            .await?;
-
-            Ok(())
-        }
-        AntiraidEvent::StingExpire(ref sting) => {
-            dispatch(
-                ctx,
-                &ectx.data,
-                Event::new(
-                    "(Anti Raid) Sting Expired".to_string(),
-                    "StingExpire".to_string(),
-                    "StingExpire".to_string(),
-                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
-                    Some(sting.creator.to_string()),
-                ),
-                ectx.guild_id,
-            )
-            .await?;
-
-            Ok(())
-        }
-        AntiraidEvent::StingDelete(ref sting) => {
-            dispatch(
-                ctx,
-                &ectx.data,
-                Event::new(
-                    "(Anti Raid) Sting Deleted".to_string(),
-                    "StingDelete".to_string(),
-                    "StingDelete".to_string(),
-                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
-                    Some(sting.creator.to_string()),
-                ),
-                ectx.guild_id,
-            )
-            .await?;
-
-            Ok(())
-        }
-        AntiraidEvent::PunishmentCreate(ref punishment) => {
-            dispatch(
-                ctx,
-                &ectx.data,
-                Event::new(
-                    "(Anti Raid) Punishment Created".to_string(),
-                    "PunishmentCreate".to_string(),
-                    "PunishmentCreate".to_string(),
-                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(punishment)?)),
-                    Some(punishment.creator.to_string()),
-                ),
-                ectx.guild_id,
-            )
-            .await?;
-
-            Ok(())
-        }
-        AntiraidEvent::PunishmentExpire(ref punishment) => {
-            dispatch(
-                ctx,
-                &ectx.data,
-                Event::new(
-                    "(Anti Raid) Punishment Expired".to_string(),
-                    "PunishmentExpire".to_string(),
-                    "PunishmentExpire".to_string(),
-                    ArcOrNormal::Arc(Arc::new(serde_json::to_value(punishment)?)),
-                    Some(punishment.creator.to_string()),
-                ),
-                ectx.guild_id,
-            )
-            .await?;
-
-            temporary_punishments::handle_expired_punishment(&ectx.data, ctx, punishment).await?;
-
-            Ok(())
-        }
-        AntiraidEvent::OnStartup(ref modified) => {
-            dispatch(
-                ctx,
-                &ectx.data,
-                Event::new(
-                    "(Anti Raid) On Startup".to_string(),
-                    "OnStartup".to_string(),
-                    "OnStartup".to_string(),
-                    ArcOrNormal::Arc(Arc::new(serde_json::json!({
-                            "targets": modified
-                        }
-                    ))),
-                    None,
-                ),
-                ectx.guild_id,
-            )
-            .await
-        }
+/// Parses an antiraid event into a template event
+pub fn parse_event(event: &AntiraidEvent) -> Result<Event, silverpelt::Error> {
+    match event {
+        AntiraidEvent::Custom(ref event) => Ok(Event::new(
+            event.event_titlename.clone(),
+            "Custom".to_string(),
+            event.event_name.clone(),
+            ArcOrNormal::Arc(Arc::new(event.event_data.clone())),
+            None,
+        )),
+        AntiraidEvent::StingCreate(ref sting) => Ok(Event::new(
+            "(Anti Raid) Sting Created".to_string(),
+            "StingCreate".to_string(),
+            "StingCreate".to_string(),
+            ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
+            Some(sting.creator.to_string()),
+        )),
+        AntiraidEvent::StingUpdate(ref sting) => Ok(Event::new(
+            "(Anti Raid) Sting Updated".to_string(),
+            "StingUpdate".to_string(),
+            "StingUpdate".to_string(),
+            ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
+            Some(sting.creator.to_string()),
+        )),
+        AntiraidEvent::StingExpire(ref sting) => Ok(Event::new(
+            "(Anti Raid) Sting Expired".to_string(),
+            "StingExpire".to_string(),
+            "StingExpire".to_string(),
+            ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
+            Some(sting.creator.to_string()),
+        )),
+        AntiraidEvent::StingDelete(ref sting) => Ok(Event::new(
+            "(Anti Raid) Sting Deleted".to_string(),
+            "StingDelete".to_string(),
+            "StingDelete".to_string(),
+            ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
+            Some(sting.creator.to_string()),
+        )),
+        AntiraidEvent::PunishmentCreate(ref punishment) => Ok(Event::new(
+            "(Anti Raid) Punishment Created".to_string(),
+            "PunishmentCreate".to_string(),
+            "PunishmentCreate".to_string(),
+            ArcOrNormal::Arc(Arc::new(serde_json::to_value(punishment)?)),
+            Some(punishment.creator.to_string()),
+        )),
+        AntiraidEvent::PunishmentExpire(ref punishment) => Ok(Event::new(
+            "(Anti Raid) Punishment Expired".to_string(),
+            "PunishmentExpire".to_string(),
+            "PunishmentExpire".to_string(),
+            ArcOrNormal::Arc(Arc::new(serde_json::to_value(punishment)?)),
+            Some(punishment.creator.to_string()),
+        )),
+        AntiraidEvent::OnStartup(ref modified) => Ok(Event::new(
+            "(Anti Raid) On Startup".to_string(),
+            "OnStartup".to_string(),
+            "OnStartup".to_string(),
+            ArcOrNormal::Arc(Arc::new(serde_json::json!({
+                    "targets": modified
+                }
+            ))),
+            None,
+        )),
     }
-}
-
-/// Check if an event matches a list of filters
-///
-/// Rules:
-/// - If filter is empty, return true unless a special case applies
-/// - If filter matches the event_name, return true unless a special case applies
-///
-/// Special cases:
-/// - If event_name is MESSAGE, then it must be an exact match to be dispatched AND must have a custom template declared for it. This is to avoid spam
-fn should_dispatch_event(event_name: &str, filters: &[String]) -> bool {
-    if event_name == "MESSAGE" || event_name == "AR/CheckCommand" || event_name == "AR/OnStartup" {
-        // Message should only be fired if the template explicitly wants the event
-        return filters.contains(&event_name.to_string());
-    }
-
-    // If empty, always return Ok
-    if filters.is_empty() {
-        return true;
-    }
-
-    filters.contains(&event_name.to_string())
 }
 
 pub async fn dispatch(
@@ -264,22 +161,9 @@ pub async fn dispatch(
 ) -> Result<(), silverpelt::Error> {
     let templates = get_all_guild_templates(guild_id, &data.pool).await?;
 
-    if templates.is_empty() {
-        return Ok(());
-    }
-
-    println!("Dispatching event: {}", event.name());
-
     for template in templates.iter().filter(|template| {
-        should_dispatch_event(event.name(), {
-            // False positive, unwrap_or_default cannot be used here as it moves the event out of the sink
-            #[allow(clippy::manual_unwrap_or_default)]
-            if let Some(ref events) = template.events {
-                events
-            } else {
-                &[]
-            }
-        })
+        template.events.contains(&event.name().to_string())
+            || template.events.contains(&event.base_name().to_string())
     }) {
         log::info!("Dispatching event: {} to {}", event.name(), template.name);
 
@@ -302,4 +186,65 @@ pub async fn dispatch(
         }
     }
     Ok(())
+}
+
+/// Dispatches a template event to all templates, waiting for the response and returning it
+pub async fn dispatch_and_wait(
+    ctx: &Context,
+    data: &Data,
+    event: Event,
+    guild_id: GuildId,
+    wait_timeout: std::time::Duration,
+) -> Result<Vec<serde_json::Value>, silverpelt::Error> {
+    let templates = get_all_guild_templates(guild_id, &data.pool).await?;
+
+    let mut local_set = tokio::task::JoinSet::new();
+    for template in templates.iter().filter(|template| {
+        template.events.contains(&event.name().to_string())
+            || template.events.contains(&event.base_name().to_string())
+    }) {
+        log::info!("Dispatching event: {} to {}", event.name(), template.name);
+
+        match templating::execute(
+            event.clone(),
+            templating::ParseCompileState {
+                serenity_context: ctx.clone(),
+                pool: data.pool.clone(),
+                reqwest_client: data.reqwest.clone(),
+                guild_id,
+            },
+            template.to_parsed_template()?,
+        )
+        .await
+        {
+            Ok(handle) => {
+                local_set.spawn(async move {
+                    handle
+                        .wait_timeout_then_response::<serde_json::Value>(wait_timeout)
+                        .await
+                });
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    let mut results = Vec::with_capacity(local_set.len());
+
+    while let Some(result) = local_set.join_next().await {
+        let result = result?;
+        match result {
+            Ok(r) => results.push(r),
+            Err(e) => {
+                local_set.abort_all();
+
+                while (local_set.join_next().await).is_some() {
+                    // Drain the rest of the results
+                }
+
+                return Err(e);
+            }
+        }
+    }
+
+    Ok(results)
 }

@@ -278,13 +278,13 @@ impl LuaToDomValue for LuaAnyUserData {
 	            // NOTE: The none and default variants of these types are handled in
 				// LuaToDomValue for the LuaValue type instead, allowing for nil/default
                 DomType::OptionalCFrame => {
-                    return match self.borrow::<CFrame>() {
+                    match self.borrow::<CFrame>() {
                         Err(_) => unreachable!("Invalid use of conversion method, should be using LuaValue"),
                         Ok(value) => Ok(DomValue::OptionalCFrame(Some(dom::CFrame::from(*value)))),
                     }
                 }
                 DomType::PhysicalProperties => {
-                    return match self.borrow::<PhysicalProperties>() {
+                    match self.borrow::<PhysicalProperties>() {
                         Err(_) => unreachable!("Invalid use of conversion method, should be using LuaValue"),
                         Ok(value) => {
                             let props = dom::CustomPhysicalProperties::from(*value);

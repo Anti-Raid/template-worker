@@ -686,7 +686,7 @@ static SHARD_MESSENGERS: OnceLock<ShardMessengerCache> = OnceLock::new();
 pub fn shard_count() -> Result<std::num::NonZeroU16, crate::Error> {
     let cache = SHARD_MESSENGERS
         .get()
-        .ok_or_else(|| "Shard messenger cache not initialized")?;
+        .ok_or("Shard messenger cache not initialized")?;
 
     let shard_count =
         std::num::NonZeroU16::new(cache.cache.len().try_into()?).ok_or("No shards available")?;
@@ -697,7 +697,7 @@ pub fn shard_count() -> Result<std::num::NonZeroU16, crate::Error> {
 pub fn shard_ids() -> Result<Vec<serenity::all::ShardId>, crate::Error> {
     let cache = SHARD_MESSENGERS
         .get()
-        .ok_or_else(|| "Shard messenger cache not initialized")?;
+        .ok_or("Shard messenger cache not initialized")?;
 
     let mut shard_ids = Vec::new();
 
@@ -714,7 +714,7 @@ pub fn shard_messenger_for_guild(
 ) -> Result<serenity::all::ShardMessenger, crate::Error> {
     let cache = SHARD_MESSENGERS
         .get()
-        .ok_or_else(|| "Shard messenger cache not initialized")?;
+        .ok_or("Shard messenger cache not initialized")?;
 
     let guild_shard_count =
         std::num::NonZeroU16::new(cache.cache.len().try_into()?).ok_or("No shards available")?;

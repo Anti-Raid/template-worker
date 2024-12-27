@@ -30,7 +30,6 @@ pub fn make_list_writer() -> Box<ListWriter> {
     return any errors - this is for consistency reasons and to make it
     easier to add these blanket implementations to [`LuaUserData`] impls.
 */
-
 pub fn userdata_impl_to_string<D>(_: &Lua, datatype: &D, _: ()) -> LuaResult<String>
 where
     D: LuaUserData + ToString + 'static,

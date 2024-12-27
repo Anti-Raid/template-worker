@@ -1,10 +1,14 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     routing::post,
     Json, Router,
 };
+use silverpelt::ar_event::AntiraidEvent;
 use std::sync::Arc;
+use templating::cache::clear_cache;
+
+use crate::dispatch::{dispatch, dispatch_and_wait, parse_event};
 
 #[derive(Clone)]
 pub struct AppData {
@@ -29,7 +33,11 @@ pub fn create(
 ) -> axum::routing::IntoMakeService<Router> {
     let router = Router::new()
         .layer(tower_http::trace::TraceLayer::new_for_http())
-        .route("/dispatch-event/:guild_id", post(dispatch_event));
+        .route("/dispatch-event/:guild_id", post(dispatch_event))
+        .route(
+            "/dispatch-event/:guild_id/@wait",
+            post(dispatch_event_and_wait),
+        );
     let router: Router<()> = router.with_state(AppData::new(data, ctx));
     router.into_make_service()
 }
@@ -42,22 +50,55 @@ async fn dispatch_event(
         ..
     }): State<AppData>,
     Path(guild_id): Path<serenity::all::GuildId>,
-    Json(event): Json<silverpelt::ar_event::AntiraidEvent>,
+    Json(event): Json<AntiraidEvent>,
 ) -> Response<()> {
     // Clear cache if event is OnStartup
-    if let silverpelt::ar_event::AntiraidEvent::OnStartup(_) = event {
+    if let AntiraidEvent::OnStartup(_) = event {
+        clear_cache(guild_id).await;
+    }
+
+    let event = parse_event(&event).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
+    dispatch(&serenity_context, &data, event, guild_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(()))
+}
+
+/// Query parameters for dispatch_event_and_wait
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct DispatchEventAndWaitQuery {
+    /// Wait duration in milliseconds
+    pub wait_timeout: Option<u64>,
+}
+
+/// Dispatches a new event and waits for a response
+async fn dispatch_event_and_wait(
+    State(AppData {
+        data,
+        serenity_context,
+        ..
+    }): State<AppData>,
+    Path(guild_id): Path<serenity::all::GuildId>,
+    Query(query): Query<DispatchEventAndWaitQuery>,
+    Json(event): Json<AntiraidEvent>,
+) -> Response<Vec<serde_json::Value>> {
+    // Clear cache if event is OnStartup
+    if let AntiraidEvent::OnStartup(_) = event {
         templating::cache::clear_cache(guild_id).await;
     }
 
-    match crate::dispatch::event_listener(silverpelt::ar_event::EventHandlerContext {
-        guild_id,
-        data: data.clone(),
-        event,
-        serenity_context: serenity_context.clone(),
-    })
-    .await
-    {
-        Ok(_) => Ok(Json(())),
-        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
-    }
+    let event = parse_event(&event).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
+    let wait_timeout = match query.wait_timeout {
+        Some(timeout) => std::time::Duration::from_millis(timeout),
+        None => templating::MAX_TEMPLATES_RETURN_WAIT_TIME,
+    };
+
+    let results = dispatch_and_wait(&serenity_context, &data, event, guild_id, wait_timeout)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(results))
 }

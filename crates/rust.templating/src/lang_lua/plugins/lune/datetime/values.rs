@@ -123,7 +123,6 @@ impl IntoLua for DateTimeValues {
     Conversion methods between chrono's timezone-aware `DateTime` to
     and from our non-timezone-aware `DateTimeValues` values struct
 */
-
 impl<T: TimeZone> From<DateTime<T>> for DateTimeValues {
     fn from(value: DateTime<T>) -> Self {
         Self {

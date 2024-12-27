@@ -95,7 +95,7 @@ pub mod templating_core {
         /// The name of the template as it appears on the template shop listing
         pub shop_name: Option<String>,
         /// The events that this template listens to
-        pub events: Option<Vec<String>>,
+        pub events: Vec<String>,
         /// The channel to send errors to
         pub error_channel: Option<serenity::all::ChannelId>,
         /// The content of the template

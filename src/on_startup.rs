@@ -1,4 +1,6 @@
-use silverpelt::data::Data;
+use silverpelt::{ar_event::AntiraidEvent, data::Data};
+
+use crate::dispatch::{dispatch, parse_event};
 
 /// Dispatches OnStartup events for all guilds with templates
 pub async fn on_startup(ctx: serenity::all::Context) -> Result<(), silverpelt::Error> {
@@ -17,14 +19,16 @@ pub async fn on_startup(ctx: serenity::all::Context) -> Result<(), silverpelt::E
         let ctx = ctx.clone();
 
         tokio::task::spawn(async move {
-            match crate::dispatch::event_listener(silverpelt::ar_event::EventHandlerContext {
-                guild_id,
-                data: data.clone(),
-                event: silverpelt::ar_event::AntiraidEvent::OnStartup(vec![]),
-                serenity_context: ctx.clone(),
-            })
-            .await
-            {
+            let event = AntiraidEvent::OnStartup(vec![]);
+            let event = match parse_event(&event) {
+                Ok(event) => event,
+                Err(e) => {
+                    log::error!("Failed to parse OnStartup event: {}", e);
+                    return;
+                }
+            };
+
+            match dispatch(&ctx, &data, event, guild_id).await {
                 Ok(_) => {}
                 Err(e) => {
                     log::error!("Failed to dispatch OnStartup event: {}", e);
