@@ -167,7 +167,7 @@ pub async fn dispatch(
     }) {
         log::info!("Dispatching event: {} to {}", event.name(), template.name);
 
-        match templating::execute_nowait(
+        match templating::execute(
             event.clone(),
             templating::ParseCompileState {
                 serenity_context: ctx.clone(),

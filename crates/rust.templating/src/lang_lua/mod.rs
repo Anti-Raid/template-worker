@@ -46,12 +46,6 @@ pub enum LuaVmAction {
         pragma: crate::TemplatePragma,
         event: event::Event,
     },
-    ExecNoWait {
-        content: String,
-        template: crate::Template,
-        pragma: crate::TemplatePragma,
-        event: event::Event,
-    },
     /// Stop the Lua VM entirely
     Stop {},
     /// Returns the memory usage of the Lua VM
@@ -448,7 +442,7 @@ pub async fn benchmark_vm(
     let reqwest_client_a = reqwest_client.clone();
 
     let start = std::time::Instant::now();
-    execute_nowait(
+    execute(
         event::Event::new(
             "Benchmark".to_string(),
             "Benchmark".to_string(),
@@ -464,8 +458,6 @@ pub async fn benchmark_vm(
         },
         pt,
     )
-    .await?
-    .wait_timeout(std::time::Duration::from_secs(10))
     .await?;
     let exec_no_wait = start.elapsed().as_micros();
 
@@ -556,45 +548,6 @@ pub async fn execute(
     lua.handle
         .send((
             LuaVmAction::Exec {
-                template: template.template,
-                content: template.template_content,
-                pragma: template.pragma,
-                event,
-            },
-            tx,
-        ))
-        .map_err(|e| format!("Could not send data to Lua thread: {}", e))?;
-
-    Ok(RenderTemplateHandle { rx })
-}
-
-/// Render a template given an event, state and template without waiting for the result
-///
-/// Pre-conditions: the serenity context's shard matches the guild itself
-pub async fn execute_nowait(
-    event: event::Event,
-    state: ParseCompileState,
-    template: crate::ParsedTemplate,
-) -> Result<RenderTemplateHandle, silverpelt::Error> {
-    let lua = get_lua_vm(
-        state.guild_id,
-        state.pool,
-        state.serenity_context,
-        state.reqwest_client,
-    )
-    .await?;
-
-    // Update last execution time.
-    lua.last_execution_time.store(
-        std::time::Instant::now(),
-        std::sync::atomic::Ordering::Release,
-    );
-
-    let (tx, rx) = tokio::sync::oneshot::channel();
-
-    lua.handle
-        .send((
-            LuaVmAction::ExecNoWait {
                 template: template.template,
                 content: template.template_content,
                 pragma: template.pragma,
