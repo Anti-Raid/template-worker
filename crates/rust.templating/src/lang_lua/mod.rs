@@ -14,9 +14,8 @@ mod handler;
 pub use handler::handle_event;
 
 use crate::atomicinstant;
-use crate::{MAX_TEMPLATES_EXECUTION_TIME, MAX_TEMPLATE_LIFETIME, MAX_TEMPLATE_MEMORY_USAGE};
+use crate::{MAX_TEMPLATES_EXECUTION_TIME, MAX_TEMPLATE_MEMORY_USAGE};
 use mlua::prelude::*;
-use moka::future::Cache;
 use serenity::all::GuildId;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -35,14 +34,19 @@ pub type XRc<T> = std::rc::Rc<T>;
 mod vm_manager;
 
 /// VM cache
-static VMS: LazyLock<Cache<GuildId, ArLua>> =
-    LazyLock::new(|| Cache::builder().time_to_idle(MAX_TEMPLATE_LIFETIME).build());
+static VMS: LazyLock<scc::HashMap<GuildId, ArLua>> = LazyLock::new(scc::HashMap::new);
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[allow(dead_code)]
 pub enum LuaVmAction {
     /// Execute a template
     Exec {
+        content: String,
+        template: crate::Template,
+        pragma: crate::TemplatePragma,
+        event: event::Event,
+    },
+    ExecNoWait {
         content: String,
         template: crate::Template,
         pragma: crate::TemplatePragma,
@@ -332,24 +336,178 @@ async fn get_lua_vm(
     serenity_context: serenity::all::Context,
     reqwest_client: reqwest::Client,
 ) -> Result<ArLua, silverpelt::Error> {
-    match VMS.get(&guild_id).await {
-        Some(vm) => {
-            if vm.broken.load(std::sync::atomic::Ordering::Acquire) {
-                let vm =
-                    vm_manager::create_lua_vm(guild_id, pool, serenity_context, reqwest_client)
-                        .await?;
-                VMS.insert(guild_id, vm.clone()).await;
-                return Ok(vm);
-            }
-            Ok(vm.clone())
+    let Some(mut vm) = VMS.get(&guild_id) else {
+        let vm =
+            vm_manager::create_lua_vm(guild_id, pool, serenity_context, reqwest_client).await?;
+        if let Err((_, alt_vm)) = VMS.insert_async(guild_id, vm.clone()).await {
+            return Ok(alt_vm);
         }
-        None => {
-            let vm =
-                vm_manager::create_lua_vm(guild_id, pool, serenity_context, reqwest_client).await?;
-            VMS.insert(guild_id, vm.clone()).await;
-            Ok(vm)
+        return Ok(vm);
+    };
+
+    if vm.broken.load(std::sync::atomic::Ordering::Acquire) {
+        let new_vm =
+            vm_manager::create_lua_vm(guild_id, pool, serenity_context, reqwest_client).await?;
+        *vm = new_vm.clone();
+        Ok(new_vm)
+    } else {
+        Ok(vm.clone())
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct FireBenchmark {
+    pub hashmap_insert_time: u128,
+    pub get_lua_vm: u128,
+    pub exec_simple: u128,
+    pub exec_no_wait: u128,
+    pub exec_error: u128,
+}
+
+/// Benchmark the Lua VM
+pub async fn benchmark_vm(
+    guild_id: GuildId,
+    pool: sqlx::PgPool,
+    serenity_context: serenity::all::Context,
+    reqwest_client: reqwest::Client,
+) -> Result<FireBenchmark, silverpelt::Error> {
+    // Get_lua_vm
+    let pool_a = pool.clone();
+    let guild_id_a = guild_id;
+    let serenity_context_a = serenity_context.clone();
+    let reqwest_client_a = reqwest_client.clone();
+
+    let start = std::time::Instant::now();
+    let _ = get_lua_vm(guild_id_a, pool_a, serenity_context_a, reqwest_client_a).await?;
+    let get_lua_vm = start.elapsed().as_micros();
+
+    let new_map = scc::HashMap::new();
+    let start = std::time::Instant::now();
+    let _ = new_map.insert_async(1, 1).await;
+    let hashmap_insert_time = start.elapsed().as_micros();
+
+    // Exec simple with wait
+    let pt = crate::ParsedTemplate {
+        template: crate::Template::Named("__benchmark".to_string()),
+        pragma: crate::TemplatePragma::default(),
+        template_content: "return 1".to_string(),
+    };
+
+    let pool_a = pool.clone();
+    let guild_id_a = guild_id;
+    let serenity_context_a = serenity_context.clone();
+    let reqwest_client_a = reqwest_client.clone();
+
+    let start = std::time::Instant::now();
+    let n: i32 = execute(
+        event::Event::new(
+            "Benchmark".to_string(),
+            "Benchmark".to_string(),
+            "Benchmark".to_string(),
+            event::ArcOrNormal::Normal(serde_json::Value::Null),
+            None,
+        ),
+        ParseCompileState {
+            serenity_context: serenity_context_a,
+            reqwest_client: reqwest_client_a,
+            guild_id: guild_id_a,
+            pool: pool_a,
+        },
+        pt,
+    )
+    .await?
+    .wait_timeout_then_response(std::time::Duration::from_secs(10))
+    .await?;
+    let exec_simple = start.elapsed().as_micros();
+
+    if n != 1 {
+        return Err(format!("Expected 1, got {}", n).into());
+    }
+
+    // Exec simple with no wait
+    let pt = crate::ParsedTemplate {
+        template: crate::Template::Named("__benchmark".to_string()),
+        pragma: crate::TemplatePragma::default(),
+        template_content: "return 1".to_string(),
+    };
+
+    let pool_a = pool.clone();
+    let guild_id_a = guild_id;
+    let serenity_context_a = serenity_context.clone();
+    let reqwest_client_a = reqwest_client.clone();
+
+    let start = std::time::Instant::now();
+    execute_nowait(
+        event::Event::new(
+            "Benchmark".to_string(),
+            "Benchmark".to_string(),
+            "Benchmark".to_string(),
+            event::ArcOrNormal::Normal(serde_json::Value::Null),
+            None,
+        ),
+        ParseCompileState {
+            serenity_context: serenity_context_a,
+            reqwest_client: reqwest_client_a,
+            guild_id: guild_id_a,
+            pool: pool_a,
+        },
+        pt,
+    )
+    .await?
+    .wait_timeout(std::time::Duration::from_secs(10))
+    .await?;
+    let exec_no_wait = start.elapsed().as_micros();
+
+    // Exec simple with wait
+    let pt = crate::ParsedTemplate {
+        template: crate::Template::Named("__benchmark".to_string()),
+        pragma: crate::TemplatePragma::default(),
+        template_content: "error('MyError')\nreturn 1".to_string(),
+    };
+
+    let pool_a = pool.clone();
+    let guild_id_a = guild_id;
+    let serenity_context_a = serenity_context.clone();
+    let reqwest_client_a = reqwest_client.clone();
+
+    let start = std::time::Instant::now();
+    let err = execute(
+        event::Event::new(
+            "Benchmark".to_string(),
+            "Benchmark".to_string(),
+            "Benchmark".to_string(),
+            event::ArcOrNormal::Normal(serde_json::Value::Null),
+            None,
+        ),
+        ParseCompileState {
+            serenity_context: serenity_context_a,
+            reqwest_client: reqwest_client_a,
+            guild_id: guild_id_a,
+            pool: pool_a,
+        },
+        pt,
+    )
+    .await?
+    .wait_timeout_then_response::<i32>(std::time::Duration::from_secs(10))
+    .await;
+    let exec_error = start.elapsed().as_micros();
+
+    match err {
+        Ok(_) => return Err("Expected error, got success".into()),
+        Err(e) => {
+            if !e.to_string().contains("MyError") {
+                return Err(format!("Expected MyError, got {}", e).into());
+            }
         }
     }
+
+    Ok(FireBenchmark {
+        get_lua_vm,
+        hashmap_insert_time,
+        exec_simple,
+        exec_no_wait,
+        exec_error,
+    })
 }
 
 #[derive(Clone)]
@@ -387,6 +545,45 @@ pub async fn execute(
     lua.handle
         .send((
             LuaVmAction::Exec {
+                template: template.template,
+                content: template.template_content,
+                pragma: template.pragma,
+                event,
+            },
+            tx,
+        ))
+        .map_err(|e| format!("Could not send data to Lua thread: {}", e))?;
+
+    Ok(RenderTemplateHandle { rx })
+}
+
+/// Render a template given an event, state and template without waiting for the result
+///
+/// Pre-conditions: the serenity context's shard matches the guild itself
+pub async fn execute_nowait(
+    event: event::Event,
+    state: ParseCompileState,
+    template: crate::ParsedTemplate,
+) -> Result<RenderTemplateHandle, silverpelt::Error> {
+    let lua = get_lua_vm(
+        state.guild_id,
+        state.pool,
+        state.serenity_context,
+        state.reqwest_client,
+    )
+    .await?;
+
+    // Update last execution time.
+    lua.last_execution_time.store(
+        std::time::Instant::now(),
+        std::sync::atomic::Ordering::Release,
+    );
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+
+    lua.handle
+        .send((
+            LuaVmAction::ExecNoWait {
                 template: template.template,
                 content: template.template_content,
                 pragma: template.pragma,
@@ -548,8 +745,15 @@ pub async fn dispatch_error(
 #[derive(Clone)]
 pub struct ThreadErrorTracker {
     pub tracker: ThreadTracker,
-    pub track_results_set: Rc<RefCell<Vec<String>>>,
-    pub returns: Rc<RefCell<HashMap<String, mlua::MultiValue>>>,
+    #[allow(clippy::type_complexity)]
+    pub returns: Rc<
+        RefCell<
+            HashMap<
+                String,
+                tokio::sync::mpsc::UnboundedSender<Option<mlua::Result<mlua::MultiValue>>>,
+            >,
+        >,
+    >,
 }
 
 impl ThreadErrorTracker {
@@ -557,7 +761,6 @@ impl ThreadErrorTracker {
     pub fn new(tracker: ThreadTracker) -> Self {
         Self {
             tracker,
-            track_results_set: Rc::new(RefCell::new(Vec::new())),
             returns: Rc::new(RefCell::new(HashMap::new())),
         }
     }
@@ -567,55 +770,14 @@ impl ThreadErrorTracker {
     }
 
     /// Track a threads result
-    #[allow(dead_code)]
-    pub fn track_thread(&self, th: mlua::Thread) {
-        self.track_results_set
-            .borrow_mut()
-            .push(self.thread_string(&th));
-    }
-
-    /// Wait for a threads result
-    #[allow(dead_code)]
-    pub async fn wait_for_result(&self, th: mlua::Thread) -> Option<mlua::MultiValue> {
-        let thread_string = self.thread_string(&th);
-
-        loop {
-            {
-                let returns = self.returns.borrow();
-                if let Some(mv) = returns.get(&thread_string) {
-                    return Some(mv.clone());
-                }
-            }
-
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-    }
-
-    /// Waits for a threads result with timeout
-    #[allow(dead_code)]
-    pub async fn wait_for_result_timeout(
+    pub fn track_thread(
         &self,
-        th: mlua::Thread,
-        timeout: std::time::Duration,
-    ) -> Option<mlua::MultiValue> {
-        let thread_string = self.thread_string(&th);
+        th: &mlua::Thread,
+    ) -> tokio::sync::mpsc::UnboundedReceiver<Option<mlua::Result<mlua::MultiValue>>> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        self.returns.borrow_mut().insert(self.thread_string(th), tx);
 
-        let start = std::time::Instant::now();
-
-        loop {
-            {
-                let returns = self.returns.borrow();
-                if let Some(mv) = returns.get(&thread_string) {
-                    return Some(mv.clone());
-                }
-            }
-
-            if start.elapsed() > timeout {
-                return None;
-            }
-
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
+        rx
     }
 }
 
@@ -634,27 +796,17 @@ impl SchedulerFeedback for ThreadErrorTracker {
                 return; // We can't do anything without metadata
             };
 
-            if self
-                .track_results_set
-                .borrow()
-                .contains(&self.thread_string(th))
-            {
-                let mut returns = self.returns.borrow_mut();
-                returns.insert(self.thread_string(th), mlua::MultiValue::from_vec(vec![]));
-            }
-
             let e = e.to_string();
 
             log_error(tm.inner.lua.clone(), template_name, e);
-        } else if let Some(Ok(mv)) = result {
-            if self
-                .track_results_set
-                .borrow()
-                .contains(&self.thread_string(th))
-            {
-                let mut returns = self.returns.borrow_mut();
-                returns.insert(self.thread_string(th), mv.clone());
-            }
+        }
+
+        if let Some(tx) = self.returns.borrow_mut().remove(&self.thread_string(th)) {
+            let _ = tx.send(match result {
+                Some(Ok(mv)) => Some(Ok(mv.clone())),
+                Some(Err(e)) => Some(Err(e.clone())),
+                None => None,
+            });
         }
     }
 }

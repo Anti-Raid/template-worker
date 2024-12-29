@@ -113,8 +113,8 @@ impl ThreadEntry {
                         broken_ref: Arc<std::sync::atomic::AtomicBool>,
                     ) -> Box<dyn Fn(&PanicHookInfo<'_>) + 'static + Sync + Send>
                     {
-                        Box::new(move |_| {
-                            log::error!("Lua thread panicked: {}", id);
+                        Box::new(move |pi| {
+                            log::error!("Lua thread panicked: {} ({})", id, pi);
                             broken_ref.store(true, std::sync::atomic::Ordering::Release);
                         })
                     }
@@ -195,21 +195,6 @@ impl ThreadEntry {
                             while let Some((action, callback)) = rx.recv().await {
                                 let tis_ref = tis_ref.clone();
 
-                                // Mark VM as broken if worker thread is broken
-                                if worker_broken.load(std::sync::atomic::Ordering::Acquire) {
-                                    tis_ref
-                                        .broken
-                                        .store(true, std::sync::atomic::Ordering::Release);
-
-                                    // Send error back
-                                    let _ = callback.send(LuaVmResult::LuaError {
-                                        err: "Worker thread is broken".to_string(),
-                                        template_name: None,
-                                    });
-
-                                    continue;
-                                }
-
                                 tokio::task::spawn_local(async move {
                                     let result = handle_event(action, &tis_ref).await;
 
@@ -279,6 +264,27 @@ impl ThreadPool {
             threads: RwLock::new(Vec::new()),
             max_threads: DEFAULT_MAX_THREADS,
         }
+    }
+
+    #[allow(dead_code)]
+    /// Fills the thread pool where needed
+    pub async fn fill(
+        &self,
+        pool: sqlx::PgPool,
+        serenity_context: serenity::all::Context,
+        reqwest_client: reqwest::Client,
+    ) -> Result<(), silverpelt::Error> {
+        let needed_threads = self.max_threads - self.threads_len().await;
+        for _ in 0..needed_threads {
+            self.add_thread(
+                pool.clone(),
+                serenity_context.clone(),
+                reqwest_client.clone(),
+            )
+            .await?;
+        }
+
+        Ok(())
     }
 
     /// Remove broken threads from the pool

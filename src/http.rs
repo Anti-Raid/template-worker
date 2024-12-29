@@ -37,7 +37,8 @@ pub fn create(
         .route(
             "/dispatch-event/:guild_id/@wait",
             post(dispatch_event_and_wait),
-        );
+        )
+        .route("/benchmark-vm/:guild_id", post(benchmark_vm));
     let router: Router<()> = router.with_state(AppData::new(data, ctx));
     router.into_make_service()
 }
@@ -101,4 +102,25 @@ async fn dispatch_event_and_wait(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(results))
+}
+
+/// Benchmarks a VM
+async fn benchmark_vm(
+    State(AppData {
+        data,
+        serenity_context,
+        ..
+    }): State<AppData>,
+    Path(guild_id): Path<serenity::all::GuildId>,
+) -> Response<templating::FireBenchmark> {
+    let bvm = templating::benchmark_vm(
+        guild_id,
+        data.pool.clone(),
+        serenity_context,
+        data.reqwest.clone(),
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(bvm))
 }
