@@ -20,6 +20,7 @@ pub mod templating_core {
 
     #[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
     pub struct TemplatePragma {
+        #[serde(default)]
         pub lang: TemplateLanguage,
 
         #[serde(default)]

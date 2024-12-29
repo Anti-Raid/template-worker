@@ -104,7 +104,7 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
             };
 
             let value = scheduler
-                .spawn_thread_and_wait("Exec", thread.clone(), args, None)
+                .spawn_thread_and_wait("Exec", thread.clone(), args)
                 .await;
 
             let json_value = if let Some(Ok(values)) = value {
