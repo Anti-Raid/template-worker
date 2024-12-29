@@ -6,7 +6,9 @@ pub(crate) mod state;
 mod plugins;
 use mlua_scheduler::taskmgr::SchedulerFeedback;
 use mlua_scheduler::TaskManager;
-use mlua_scheduler_ext::feedbacks::{MultipleSchedulerFeedback, ThreadTracker};
+use mlua_scheduler_ext::feedbacks::{
+    MultipleSchedulerFeedback, ThreadResultTracker, ThreadTracker,
+};
 use mlua_scheduler_ext::Scheduler;
 pub use plugins::PLUGINS;
 
@@ -17,8 +19,6 @@ use crate::atomicinstant;
 use crate::{MAX_TEMPLATES_EXECUTION_TIME, MAX_TEMPLATE_MEMORY_USAGE};
 use mlua::prelude::*;
 use serenity::all::GuildId;
-use std::cell::RefCell;
-use std::collections::HashMap;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::ops::Deref;
@@ -202,18 +202,21 @@ pub(crate) fn configure_lua_vm(
     // Also create the mlua scheduler in the app data
     let thread_tracker = ThreadTracker::new();
     let ter = ThreadErrorTracker::new(thread_tracker.clone());
+    let trt = ThreadResultTracker::new();
 
     let scheduler_feedback = MultipleSchedulerFeedback::new(vec![
         Box::new(thread_tracker.clone()),
         Box::new(ter.clone()),
+        Box::new(trt.clone()),
     ]);
 
     lua.set_app_data(thread_tracker);
     lua.set_app_data(ter);
+    lua.set_app_data(trt);
 
     let scheduler = Scheduler::new(TaskManager::new(lua.clone(), Rc::new(scheduler_feedback)));
 
-    scheduler.attach(&lua);
+    scheduler.attach();
 
     // Prelude code providing some basic functions directly to the Lua VM
     lua.load(
@@ -753,39 +756,12 @@ pub async fn dispatch_error(
 #[derive(Clone)]
 pub struct ThreadErrorTracker {
     pub tracker: ThreadTracker,
-    #[allow(clippy::type_complexity)]
-    pub returns: Rc<
-        RefCell<
-            HashMap<
-                String,
-                tokio::sync::mpsc::UnboundedSender<Option<mlua::Result<mlua::MultiValue>>>,
-            >,
-        >,
-    >,
 }
 
 impl ThreadErrorTracker {
     /// Creates a new thread error tracker
     pub fn new(tracker: ThreadTracker) -> Self {
-        Self {
-            tracker,
-            returns: Rc::new(RefCell::new(HashMap::new())),
-        }
-    }
-
-    pub fn thread_string(&self, th: &mlua::Thread) -> String {
-        format!("{:?}", th.to_pointer())
-    }
-
-    /// Track a threads result
-    pub fn track_thread(
-        &self,
-        th: &mlua::Thread,
-    ) -> tokio::sync::mpsc::UnboundedReceiver<Option<mlua::Result<mlua::MultiValue>>> {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        self.returns.borrow_mut().insert(self.thread_string(th), tx);
-
-        rx
+        Self { tracker }
     }
 }
 
@@ -807,14 +783,6 @@ impl SchedulerFeedback for ThreadErrorTracker {
             let e = e.to_string();
 
             log_error(tm.inner.lua.clone(), template_name, e);
-        }
-
-        if let Some(tx) = self.returns.borrow_mut().remove(&self.thread_string(th)) {
-            let _ = tx.send(match result {
-                Some(Ok(mv)) => Some(Ok(mv.clone())),
-                Some(Err(e)) => Some(Err(e.clone())),
-                None => None,
-            });
         }
     }
 }

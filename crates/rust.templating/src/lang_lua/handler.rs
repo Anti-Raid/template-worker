@@ -80,12 +80,10 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
 
             thread_tracker.set_metadata(thread.clone(), exec_name.clone());
 
-            let thread_error_tracker = tis_ref
+            let scheduler = tis_ref
                 .lua
-                .app_data_ref::<crate::lang_lua::ThreadErrorTracker>()
+                .app_data_ref::<mlua_scheduler_ext::Scheduler>()
                 .unwrap();
-
-            let mut rx = thread_error_tracker.track_thread(&thread);
 
             let args = match (event, template_context).into_lua_multi(&tis_ref.lua) {
                 Ok(f) => f,
@@ -105,43 +103,9 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
                 }
             };
 
-            let task_mgr = mlua_scheduler::taskmgr::get(&tis_ref.lua);
-            let result = task_mgr
-                .resume_thread("SpawnThread", thread.clone(), args)
+            let value = scheduler
+                .spawn_thread_and_wait("Exec", thread.clone(), args, None)
                 .await;
-            task_mgr
-                .inner
-                .feedback
-                .on_response("SpawnThread", &task_mgr, &thread, result.as_ref());
-
-            match result {
-                Some(Err(e)) => {
-                    // Mark memory error'd VMs as broken automatically to avoid user grief/pain
-                    if let LuaError::MemoryError(_) = e {
-                        // Mark VM as broken
-                        tis_ref
-                            .broken
-                            .store(true, std::sync::atomic::Ordering::Release);
-                    }
-
-                    return LuaVmResult::LuaError {
-                        err: e.to_string(),
-                        template_name: Some(exec_name),
-                    };
-                }
-                _ => {}
-            };
-
-            let mut value: Option<mlua::Result<LuaMultiValue>> = None;
-            while let Ok(Some(next)) =
-                tokio::time::timeout(crate::MAX_TEMPLATES_RETURN_WAIT_TIME, rx.recv()).await
-            {
-                if next.is_none() {
-                    break;
-                }
-
-                value = next;
-            }
 
             let json_value = if let Some(Ok(values)) = value {
                 match values.len() {
@@ -265,10 +229,12 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
 
             thread_tracker.set_metadata(thread.clone(), exec_name.clone());
 
-            match tis_ref
+            let scheduler = tis_ref
                 .lua
-                .push_thread_back(thread, (event, template_context))
-            {
+                .app_data_ref::<mlua_scheduler_ext::Scheduler>()
+                .unwrap();
+
+            let args = match (event, template_context).into_lua_multi(&tis_ref.lua) {
                 Ok(f) => f,
                 Err(e) => {
                     // Mark memory error'd VMs as broken automatically to avoid user grief/pain
@@ -286,7 +252,8 @@ pub async fn handle_event(action: LuaVmAction, tis_ref: &ArLuaThreadInnerState) 
                 }
             };
 
-            // Send acknoledgement
+            scheduler.spawn_thread("Exec", thread.clone(), args).await;
+
             LuaVmResult::Ok {
                 result_val: serde_json::Value::Null,
             }
