@@ -6,7 +6,7 @@ use crate::{
 use serenity::all::GuildId;
 use std::{panic::PanicHookInfo, sync::Arc, time::Duration};
 
-pub fn lua_thread_impl(
+pub async fn create_lua_vm(
     guild_id: GuildId,
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,

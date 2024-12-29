@@ -87,6 +87,7 @@ git = "https://github.com/infinitybotlist/kittycat"
 branch = "main"
 
 [features]
-default = ["thread_proc"]
+default = ["threadpool_proc"]
 thread_proc = [] # Use threads for the Lua VM
+threadpool_proc = [] # Use fixed-size thread pool for Lua VMs
 send = ["mlua/send"]
