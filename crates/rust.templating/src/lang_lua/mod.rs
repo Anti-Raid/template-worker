@@ -244,9 +244,17 @@ pub(crate) fn configure_lua_vm(
     .exec()?;
 
     // Patch coroutine and enable task
-    mlua_scheduler::userdata::patch_coroutine_lib(&lua)?;
+    let scheduler_lib = mlua_scheduler::userdata::scheduler_lib(&lua)?;
+
     lua.globals()
-        .set("task", mlua_scheduler::userdata::task_lib(&lua)?)?;
+        .set("scheduler", scheduler_lib.clone())
+        .expect("Failed to set scheduler global");
+
+    mlua_scheduler::userdata::patch_coroutine_lib(&lua)?;
+    lua.globals().set(
+        "task",
+        mlua_scheduler::userdata::task_lib(&lua, scheduler_lib)?,
+    )?;
 
     lua.sandbox(true)?; // We explicitly want globals to be shared across all scripts in this VM
     lua.set_memory_limit(MAX_TEMPLATE_MEMORY_USAGE)?;
