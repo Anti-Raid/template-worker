@@ -617,6 +617,19 @@ pub fn plugin_docs() -> templating_docgen::Plugin {
                 })
             })
         })
+        .type_mut("SendMessageChannelAction", "Options for sending a message in a channel in Discord", |mut t| {
+            t
+            .field("channel_id", |f| {
+                f
+                .typ("string")
+                .description("The channel ID to send the message in")
+            })
+            .field("data", |f| {
+                f
+                .typ("Serenity.CreateMessage")
+                .description("The data of the message to send")
+            })
+        })
         .type_mut(
             "DiscordExecutor",
             "DiscordExecutor allows templates to access/use the Discord API in a sandboxed form.",
@@ -681,7 +694,7 @@ pub fn plugin_docs() -> templating_docgen::Plugin {
                     typ
                     .description("Creates a message")
                     .parameter("data", |p| {
-                        p.typ("CreateMessage").description("Options for creating a message.")
+                        p.typ("SendMessageChannelAction").description("Options for creating a message.")
                     })
                     .return_("MessageHandle", |p| {
                         p.description("The message")
