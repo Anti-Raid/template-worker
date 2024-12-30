@@ -22,7 +22,7 @@ pub static PLUGINS: LazyLock<indexmap::IndexMap<String, (ModuleFn, Option<Module
             "@antiraid/kv".to_string() => (kv::init_plugin as ModuleFn, Some(kv::plugin_docs as ModuleDocFn)),
             "@antiraid/page".to_string() => (page::init_plugin as ModuleFn, Some(page::plugin_docs as ModuleDocFn)),
             "@antiraid/permissions".to_string() => (permissions::init_plugin as ModuleFn, Some(permissions::plugin_docs as ModuleDocFn)),
-            "@antiraid/promise".to_string() => (promise::init_plugin as ModuleFn, None),
+            "@antiraid/promise".to_string() => (promise::init_plugin as ModuleFn, Some(promise::plugin_docs as ModuleDocFn)),
             "@antiraid/stings".to_string() => (stings::init_plugin as ModuleFn, Some(stings::plugin_docs as ModuleDocFn)),
             "@antiraid/stream".to_string() => (stream::init_plugin as ModuleFn, Some(stream::plugin_docs as ModuleDocFn)),
             "@antiraid/typesext".to_string() => (typesext::init_plugin as ModuleFn, Some(typesext::plugin_docs as ModuleDocFn)),

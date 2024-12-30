@@ -102,6 +102,29 @@ pub type LuaPromiseRef = LuaUserDataRefMut<LuaPromise>;
 
 impl LuaUserData for LuaPromise {}
 
+pub fn plugin_docs() -> templating_docgen::Plugin {
+    templating_docgen::Plugin::default()
+        .name("@antiraid/promise")
+        .description("Lua Promises, yield for a promise to execute the async action returning its result.")
+        .type_mut(
+            "LuaPromise",
+            "LuaPromise<T> provides a promise that must be yielded to actually execute and get the result of the async action.",
+            |t| {
+                t
+                .add_generic("T")
+            }
+        )
+        .method_mut("yield", |m| {
+            m.description("Yields the promise to execute the async action and return its result. Note that this is the only function other than `stream.next` that yields.")
+            .parameter("promise", |p| {
+                p.typ("LuaPromise<T>").description("The promise to yield.")
+            })
+            .return_("T", |r| {
+                r.typ("T").description("The result of executing the promise.")
+            })
+        })
+}
+
 pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
     let module = lua.create_table()?;
 

@@ -275,7 +275,7 @@ pub fn plugin_docs() -> templating_docgen::Plugin {
             })
             .field("type", |f| {
                 f
-                .typ("string?")
+                .typ("number?")
                 .description("The type of the channel")
             })
             .field("position", |f| {
@@ -320,12 +320,12 @@ pub fn plugin_docs() -> templating_docgen::Plugin {
             })
             .field("video_quality_mode", |f| {
                 f
-                .typ("string?")
+                .typ("number?")
                 .description("The video quality mode of the channel")
             })
             .field("default_auto_archive_duration", |f| {
                 f
-                .typ("string?")
+                .typ("number?")
                 .description("The default auto archive duration of the channel")
             })
             .field("flags", |f| {
@@ -350,12 +350,12 @@ pub fn plugin_docs() -> templating_docgen::Plugin {
             })
             .field("default_sort_order", |f| {
                 f
-                .typ("string?")
+                .typ("number?")
                 .description("The default sort order of the channel")
             })
             .field("default_forum_layout", |f| {
                 f
-                .typ("string?")
+                .typ("number?")
                 .description("The default forum layout of the channel")
             })
         })
@@ -384,7 +384,7 @@ pub fn plugin_docs() -> templating_docgen::Plugin {
             })
             .field("auto_archive_duration", |f| {
                 f
-                .typ("string?")
+                .typ("number?")
                 .description("The auto archive duration of the thread")
             })
             .field("locked", |f| {
@@ -504,7 +504,7 @@ pub fn plugin_docs() -> templating_docgen::Plugin {
             })
             .field("color", |f| {
                 f
-                .typ("string?")
+                .typ("number?")
                 .description("The color of the embed")
             })
             .field("footer", |f| {
@@ -585,8 +585,38 @@ pub fn plugin_docs() -> templating_docgen::Plugin {
                         .description("The inner data of the message")
                     })
                 })
+                .method_mut("await_component_interaction", |m| {
+                    m
+                    .description("Awaits a component interaction on the message")
+                    .return_("stream", |r| {
+                        r
+                        .typ("LuaStream<MessageComponentHandle>")
+                        .description("The stream of component interaction handles")
+                    })
+                })
             }
         )
+        .type_mut("MessageComponentHandle", "A handle to a message component interaction in Discord, as represented by AntiRaid. Internal fields are subject to change", |mut t| {
+            t
+            .method_mut("data", |f| {
+                f
+                .description("The inner data of the message component interaction")
+                .return_("data", |r| {
+                    r
+                    .typ("any")
+                    .description("The inner data of the message component interaction")
+                })
+            })
+            .method_mut("custom_id", |f| {
+                f
+                .description("The custom ID of the message component interaction")
+                .return_("custom_id", |r| {
+                    r
+                    .typ("string")
+                    .description("The custom ID of the message component interaction")
+                })
+            })
+        })
         .type_mut(
             "DiscordExecutor",
             "DiscordExecutor allows templates to access/use the Discord API in a sandboxed form.",

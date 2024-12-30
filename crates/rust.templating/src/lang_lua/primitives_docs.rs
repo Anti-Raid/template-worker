@@ -70,6 +70,13 @@ pub fn document_primitives() -> templating_docgen::PrimitiveListBuilder {
                 "IEEE 754 double-precision floating point",
             )
         })
+        .add("byte", "number", "An unsigned 8-bit integer that semantically stores a byte of information", |p| {
+            p.add_constraint(
+                "range",
+                "The range of values this number can take on",
+                &format!("0-{}", u8::MAX),
+            )
+        })
         .add("bool", "boolean", "A boolean value.", |p| p)
         .add("char", "string", "A single Unicode character.", |p| {
             p.add_constraint(
