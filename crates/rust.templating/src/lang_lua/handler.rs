@@ -10,7 +10,6 @@ pub async fn handle_event(
     tis_ref: &ArLuaThreadInnerState,
     guild_state: Rc<super::state::GuildState>,
 ) -> LuaVmResult {
-    let guild_id = guild_state.guild_id;
     match action {
         LuaVmAction::Exec {
             content,
@@ -73,14 +72,6 @@ pub async fn handle_event(
                 }
             };
 
-            // Mark thread with template name
-            let thread_tracker = tis_ref
-                .lua
-                .app_data_ref::<mlua_scheduler_ext::feedbacks::ThreadTracker>()
-                .unwrap();
-
-            thread_tracker.set_metadata(thread.clone(), format!("{}.{}", guild_id, exec_name));
-
             let scheduler = tis_ref
                 .lua
                 .app_data_ref::<mlua_scheduler_ext::Scheduler>()
@@ -101,9 +92,7 @@ pub async fn handle_event(
                 }
             };
 
-            let value = scheduler
-                .spawn_thread_and_wait("Exec", thread.clone(), args)
-                .await;
+            let value = scheduler.spawn_thread_and_wait("Exec", thread, args).await;
 
             let json_value = if let Some(Ok(values)) = value {
                 match values.len() {
