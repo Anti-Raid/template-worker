@@ -136,14 +136,16 @@ impl ThreadEntry {
                         );
 
                         // Create Lua VM
-                        let userdata = crate::lang_lua::create_lua_vm_userdata(
-                            last_execution_time.clone(),
-                            send.guild_id,
-                            pool.clone(),
-                            serenity_context.clone(),
-                            reqwest_client.clone(),
-                        )
-                        .expect("Failed to create Lua VM userdata");
+                        let gs = XRc::new(
+                            crate::lang_lua::create_guild_state(
+                                last_execution_time.clone(),
+                                send.guild_id,
+                                pool.clone(),
+                                serenity_context.clone(),
+                                reqwest_client.clone(),
+                            )
+                            .expect("Failed to create Lua VM userdata"),
+                        );
 
                         let bytecode_cache = BytecodeCache::new();
 
@@ -160,8 +162,6 @@ impl ThreadEntry {
                                 }
                             },
                         );
-
-                        tis_ref.lua.set_app_data(userdata);
 
                         // Start the scheduler in a tokio task
                         let broken_sched_ref = tis_ref.broken.clone();
@@ -194,39 +194,9 @@ impl ThreadEntry {
                         tokio::task::spawn_local(async move {
                             while let Some((action, callback)) = rx.recv().await {
                                 let tis_ref = tis_ref.clone();
-
+                                let gs = gs.clone();
                                 tokio::task::spawn_local(async move {
-                                    let result = handle_event(action, &tis_ref).await;
-
-                                    #[allow(clippy::single_match)]
-                                    match result {
-                                        LuaVmResult::LuaError {
-                                            ref err,
-                                            ref template_name,
-                                        } => {
-                                            let template_name = template_name.clone();
-                                            log::error!(
-                                                "Lua error in template {}: {}",
-                                                template_name
-                                                    .clone()
-                                                    .unwrap_or_else(|| "Unknown".to_string()),
-                                                err
-                                            );
-
-                                            if let Some(template_name) = template_name.as_ref() {
-                                                crate::lang_lua::log_error(
-                                                    tis_ref.lua.clone(),
-                                                    template_name.clone(),
-                                                    format!(
-                                                        "Lua error in template {}: {}",
-                                                        template_name, err
-                                                    ),
-                                                )
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-
+                                    let result = handle_event(action, &tis_ref, gs).await;
                                     let _ = callback.send(result);
                                 });
                             }

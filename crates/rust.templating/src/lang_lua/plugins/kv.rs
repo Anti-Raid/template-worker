@@ -322,17 +322,13 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
 
     module.set(
         "new",
-        lua.create_function(|lua, (token,): (crate::TemplateContextRef,)| {
-            let Some(data) = lua.app_data_ref::<state::LuaUserData>() else {
-                return Err(LuaError::external("No app data found"));
-            };
-
+        lua.create_function(|_, (token,): (crate::TemplateContextRef,)| {
             let executor = KvExecutor {
                 template_data: token.template_data.clone(),
-                guild_id: data.guild_id,
-                pool: data.pool.clone(),
-                ratelimits: data.kv_ratelimits.clone(),
-                kv_constraints: data.kv_constraints,
+                guild_id: token.guild_state.guild_id,
+                pool: token.guild_state.pool.clone(),
+                ratelimits: token.guild_state.kv_ratelimits.clone(),
+                kv_constraints: token.guild_state.kv_constraints,
             };
 
             Ok(executor)

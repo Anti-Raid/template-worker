@@ -15,8 +15,8 @@ pub use lang_lua::primitives_docs;
 pub use lang_lua::state::LuaKVConstraints;
 pub use lang_lua::PLUGINS;
 pub use lang_lua::{
-    benchmark_vm, dispatch_error, execute, handle_event, ArLuaThreadInnerState, FireBenchmark,
-    LuaVmAction, LuaVmResult, ParseCompileState, RenderTemplateHandle,
+    benchmark_vm, dispatch_error, execute, handle_event, log_error, ArLuaThreadInnerState,
+    FireBenchmark, LuaVmAction, LuaVmResult, ParseCompileState, RenderTemplateHandle,
 };
 pub use serenitystore::{
     setup_shard_messenger, shard_count, shard_ids, shard_messenger_for_guild,

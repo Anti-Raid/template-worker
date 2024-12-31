@@ -389,17 +389,13 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
 
     module.set(
         "new",
-        lua.create_function(|lua, (token,): (crate::TemplateContextRef,)| {
-            let Some(data) = lua.app_data_ref::<state::LuaUserData>() else {
-                return Err(LuaError::external("No app data found"));
-            };
-
+        lua.create_function(|_, (token,): (crate::TemplateContextRef,)| {
             let executor = StingExecutor {
                 template_data: token.template_data.clone(),
-                guild_id: data.guild_id,
-                serenity_context: data.serenity_context.clone(),
-                ratelimits: data.sting_ratelimits.clone(),
-                pool: data.pool.clone(),
+                guild_id: token.guild_state.guild_id,
+                serenity_context: token.guild_state.serenity_context.clone(),
+                ratelimits: token.guild_state.sting_ratelimits.clone(),
+                pool: token.guild_state.pool.clone(),
             };
 
             Ok(executor)

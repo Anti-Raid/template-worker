@@ -1,4 +1,3 @@
-use crate::lang_lua::state;
 use ar_settings::types::{
     HookContext, OperationType, SettingCreator, SettingDeleter, SettingUpdater, SettingView, SettingsError
 };
@@ -44,13 +43,11 @@ impl SettingView for LuaSettingExecutor {
                 "(Anti-Raid) View Setting".to_string(),
                 "Settings/View".to_string(),
                 self.name.clone(),
-                crate::event::ArcOrNormal::Normal(
-                    serde_json::to_value(filters).map_err(|e| SettingsError::Generic {
-                        message: e.to_string(),
-                        src: "LuaSettingExecutor".to_string(),
-                        typ: "internal".to_string(),
-                    })?
-                ),
+                serde_json::to_value(filters).map_err(|e| SettingsError::Generic {
+                    message: e.to_string(),
+                    src: "LuaSettingExecutor".to_string(),
+                    typ: "internal".to_string(),
+                })?,
                 Some(context.author.to_string()),
             ),
             crate::ParseCompileState {
@@ -72,12 +69,23 @@ impl SettingView for LuaSettingExecutor {
             src: "LuaSettingExecutor".to_string(),
             typ: "internal".to_string(),
         })?
-        .wait_timeout_then_response::<Vec<indexmap::IndexMap<String, splashcore_rs::value::Value>>>(crate::MAX_TEMPLATES_RETURN_WAIT_TIME)
+        .wait_and_log_error(
+            &self.template.exec_name(),
+            context.guild_id,
+            &context.data.data.pool,
+            &context.data.serenity_context
+        )
         .await
         .map_err(|e| SettingsError::Generic {
             message: e.to_string(),
             src: "LuaSettingExecutor".to_string(),
             typ: "internal#wait_timeout".to_string(),
+        })?
+        .to_response::<Vec<indexmap::IndexMap<String, splashcore_rs::value::Value>>>()
+        .map_err(|e| SettingsError::Generic {
+            message: e.to_string(),
+            src: "LuaSettingExecutor".to_string(),
+            typ: "internal#to_response".to_string(),
         })?;
 
         Ok(result)
@@ -96,13 +104,11 @@ impl SettingCreator for LuaSettingExecutor {
                 "(Anti-Raid) Create Setting".to_string(),
                 "Settings/Create".to_string(),
                 self.name.clone(),
-                crate::event::ArcOrNormal::Normal(
-                    serde_json::to_value(state).map_err(|e| SettingsError::Generic {
-                        message: e.to_string(),
-                        src: "LuaSettingExecutor".to_string(),
-                        typ: "internal".to_string(),
-                    })?
-                ),
+                serde_json::to_value(state).map_err(|e| SettingsError::Generic {
+                    message: e.to_string(),
+                    src: "LuaSettingExecutor".to_string(),
+                    typ: "internal".to_string(),
+                })?,
                 Some(context.author.to_string()),
             ),
             crate::ParseCompileState {
@@ -124,12 +130,23 @@ impl SettingCreator for LuaSettingExecutor {
             src: "LuaSettingExecutor".to_string(),
             typ: "internal".to_string(),
         })?
-        .wait_timeout_then_response::<indexmap::IndexMap<String, splashcore_rs::value::Value>>(crate::MAX_TEMPLATES_RETURN_WAIT_TIME)
+        .wait_and_log_error(
+            &self.template.exec_name(),
+            context.guild_id,
+            &context.data.data.pool,
+            &context.data.serenity_context
+        )
         .await
         .map_err(|e| SettingsError::Generic {
             message: e.to_string(),
             src: "LuaSettingExecutor".to_string(),
             typ: "internal#wait_timeout".to_string(),
+        })?
+        .to_response::<indexmap::IndexMap<String, splashcore_rs::value::Value>>()
+        .map_err(|e| SettingsError::Generic {
+            message: e.to_string(),
+            src: "LuaSettingExecutor".to_string(),
+            typ: "internal#to_response".to_string(),
         })?;
 
         Ok(result)
@@ -148,12 +165,11 @@ impl SettingUpdater for LuaSettingExecutor {
                 "(Anti-Raid) Update Setting".to_string(),
                 "Settings/Update".to_string(),
                 self.name.clone(),
-                crate::event::ArcOrNormal::Normal(
-                    serde_json::to_value(state).map_err(|e| SettingsError::Generic {
-                        message: e.to_string(),
-                        src: "LuaSettingExecutor".to_string(),
-                        typ: "internal".to_string(),
-                    })?),
+                serde_json::to_value(state).map_err(|e| SettingsError::Generic {
+                    message: e.to_string(),
+                    src: "LuaSettingExecutor".to_string(),
+                    typ: "internal".to_string(),
+                })?,
                 Some(context.author.to_string()),
             ),
             crate::ParseCompileState {
@@ -175,12 +191,23 @@ impl SettingUpdater for LuaSettingExecutor {
             src: "LuaSettingExecutor".to_string(),
             typ: "internal".to_string(),
         })?
-        .wait_timeout_then_response::<indexmap::IndexMap<String, splashcore_rs::value::Value>>(crate::MAX_TEMPLATES_RETURN_WAIT_TIME)
+        .wait_and_log_error(
+            &self.template.exec_name(),
+            context.guild_id,
+            &context.data.data.pool,
+            &context.data.serenity_context
+        )
         .await
         .map_err(|e| SettingsError::Generic {
             message: e.to_string(),
             src: "LuaSettingExecutor".to_string(),
             typ: "internal#wait_timeout".to_string(),
+        })?
+        .to_response::<indexmap::IndexMap<String, splashcore_rs::value::Value>>()
+        .map_err(|e| SettingsError::Generic {
+            message: e.to_string(),
+            src: "LuaSettingExecutor".to_string(),
+            typ: "internal#to_response".to_string(),
         })?;
 
         Ok(result)
@@ -200,7 +227,7 @@ impl SettingDeleter for LuaSettingExecutor {
                 "(Anti-Raid) Delete Setting".to_string(),
                 "Settings/Delete".to_string(),
                 self.name.clone(),
-                crate::event::ArcOrNormal::Normal(pkey.to_json()),
+                pkey.to_json(),
                 Some(context.author.to_string()),
             ),
             crate::ParseCompileState {
@@ -222,12 +249,23 @@ impl SettingDeleter for LuaSettingExecutor {
             src: "LuaSettingExecutor".to_string(),
             typ: "internal".to_string(),
         })?
-        .wait_timeout_then_response::<bool>(crate::MAX_TEMPLATES_RETURN_WAIT_TIME)
+        .wait_and_log_error(
+            &self.template.exec_name(),
+            context.guild_id,
+            &context.data.data.pool,
+            &context.data.serenity_context
+        )
         .await
         .map_err(|e| SettingsError::Generic {
             message: e.to_string(),
             src: "LuaSettingExecutor".to_string(),
             typ: "internal#wait_timeout".to_string(),
+        })?
+        .to_response::<bool>()
+        .map_err(|e| SettingsError::Generic {
+            message: e.to_string(),
+            src: "LuaSettingExecutor".to_string(),
+            typ: "internal#to_response".to_string(),
         })?;
 
         if !result {
@@ -753,14 +791,10 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
 
     module.set(
         "create_page",
-        lua.create_function(|lua, (token,): (crate::TemplateContextRef,)| {
-            let Some(data) = lua.app_data_ref::<state::LuaUserData>() else {
-                return Err(LuaError::external("No app data found"));
-            };
-
+        lua.create_function(|_, (token,): (crate::TemplateContextRef,)| {
             let page = CreatePage {
                 page_id: sqlx::types::Uuid::new_v4().to_string(),
-                guild_id: data.guild_id,
+                guild_id: token.guild_state.guild_id,
                 template: token.template_data.template.clone(),
                 title: token.template_data.path.clone(),
                 description: "Missing description".to_string(),

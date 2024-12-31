@@ -142,7 +142,7 @@ pub struct TemplateData {
 }
 
 #[allow(dead_code)]
-pub struct LuaUserData {
+pub struct GuildState {
     pub last_execution_time: Arc<crate::atomicinstant::AtomicInstant>,
     pub pool: sqlx::PgPool,
     pub guild_id: serenity::all::GuildId,

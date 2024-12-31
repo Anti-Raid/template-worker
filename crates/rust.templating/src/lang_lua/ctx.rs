@@ -1,20 +1,23 @@
 use mlua::prelude::*;
-use serde::{Deserialize, Serialize};
 use std::rc::Rc;
 
-#[derive(Serialize, Deserialize)]
 pub struct TemplateContext {
+    pub guild_state: Rc<super::state::GuildState>,
+
+    /// The template data
     pub template_data: Rc<super::state::TemplateData>,
 
-    #[serde(skip)]
-    #[serde(default = "std::sync::Mutex::default")]
     /// The cached serialized value of the template data
     cached_template_data: std::sync::Mutex<Option<LuaValue>>,
 }
 
 impl TemplateContext {
-    pub fn new(template_data: super::state::TemplateData) -> Self {
+    pub fn new(
+        guild_state: Rc<super::state::GuildState>,
+        template_data: super::state::TemplateData,
+    ) -> Self {
         Self {
+            guild_state,
             template_data: Rc::new(template_data),
             cached_template_data: std::sync::Mutex::default(),
         }
@@ -44,20 +47,19 @@ impl LuaUserData for TemplateContext {
             Ok(v)
         });
 
-        fields.add_field_method_get("guild_id", |lua, _| {
-            let Some(data) = lua.app_data_ref::<crate::lang_lua::state::LuaUserData>() else {
-                return Err(LuaError::external("No app data found"));
-            };
-
-            Ok(data.guild_id.to_string())
+        fields.add_field_method_get("guild_id", |_, this| {
+            Ok(this.guild_state.guild_id.to_string())
         });
 
-        fields.add_field_method_get("current_user", |lua, _| {
-            let Some(data) = lua.app_data_ref::<crate::lang_lua::state::LuaUserData>() else {
-                return Err(LuaError::external("No app data found"));
-            };
-
-            let v = lua.to_value(&data.serenity_context.cache.current_user().clone())?;
+        fields.add_field_method_get("current_user", |lua, this| {
+            let v = lua.to_value(
+                &this
+                    .guild_state
+                    .serenity_context
+                    .cache
+                    .current_user()
+                    .clone(),
+            )?;
             Ok(v)
         });
     }

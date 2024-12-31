@@ -1,11 +1,7 @@
 use serenity::all::{Context, FullEvent, GuildId, Interaction};
 use silverpelt::ar_event::AntiraidEvent;
 use silverpelt::data::Data;
-use std::sync::Arc;
-use templating::{
-    cache::get_all_guild_templates,
-    event::{ArcOrNormal, Event},
-};
+use templating::{cache::get_all_guild_templates, event::Event};
 
 #[inline]
 const fn not_audit_loggable_event() -> &'static [&'static str] {
@@ -80,7 +76,7 @@ pub async fn discord_event_dispatch(
             event_titlename,
             "Discord".to_string(),
             event.snake_case_name().to_uppercase(),
-            ArcOrNormal::Arc(Arc::new(serde_json::to_value(event)?)),
+            serde_json::to_value(event)?,
             user_id.map(|u| u.to_string()),
         ),
         guild_id,
@@ -95,59 +91,59 @@ pub fn parse_event(event: &AntiraidEvent) -> Result<Event, silverpelt::Error> {
             event.event_titlename.clone(),
             "Custom".to_string(),
             event.event_name.clone(),
-            ArcOrNormal::Arc(Arc::new(event.event_data.clone())),
+            event.event_data.clone(),
             None,
         )),
         AntiraidEvent::StingCreate(ref sting) => Ok(Event::new(
             "(Anti Raid) Sting Created".to_string(),
             "StingCreate".to_string(),
             "StingCreate".to_string(),
-            ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
+            serde_json::to_value(sting)?,
             Some(sting.creator.to_string()),
         )),
         AntiraidEvent::StingUpdate(ref sting) => Ok(Event::new(
             "(Anti Raid) Sting Updated".to_string(),
             "StingUpdate".to_string(),
             "StingUpdate".to_string(),
-            ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
+            serde_json::to_value(sting)?,
             Some(sting.creator.to_string()),
         )),
         AntiraidEvent::StingExpire(ref sting) => Ok(Event::new(
             "(Anti Raid) Sting Expired".to_string(),
             "StingExpire".to_string(),
             "StingExpire".to_string(),
-            ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
+            serde_json::to_value(sting)?,
             Some(sting.creator.to_string()),
         )),
         AntiraidEvent::StingDelete(ref sting) => Ok(Event::new(
             "(Anti Raid) Sting Deleted".to_string(),
             "StingDelete".to_string(),
             "StingDelete".to_string(),
-            ArcOrNormal::Arc(Arc::new(serde_json::to_value(sting)?)),
+            serde_json::to_value(sting)?,
             Some(sting.creator.to_string()),
         )),
         AntiraidEvent::PunishmentCreate(ref punishment) => Ok(Event::new(
             "(Anti Raid) Punishment Created".to_string(),
             "PunishmentCreate".to_string(),
             "PunishmentCreate".to_string(),
-            ArcOrNormal::Arc(Arc::new(serde_json::to_value(punishment)?)),
+            serde_json::to_value(punishment)?,
             Some(punishment.creator.to_string()),
         )),
         AntiraidEvent::PunishmentExpire(ref punishment) => Ok(Event::new(
             "(Anti Raid) Punishment Expired".to_string(),
             "PunishmentExpire".to_string(),
             "PunishmentExpire".to_string(),
-            ArcOrNormal::Arc(Arc::new(serde_json::to_value(punishment)?)),
+            serde_json::to_value(punishment)?,
             Some(punishment.creator.to_string()),
         )),
         AntiraidEvent::OnStartup(ref modified) => Ok(Event::new(
             "(Anti Raid) On Startup".to_string(),
             "OnStartup".to_string(),
             "OnStartup".to_string(),
-            ArcOrNormal::Arc(Arc::new(serde_json::json!({
+            serde_json::json!({
                     "targets": modified
                 }
-            ))),
+            ),
             None,
         )),
     }
@@ -179,7 +175,19 @@ pub async fn dispatch(
         )
         .await
         {
-            Ok(_) => {}
+            Ok(handle) => {
+                let template_name = template.name.clone();
+                let pool = data.pool.clone();
+                let serenity_context = ctx.clone();
+                tokio::task::spawn(async move {
+                    handle
+                        .wait_and_log_error(&template_name, guild_id, &pool, &serenity_context)
+                        .await
+                        .map_err(|e| {
+                            log::error!("Error while waiting for template: {}", e);
+                        })
+                });
+            }
             Err(e) => {
                 templating::dispatch_error(ctx, &e.to_string(), guild_id, template).await?;
             }
@@ -218,10 +226,15 @@ pub async fn dispatch_and_wait(
         .await
         {
             Ok(handle) => {
+                let template = template.name.clone();
                 local_set.spawn(async move {
-                    handle
-                        .wait_timeout_then_response::<serde_json::Value>(wait_timeout)
-                        .await
+                    match handle.wait_timeout(wait_timeout).await {
+                        Ok(Some(action)) => action
+                            .to_response::<serde_json::Value>()
+                            .map_err(|e| (e, template)),
+                        Ok(None) => Err(("Timed out while waiting for response".into(), template)),
+                        Err(e) => Err((e.to_string().into(), template)),
+                    }
                 });
             }
             Err(e) => return Err(e),
@@ -234,12 +247,29 @@ pub async fn dispatch_and_wait(
         let result = result?;
         match result {
             Ok(r) => results.push(r),
-            Err(e) => {
+            Err((e, template_name)) => {
                 local_set.abort_all();
 
                 while (local_set.join_next().await).is_some() {
                     // Drain the rest of the results
                 }
+
+                // Try logging error
+                if let Err(e) =
+                    templating::log_error(guild_id, &data.pool, ctx, &template_name, e.to_string())
+                        .await
+                {
+                    log::error!("Error while logging error: {}", e);
+                }
+
+                templating::dispatch_error(
+                    ctx,
+                    &e.to_string(),
+                    guild_id,
+                    &templates[results.len()],
+                )
+                .await
+                .ok();
 
                 return Err(e);
             }

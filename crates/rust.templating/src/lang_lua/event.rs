@@ -1,49 +1,5 @@
 pub use mlua::prelude::*;
-use std::{ops::Deref, sync::Arc};
-
-pub enum ArcOrNormal<T: Sized> {
-    Arc(Arc<T>),
-    Normal(T),
-}
-
-impl<T: Sized> Deref for ArcOrNormal<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            ArcOrNormal::Arc(a) => a.as_ref(),
-            ArcOrNormal::Normal(b) => b,
-        }
-    }
-}
-
-impl<T: serde::Serialize> serde::Serialize for ArcOrNormal<T> {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match self {
-            ArcOrNormal::Arc(a) => serde::Serialize::serialize(a, serializer),
-            ArcOrNormal::Normal(b) => serde::Serialize::serialize(b, serializer),
-        }
-    }
-}
-
-impl<'de, T: serde::de::Deserialize<'de>> serde::de::Deserialize<'de> for ArcOrNormal<T> {
-    fn deserialize<D>(deserializer: D) -> Result<ArcOrNormal<T>, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let v = T::deserialize(deserializer)?;
-        Ok(ArcOrNormal::Normal(v))
-    }
-}
-
-impl<T: Clone> Clone for ArcOrNormal<T> {
-    fn clone(&self) -> Self {
-        match self {
-            ArcOrNormal::Arc(a) => ArcOrNormal::Arc(a.clone()),
-            ArcOrNormal::Normal(b) => ArcOrNormal::Normal(b.clone()),
-        }
-    }
-}
+use std::sync::Arc;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct InnerEvent {
@@ -54,7 +10,7 @@ pub struct InnerEvent {
     /// The name of the event
     name: String,
     /// The inner data of the object
-    data: ArcOrNormal<serde_json::Value>,
+    data: serde_json::Value,
     /// The random identifier of the event
     uid: sqlx::types::Uuid,
     /// The author, if any, of the event
@@ -73,7 +29,7 @@ impl Event {
         title: String,
         base_name: String,
         name: String,
-        data: ArcOrNormal<serde_json::Value>,
+        data: serde_json::Value,
         author: Option<String>,
     ) -> Self {
         Self {

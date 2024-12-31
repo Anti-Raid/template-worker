@@ -4,11 +4,8 @@ pub mod primitives_docs;
 pub(crate) mod state;
 
 mod plugins;
-use mlua_scheduler::taskmgr::SchedulerFeedback;
 use mlua_scheduler::TaskManager;
-use mlua_scheduler_ext::feedbacks::{
-    MultipleSchedulerFeedback, ThreadResultTracker, ThreadTracker,
-};
+use mlua_scheduler_ext::feedbacks::ThreadTracker;
 use mlua_scheduler_ext::Scheduler;
 pub use plugins::PLUGINS;
 
@@ -56,13 +53,8 @@ pub enum LuaVmAction {
 
 #[derive(Debug)]
 pub enum LuaVmResult {
-    Ok {
-        result_val: serde_json::Value,
-    },
-    LuaError {
-        err: String,
-        template_name: Option<String>,
-    },
+    Ok { result_val: serde_json::Value },
+    LuaError { err: String },
     VmBroken {},
 }
 
@@ -74,11 +66,55 @@ impl LuaVmResult {
                 let res = serde_json::from_value(result_val)?;
                 Ok(res)
             }
-            LuaVmResult::LuaError { err, template_name } => {
-                Err(format!("Lua error: {:?}: {}", template_name, err).into())
-            }
+            LuaVmResult::LuaError { err } => Err(format!("Lua error: {}", err).into()),
             LuaVmResult::VmBroken {} => Err("Lua VM is marked as broken".into()),
         }
+    }
+
+    /// Returns ``true`` if the result is an LuaError or VmBroken
+    pub fn is_error(&self) -> bool {
+        matches!(
+            self,
+            LuaVmResult::LuaError { .. } | LuaVmResult::VmBroken {}
+        )
+    }
+
+    /// Logs an error in the case of a error lua vm result
+    pub async fn log_error(
+        &self,
+        template_name: &str,
+        guild_id: serenity::all::GuildId,
+        pool: &sqlx::PgPool,
+        serenity_context: &serenity::all::Context,
+    ) -> Result<(), silverpelt::Error> {
+        match self {
+            LuaVmResult::VmBroken {} => {
+                log::error!("Lua VM is broken in template {}", template_name);
+                crate::lang_lua::log_error(
+                    guild_id,
+                    pool,
+                    serenity_context,
+                    template_name,
+                    "Lua VM has been marked as broken".to_string(),
+                )
+                .await?;
+            }
+            LuaVmResult::LuaError { ref err } => {
+                log::error!("Lua error in template {}: {}", template_name, err);
+
+                crate::lang_lua::log_error(
+                    guild_id,
+                    pool,
+                    serenity_context,
+                    template_name,
+                    err.to_string(),
+                )
+                .await?;
+            }
+            _ => {}
+        }
+
+        Ok(())
     }
 }
 
@@ -195,20 +231,10 @@ pub(crate) fn configure_lua_vm(
 
     // Also create the mlua scheduler in the app data
     let thread_tracker = ThreadTracker::new();
-    let ter = ThreadErrorTracker::new(thread_tracker.clone());
-    let trt = ThreadResultTracker::new();
 
-    let scheduler_feedback = MultipleSchedulerFeedback::new(vec![
-        Box::new(thread_tracker.clone()),
-        Box::new(ter.clone()),
-        Box::new(trt.clone()),
-    ]);
+    lua.set_app_data(thread_tracker.clone());
 
-    lua.set_app_data(thread_tracker);
-    lua.set_app_data(ter);
-    lua.set_app_data(trt);
-
-    let scheduler = Scheduler::new(TaskManager::new(lua.clone(), Rc::new(scheduler_feedback)));
+    let scheduler = Scheduler::new(TaskManager::new(lua.clone(), Rc::new(thread_tracker)));
 
     scheduler.attach();
 
@@ -279,14 +305,14 @@ pub(crate) fn configure_lua_vm(
     })
 }
 
-pub(crate) fn create_lua_vm_userdata(
+pub(crate) fn create_guild_state(
     last_execution_time: Arc<atomicinstant::AtomicInstant>,
     guild_id: GuildId,
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
     reqwest_client: reqwest::Client,
-) -> Result<state::LuaUserData, silverpelt::Error> {
-    Ok(state::LuaUserData {
+) -> Result<state::GuildState, silverpelt::Error> {
+    Ok(state::GuildState {
         pool,
         guild_id,
         serenity_context,
@@ -409,7 +435,7 @@ pub async fn benchmark_vm(
             "Benchmark".to_string(),
             "Benchmark".to_string(),
             "Benchmark".to_string(),
-            event::ArcOrNormal::Normal(serde_json::Value::Null),
+            serde_json::Value::Null,
             None,
         ),
         ParseCompileState {
@@ -421,8 +447,10 @@ pub async fn benchmark_vm(
         pt,
     )
     .await?
-    .wait_timeout_then_response(std::time::Duration::from_secs(10))
-    .await?;
+    .wait()
+    .await?
+    .to_response()?;
+
     let exec_simple = start.elapsed().as_micros();
 
     if n != 1 {
@@ -447,7 +475,7 @@ pub async fn benchmark_vm(
             "Benchmark".to_string(),
             "Benchmark".to_string(),
             "Benchmark".to_string(),
-            event::ArcOrNormal::Normal(serde_json::Value::Null),
+            serde_json::Value::Null,
             None,
         ),
         ParseCompileState {
@@ -479,7 +507,7 @@ pub async fn benchmark_vm(
             "Benchmark".to_string(),
             "Benchmark".to_string(),
             "Benchmark".to_string(),
-            event::ArcOrNormal::Normal(serde_json::Value::Null),
+            serde_json::Value::Null,
             None,
         ),
         ParseCompileState {
@@ -491,16 +519,18 @@ pub async fn benchmark_vm(
         pt,
     )
     .await?
-    .wait_timeout_then_response::<i32>(std::time::Duration::from_secs(10))
-    .await;
+    .wait()
+    .await?;
     let exec_error = start.elapsed().as_micros();
 
     match err {
-        Ok(_) => return Err("Expected error, got success".into()),
-        Err(e) => {
-            if !e.to_string().contains("MyError") {
-                return Err(format!("Expected MyError, got {}", e).into());
+        LuaVmResult::LuaError { err } => {
+            if !err.contains("MyError") {
+                return Err(format!("Expected MyError, got {}", err).into());
             }
+        }
+        _ => {
+            return Err("Expected error, got success".into());
         }
     }
 
@@ -573,6 +603,20 @@ impl RenderTemplateHandle {
             .map_err(|e| format!("Could not receive data from Lua thread: {}", e).into())
     }
 
+    /// Waits for the template to render, then logs an error if the result is an error
+    pub async fn wait_and_log_error(
+        self,
+        template_name: &str,
+        guild_id: serenity::all::GuildId,
+        pool: &sqlx::PgPool,
+        serenity_context: &serenity::all::Context,
+    ) -> Result<LuaVmResult, silverpelt::Error> {
+        let res = self.wait().await?;
+        res.log_error(template_name, guild_id, pool, serenity_context)
+            .await?;
+        Ok(res)
+    }
+
     /// Wait for the template to render with a timeout
     pub async fn wait_timeout(
         self,
@@ -584,56 +628,23 @@ impl RenderTemplateHandle {
             Err(_) => Ok(None),
         }
     }
-
-    /// Wait for the template to render with a timeout, returning an error if the timeout is reached
-    pub async fn wait_timeout_or_err(
-        self,
-        timeout: std::time::Duration,
-    ) -> Result<LuaVmResult, silverpelt::Error> {
-        self.wait_timeout(timeout)
-            .await?
-            .ok_or("Lua VM timed out when rendering template".into())
-    }
-
-    /// Wait for the template to render with a timeout, returning an error if the timeout is reached
-    pub async fn wait_timeout_then_response<T: serde::de::DeserializeOwned>(
-        self,
-        timeout: std::time::Duration,
-    ) -> Result<T, silverpelt::Error> {
-        self.wait_timeout_or_err(timeout).await?.to_response()
-    }
 }
 
-pub fn log_error(lua: mlua::Lua, template_name: String, e: String) {
-    tokio::task::spawn_local(async move {
-        log::error!("Lua thread error: {}: {}", template_name, e);
+/// Helper method to get guild template and log error
+pub async fn log_error(
+    guild_id: serenity::all::GuildId,
+    pool: &sqlx::PgPool,
+    serenity_context: &serenity::all::Context,
+    template_name: &str,
+    e: String,
+) -> Result<(), silverpelt::Error> {
+    log::error!("Lua thread error: {}: {}", template_name, e);
 
-        let tm = lua.app_data_ref::<mlua_scheduler::TaskManager>().unwrap();
-        let inner = tm.inner.clone();
-        let user_data = inner
-            .lua
-            .app_data_ref::<crate::lang_lua::state::LuaUserData>()
-            .unwrap();
+    let Ok(template) = crate::cache::get_guild_template(guild_id, template_name, pool).await else {
+        return Err("Failed to get template data for error reporting".into());
+    };
 
-        let Ok(template) =
-            crate::cache::get_guild_template(user_data.guild_id, &template_name, &user_data.pool)
-                .await
-        else {
-            log::error!("Failed to get template data for error reporting");
-            return;
-        };
-
-        if let Err(e) = dispatch_error(
-            &user_data.serenity_context,
-            &e,
-            user_data.guild_id,
-            &template,
-        )
-        .await
-        {
-            log::error!("Failed to dispatch error: {}", e);
-        }
-    });
+    dispatch_error(serenity_context, &e, guild_id, &template).await
 }
 
 /// Dispatches an error to a channel
@@ -688,7 +699,7 @@ pub async fn dispatch_error(
                     "Error".to_string(),
                     "Error".to_string(),
                     "Error".to_string(),
-                    event::ArcOrNormal::Normal(error.into()),
+                    error.into(),
                     None,
                 ),
                 ParseCompileState {
@@ -704,38 +715,4 @@ pub async fn dispatch_error(
     }
 
     Ok(())
-}
-
-#[derive(Clone)]
-pub struct ThreadErrorTracker {
-    pub tracker: ThreadTracker,
-}
-
-impl ThreadErrorTracker {
-    /// Creates a new thread error tracker
-    pub fn new(tracker: ThreadTracker) -> Self {
-        Self { tracker }
-    }
-}
-
-impl SchedulerFeedback for ThreadErrorTracker {
-    fn on_response(
-        &self,
-        _label: &str,
-        tm: &TaskManager,
-        th: &mlua::Thread,
-        result: Option<&mlua::Result<mlua::MultiValue>>,
-    ) {
-        if let Some(Err(e)) = result {
-            let initiator = self.tracker.get_initiator(th).unwrap_or_else(|| th.clone());
-
-            let Some(template_name) = self.tracker.get_metadata(&initiator) else {
-                return; // We can't do anything without metadata
-            };
-
-            let e = e.to_string();
-
-            log_error(tm.inner.lua.clone(), template_name, e);
-        }
-    }
 }

@@ -207,6 +207,14 @@ pub mod templating_core {
     }
 
     impl Template {
+        /// Returns the execution name of the template
+        pub fn exec_name(&self) -> String {
+            match self {
+                crate::Template::Raw(_) => "script".to_string(),
+                crate::Template::Named(ref name) => name.to_string(),
+            }
+        }
+
         /// Converts the template to a parsed template struct
         pub async fn to_parsed_template(
             &self,

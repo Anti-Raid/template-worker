@@ -1,6 +1,6 @@
 use crate::{
     handle_event,
-    lang_lua::{ArLua, BytecodeCache, XRc},
+    lang_lua::{ArLua, BytecodeCache, LogErrorData, XRc},
     LuaVmAction, LuaVmResult, MAX_VM_THREAD_STACK_SIZE,
 };
 use serenity::all::GuildId;
@@ -29,14 +29,21 @@ pub async fn create_lua_vm(
         .name(format!("lua-vm-{}", guild_id))
         .stack_size(MAX_VM_THREAD_STACK_SIZE)
         .spawn(move || {
-            let userdata = crate::lang_lua::create_lua_vm_userdata(
-                last_execution_time_ref.clone(),
-                guild_id,
-                pool,
-                serenity_context,
-                reqwest_client,
-            )
-            .expect("Failed to create Lua VM userdata");
+            let led = XRc::new(LogErrorData {
+                pool: pool.clone(),
+                serenity_context: serenity_context.clone(),
+            });
+
+            let gs = XRc::new(
+                crate::lang_lua::create_guild_state(
+                    last_execution_time_ref.clone(),
+                    guild_id,
+                    pool,
+                    serenity_context,
+                    reqwest_client,
+                )
+                .expect("Failed to create Lua VM userdata"),
+            );
 
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -73,8 +80,6 @@ pub async fn create_lua_vm(
                     },
                 );
 
-                tis_ref.lua.set_app_data(userdata);
-
                 // Start the scheduler in a tokio task
                 let broken_sched_ref = tis_ref.broken.clone();
                 let scheduler = tis_ref.scheduler.clone();
@@ -103,8 +108,12 @@ pub async fn create_lua_vm(
 
                 while let Some((action, callback)) = rx.recv().await {
                     let tis_ref = tis_ref.clone();
+                    let gs = gs.clone();
+                    let led = led.clone();
                     local.spawn_local(async move {
-                        let result = handle_event(action, &tis_ref).await;
+                        let guild_id = gs.guild_id;
+                        let led = led.clone();
+                        let result = handle_event(action, &tis_ref, gs).await;
 
                         #[allow(clippy::single_match)]
                         match result {
@@ -123,7 +132,8 @@ pub async fn create_lua_vm(
 
                                 if let Some(template_name) = template_name.as_ref() {
                                     crate::lang_lua::log_error(
-                                        tis_ref.lua.clone(),
+                                        guild_id,
+                                        led.clone(),
                                         template_name.clone(),
                                         format!("Lua error in template {}: {}", template_name, err),
                                     )
