@@ -1,5 +1,5 @@
 use mlua::prelude::*;
-use std::{rc::Rc, sync::Arc};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 pub struct TemplateContext {
     pub guild_state: Rc<super::state::GuildState>,
@@ -8,7 +8,7 @@ pub struct TemplateContext {
     pub template_data: Arc<crate::Template>,
 
     /// The cached serialized value of the template data
-    cached_template_data: std::sync::Mutex<Option<LuaValue>>,
+    cached_template_data: RefCell<Option<LuaValue>>,
 }
 
 impl TemplateContext {
@@ -19,7 +19,7 @@ impl TemplateContext {
         Self {
             guild_state,
             template_data,
-            cached_template_data: std::sync::Mutex::default(),
+            cached_template_data: RefCell::default(),
         }
     }
 }
@@ -32,7 +32,7 @@ impl LuaUserData for TemplateContext {
             // Check for cached serialized data
             let mut cached_data = this
                 .cached_template_data
-                .lock()
+                .try_borrow_mut()
                 .map_err(|e| LuaError::external(e.to_string()))?;
 
             if let Some(v) = cached_data.as_ref() {

@@ -55,6 +55,7 @@ pub async fn handle_event(
                 .app_data_ref::<mlua_scheduler_ext::Scheduler>()
                 .unwrap();
 
+            let event = event.to_event();
             let args = match (event, template_context).into_lua_multi(&tis_ref.lua) {
                 Ok(f) => f,
                 Err(e) => {

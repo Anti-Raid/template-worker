@@ -1,7 +1,7 @@
 use serenity::all::{Context, FullEvent, GuildId, Interaction};
 use silverpelt::ar_event::AntiraidEvent;
 use silverpelt::data::Data;
-use templating::{cache::get_all_guild_templates, event::Event};
+use templating::{cache::get_all_guild_templates, event::CreateEvent};
 
 use crate::serenitystore::shard_messenger_for_guild;
 
@@ -74,7 +74,7 @@ pub async fn discord_event_dispatch(
     dispatch(
         serenity_context,
         &data,
-        Event::new(
+        CreateEvent::new(
             event_titlename,
             "Discord".to_string(),
             event.snake_case_name().to_uppercase(),
@@ -87,58 +87,58 @@ pub async fn discord_event_dispatch(
 }
 
 /// Parses an antiraid event into a template event
-pub fn parse_event(event: &AntiraidEvent) -> Result<Event, silverpelt::Error> {
+pub fn parse_event(event: &AntiraidEvent) -> Result<CreateEvent, silverpelt::Error> {
     match event {
-        AntiraidEvent::Custom(ref event) => Ok(Event::new(
+        AntiraidEvent::Custom(ref event) => Ok(CreateEvent::new(
             event.event_titlename.clone(),
             "Custom".to_string(),
             event.event_name.clone(),
             event.event_data.clone(),
             None,
         )),
-        AntiraidEvent::StingCreate(ref sting) => Ok(Event::new(
+        AntiraidEvent::StingCreate(ref sting) => Ok(CreateEvent::new(
             "(Anti Raid) Sting Created".to_string(),
             "StingCreate".to_string(),
             "StingCreate".to_string(),
             serde_json::to_value(sting)?,
             Some(sting.creator.to_string()),
         )),
-        AntiraidEvent::StingUpdate(ref sting) => Ok(Event::new(
+        AntiraidEvent::StingUpdate(ref sting) => Ok(CreateEvent::new(
             "(Anti Raid) Sting Updated".to_string(),
             "StingUpdate".to_string(),
             "StingUpdate".to_string(),
             serde_json::to_value(sting)?,
             Some(sting.creator.to_string()),
         )),
-        AntiraidEvent::StingExpire(ref sting) => Ok(Event::new(
+        AntiraidEvent::StingExpire(ref sting) => Ok(CreateEvent::new(
             "(Anti Raid) Sting Expired".to_string(),
             "StingExpire".to_string(),
             "StingExpire".to_string(),
             serde_json::to_value(sting)?,
             Some(sting.creator.to_string()),
         )),
-        AntiraidEvent::StingDelete(ref sting) => Ok(Event::new(
+        AntiraidEvent::StingDelete(ref sting) => Ok(CreateEvent::new(
             "(Anti Raid) Sting Deleted".to_string(),
             "StingDelete".to_string(),
             "StingDelete".to_string(),
             serde_json::to_value(sting)?,
             Some(sting.creator.to_string()),
         )),
-        AntiraidEvent::PunishmentCreate(ref punishment) => Ok(Event::new(
+        AntiraidEvent::PunishmentCreate(ref punishment) => Ok(CreateEvent::new(
             "(Anti Raid) Punishment Created".to_string(),
             "PunishmentCreate".to_string(),
             "PunishmentCreate".to_string(),
             serde_json::to_value(punishment)?,
             Some(punishment.creator.to_string()),
         )),
-        AntiraidEvent::PunishmentExpire(ref punishment) => Ok(Event::new(
+        AntiraidEvent::PunishmentExpire(ref punishment) => Ok(CreateEvent::new(
             "(Anti Raid) Punishment Expired".to_string(),
             "PunishmentExpire".to_string(),
             "PunishmentExpire".to_string(),
             serde_json::to_value(punishment)?,
             Some(punishment.creator.to_string()),
         )),
-        AntiraidEvent::OnStartup(ref modified) => Ok(Event::new(
+        AntiraidEvent::OnStartup(ref modified) => Ok(CreateEvent::new(
             "(Anti Raid) On Startup".to_string(),
             "OnStartup".to_string(),
             "OnStartup".to_string(),
@@ -154,7 +154,7 @@ pub fn parse_event(event: &AntiraidEvent) -> Result<Event, silverpelt::Error> {
 pub async fn dispatch(
     ctx: &Context,
     data: &Data,
-    event: Event,
+    event: CreateEvent,
     guild_id: GuildId,
 ) -> Result<(), silverpelt::Error> {
     let templates = get_all_guild_templates(guild_id, &data.pool).await?;
@@ -203,7 +203,7 @@ pub async fn dispatch(
 pub async fn dispatch_and_wait(
     ctx: &Context,
     data: &Data,
-    event: Event,
+    event: CreateEvent,
     guild_id: GuildId,
     wait_timeout: std::time::Duration,
 ) -> Result<Vec<serde_json::Value>, silverpelt::Error> {

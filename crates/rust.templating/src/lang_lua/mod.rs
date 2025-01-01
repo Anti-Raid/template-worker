@@ -39,7 +39,7 @@ pub enum LuaVmAction {
     /// Execute a template
     Exec {
         template: Arc<crate::Template>,
-        event: event::Event,
+        event: event::CreateEvent,
     },
     /// Stop the Lua VM entirely
     Stop {},
@@ -454,7 +454,7 @@ pub async fn benchmark_vm(
 
     let start = std::time::Instant::now();
     let n: i32 = execute(
-        event::Event::new(
+        event::CreateEvent::new(
             "Benchmark".to_string(),
             "Benchmark".to_string(),
             "Benchmark".to_string(),
@@ -495,7 +495,7 @@ pub async fn benchmark_vm(
 
     let start = std::time::Instant::now();
     execute(
-        event::Event::new(
+        event::CreateEvent::new(
             "Benchmark".to_string(),
             "Benchmark".to_string(),
             "Benchmark".to_string(),
@@ -528,7 +528,7 @@ pub async fn benchmark_vm(
 
     let start = std::time::Instant::now();
     let err = execute(
-        event::Event::new(
+        event::CreateEvent::new(
             "Benchmark".to_string(),
             "Benchmark".to_string(),
             "Benchmark".to_string(),
@@ -582,7 +582,7 @@ pub struct ParseCompileState {
 ///
 /// Pre-conditions: the serenity context's shard matches the guild itself
 pub async fn execute(
-    event: event::Event,
+    event: event::CreateEvent,
     state: ParseCompileState,
     template: Arc<crate::Template>,
 ) -> Result<RenderTemplateHandle, silverpelt::Error> {

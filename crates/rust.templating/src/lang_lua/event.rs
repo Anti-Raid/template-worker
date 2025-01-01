@@ -1,5 +1,5 @@
 pub use mlua::prelude::*;
-use std::sync::Arc;
+use std::{cell::RefCell, sync::Arc};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct InnerEvent {
@@ -11,19 +11,17 @@ pub struct InnerEvent {
     name: String,
     /// The inner data of the object
     data: serde_json::Value,
-    /// The random identifier of the event
-    uid: sqlx::types::Uuid,
     /// The author, if any, of the event
     author: Option<String>,
 }
 
 /// An `Event` is an object that can be passed to a Lua template
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-pub struct Event {
+pub struct CreateEvent {
     inner: Arc<InnerEvent>,
 }
 
-impl Event {
+impl CreateEvent {
     /// Create a new Event
     pub fn new(
         title: String,
@@ -38,14 +36,13 @@ impl Event {
                 base_name,
                 name,
                 data,
-                uid: sqlx::types::Uuid::new_v4(),
                 author,
             }),
         }
     }
 }
 
-impl Event {
+impl CreateEvent {
     /// Returns the base name of the event
     pub fn base_name(&self) -> &str {
         &self.inner.base_name
@@ -55,6 +52,22 @@ impl Event {
     pub fn name(&self) -> &str {
         &self.inner.name
     }
+
+    /// Converts the `CreateEvent` into an `Event`
+    pub(crate) fn to_event(&self) -> Event {
+        Event {
+            inner: self.inner.clone(),
+            cached_data: RefCell::new(None),
+        }
+    }
+}
+
+/// An `Event` is an object that can be passed to a Lua template
+pub(crate) struct Event {
+    /// The inner data of the object
+    inner: Arc<InnerEvent>,
+    /// The cached serialized value of the template data
+    cached_data: RefCell<Option<LuaValue>>,
 }
 
 impl LuaUserData for Event {
@@ -72,13 +85,22 @@ impl LuaUserData for Event {
             Ok(name)
         });
         fields.add_field_method_get("data", |lua, this| {
+            // Check for cached serialized data
+            let mut cached_data = this
+                .cached_data
+                .try_borrow_mut()
+                .map_err(|e| LuaError::external(e.to_string()))?;
+
+            if let Some(v) = cached_data.as_ref() {
+                return Ok(v.clone());
+            }
+
             log::trace!("Event: Serializing data");
             let v = lua.to_value(&this.inner.data)?;
+
+            *cached_data = Some(v.clone());
+
             Ok(v)
-        });
-        fields.add_field_method_get("uid", |lua, this| {
-            let uid = lua.to_value(&this.inner.uid)?;
-            Ok(uid)
         });
         fields.add_field_method_get("author", |lua, this| {
             let author = lua.to_value(&this.inner.author)?;

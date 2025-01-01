@@ -125,11 +125,6 @@ pub fn document_primitives() -> templating_docgen::PrimitiveListBuilder {
                 .typ("unknown")
                 .description("The current response of the event. This can be overwritten by the template by just setting it to a new value.")
             })
-            .field("uid", |f| {
-                f
-                .typ("string")
-                .description("The unique identifier ID of the event. Will be guaranteed to be unique at a per-guild level.")
-            })
             .field("author", |f| {
                 f
                 .typ("string?")

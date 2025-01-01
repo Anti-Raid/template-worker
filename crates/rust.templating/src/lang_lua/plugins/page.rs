@@ -43,7 +43,7 @@ impl SettingView for LuaSettingExecutor {
     ) -> Result<Vec<indexmap::IndexMap<String, splashcore_rs::value::Value>>, SettingsError> {        
         
         let result = crate::execute(
-            crate::event::Event::new(
+            crate::event::CreateEvent::new(
                 "(Anti-Raid) View Setting".to_string(),
                 "Settings/View".to_string(),
                 self.name.clone(),
@@ -100,7 +100,7 @@ impl SettingCreator for LuaSettingExecutor {
         state: indexmap::IndexMap<String, splashcore_rs::value::Value>,
     ) -> Result<indexmap::IndexMap<String, splashcore_rs::value::Value>, SettingsError> {        
         let result = crate::execute(
-            crate::event::Event::new(
+            crate::event::CreateEvent::new(
                 "(Anti-Raid) Create Setting".to_string(),
                 "Settings/Create".to_string(),
                 self.name.clone(),
@@ -157,7 +157,7 @@ impl SettingUpdater for LuaSettingExecutor {
         state: indexmap::IndexMap<String, splashcore_rs::value::Value>,
     ) -> Result<indexmap::IndexMap<String, splashcore_rs::value::Value>, SettingsError> {        
        let result = crate::execute(
-            crate::event::Event::new(
+            crate::event::CreateEvent::new(
                 "(Anti-Raid) Update Setting".to_string(),
                 "Settings/Update".to_string(),
                 self.name.clone(),
@@ -215,7 +215,7 @@ impl SettingDeleter for LuaSettingExecutor {
         pkey: splashcore_rs::value::Value,
     ) -> Result<(), SettingsError> {
         let result = crate::execute(
-            crate::event::Event::new(
+            crate::event::CreateEvent::new(
                 "(Anti-Raid) Delete Setting".to_string(),
                 "Settings/Delete".to_string(),
                 self.name.clone(),
