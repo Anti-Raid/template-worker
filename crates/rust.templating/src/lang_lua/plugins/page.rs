@@ -10,8 +10,9 @@ pub struct CreatePage {
     pub guild_id: serenity::all::GuildId,
     pub title: String,
     pub description: String,
-    pub template: crate::Template,
+    pub template: Arc<crate::Template>,
     pub settings: Vec<ar_settings::types::Setting>,
+    pub shard_messenger: serenity::all::ShardMessenger,
     pub is_created: bool,
 }
 
@@ -24,7 +25,10 @@ pub struct CreatePageSetting {
 #[derive(Clone)]
 pub struct LuaSettingExecutor {
     /// The template to execute
-    pub template: crate::Template,
+    pub template: Arc<crate::Template>,
+
+    /// Shard Messenger
+    pub shard_messenger: serenity::all::ShardMessenger,
 
     /// The ID of the setting
     pub name: String,
@@ -52,16 +56,12 @@ impl SettingView for LuaSettingExecutor {
             ),
             crate::ParseCompileState {
                 serenity_context: context.data.serenity_context.clone(),
+                shard_messenger: self.shard_messenger.clone(),
                 pool: context.data.data.pool.clone(),
                 reqwest_client: context.data.data.reqwest.clone(),
                 guild_id: context.guild_id,
             },
-            self.template.to_parsed_template(context.guild_id, &context.data.data.pool).await
-            .map_err(|e| SettingsError::Generic {
-                message: e.to_string(),
-                src: "LuaSettingExecutor".to_string(),
-                typ: "internal".to_string(),
-            })?
+            self.template.clone()
         )
         .await
         .map_err(|e| SettingsError::Generic {
@@ -70,7 +70,7 @@ impl SettingView for LuaSettingExecutor {
             typ: "internal".to_string(),
         })?
         .wait_and_log_error(
-            &self.template.exec_name(),
+            &self.template.name,
             context.guild_id,
             &context.data.data.pool,
             &context.data.serenity_context
@@ -113,16 +113,12 @@ impl SettingCreator for LuaSettingExecutor {
             ),
             crate::ParseCompileState {
                 serenity_context: context.data.serenity_context.clone(),
+                shard_messenger: self.shard_messenger.clone(),
                 pool: context.data.data.pool.clone(),
                 reqwest_client: context.data.data.reqwest.clone(),
                 guild_id: context.guild_id,
             },
-            self.template.to_parsed_template(context.guild_id, &context.data.data.pool).await
-            .map_err(|e| SettingsError::Generic {
-                message: e.to_string(),
-                src: "LuaSettingExecutor".to_string(),
-                typ: "internal".to_string(),
-            })?
+            self.template.clone()
         )
         .await
         .map_err(|e| SettingsError::Generic {
@@ -131,7 +127,7 @@ impl SettingCreator for LuaSettingExecutor {
             typ: "internal".to_string(),
         })?
         .wait_and_log_error(
-            &self.template.exec_name(),
+            &self.template.name,
             context.guild_id,
             &context.data.data.pool,
             &context.data.serenity_context
@@ -174,16 +170,12 @@ impl SettingUpdater for LuaSettingExecutor {
             ),
             crate::ParseCompileState {
                 serenity_context: context.data.serenity_context.clone(),
+                shard_messenger: self.shard_messenger.clone(),
                 pool: context.data.data.pool.clone(),
                 reqwest_client: context.data.data.reqwest.clone(),
                 guild_id: context.guild_id,
             },
-            self.template.to_parsed_template(context.guild_id, &context.data.data.pool).await
-            .map_err(|e| SettingsError::Generic {
-                message: e.to_string(),
-                src: "LuaSettingExecutor".to_string(),
-                typ: "internal".to_string(),
-            })?
+            self.template.clone()
         )
         .await
         .map_err(|e| SettingsError::Generic {
@@ -192,7 +184,7 @@ impl SettingUpdater for LuaSettingExecutor {
             typ: "internal".to_string(),
         })?
         .wait_and_log_error(
-            &self.template.exec_name(),
+            &self.template.name,
             context.guild_id,
             &context.data.data.pool,
             &context.data.serenity_context
@@ -232,16 +224,12 @@ impl SettingDeleter for LuaSettingExecutor {
             ),
             crate::ParseCompileState {
                 serenity_context: context.data.serenity_context.clone(),
+                shard_messenger: self.shard_messenger.clone(),
                 pool: context.data.data.pool.clone(),
                 reqwest_client: context.data.data.reqwest.clone(),
                 guild_id: context.guild_id,
             },
-            self.template.to_parsed_template(context.guild_id, &context.data.data.pool).await
-            .map_err(|e| SettingsError::Generic {
-                message: e.to_string(),
-                src: "LuaSettingExecutor".to_string(),
-                typ: "internal".to_string(),
-            })?
+            self.template.clone()
         )
         .await
         .map_err(|e| SettingsError::Generic {
@@ -250,7 +238,7 @@ impl SettingDeleter for LuaSettingExecutor {
             typ: "internal".to_string(),
         })?
         .wait_and_log_error(
-            &self.template.exec_name(),
+            &self.template.name,
             context.guild_id,
             &context.data.data.pool,
             &context.data.serenity_context
@@ -383,6 +371,7 @@ impl LuaUserData for CreatePage {
                 let settings_executor = LuaSettingExecutor {
                     template: this.template.clone(),
                     name: setting.setting.id.clone(),
+                    shard_messenger: this.shard_messenger.clone(),
                 };
 
                 let ops = setting.operations;
@@ -475,8 +464,9 @@ impl LuaUserData for CreatePage {
                 guild_id: this.guild_id,
                 title: page.title,
                 description: page.description,
-                template: page.template,
+                template: this.template.clone(),
                 settings: page.settings,
+                shard_messenger: this.shard_messenger.clone(),
                 is_created: true,
             };
 
@@ -795,11 +785,12 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
             let page = CreatePage {
                 page_id: sqlx::types::Uuid::new_v4().to_string(),
                 guild_id: token.guild_state.guild_id,
-                template: token.template_data.template.clone(),
-                title: token.template_data.path.clone(),
+                template: token.template_data.clone(),
+                title: token.template_data.name.clone(),
                 description: "Missing description".to_string(),
                 settings: vec![],
                 is_created: false,
+                shard_messenger: token.guild_state.shard_messenger.clone(),
             };
 
             Ok(page)

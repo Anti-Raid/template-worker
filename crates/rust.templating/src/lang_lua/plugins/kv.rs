@@ -5,11 +5,20 @@ use std::{num::TryFromIntError, rc::Rc};
 
 use super::promise::lua_promise;
 
+#[derive(Default)]
+pub enum KvExecutorScope {
+    #[default]
+    /// The originating guild
+    ThisGuild,
+    /// The guild that owns the template on the shop (only available in shop templates, on non-shop templates this will be the same as Guild)
+    OwnerGuild,
+}
+
 /// An kv executor is used to execute key-value ops from Lua
 /// templates
 #[derive(Clone)]
 pub struct KvExecutor {
-    template_data: Rc<state::TemplateData>,
+    pragma: crate::TemplatePragma,
     guild_id: serenity::all::GuildId,
     pool: sqlx::PgPool,
     kv_constraints: state::LuaKVConstraints,
@@ -40,19 +49,19 @@ impl KvRecord {
 
 impl KvExecutor {
     pub fn check(&self, action: String, key: String) -> Result<(), crate::Error> {
-        if !self.template_data
+        if !self
         .pragma
         .allowed_caps
         .contains(&"kv:*".to_string()) // KV:* means all KV operations are allowed
-        && !self.template_data
+        && !self
         .pragma
         .allowed_caps
         .contains(&format!("kv:{}:*", action)) // kv:{action}:* means that the action can be performed on any key
-        && !self.template_data
+        && !self
         .pragma
         .allowed_caps
         .contains(&format!("kv:{}:{}", action, key)) // kv:{action}:{key} means that the action can only be performed on said key
-        && !self.template_data
+        && !self
         .pragma
         .allowed_caps
         .contains(&format!("kv:*:{}", key))  // kv:*:{key} means that any action can be performed on said key
@@ -324,7 +333,7 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
         "new",
         lua.create_function(|_, (token,): (crate::TemplateContextRef,)| {
             let executor = KvExecutor {
-                template_data: token.template_data.clone(),
+                pragma: token.template_data.pragma.clone(),
                 guild_id: token.guild_state.guild_id,
                 pool: token.guild_state.pool.clone(),
                 ratelimits: token.guild_state.kv_ratelimits.clone(),

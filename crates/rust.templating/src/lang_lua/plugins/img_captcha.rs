@@ -167,8 +167,17 @@ pub fn plugin_docs() -> templating_docgen::Plugin {
             |t| {
                 t
                 .example(std::sync::Arc::new(CaptchaConfig::default()))
-                .field("filter", |f| {
-                    f.typ("string").description("The name of the filter to use. See example for the parameters to pass for the filter as well as https://github.com/Anti-Raid/captcha.")
+                .field("char_count", |f| {
+                    f.typ("u8").description("The number of characters the CAPTCHA should have.")
+                })
+                .field("filters", |f| {
+                    f.typ("{any}").description("See example for the parameters to pass for the filter as well as https://github.com/Anti-Raid/captcha")
+                })
+                .field("viewbox_size", |f| {
+                    f.typ("(u32, u32)").description("The size of the viewbox to render the CAPTCHA in.")
+                })
+                .field("set_viewbox_at_idx", |f| {
+                    f.typ("Option<usize>").description("At what index of CAPTCHA generation should a viewbox be created at.")
                 })
             },
         )

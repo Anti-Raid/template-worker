@@ -8,6 +8,7 @@ use silverpelt::{ar_event::AntiraidEvent, data::Data, punishments::Punishment, s
 
 use crate::{
     dispatch::{dispatch, parse_event},
+    serenitystore::{shard_count, shard_ids},
     temporary_punishments::handle_expired_punishment,
 };
 
@@ -38,8 +39,8 @@ pub async fn punishment_expiry_task(
 
     let mut set = tokio::task::JoinSet::new();
 
-    let shard_count = templating::shard_count()?;
-    let shards = templating::shard_ids()?;
+    let shard_count = shard_count()?;
+    let shards = shard_ids()?;
 
     for punishment in punishments {
         let guild_id = punishment.guild_id;
@@ -121,8 +122,8 @@ pub async fn stings_expiry_task(
 
     let mut set = tokio::task::JoinSet::new();
 
-    let shard_count = templating::shard_count()?;
-    let shards = templating::shard_ids()?;
+    let shard_count = shard_count()?;
+    let shards = shard_ids()?;
 
     for sting in stings {
         let guild_id = sting.guild_id;

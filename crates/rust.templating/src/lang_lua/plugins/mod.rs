@@ -2,6 +2,7 @@ pub mod discord;
 pub mod img_captcha;
 pub mod interop;
 pub mod kv;
+pub mod lockdowns;
 pub mod lune;
 pub mod page;
 pub mod permissions;

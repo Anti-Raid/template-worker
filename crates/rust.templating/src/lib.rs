@@ -1,13 +1,11 @@
 mod atomicinstant;
 pub mod cache;
 pub mod core;
-mod serenitystore;
 
 mod lang_lua;
 pub use core::page::Page;
 pub use core::templating_core::{
-    create_shop_template, parse_shop_template, GuildTemplate, ParsedTemplate, Template,
-    TemplateLanguage, TemplatePragma,
+    create_shop_template, parse_shop_template, Template, TemplateLanguage, TemplatePragma,
 };
 pub use lang_lua::ctx::TemplateContextRef;
 pub use lang_lua::event;
@@ -17,10 +15,6 @@ pub use lang_lua::PLUGINS;
 pub use lang_lua::{
     benchmark_vm, dispatch_error, execute, handle_event, log_error, ArLuaThreadInnerState,
     FireBenchmark, LuaVmAction, LuaVmResult, ParseCompileState, RenderTemplateHandle,
-};
-pub use serenitystore::{
-    setup_shard_messenger, shard_count, shard_ids, shard_messenger_for_guild,
-    update_shard_messengers,
 };
 
 pub const MAX_TEMPLATE_MEMORY_USAGE: usize = 1024 * 1024 * 3; // 3MB maximum memory

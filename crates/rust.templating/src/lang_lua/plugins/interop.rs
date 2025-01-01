@@ -22,11 +22,9 @@ pub fn plugin_docs() -> templating_docgen::Plugin {
                 t
             },
         )
-        .method_mut("array_metatable", |m| {
-            m.description("Returns the array metatable.")
-            .return_("array_metatable", |r| {
-                r.typ("table").description("The array metatable.")
-            })
+        .field_mut("array_metatable", |m| {
+            m.description("The array metatable.")
+            .typ("array_metatable")
         })
         .method_mut("memusage", |m| {
             m.description("Returns the current memory usage of the Lua VM.")

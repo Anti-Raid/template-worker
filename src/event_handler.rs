@@ -12,12 +12,12 @@ pub struct EventFramework {}
 impl Framework for EventFramework {
     async fn init(&mut self, client: &serenity::all::Client) {
         // Set up the shard messenger
-        templating::setup_shard_messenger(client).await;
+        crate::serenitystore::setup_shard_messenger(client).await;
     }
 
     async fn dispatch(&self, ctx: &Context, event: &serenity::all::FullEvent) {
         if let serenity::all::FullEvent::Ready { .. } = event {
-            templating::update_shard_messengers().await;
+            crate::serenitystore::update_shard_messengers().await;
             ONCE.call_once(|| {
                 let ctx1 = ctx.clone();
                 let data1 = ctx.data::<silverpelt::data::Data>();
@@ -39,20 +39,11 @@ impl Framework for EventFramework {
                 });
 
                 let ctx2 = ctx.clone();
-
-                tokio::task::spawn(async move {
-                    log::info!("Calling on_startup");
-                    crate::on_startup::on_startup(ctx2)
-                        .await
-                        .expect("Failed to call on_startup");
-                });
-
-                let ctx3 = ctx.clone();
                 tokio::task::spawn(async move {
                     log::info!("Starting up tasks");
 
                     tokio::task::spawn(async move {
-                        botox::taskman::start_all_tasks(tasks(), ctx3).await;
+                        botox::taskman::start_all_tasks(tasks(), ctx2).await;
                     });
                 });
             });

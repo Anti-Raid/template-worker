@@ -1,12 +1,12 @@
 use crate::core::page::Page;
-use crate::GuildTemplate;
+use crate::Template;
 use moka::future::Cache;
 use serenity::all::GuildId;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::time::Duration;
 
-pub static TEMPLATES_CACHE: LazyLock<Cache<GuildId, Arc<Vec<GuildTemplate>>>> =
+pub static TEMPLATES_CACHE: LazyLock<Cache<GuildId, Arc<Vec<Arc<Template>>>>> =
     LazyLock::new(|| {
         Cache::builder()
             .support_invalidation_closures()
@@ -21,7 +21,7 @@ pub static PAGES: LazyLock<scc::HashMap<GuildId, Vec<Page>>> = LazyLock::new(scc
 pub async fn get_all_guild_templates(
     guild_id: GuildId,
     pool: &sqlx::PgPool,
-) -> Result<Arc<Vec<GuildTemplate>>, crate::Error> {
+) -> Result<Arc<Vec<Arc<Template>>>, crate::Error> {
     if let Some(templates) = TEMPLATES_CACHE.get(&guild_id).await {
         return Ok(templates.clone());
     }
@@ -39,13 +39,12 @@ pub async fn get_all_guild_templates(
     let mut templates = Vec::new();
 
     for name in names {
-        let template = crate::GuildTemplate::get(guild_id, &name, pool).await?;
-        templates.push(template);
+        let template = crate::Template::guild(guild_id, &name, pool).await?;
+        templates.push(Arc::new(template));
     }
 
-    let templates = Arc::new(templates);
-
     // Store the templates in the cache
+    let templates = Arc::new(templates.clone());
     TEMPLATES_CACHE.insert(guild_id, templates.clone()).await;
 
     Ok(templates)
@@ -56,7 +55,7 @@ pub async fn get_guild_template(
     guild_id: GuildId,
     name: &str,
     pool: &sqlx::PgPool,
-) -> Result<GuildTemplate, crate::Error> {
+) -> Result<Arc<Template>, crate::Error> {
     let template = get_all_guild_templates(guild_id, pool).await?;
 
     for t in template.iter() {

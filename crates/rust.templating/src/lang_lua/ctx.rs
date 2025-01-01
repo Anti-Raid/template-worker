@@ -1,11 +1,11 @@
 use mlua::prelude::*;
-use std::rc::Rc;
+use std::{rc::Rc, sync::Arc};
 
 pub struct TemplateContext {
     pub guild_state: Rc<super::state::GuildState>,
 
     /// The template data
-    pub template_data: Rc<super::state::TemplateData>,
+    pub template_data: Arc<crate::Template>,
 
     /// The cached serialized value of the template data
     cached_template_data: std::sync::Mutex<Option<LuaValue>>,
@@ -14,11 +14,11 @@ pub struct TemplateContext {
 impl TemplateContext {
     pub fn new(
         guild_state: Rc<super::state::GuildState>,
-        template_data: super::state::TemplateData,
+        template_data: Arc<crate::Template>,
     ) -> Self {
         Self {
             guild_state,
-            template_data: Rc::new(template_data),
+            template_data,
             cached_template_data: std::sync::Mutex::default(),
         }
     }

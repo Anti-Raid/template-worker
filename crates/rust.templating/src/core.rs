@@ -18,7 +18,7 @@ pub mod templating_core {
     pub use silverpelt::templates::{create_shop_template, parse_shop_template};
     use silverpelt::Error;
 
-    #[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
+    #[derive(Clone, serde::Serialize, serde::Deserialize, Default, Debug)]
     pub struct TemplatePragma {
         #[serde(default)]
         pub lang: TemplateLanguage,
@@ -61,7 +61,7 @@ pub mod templating_core {
         }
     }
 
-    #[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
+    #[derive(Clone, serde::Serialize, serde::Deserialize, Default, Debug)]
     pub enum TemplateLanguage {
         #[serde(rename = "lua")]
         #[default]
@@ -87,20 +87,26 @@ pub mod templating_core {
         }
     }
 
-    #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
-    pub struct GuildTemplate {
+    #[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default)]
+    pub struct Template {
+        /// The guild id the template is in
+        pub guild_id: serenity::all::GuildId,
         /// The name of the template
         pub name: String,
         /// The description of the template
         pub description: Option<String>,
         /// The name of the template as it appears on the template shop listing
         pub shop_name: Option<String>,
+        /// The owner of the template on the template shop
+        pub shop_owner: Option<serenity::all::GuildId>,
         /// The events that this template listens to
         pub events: Vec<String>,
         /// The channel to send errors to
         pub error_channel: Option<serenity::all::ChannelId>,
         /// The content of the template
         pub content: String,
+        /// The template pragma
+        pub pragma: TemplatePragma,
         /// The user who created the template
         pub created_by: String,
         /// The time the template was created
@@ -111,8 +117,8 @@ pub mod templating_core {
         pub updated_at: chrono::DateTime<chrono::Utc>,
     }
 
-    impl GuildTemplate {
-        pub async fn get(
+    impl Template {
+        pub async fn guild(
             guild_id: serenity::all::GuildId,
             template: &str,
             pool: &sqlx::PgPool,
@@ -121,12 +127,16 @@ pub mod templating_core {
                 let (shop_tname, shop_tversion) = parse_shop_template(template)?;
 
                 let shop_template = sqlx::query!(
-                    "SELECT name, description, content, created_at, created_by, last_updated_at, last_updated_by FROM template_shop WHERE name = $1 AND version = $2",
+                    "SELECT owner_guild, name, description, content, created_at, created_by, last_updated_at, last_updated_by FROM template_shop WHERE name = $1 AND version = $2",
                     shop_tname,
                     shop_tversion
                 )
                 .fetch_optional(pool)
                 .await?;
+
+                let Some(shop_template) = shop_template else {
+                    return Err("Shop template not found".into());
+                };
 
                 let guild_data = sqlx::query!(
                     "SELECT events, error_channel FROM guild_templates WHERE guild_id = $1 AND name = $2",
@@ -140,24 +150,26 @@ pub mod templating_core {
                     return Err("Guild data not found".into());
                 };
 
-                match shop_template {
-                    Some(shop_template) => Ok(Self {
-                        name: shop_template.name,
-                        description: Some(shop_template.description),
-                        shop_name: Some(template.to_string()),
-                        events: guild_data.events,
-                        error_channel: match guild_data.error_channel {
-                            Some(channel_id) => Some(channel_id.parse()?),
-                            None => None,
-                        },
-                        content: shop_template.content,
-                        created_by: shop_template.created_by,
-                        created_at: shop_template.created_at,
-                        updated_by: shop_template.last_updated_by,
-                        updated_at: shop_template.last_updated_at,
-                    }),
-                    None => Err("Shop template not found".into()),
-                }
+                let (template_content, pragma) = TemplatePragma::parse(&shop_template.content)?;
+
+                Ok(Self {
+                    guild_id,
+                    name: shop_template.name,
+                    description: Some(shop_template.description),
+                    shop_name: Some(template.to_string()),
+                    shop_owner: Some(shop_template.owner_guild.parse()?),
+                    events: guild_data.events,
+                    error_channel: match guild_data.error_channel {
+                        Some(channel_id) => Some(channel_id.parse()?),
+                        None => None,
+                    },
+                    content: template_content.to_string(),
+                    pragma,
+                    created_by: shop_template.created_by,
+                    created_at: shop_template.created_at,
+                    updated_by: shop_template.last_updated_by,
+                    updated_at: shop_template.last_updated_at,
+                })
             } else {
                 let rec = sqlx::query!(
                     "SELECT events, content, error_channel, created_at, created_by, last_updated_at, last_updated_by FROM guild_templates WHERE guild_id = $1 AND name = $2",
@@ -167,113 +179,45 @@ pub mod templating_core {
                 .fetch_optional(pool)
                 .await?;
 
-                match rec {
-                    Some(rec) => Ok(Self {
-                        name: template.to_string(),
-                        description: None,
-                        shop_name: None,
-                        events: rec.events,
-                        error_channel: match rec.error_channel {
-                            Some(channel_id) => Some(channel_id.parse()?),
-                            None => None,
-                        },
-                        content: rec.content,
-                        created_by: rec.created_by,
-                        created_at: rec.created_at,
-                        updated_by: rec.last_updated_by,
-                        updated_at: rec.last_updated_at,
-                    }),
-                    None => Err("Template not found".into()),
-                }
+                let Some(rec) = rec else {
+                    return Err("Template not found".into());
+                };
+
+                let (template_content, pragma) = TemplatePragma::parse(&rec.content)?;
+
+                Ok(Self {
+                    guild_id,
+                    name: template.to_string(),
+                    description: None,
+                    shop_name: None,
+                    shop_owner: None,
+                    events: rec.events,
+                    error_channel: match rec.error_channel {
+                        Some(channel_id) => Some(channel_id.parse()?),
+                        None => None,
+                    },
+                    content: template_content.to_string(),
+                    pragma,
+                    created_by: rec.created_by,
+                    created_at: rec.created_at,
+                    updated_by: rec.last_updated_by,
+                    updated_at: rec.last_updated_at,
+                })
             }
-        }
-
-        /// Converts the guild template to a parsed template struct
-        pub fn to_parsed_template(&self) -> Result<ParsedTemplate, Error> {
-            let (template_content, pragma) = TemplatePragma::parse(&self.content)?;
-
-            Ok(ParsedTemplate {
-                template: Template::Named(self.name.clone()),
-                pragma,
-                template_content: template_content.to_string(),
-            })
-        }
-    }
-
-    #[derive(Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-    pub enum Template {
-        Raw(String),
-        Named(String),
-    }
-
-    impl Template {
-        /// Returns the execution name of the template
-        pub fn exec_name(&self) -> String {
-            match self {
-                crate::Template::Raw(_) => "script".to_string(),
-                crate::Template::Named(ref name) => name.to_string(),
-            }
-        }
-
-        /// Converts the template to a parsed template struct
-        pub async fn to_parsed_template(
-            &self,
-            guild_id: serenity::all::GuildId,
-            pool: &sqlx::PgPool,
-        ) -> Result<ParsedTemplate, Error> {
-            ParsedTemplate::parse(guild_id, self.clone(), pool).await
-        }
-
-        pub async fn into_parsed_template(
-            self,
-            guild_id: serenity::all::GuildId,
-            pool: &sqlx::PgPool,
-        ) -> Result<ParsedTemplate, Error> {
-            ParsedTemplate::parse(guild_id, self, pool).await
-        }
-    }
-
-    #[derive(Clone, serde::Serialize, serde::Deserialize)]
-    /// Represents a template that has been parsed
-    pub struct ParsedTemplate {
-        pub template: Template,
-        pub pragma: TemplatePragma,
-        pub template_content: String,
-    }
-
-    impl ParsedTemplate {
-        #[allow(unused_variables)]
-        pub async fn parse(
-            guild_id: serenity::all::GuildId,
-            template: Template,
-            pool: &sqlx::PgPool,
-        ) -> Result<Self, Error> {
-            let template_content = match template {
-                Template::Raw(ref template) => template.clone(),
-                Template::Named(ref template) => {
-                    GuildTemplate::get(guild_id, template, pool).await?.content
-                }
-            };
-
-            let (template_content, pragma) = TemplatePragma::parse(&template_content)?;
-
-            Ok(Self {
-                template,
-                pragma,
-                template_content: template_content.to_string(),
-            })
         }
     }
 }
 
 pub mod page {
+    use std::sync::Arc;
+
     pub const MAX_PAGE_ID_LENGTH: usize = 128;
 
     pub struct Page {
         pub page_id: String,
         pub title: String,
         pub description: String,
-        pub template: crate::Template,
+        pub template: Arc<crate::Template>,
         pub settings: Vec<ar_settings::types::Setting>,
     }
 }

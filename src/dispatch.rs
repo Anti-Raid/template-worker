@@ -3,6 +3,8 @@ use silverpelt::ar_event::AntiraidEvent;
 use silverpelt::data::Data;
 use templating::{cache::get_all_guild_templates, event::Event};
 
+use crate::serenitystore::shard_messenger_for_guild;
+
 #[inline]
 const fn not_audit_loggable_event() -> &'static [&'static str] {
     &[
@@ -167,11 +169,12 @@ pub async fn dispatch(
             event.clone(),
             templating::ParseCompileState {
                 serenity_context: ctx.clone(),
+                shard_messenger: crate::serenitystore::shard_messenger_for_guild(guild_id)?,
                 pool: data.pool.clone(),
                 reqwest_client: data.reqwest.clone(),
                 guild_id,
             },
-            template.to_parsed_template()?,
+            template.clone(),
         )
         .await
         {
@@ -217,11 +220,12 @@ pub async fn dispatch_and_wait(
             event.clone(),
             templating::ParseCompileState {
                 serenity_context: ctx.clone(),
+                shard_messenger: shard_messenger_for_guild(guild_id)?,
                 pool: data.pool.clone(),
                 reqwest_client: data.reqwest.clone(),
                 guild_id,
             },
-            template.to_parsed_template()?,
+            template.clone(),
         )
         .await
         {

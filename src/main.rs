@@ -4,7 +4,7 @@ mod docgen;
 mod event_handler;
 mod expiry_tasks;
 mod http;
-mod on_startup;
+mod serenitystore;
 mod temporary_punishments;
 
 /// The main function is just a command handling function

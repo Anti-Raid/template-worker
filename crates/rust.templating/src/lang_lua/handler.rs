@@ -11,49 +11,27 @@ pub async fn handle_event(
     guild_state: Rc<super::state::GuildState>,
 ) -> LuaVmResult {
     match action {
-        LuaVmAction::Exec {
-            content,
-            template,
-            pragma,
-            event,
-        } => {
+        LuaVmAction::Exec { template, event } => {
             if tis_ref.broken.load(std::sync::atomic::Ordering::Acquire) {
                 return LuaVmResult::VmBroken {};
             }
 
-            let exec_name = template.exec_name();
-
             // Check bytecode cache first, compile template if not found
-            let template_bytecode = match resolve_template_to_bytecode(
-                content,
-                template.clone(),
-                &tis_ref.bytecode_cache,
-            )
-            .await
-            {
-                Ok(bytecode) => bytecode,
-                Err(e) => {
-                    return LuaVmResult::LuaError { err: e.to_string() };
-                }
-            };
+            let template_bytecode =
+                match resolve_template_to_bytecode(&template, &tis_ref.bytecode_cache).await {
+                    Ok(bytecode) => bytecode,
+                    Err(e) => {
+                        return LuaVmResult::LuaError { err: e.to_string() };
+                    }
+                };
 
             // Now, create the template context that should be passed to the template
-            let template_context = super::ctx::TemplateContext::new(
-                guild_state,
-                super::state::TemplateData {
-                    path: match template {
-                        crate::Template::Raw(_) => "".to_string(),
-                        crate::Template::Named(ref name) => name.clone(),
-                    },
-                    template,
-                    pragma,
-                },
-            );
+            let template_context = super::ctx::TemplateContext::new(guild_state, template.clone());
 
             let thread = match tis_ref
                 .lua
                 .load(&template_bytecode)
-                .set_name(&exec_name)
+                .set_name(&template.name)
                 .set_mode(mlua::ChunkMode::Binary) // Ensure auto-detection never selects binary mode
                 .set_environment(tis_ref.global_table.clone())
                 .into_lua_thread(&tis_ref.lua)

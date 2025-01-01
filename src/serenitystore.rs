@@ -11,7 +11,7 @@ struct ShardMessengerCache {
 static SHARD_MESSENGERS: OnceLock<ShardMessengerCache> = OnceLock::new();
 
 /// Returns the total number of shards
-pub fn shard_count() -> Result<std::num::NonZeroU16, crate::Error> {
+pub fn shard_count() -> Result<std::num::NonZeroU16, silverpelt::Error> {
     let cache = SHARD_MESSENGERS
         .get()
         .ok_or("Shard messenger cache not initialized")?;
@@ -22,7 +22,7 @@ pub fn shard_count() -> Result<std::num::NonZeroU16, crate::Error> {
 }
 
 /// Returns the shard ids available
-pub fn shard_ids() -> Result<Vec<serenity::all::ShardId>, crate::Error> {
+pub fn shard_ids() -> Result<Vec<serenity::all::ShardId>, silverpelt::Error> {
     let cache = SHARD_MESSENGERS
         .get()
         .ok_or("Shard messenger cache not initialized")?;
@@ -39,7 +39,7 @@ pub fn shard_ids() -> Result<Vec<serenity::all::ShardId>, crate::Error> {
 /// Get the shard messenger for a guild
 pub fn shard_messenger_for_guild(
     guild_id: serenity::all::GuildId,
-) -> Result<serenity::all::ShardMessenger, crate::Error> {
+) -> Result<serenity::all::ShardMessenger, silverpelt::Error> {
     let cache = SHARD_MESSENGERS
         .get()
         .ok_or("Shard messenger cache not initialized")?;

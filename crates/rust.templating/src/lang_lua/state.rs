@@ -134,13 +134,6 @@ impl LuaRatelimits {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-pub struct TemplateData {
-    pub path: String,
-    pub template: crate::Template,
-    pub pragma: crate::TemplatePragma,
-}
-
 #[allow(dead_code)]
 pub struct GuildState {
     pub last_execution_time: Arc<crate::atomicinstant::AtomicInstant>,

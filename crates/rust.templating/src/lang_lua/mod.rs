@@ -38,9 +38,7 @@ static VMS: LazyLock<scc::HashMap<GuildId, ArLua>> = LazyLock::new(scc::HashMap:
 pub enum LuaVmAction {
     /// Execute a template
     Exec {
-        content: String,
-        template: crate::Template,
-        pragma: crate::TemplatePragma,
+        template: Arc<crate::Template>,
         event: event::Event,
     },
     /// Stop the Lua VM entirely
@@ -118,7 +116,10 @@ impl LuaVmResult {
     }
 }
 
-pub struct BytecodeCache(scc::HashMap<crate::Template, (Vec<u8>, u64)>);
+/// Map of template name to bytecode
+///
+/// Note that it is assumed for BytecodeCache to be uniquely made per server
+pub struct BytecodeCache(scc::HashMap<String, (Vec<u8>, u64)>);
 
 impl BytecodeCache {
     /// Create a new bytecode cache
@@ -128,7 +129,7 @@ impl BytecodeCache {
 }
 
 impl Deref for BytecodeCache {
-    type Target = scc::HashMap<crate::Template, (Vec<u8>, u64)>;
+    type Target = scc::HashMap<String, (Vec<u8>, u64)>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -310,13 +311,14 @@ pub(crate) fn create_guild_state(
     guild_id: GuildId,
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
+    shard_messenger: serenity::all::ShardMessenger,
     reqwest_client: reqwest::Client,
 ) -> Result<state::GuildState, silverpelt::Error> {
     Ok(state::GuildState {
         pool,
         guild_id,
         serenity_context,
-        shard_messenger: crate::shard_messenger_for_guild(guild_id)?,
+        shard_messenger,
         reqwest_client,
         kv_constraints: state::LuaKVConstraints::default(),
         kv_ratelimits: Rc::new(state::LuaRatelimits::new_kv_rl()?),
@@ -328,16 +330,15 @@ pub(crate) fn create_guild_state(
 
 /// Helper method to fetch a template from bytecode or compile it if it doesnt exist in bytecode cache
 pub(crate) async fn resolve_template_to_bytecode(
-    template_content: String,
-    template: crate::Template,
+    template: &crate::Template,
     bytecode_cache_ref: &BytecodeCache,
 ) -> Result<Vec<u8>, LuaError> {
     // Check if the source hash matches the expected source hash
     let mut hasher = std::hash::DefaultHasher::new();
-    template_content.hash(&mut hasher);
+    template.content.hash(&mut hasher);
     let cur_hash = hasher.finish();
 
-    let existing_bycode = bytecode_cache_ref.read(&template, |_, v| {
+    let existing_bycode = bytecode_cache_ref.read(&template.name, |_, v| {
         if v.1 == cur_hash {
             Some(v.0.clone())
         } else {
@@ -349,10 +350,10 @@ pub(crate) async fn resolve_template_to_bytecode(
         return Ok(bytecode);
     }
 
-    let bytecode = create_lua_compiler().compile(&template_content)?;
+    let bytecode = create_lua_compiler().compile(&template.content)?;
 
     let _ = bytecode_cache_ref
-        .insert_async(template, (bytecode.clone(), cur_hash))
+        .insert_async(template.name.clone(), (bytecode.clone(), cur_hash))
         .await;
 
     Ok(bytecode)
@@ -365,11 +366,18 @@ async fn get_lua_vm(
     guild_id: GuildId,
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
+    shard_messenger: serenity::all::ShardMessenger,
     reqwest_client: reqwest::Client,
 ) -> Result<ArLua, silverpelt::Error> {
     let Some(mut vm) = VMS.get(&guild_id) else {
-        let vm =
-            vm_manager::create_lua_vm(guild_id, pool, serenity_context, reqwest_client).await?;
+        let vm = vm_manager::create_lua_vm(
+            guild_id,
+            pool,
+            serenity_context,
+            shard_messenger,
+            reqwest_client,
+        )
+        .await?;
         if let Err((_, alt_vm)) = VMS.insert_async(guild_id, vm.clone()).await {
             return Ok(alt_vm);
         }
@@ -377,8 +385,14 @@ async fn get_lua_vm(
     };
 
     if vm.broken.load(std::sync::atomic::Ordering::Acquire) {
-        let new_vm =
-            vm_manager::create_lua_vm(guild_id, pool, serenity_context, reqwest_client).await?;
+        let new_vm = vm_manager::create_lua_vm(
+            guild_id,
+            pool,
+            serenity_context,
+            shard_messenger,
+            reqwest_client,
+        )
+        .await?;
         *vm = new_vm.clone();
         Ok(new_vm)
     } else {
@@ -400,6 +414,7 @@ pub async fn benchmark_vm(
     guild_id: GuildId,
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
+    shard_messenger: serenity::all::ShardMessenger,
     reqwest_client: reqwest::Client,
 ) -> Result<FireBenchmark, silverpelt::Error> {
     // Get_lua_vm
@@ -409,7 +424,14 @@ pub async fn benchmark_vm(
     let reqwest_client_a = reqwest_client.clone();
 
     let start = std::time::Instant::now();
-    let _ = get_lua_vm(guild_id_a, pool_a, serenity_context_a, reqwest_client_a).await?;
+    let _ = get_lua_vm(
+        guild_id_a,
+        pool_a,
+        serenity_context_a,
+        shard_messenger.clone(),
+        reqwest_client_a,
+    )
+    .await?;
     let get_lua_vm = start.elapsed().as_micros();
 
     let new_map = scc::HashMap::new();
@@ -418,10 +440,11 @@ pub async fn benchmark_vm(
     let hashmap_insert_time = start.elapsed().as_micros();
 
     // Exec simple with wait
-    let pt = crate::ParsedTemplate {
-        template: crate::Template::Named("__benchmark".to_string()),
+
+    let pt = crate::Template {
         pragma: crate::TemplatePragma::default(),
-        template_content: "return 1".to_string(),
+        content: "return 1".to_string(),
+        ..Default::default()
     };
 
     let pool_a = pool.clone();
@@ -440,11 +463,12 @@ pub async fn benchmark_vm(
         ),
         ParseCompileState {
             serenity_context: serenity_context_a,
+            shard_messenger: shard_messenger.clone(),
             reqwest_client: reqwest_client_a,
             guild_id: guild_id_a,
             pool: pool_a,
         },
-        pt,
+        pt.into(),
     )
     .await?
     .wait()
@@ -458,10 +482,10 @@ pub async fn benchmark_vm(
     }
 
     // Exec simple with no wait
-    let pt = crate::ParsedTemplate {
-        template: crate::Template::Named("__benchmark".to_string()),
+    let pt = crate::Template {
         pragma: crate::TemplatePragma::default(),
-        template_content: "return 1".to_string(),
+        content: "return 1".to_string(),
+        ..Default::default()
     };
 
     let pool_a = pool.clone();
@@ -480,20 +504,21 @@ pub async fn benchmark_vm(
         ),
         ParseCompileState {
             serenity_context: serenity_context_a,
+            shard_messenger: shard_messenger.clone(),
             reqwest_client: reqwest_client_a,
             guild_id: guild_id_a,
             pool: pool_a,
         },
-        pt,
+        pt.into(),
     )
     .await?;
     let exec_no_wait = start.elapsed().as_micros();
 
     // Exec simple with wait
-    let pt = crate::ParsedTemplate {
-        template: crate::Template::Named("__benchmark".to_string()),
+    let pt = crate::Template {
         pragma: crate::TemplatePragma::default(),
-        template_content: "error('MyError')\nreturn 1".to_string(),
+        content: "error('MyError')\nreturn 1".to_string(),
+        ..Default::default()
     };
 
     let pool_a = pool.clone();
@@ -512,11 +537,12 @@ pub async fn benchmark_vm(
         ),
         ParseCompileState {
             serenity_context: serenity_context_a,
+            shard_messenger: shard_messenger.clone(),
             reqwest_client: reqwest_client_a,
             guild_id: guild_id_a,
             pool: pool_a,
         },
-        pt,
+        pt.into(),
     )
     .await?
     .wait()
@@ -546,6 +572,7 @@ pub async fn benchmark_vm(
 #[derive(Clone)]
 pub struct ParseCompileState {
     pub serenity_context: serenity::all::Context,
+    pub shard_messenger: serenity::all::ShardMessenger,
     pub reqwest_client: reqwest::Client,
     pub guild_id: GuildId,
     pub pool: sqlx::PgPool,
@@ -557,12 +584,13 @@ pub struct ParseCompileState {
 pub async fn execute(
     event: event::Event,
     state: ParseCompileState,
-    template: crate::ParsedTemplate,
+    template: Arc<crate::Template>,
 ) -> Result<RenderTemplateHandle, silverpelt::Error> {
     let lua = get_lua_vm(
         state.guild_id,
         state.pool,
         state.serenity_context,
+        state.shard_messenger,
         state.reqwest_client,
     )
     .await?;
@@ -576,15 +604,7 @@ pub async fn execute(
     let (tx, rx) = tokio::sync::oneshot::channel();
 
     lua.handle
-        .send((
-            LuaVmAction::Exec {
-                template: template.template,
-                content: template.template_content,
-                pragma: template.pragma,
-                event,
-            },
-            tx,
-        ))
+        .send((LuaVmAction::Exec { template, event }, tx))
         .map_err(|e| format!("Could not send data to Lua thread: {}", e))?;
 
     Ok(RenderTemplateHandle { rx })
@@ -652,28 +672,33 @@ pub async fn dispatch_error(
     ctx: &serenity::all::Context,
     error: &str,
     guild_id: serenity::all::GuildId,
-    template: &crate::GuildTemplate,
+    template: &crate::Template,
 ) -> Result<(), silverpelt::Error> {
     let data = ctx.data::<silverpelt::data::Data>();
 
-    match template.error_channel {
-        Some(c) => {
-            let Some(channel) =
-                sandwich_driver::channel(&ctx.cache, &ctx.http, &data.reqwest, Some(guild_id), c)
-                    .await?
-            else {
-                return Ok(());
-            };
+    if let Some(error_channel) = template.error_channel {
+        let Some(channel) = sandwich_driver::channel(
+            &ctx.cache,
+            &ctx.http,
+            &data.reqwest,
+            Some(guild_id),
+            error_channel,
+        )
+        .await?
+        else {
+            return Ok(());
+        };
 
-            let Some(guild_channel) = channel.guild() else {
-                return Ok(());
-            };
+        let Some(guild_channel) = channel.guild() else {
+            return Ok(());
+        };
 
-            if guild_channel.guild_id != guild_id {
-                return Ok(());
-            }
+        if guild_channel.guild_id != guild_id {
+            return Ok(());
+        }
 
-            c.send_message(
+        guild_channel
+            .send_message(
                 &ctx.http,
                 serenity::all::CreateMessage::new()
                     .embed(
@@ -691,27 +716,6 @@ pub async fn dispatch_error(
                     )]),
             )
             .await?;
-        }
-        None => {
-            // Try firing the error event
-            execute(
-                event::Event::new(
-                    "Error".to_string(),
-                    "Error".to_string(),
-                    "Error".to_string(),
-                    error.into(),
-                    None,
-                ),
-                ParseCompileState {
-                    serenity_context: ctx.clone(),
-                    reqwest_client: data.reqwest.clone(),
-                    guild_id,
-                    pool: data.pool.clone(),
-                },
-                template.to_parsed_template()?,
-            )
-            .await?;
-        }
     }
 
     Ok(())

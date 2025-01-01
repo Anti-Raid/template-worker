@@ -151,21 +151,11 @@ pub fn document_primitives() -> templating_docgen::PrimitiveListBuilder {
             },
         )
         .type_mut(
-            "TemplateData",
-            "`TemplateData` is a struct that represents the data associated with a template token. It is used to store the path and pragma of a template token.",
+            "Template",
+            "`Template` is a struct that represents the data associated with a template. Fields are still being documented and subject to change.",
             |t| {
                 t
-                .example(std::sync::Arc::new(crate::lang_lua::state::TemplateData {
-                    path: "test".to_string(),
-                    pragma: crate::TemplatePragma::default(),
-                    template: crate::Template::Named("foo".to_string()),
-                }))
-                .field("path", |f| {
-                    f.typ("string").description("The path of the template token.")
-                })
-                .field("pragma", |f| {
-                    f.typ("TemplatePragma").description("The pragma of the template.")
-                })
+                .example(std::sync::Arc::new(crate::Template::default()))
             },
         )
         .type_mut(
