@@ -5,7 +5,7 @@ use std::{num::TryFromIntError, rc::Rc};
 
 use super::promise::lua_promise;
 
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 pub enum KvExecutorScope {
     #[default]
     /// The originating guild
@@ -14,12 +14,39 @@ pub enum KvExecutorScope {
     OwnerGuild,
 }
 
+impl std::str::FromStr for KvExecutorScope {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "this_guild" => Ok(KvExecutorScope::ThisGuild),
+            "owner_guild" => Ok(KvExecutorScope::OwnerGuild),
+            _ => Err("invalid scope, must be one of 'this_guild' or 'owner_guild'".to_string()),
+        }
+    }
+}
+
+impl std::fmt::Display for KvExecutorScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            KvExecutorScope::ThisGuild => write!(f, "this_guild"),
+            KvExecutorScope::OwnerGuild => write!(f, "owner_guild"),
+        }
+    }
+}
+
 /// An kv executor is used to execute key-value ops from Lua
 /// templates
 #[derive(Clone)]
 pub struct KvExecutor {
     pragma: crate::TemplatePragma,
+    /// The guild ID to execute the operation on
+    /// 
+    /// This can be either ThisGuild or OwnerGuild
     guild_id: serenity::all::GuildId,
+    /// The origin guild id
+    origin_guild_id: serenity::all::GuildId,
+    scope: KvExecutorScope,
     pool: sqlx::PgPool,
     kv_constraints: state::LuaKVConstraints,
     ratelimits: Rc<state::LuaRatelimits>,
@@ -97,6 +124,9 @@ pub fn plugin_docs() -> templating_docgen::Plugin {
             "KvExecutor allows templates to get, store and find persistent data within a server.",
             |mut t| {
                 t
+                .field("guild_id", |f| f.typ("string").description("The guild ID the executor will perform key-value operations on."))
+                .field("origin_guild_id", |f| f.typ("string").description("The originating guild ID (the guild ID of the template itself)."))
+                .field("scope", |f| f.typ("string").description("The scope of the executor."))
                 .method_mut("find", |mut m| {
                     m
                     .parameter("key", |p| p.typ("string")
@@ -128,11 +158,18 @@ pub fn plugin_docs() -> templating_docgen::Plugin {
         )
         .method_mut("new", |mut m| {
             m.parameter("token", |p| p.typ("TemplateContext").description("The token of the template to use."))
+            .parameter("scope", |p| p.typ("string?").description("The scope of the executor. `this_guild` to use the originating guilds data, `owner_guild` to use the KV of the guild that owns the template on the shop. Defaults to `this_guild` if not specified."))
             .return_("executor", |r| r.typ("KvExecutor").description("A key-value executor."))
         })
 }
 
 impl LuaUserData for KvExecutor {
+    fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("guild_id", |_, this| Ok(this.guild_id.to_string()));
+        fields.add_field_method_get("origin_guild_id", |_, this| Ok(this.origin_guild_id.to_string()));
+        fields.add_field_method_get("scope", |_, this| Ok(this.scope.to_string()));
+    }
+
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("find", |_, this, key: String| {
             Ok(lua_promise!(this, key, |lua, this, key|, {
@@ -331,10 +368,22 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
 
     module.set(
         "new",
-        lua.create_function(|_, (token,): (crate::TemplateContextRef,)| {
+        lua.create_function(|_, (token, scope): (crate::TemplateContextRef, Option<String>)| {
+            let scope = match scope {
+                Some(scope) => scope.parse().map_err(LuaError::external)?,
+                None => KvExecutorScope::ThisGuild,
+            };
+
+            let guild_id = match scope {
+                KvExecutorScope::ThisGuild => token.guild_state.guild_id,
+                KvExecutorScope::OwnerGuild => token.template_data.shop_owner.unwrap_or(token.guild_state.guild_id),
+            };
+            
             let executor = KvExecutor {
                 pragma: token.template_data.pragma.clone(),
-                guild_id: token.guild_state.guild_id,
+                origin_guild_id: token.guild_state.guild_id,
+                guild_id,
+                scope,
                 pool: token.guild_state.pool.clone(),
                 ratelimits: token.guild_state.kv_ratelimits.clone(),
                 kv_constraints: token.guild_state.kv_constraints,
