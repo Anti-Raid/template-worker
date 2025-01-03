@@ -64,7 +64,7 @@ pub async fn punishment_expiry_task(
                 Ok(()) => {
                     // Mark the punishment as handled
                     let _ = sqlx::query!(
-                        "UPDATE punishments SET is_handled = true WHERE id = $1",
+                        "UPDATE punishments SET state = 'handled' WHERE id = $1",
                         punishment_id
                     )
                     .execute(&data.pool)
@@ -74,7 +74,7 @@ pub async fn punishment_expiry_task(
                     log::error!("Error in punishment_expiry_task: {:?}", e);
                     // Mark the punishment as handled
                     let _ = sqlx::query!(
-                        "UPDATE punishments SET is_handled = true, handle_log = $2 WHERE id = $1",
+                        "UPDATE punishments SET state = 'handled', handle_log = $2 WHERE id = $1",
                         punishment_id,
                         serde_json::json!({
                             "error": format!("{:?}", e),
@@ -147,7 +147,7 @@ pub async fn stings_expiry_task(
                 Ok(()) => {
                     // Mark the punishment as handled
                     let _ = sqlx::query!(
-                        "UPDATE stings SET is_handled = true WHERE id = $1",
+                        "UPDATE stings SET state = 'handled' WHERE id = $1",
                         sting_id
                     )
                     .execute(&data.pool)
@@ -157,7 +157,7 @@ pub async fn stings_expiry_task(
                     log::error!("Error in stings_expiry_task: {:?}", e);
                     // Mark the punishment as handled
                     let _ = sqlx::query!(
-                        "UPDATE stings SET is_handled = true, handle_log = $2 WHERE id = $1",
+                        "UPDATE stings SET state = 'handled', handle_log = $2 WHERE id = $1",
                         sting_id,
                         serde_json::json!({
                             "error": format!("{:?}", e),

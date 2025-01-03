@@ -89,13 +89,6 @@ pub async fn discord_event_dispatch(
 /// Parses an antiraid event into a template event
 pub fn parse_event(event: &AntiraidEvent) -> Result<CreateEvent, silverpelt::Error> {
     match event {
-        AntiraidEvent::Custom(ref event) => Ok(CreateEvent::new(
-            event.event_titlename.clone(),
-            "Custom".to_string(),
-            event.event_name.clone(),
-            event.event_data.clone(),
-            None,
-        )),
         AntiraidEvent::StingCreate(ref sting) => Ok(CreateEvent::new(
             "(Anti Raid) Sting Created".to_string(),
             "StingCreate".to_string(),
@@ -146,6 +139,34 @@ pub fn parse_event(event: &AntiraidEvent) -> Result<CreateEvent, silverpelt::Err
                     "targets": modified
                 }
             ),
+            None,
+        )),
+        AntiraidEvent::BuiltinCommandExecute(ref command) => Ok(CreateEvent::new(
+            "(Anti Raid) Builtin Command Execute".to_string(),
+            "BuiltinCommandExecute".to_string(),
+            "BuiltinCommandExecute".to_string(),
+            serde_json::to_value(command)?,
+            Some(command.user_id.to_string()),
+        )),
+        AntiraidEvent::PermissionCheckExecute(ref permission) => Ok(CreateEvent::new(
+            "(Anti Raid) Permission Check Execute".to_string(),
+            "PermissionCheckExecute".to_string(),
+            "PermissionCheckExecute".to_string(),
+            serde_json::to_value(permission)?,
+            Some(permission.user_id.to_string()),
+        )),
+        AntiraidEvent::ModerationStart(ref moderation) => Ok(CreateEvent::new(
+            "(Anti Raid) Moderation Start".to_string(),
+            "ModerationStart".to_string(),
+            "ModerationStart".to_string(),
+            serde_json::to_value(moderation)?,
+            Some(moderation.author.user.id.to_string()),
+        )),
+        AntiraidEvent::ModerationEnd(ref moderation) => Ok(CreateEvent::new(
+            "(Anti Raid) Moderation End".to_string(),
+            "ModerationEnd".to_string(),
+            "ModerationEnd".to_string(),
+            serde_json::to_value(moderation)?,
             None,
         )),
     }

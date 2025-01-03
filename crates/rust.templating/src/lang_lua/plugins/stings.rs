@@ -70,6 +70,15 @@ pub fn plugin_docs() -> templating_docgen::Plugin {
     templating_docgen::Plugin::default()
         .name("@antiraid/stings")
         .description("List, get, create, update and delete stings on Anti-Raid.")
+        .enum_mut("StingTarget", "The target of the sting.", |e| {
+            e
+                .variant("system", |v| {
+                    v.description("A system-target (no associated user)")
+                })
+                .variant("user:{user_id}", |v| {
+                    v.description("A user-target")
+                })
+        })
         .type_mut(
             "StingCreate",
             "A type representing a new sting to be created.",
@@ -87,9 +96,6 @@ pub fn plugin_docs() -> templating_docgen::Plugin {
                     duration: Some(std::time::Duration::from_secs(60)),
                     sting_data: Some(serde_json::json!({"a": "b"})),
                 }))
-                .field("module", |f| {
-                    f.typ("string").description("The module name.")
-                })
                 .field("src", |f| {
                     f.typ("string?").description("The source of the sting.")
                 })
@@ -115,11 +121,7 @@ pub fn plugin_docs() -> templating_docgen::Plugin {
                     f.typ("StingTarget").description("The target of the sting.")
                 })
                 .field("state", |f| {
-                    f.typ("StingState").description("The state of the sting.")
-                })
-                .field("created_at", |f| {
-                    f.typ("string")
-                        .description("When the sting was created as a chrono datetime.")
+                    f.typ("string").description("The state of the sting. Must be one of 'active', 'voided' or 'handled'")
                 })
                 .field("duration", |f| {
                     f.typ("Duration?")
@@ -146,14 +148,10 @@ pub fn plugin_docs() -> templating_docgen::Plugin {
                     created_at: chrono::Utc::now(),
                     duration: Some(std::time::Duration::from_secs(60)),
                     sting_data: Some(serde_json::json!({"a": "b"})),
-                    is_handled: false,
                     handle_log: serde_json::json!({"a": "b"}),
                 }))
                 .field("id", |f| {
                     f.typ("string").description("The sting ID.")
-                })
-                .field("module", |f| {
-                    f.typ("string").description("The module name.")
                 })
                 .field("src", |f| {
                     f.typ("string?").description("The source of the sting.")
@@ -190,11 +188,12 @@ pub fn plugin_docs() -> templating_docgen::Plugin {
                     f.typ("any?")
                         .description("The data/metadata present within the sting, if any.")
                 })
-                .field("is_handled", |f| {
-                    f.typ("boolean").description("Is Handled")
-                })
                 .field("handle_log", |f| {
                     f.typ("any").description("The handle log encountered while handling the sting.")
+                })
+                .field("created_at", |f| {
+                    f.typ("string")
+                        .description("When the sting was created at.")
                 })
         })
         .type_mut("StingExecutor", "An sting executor is used to execute actions related to stings from Lua templates", |mut t| {

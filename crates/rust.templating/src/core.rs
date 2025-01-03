@@ -126,16 +126,56 @@ pub mod templating_core {
             if template.starts_with("$shop/") {
                 let (shop_tname, shop_tversion) = parse_shop_template(template)?;
 
-                let shop_template = sqlx::query!(
-                    "SELECT owner_guild, name, description, content, created_at, created_by, last_updated_at, last_updated_by FROM template_shop WHERE name = $1 AND version = $2",
-                    shop_tname,
-                    shop_tversion
-                )
-                .fetch_optional(pool)
-                .await?;
+                let (
+                    st_owner_guild,
+                    st_name,
+                    st_description,
+                    st_content,
+                    st_created_at,
+                    st_created_by,
+                    st_last_updated_at,
+                    st_last_updated_by,
+                ) = if shop_tversion == "latest" {
+                    let rec = sqlx::query!(
+                        "SELECT owner_guild, name, description, content, created_at, created_by, last_updated_at, last_updated_by FROM template_shop WHERE name = $1 ORDER BY version DESC LIMIT 1",
+                        shop_tname
+                    )
+                    .fetch_optional(pool)
+                    .await?;
 
-                let Some(shop_template) = shop_template else {
-                    return Err("Shop template not found".into());
+                    let rec = rec.ok_or("Shop template not found")?;
+
+                    (
+                        rec.owner_guild,
+                        rec.name,
+                        rec.description,
+                        rec.content,
+                        rec.created_at,
+                        rec.created_by,
+                        rec.last_updated_at,
+                        rec.last_updated_by,
+                    )
+                } else {
+                    let rec = sqlx::query!(
+                        "SELECT owner_guild, name, description, content, created_at, created_by, last_updated_at, last_updated_by FROM template_shop WHERE name = $1 AND version = $2",
+                        shop_tname,
+                        shop_tversion
+                    )
+                    .fetch_optional(pool)
+                    .await?;
+
+                    let rec = rec.ok_or("Shop template not found")?;
+
+                    (
+                        rec.owner_guild,
+                        rec.name,
+                        rec.description,
+                        rec.content,
+                        rec.created_at,
+                        rec.created_by,
+                        rec.last_updated_at,
+                        rec.last_updated_by,
+                    )
                 };
 
                 let guild_data = sqlx::query!(
@@ -150,14 +190,14 @@ pub mod templating_core {
                     return Err("Guild data not found".into());
                 };
 
-                let (template_content, pragma) = TemplatePragma::parse(&shop_template.content)?;
+                let (template_content, pragma) = TemplatePragma::parse(&st_content)?;
 
                 Ok(Self {
                     guild_id,
-                    name: shop_template.name,
-                    description: Some(shop_template.description),
+                    name: st_name,
+                    description: Some(st_description),
                     shop_name: Some(template.to_string()),
-                    shop_owner: Some(shop_template.owner_guild.parse()?),
+                    shop_owner: Some(st_owner_guild.parse()?),
                     events: guild_data.events,
                     error_channel: match guild_data.error_channel {
                         Some(channel_id) => Some(channel_id.parse()?),
@@ -165,10 +205,10 @@ pub mod templating_core {
                     },
                     content: template_content.to_string(),
                     pragma,
-                    created_by: shop_template.created_by,
-                    created_at: shop_template.created_at,
-                    updated_by: shop_template.last_updated_by,
-                    updated_at: shop_template.last_updated_at,
+                    created_by: st_created_by,
+                    created_at: st_created_at,
+                    updated_by: st_last_updated_by,
+                    updated_at: st_last_updated_at,
                 })
             } else {
                 let rec = sqlx::query!(
