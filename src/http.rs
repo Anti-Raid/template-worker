@@ -6,7 +6,7 @@ use axum::{
 };
 use silverpelt::ar_event::AntiraidEvent;
 use std::sync::Arc;
-use templating::cache::clear_cache;
+use templating::clear_cache;
 
 use crate::{
     dispatch::{dispatch, dispatch_and_wait, parse_event},
@@ -90,7 +90,7 @@ async fn dispatch_event_and_wait(
 ) -> Response<Vec<serde_json::Value>> {
     // Clear cache if event is OnStartup
     if let AntiraidEvent::OnStartup(_) = event {
-        templating::cache::clear_cache(guild_id).await;
+        templating::clear_cache(guild_id).await;
     }
 
     let event = parse_event(&event).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;

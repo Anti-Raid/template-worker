@@ -1,5 +1,5 @@
 // Generates AntiRaid documentation from docgen data
-use templating_docgen::{
+use templating::doclib::{
     Enum, EnumVariant, Field, LuaParamaterTypeMetadata, Method, Parameter, Plugin, Primitive,
     PrimitiveConstraint, Type,
 };
@@ -34,7 +34,7 @@ pub fn document_all_primitives(heading_level: usize) -> String {
 
     markdown.push_str(&format!("{} Primitives\n\n", _headings(heading_level)));
 
-    let primitive_list = templating::primitives_docs::document_primitives();
+    let primitive_list = templating::document_primitives();
 
     for primitive in primitive_list.primitives {
         markdown.push_str(&generate_markdown_for_primitive(

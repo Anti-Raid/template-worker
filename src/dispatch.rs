@@ -1,7 +1,7 @@
 use serenity::all::{Context, FullEvent, GuildId, Interaction};
 use silverpelt::ar_event::AntiraidEvent;
 use silverpelt::data::Data;
-use templating::{cache::get_all_guild_templates, event::CreateEvent};
+use templating::{get_all_guild_templates, CreateEvent};
 
 use crate::serenitystore::shard_messenger_for_guild;
 
@@ -255,7 +255,7 @@ pub async fn dispatch_and_wait(
                 local_set.spawn(async move {
                     match handle.wait_timeout(wait_timeout).await {
                         Ok(Some(action)) => action
-                            .to_response::<serde_json::Value>()
+                            .into_response::<serde_json::Value>()
                             .map_err(|e| (e, template)),
                         Ok(None) => Err(("Timed out while waiting for response".into(), template)),
                         Err(e) => Err((e.to_string().into(), template)),
