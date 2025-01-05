@@ -709,7 +709,7 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
 }
 
 mod types {
-    use crate::lang_lua::plugins::typesext::MultiOption;
+    use crate::lang_lua::plugins::antiraid::typesext::MultiOption;
 
     #[derive(serde::Serialize, serde::Deserialize)]
     pub struct GetAuditLogOptions {

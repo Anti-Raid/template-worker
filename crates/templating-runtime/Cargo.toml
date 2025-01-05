@@ -62,6 +62,7 @@ rbx_xml = "0.13.5"
 # Anti-Raid specific
 limits = { path = "../../../../core/rust/rust.limits" }
 splashcore_rs = { path = "../../../../core/rust/rust.std" }
+lockdowns = { path = "../../../../core/rust/rust.lockdowns" }
 silverpelt = { path = "../../../../core/rust/rust.silverpelt" }
 captcha = { git = "https://github.com/Anti-Raid/captcha", branch = "master" }
 sandwich_driver = { path = "../../../../core/rust/rust.sandwich_driver" }

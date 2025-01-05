@@ -99,6 +99,31 @@ impl LuaRatelimits {
         })
     }
 
+    pub fn new_lockdowns_rl() -> Result<Self, crate::Error> {
+        // Create the global limit
+        let global_quota =
+            Self::create_quota(NonZeroU32::new(3).unwrap(), Duration::from_secs(60))?;
+
+        // TSL limit
+        let tsl_quota = Self::create_quota(NonZeroU32::new(1).unwrap(), Duration::from_secs(60))?;
+
+        let global1 = DefaultKeyedRateLimiter::keyed(global_quota);
+        let global = vec![global1];
+
+        // Create the per-bucket limits
+        let tsl_lim1 = DefaultKeyedRateLimiter::keyed(tsl_quota);
+        // Create the clock
+        let clock = QuantaClock::default();
+
+        Ok(Self {
+            global,
+            per_bucket: indexmap::indexmap!(
+                "tsl".to_string() => vec![tsl_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
+            ),
+            clock,
+        })
+    }
+
     pub fn check(&self, bucket: &str) -> Result<(), crate::Error> {
         // Check global ratelimits
         for global_lim in self.global.iter() {
@@ -154,4 +179,7 @@ pub struct GuildState {
 
     /// Stores the lua sting ratelimiters
     pub sting_ratelimits: Rc<LuaRatelimits>,
+
+    /// Stores the lua lockdown ratelimiters
+    pub lockdown_ratelimits: Rc<LuaRatelimits>,
 }

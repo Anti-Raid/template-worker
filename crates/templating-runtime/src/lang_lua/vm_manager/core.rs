@@ -258,6 +258,7 @@ pub(super) fn create_guild_state(
         kv_ratelimits: Rc::new(LuaRatelimits::new_kv_rl()?),
         actions_ratelimits: Rc::new(LuaRatelimits::new_action_rl()?),
         sting_ratelimits: Rc::new(LuaRatelimits::new_stings_rl()?),
+        lockdown_ratelimits: Rc::new(LuaRatelimits::new_lockdowns_rl()?),
         last_execution_time,
     })
 }

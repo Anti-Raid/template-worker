@@ -4,36 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{num::TryFromIntError, rc::Rc};
 
 use super::promise::lua_promise;
-
-#[derive(Default, Clone, Copy)]
-pub enum KvExecutorScope {
-    #[default]
-    /// The originating guild
-    ThisGuild,
-    /// The guild that owns the template on the shop (only available in shop templates, on non-shop templates this will be the same as Guild)
-    OwnerGuild,
-}
-
-impl std::str::FromStr for KvExecutorScope {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "this_guild" => Ok(KvExecutorScope::ThisGuild),
-            "owner_guild" => Ok(KvExecutorScope::OwnerGuild),
-            _ => Err("invalid scope, must be one of 'this_guild' or 'owner_guild'".to_string()),
-        }
-    }
-}
-
-impl std::fmt::Display for KvExecutorScope {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            KvExecutorScope::ThisGuild => write!(f, "this_guild"),
-            KvExecutorScope::OwnerGuild => write!(f, "owner_guild"),
-        }
-    }
-}
+use crate::lang_lua::plugins::executor::ExecutorScope;
 
 /// An kv executor is used to execute key-value ops from Lua
 /// templates
@@ -46,7 +17,7 @@ pub struct KvExecutor {
     guild_id: serenity::all::GuildId,
     /// The origin guild id
     origin_guild_id: serenity::all::GuildId,
-    scope: KvExecutorScope,
+    scope: ExecutorScope,
     pool: sqlx::PgPool,
     kv_constraints: state::LuaKVConstraints,
     ratelimits: Rc<state::LuaRatelimits>,
@@ -369,16 +340,8 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
     module.set(
         "new",
         lua.create_function(|_, (token, scope): (TemplateContextRef, Option<String>)| {
-            let scope = match scope {
-                Some(scope) => scope.parse().map_err(LuaError::external)?,
-                None => KvExecutorScope::ThisGuild,
-            };
-
-            let guild_id = match scope {
-                KvExecutorScope::ThisGuild => token.guild_state.guild_id,
-                KvExecutorScope::OwnerGuild => token.template_data.shop_owner.unwrap_or(token.guild_state.guild_id),
-            };
-            
+            let scope = ExecutorScope::scope_str(scope)?;
+            let guild_id = scope.guild(&token);
             let executor = KvExecutor {
                 pragma: token.template_data.pragma.clone(),
                 origin_guild_id: token.guild_state.guild_id,

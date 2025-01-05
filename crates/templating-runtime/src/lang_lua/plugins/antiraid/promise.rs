@@ -67,7 +67,7 @@ impl LuaPromise {
 macro_rules! lua_promise {
     ($($arg:ident),* $(,)?, |$lua:ident, $($args:ident),*|, $code:block) => {
         {
-            use crate::lang_lua::plugins::promise::LuaPromise;
+            use crate::lang_lua::plugins::antiraid::promise::LuaPromise;
             // let arg1 = arg1.clone();
             // let arg2 = arg2.clone();
             $(

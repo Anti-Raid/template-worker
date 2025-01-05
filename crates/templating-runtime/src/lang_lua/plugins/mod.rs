@@ -1,15 +1,6 @@
-pub mod discord;
-pub mod img_captcha;
-pub mod interop;
-pub mod kv;
-pub mod lockdowns;
+pub mod antiraid;
+pub(crate) mod executor;
 pub mod lune;
-pub mod page;
-pub mod permissions;
-pub mod promise;
-pub mod stings;
-pub mod stream;
-pub mod typesext;
 
 use mlua::prelude::*;
 use std::sync::LazyLock;
@@ -17,16 +8,17 @@ use std::sync::LazyLock;
 pub static PLUGINS: LazyLock<indexmap::IndexMap<String, (ModuleFn, Option<ModuleDocFn>)>> =
     LazyLock::new(|| {
         indexmap::indexmap! {
-            "@antiraid/discord".to_string() => (discord::init_plugin as ModuleFn, Some(discord::plugin_docs as ModuleDocFn)),
-            "@antiraid/interop".to_string() => (interop::init_plugin as ModuleFn, Some(interop::plugin_docs as ModuleDocFn)),
-            "@antiraid/img_captcha".to_string() => (img_captcha::init_plugin as ModuleFn, Some(img_captcha::plugin_docs as ModuleDocFn)),
-            "@antiraid/kv".to_string() => (kv::init_plugin as ModuleFn, Some(kv::plugin_docs as ModuleDocFn)),
-            "@antiraid/page".to_string() => (page::init_plugin as ModuleFn, Some(page::plugin_docs as ModuleDocFn)),
-            "@antiraid/permissions".to_string() => (permissions::init_plugin as ModuleFn, Some(permissions::plugin_docs as ModuleDocFn)),
-            "@antiraid/promise".to_string() => (promise::init_plugin as ModuleFn, Some(promise::plugin_docs as ModuleDocFn)),
-            "@antiraid/stings".to_string() => (stings::init_plugin as ModuleFn, Some(stings::plugin_docs as ModuleDocFn)),
-            "@antiraid/stream".to_string() => (stream::init_plugin as ModuleFn, Some(stream::plugin_docs as ModuleDocFn)),
-            "@antiraid/typesext".to_string() => (typesext::init_plugin as ModuleFn, Some(typesext::plugin_docs as ModuleDocFn)),
+            "@antiraid/discord".to_string() => (antiraid::discord::init_plugin as ModuleFn, Some(antiraid::discord::plugin_docs as ModuleDocFn)),
+            "@antiraid/interop".to_string() => (antiraid::interop::init_plugin as ModuleFn, Some(antiraid::interop::plugin_docs as ModuleDocFn)),
+            "@antiraid/img_captcha".to_string() => (antiraid::img_captcha::init_plugin as ModuleFn, Some(antiraid::img_captcha::plugin_docs as ModuleDocFn)),
+            "@antiraid/kv".to_string() => (antiraid::kv::init_plugin as ModuleFn, Some(antiraid::kv::plugin_docs as ModuleDocFn)),
+            "@antiraid/lockdowns".to_string() => (antiraid::lockdowns::init_plugin as ModuleFn, Some(antiraid::lockdowns::plugin_docs as ModuleDocFn)),
+            "@antiraid/page".to_string() => (antiraid::page::init_plugin as ModuleFn, Some(antiraid::page::plugin_docs as ModuleDocFn)),
+            "@antiraid/permissions".to_string() => (antiraid::permissions::init_plugin as ModuleFn, Some(antiraid::permissions::plugin_docs as ModuleDocFn)),
+            "@antiraid/promise".to_string() => (antiraid::promise::init_plugin as ModuleFn, Some(antiraid::promise::plugin_docs as ModuleDocFn)),
+            "@antiraid/stings".to_string() => (antiraid::stings::init_plugin as ModuleFn, Some(antiraid::stings::plugin_docs as ModuleDocFn)),
+            "@antiraid/stream".to_string() => (antiraid::stream::init_plugin as ModuleFn, Some(antiraid::stream::plugin_docs as ModuleDocFn)),
+            "@antiraid/typesext".to_string() => (antiraid::typesext::init_plugin as ModuleFn, Some(antiraid::typesext::plugin_docs as ModuleDocFn)),
 
             // External plugins
             "@lune/datetime".to_string() => (lune::datetime::init_plugin as ModuleFn, None as Option<ModuleDocFn>),
