@@ -71,55 +71,70 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
                     .description("The time the lockdown was created")
             })
         })
-        .method_mut("list", |m| {
-            m.is_promise(true)
-                .description("Lists all active lockdowns")
-                .return_("lockdowns", |r| {
-                    r.typ("{Lockdown}")
-                        .description("A list of all currently active lockdowns")
+        .type_mut(
+            "LockdownExecutor",
+            "An executor for listing, creating and removing lockdowns",
+            |mut t| {
+                t.method_mut("list", |m| {
+                    m.is_promise(true)
+                        .description("Lists all active lockdowns")
+                        .return_("lockdowns", |r| {
+                            r.typ("{Lockdown}")
+                                .description("A list of all currently active lockdowns")
+                        })
                 })
-        })
-        .method_mut("qsl", |m| {
-            m.is_promise(true)
-                .description("Starts a quick server lockdown")
-                .parameter("reason", |p| {
-                    p.description("The reason for the lockdown").typ("string")
+                .method_mut("qsl", |m| {
+                    m.is_promise(true)
+                        .description("Starts a quick server lockdown")
+                        .parameter("reason", |p| {
+                            p.description("The reason for the lockdown").typ("string")
+                        })
                 })
-        })
-        .method_mut("tsl", |m| {
-            m.is_promise(true)
-                .description("Starts a traditional server lockdown")
-                .parameter("reason", |p| {
-                    p.description("The reason for the lockdown").typ("string")
+                .method_mut("tsl", |m| {
+                    m.is_promise(true)
+                        .description("Starts a traditional server lockdown")
+                        .parameter("reason", |p| {
+                            p.description("The reason for the lockdown").typ("string")
+                        })
                 })
-        })
-        .method_mut("scl", |m| {
-            m.is_promise(true)
-                .description("Starts a lockdown on a single channel")
-                .parameter("channel", |p| {
-                    p.description("The channel to lock down").typ("string")
+                .method_mut("scl", |m| {
+                    m.is_promise(true)
+                        .description("Starts a lockdown on a single channel")
+                        .parameter("channel", |p| {
+                            p.description("The channel to lock down").typ("string")
+                        })
+                        .parameter("reason", |p| {
+                            p.description("The reason for the lockdown").typ("string")
+                        })
                 })
-                .parameter("reason", |p| {
-                    p.description("The reason for the lockdown").typ("string")
+                .method_mut("role", |m| {
+                    m.is_promise(true)
+                        .description("Starts a lockdown on a role")
+                        .parameter("role", |p| {
+                            p.description("The role to lock down").typ("string")
+                        })
+                        .parameter("reason", |p| {
+                            p.description("The reason for the lockdown").typ("string")
+                        })
                 })
-        })
-        .method_mut("role", |m| {
-            m.is_promise(true)
-                .description("Starts a lockdown on a role")
-                .parameter("role", |p| {
-                    p.description("The role to lock down").typ("string")
+                .method_mut("remove", |m| {
+                    m.is_promise(true)
+                        .description("Removes a lockdown")
+                        .parameter("id", |p| {
+                            p.description("The id of the lockdown to remove")
+                                .typ("string")
+                        })
                 })
-                .parameter("reason", |p| {
-                    p.description("The reason for the lockdown").typ("string")
-                })
-        })
-        .method_mut("remove", |m| {
-            m.is_promise(true)
-                .description("Removes a lockdown")
-                .parameter("id", |p| {
-                    p.description("The id of the lockdown to remove")
-                        .typ("string")
-                })
+            },
+        )
+        .method_mut("new", |mut m| {
+            m.parameter("token", |p| {
+                p.description("The token of the template to use")
+                    .typ("TemplateContext")
+            })
+            .return_("executor", |r| {
+                r.description("A lockdown executor").typ("LockdownExecutor")
+            })
         })
 }
 

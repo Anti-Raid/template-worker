@@ -57,7 +57,8 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
                     },
                     kittycat_resolved_permissions: vec!["moderation.kick".into(), "moderation.ban".into()],
                     guild_owner_id: serenity::all::UserId::new(1234567890),
-                    roles: vec![serenity::all::RoleId::new(1234567890)],
+                    guild_roles: extract_map::ExtractMap::new(),
+                    member_roles: vec![serenity::all::RoleId::new(1234567890)],
                 }
             ))
             .field("discord_permissions", |f| {
@@ -76,14 +77,18 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
                 f.description("The guild owner id")
                 .typ("string")
             })
-            .field("roles", |f| {
-                f.description("The roles of the user")
+            .field("guild_roles", |f| {
+                f.description("The roles of the guild")
+                .typ("{[string]: Serenity.Role}")
+            })
+            .field("member_roles", |f| {
+                f.description("The roles of the member")
                 .typ("{string}")
             })
         })
         .type_mut(
             "UserInfoExecutor",
-            "DiscordExecutor allows templates to access/use user infos not otherwise sent via events.",
+            "UserInfoExecutor allows templates to access/use user infos not otherwise sent via events.",
             |mut t| {
                 t
                 .method_mut("get", |typ| {
