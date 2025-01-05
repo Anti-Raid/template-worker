@@ -2,7 +2,7 @@ use super::AtomicInstant;
 use crate::lang_lua::plugins;
 use crate::lang_lua::primitives::CreateEvent;
 use crate::lang_lua::state::GuildState;
-use crate::lang_lua::state::LuaRatelimits;
+use crate::lang_lua::state::Ratelimits;
 use crate::MAX_TEMPLATES_EXECUTION_TIME;
 use crate::MAX_TEMPLATE_MEMORY_USAGE;
 use mlua::prelude::*;
@@ -255,10 +255,7 @@ pub(super) fn create_guild_state(
         shard_messenger,
         reqwest_client,
         kv_constraints: LuaKVConstraints::default(),
-        kv_ratelimits: Rc::new(LuaRatelimits::new_kv_rl()?),
-        actions_ratelimits: Rc::new(LuaRatelimits::new_action_rl()?),
-        sting_ratelimits: Rc::new(LuaRatelimits::new_stings_rl()?),
-        lockdown_ratelimits: Rc::new(LuaRatelimits::new_lockdowns_rl()?),
+        ratelimits: Rc::new(Ratelimits::new()?),
         last_execution_time,
     })
 }

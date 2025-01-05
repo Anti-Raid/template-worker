@@ -14,7 +14,7 @@ pub struct DiscordActionExecutor {
     serenity_context: serenity::all::Context,
     shard_messenger: serenity::all::ShardMessenger,
     reqwest_client: reqwest::Client,
-    ratelimits: Rc<state::LuaRatelimits>,
+    ratelimits: Rc<state::Ratelimits>,
 }
 
 // @userdata DiscordActionExecutor
@@ -33,6 +33,7 @@ impl DiscordActionExecutor {
         }
 
         self.ratelimits
+            .discord
             .check(&action)
             .map_err(|e| LuaError::external(e.to_string()))?;
 
@@ -2085,7 +2086,7 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
                 serenity_context: token.guild_state.serenity_context.clone(),
                 shard_messenger: token.guild_state.shard_messenger.clone(),
                 reqwest_client: token.guild_state.reqwest_client.clone(),
-                ratelimits: token.guild_state.actions_ratelimits.clone(),
+                ratelimits: token.guild_state.ratelimits.clone(),
             };
 
             Ok(executor)

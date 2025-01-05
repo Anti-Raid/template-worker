@@ -20,7 +20,7 @@ pub struct KvExecutor {
     scope: ExecutorScope,
     pool: sqlx::PgPool,
     kv_constraints: state::LuaKVConstraints,
-    ratelimits: Rc<state::LuaRatelimits>,
+    ratelimits: Rc<state::Ratelimits>,
 }
 
 /// Represents a full record complete with metadata
@@ -67,7 +67,7 @@ impl KvExecutor {
             return Err(format!("KV operation `{}` not allowed in this template context for key '{}'", action, key).into());
         }
 
-        self.ratelimits.check(&action)?; // Check rate limits
+        self.ratelimits.kv.check(&action)?; // Check rate limits
 
         Ok(())
     }
@@ -348,7 +348,7 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
                 guild_id,
                 scope,
                 pool: token.guild_state.pool.clone(),
-                ratelimits: token.guild_state.kv_ratelimits.clone(),
+                ratelimits: token.guild_state.ratelimits.clone(),
                 kv_constraints: token.guild_state.kv_constraints,
             };
 

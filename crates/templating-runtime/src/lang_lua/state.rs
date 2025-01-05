@@ -27,7 +27,7 @@ impl LuaRatelimits {
         Ok(quota)
     }
 
-    pub fn new_action_rl() -> Result<Self, crate::Error> {
+    fn new_discord_rl() -> Result<Self, crate::Error> {
         // Create the global limit
         let global_quota =
             Self::create_quota(NonZeroU32::new(10).unwrap(), Duration::from_secs(10))?;
@@ -65,7 +65,7 @@ impl LuaRatelimits {
         })
     }
 
-    pub fn new_kv_rl() -> Result<Self, crate::Error> {
+    fn new_kv_rl() -> Result<Self, crate::Error> {
         // Create the global limit
         let global_quota =
             Self::create_quota(NonZeroU32::new(10).unwrap(), Duration::from_secs(60))?;
@@ -82,7 +82,7 @@ impl LuaRatelimits {
         })
     }
 
-    pub fn new_stings_rl() -> Result<Self, crate::Error> {
+    fn new_stings_rl() -> Result<Self, crate::Error> {
         // Create the global limit
         let global_quota =
             Self::create_quota(NonZeroU32::new(10).unwrap(), Duration::from_secs(60))?;
@@ -99,7 +99,7 @@ impl LuaRatelimits {
         })
     }
 
-    pub fn new_lockdowns_rl() -> Result<Self, crate::Error> {
+    fn new_lockdowns_rl() -> Result<Self, crate::Error> {
         // Create the global limit
         let global_quota =
             Self::create_quota(NonZeroU32::new(3).unwrap(), Duration::from_secs(60))?;
@@ -120,6 +120,23 @@ impl LuaRatelimits {
             per_bucket: indexmap::indexmap!(
                 "tsl".to_string() => vec![tsl_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
             ),
+            clock,
+        })
+    }
+
+    fn new_userinfo_rl() -> Result<Self, crate::Error> {
+        // Create the global limit
+        let global_quota =
+            Self::create_quota(NonZeroU32::new(7).unwrap(), Duration::from_secs(60))?;
+        let global1 = DefaultKeyedRateLimiter::keyed(global_quota);
+        let global = vec![global1];
+
+        // Create the clock
+        let clock = QuantaClock::default();
+
+        Ok(Self {
+            global,
+            per_bucket: indexmap::indexmap!(),
             clock,
         })
     }
@@ -161,6 +178,35 @@ impl LuaRatelimits {
     }
 }
 
+pub struct Ratelimits {
+    /// Stores the lua discord ratelimiters
+    pub discord: LuaRatelimits,
+
+    /// Stores the lua kv ratelimiters
+    pub kv: LuaRatelimits,
+
+    /// Stores the lua sting ratelimiters
+    pub stings: LuaRatelimits,
+
+    /// Stores the lua lockdown ratelimiters
+    pub lockdowns: LuaRatelimits,
+
+    /// Stores the lua userinfo ratelimiters
+    pub userinfo: LuaRatelimits,
+}
+
+impl Ratelimits {
+    pub fn new() -> Result<Self, crate::Error> {
+        Ok(Self {
+            discord: LuaRatelimits::new_discord_rl()?,
+            kv: LuaRatelimits::new_kv_rl()?,
+            stings: LuaRatelimits::new_stings_rl()?,
+            lockdowns: LuaRatelimits::new_lockdowns_rl()?,
+            userinfo: LuaRatelimits::new_userinfo_rl()?,
+        })
+    }
+}
+
 #[allow(dead_code)]
 pub struct GuildState {
     pub last_execution_time: Arc<AtomicInstant>,
@@ -170,16 +216,5 @@ pub struct GuildState {
     pub shard_messenger: serenity::all::ShardMessenger,
     pub reqwest_client: reqwest::Client,
     pub kv_constraints: LuaKVConstraints,
-
-    /// Stores the lua actions ratelimiters
-    pub actions_ratelimits: Rc<LuaRatelimits>,
-
-    /// Stores the lua kv ratelimiters
-    pub kv_ratelimits: Rc<LuaRatelimits>,
-
-    /// Stores the lua sting ratelimiters
-    pub sting_ratelimits: Rc<LuaRatelimits>,
-
-    /// Stores the lua lockdown ratelimiters
-    pub lockdown_ratelimits: Rc<LuaRatelimits>,
+    pub ratelimits: Rc<Ratelimits>,
 }

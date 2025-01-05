@@ -1,7 +1,7 @@
 use super::promise::lua_promise;
 use crate::lang_lua::{primitives::TemplateContextRef, state};
 use mlua::prelude::*;
-use std::rc::Rc;
+use std::{rc::Rc, str::FromStr};
 
 #[derive(Clone)]
 /// An lockdown executor is used to manage AntiRaid lockdowns from Lua
@@ -12,7 +12,7 @@ pub struct LockdownExecutor {
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
     reqwest_client: reqwest::Client,
-    ratelimits: Rc<state::LuaRatelimits>,
+    ratelimits: Rc<state::Ratelimits>,
 }
 
 // @userdata LockdownExecutor
@@ -31,6 +31,7 @@ impl LockdownExecutor {
         }
 
         self.ratelimits
+            .lockdowns
             .check(&action)
             .map_err(|e| LuaError::external(e.to_string()))?;
 
@@ -42,8 +43,41 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
     crate::doclib::Plugin::default()
         .name("@antiraid/lockdowns")
         .description("This plugin allows for templates to interact with AntiRaid lockdowns")
+        .type_mut("Lockdown", "A created lockdown", |t| {
+            t.example(std::sync::Arc::new(lockdowns::Lockdown {
+                id: sqlx::types::Uuid::from_str("805c0dd1-a625-4875-81e4-8edc6a14f659")
+                    .expect("Failed to parse UUID"),
+                reason: "Testing".to_string(),
+                r#type: Box::new(lockdowns::qsl::QuickServerLockdown {}),
+                data: serde_json::json!({}),
+                created_at: chrono::Utc::now(),
+            }))
+            .field("id", |f| {
+                f.typ("string").description("The id of the lockdown")
+            })
+            .field("reason", |f| {
+                f.typ("string").description("The reason for the lockdown")
+            })
+            .field("type", |f| {
+                f.typ("string")
+                    .description("The type of lockdown in string form")
+            })
+            .field("data", |f| {
+                f.typ("any")
+                    .description("The data associated with the lockdown")
+            })
+            .field("created_at", |f| {
+                f.typ("string")
+                    .description("The time the lockdown was created")
+            })
+        })
         .method_mut("list", |m| {
-            m.is_promise(true).description("Lists all active lockdowns")
+            m.is_promise(true)
+                .description("Lists all active lockdowns")
+                .return_("lockdowns", |r| {
+                    r.typ("{Lockdown}")
+                        .description("A list of all currently active lockdowns")
+                })
         })
         .method_mut("qsl", |m| {
             m.is_promise(true)
@@ -314,7 +348,7 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
                 serenity_context: token.guild_state.serenity_context.clone(),
                 reqwest_client: token.guild_state.reqwest_client.clone(),
                 pool: token.guild_state.pool.clone(),
-                ratelimits: token.guild_state.lockdown_ratelimits.clone(),
+                ratelimits: token.guild_state.ratelimits.clone(),
             };
 
             Ok(executor)

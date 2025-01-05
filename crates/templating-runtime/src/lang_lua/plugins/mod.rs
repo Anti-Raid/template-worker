@@ -19,6 +19,7 @@ pub static PLUGINS: LazyLock<indexmap::IndexMap<String, (ModuleFn, Option<Module
             "@antiraid/stings".to_string() => (antiraid::stings::init_plugin as ModuleFn, Some(antiraid::stings::plugin_docs as ModuleDocFn)),
             "@antiraid/stream".to_string() => (antiraid::stream::init_plugin as ModuleFn, Some(antiraid::stream::plugin_docs as ModuleDocFn)),
             "@antiraid/typesext".to_string() => (antiraid::typesext::init_plugin as ModuleFn, Some(antiraid::typesext::plugin_docs as ModuleDocFn)),
+            "@antiraid/userinfo".to_string() => (antiraid::userinfo::init_plugin as ModuleFn, Some(antiraid::userinfo::plugin_docs as ModuleDocFn)),
 
             // External plugins
             "@lune/datetime".to_string() => (lune::datetime::init_plugin as ModuleFn, None as Option<ModuleDocFn>),

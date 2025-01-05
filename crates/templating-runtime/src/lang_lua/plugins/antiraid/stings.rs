@@ -190,7 +190,7 @@ pub struct StingExecutor {
     guild_id: serenity::all::GuildId,
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
-    ratelimits: Rc<state::LuaRatelimits>,
+    ratelimits: Rc<state::Ratelimits>,
 }
 
 impl StingExecutor {
@@ -203,7 +203,7 @@ impl StingExecutor {
             return Err("Sting operation not allowed in this template context".into());
         }
 
-        self.ratelimits.check(&action)?;
+        self.ratelimits.stings.check(&action)?;
 
         Ok(())
     }
@@ -330,7 +330,7 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
                 pragma: token.template_data.pragma.clone(),
                 guild_id: token.guild_state.guild_id,
                 serenity_context: token.guild_state.serenity_context.clone(),
-                ratelimits: token.guild_state.sting_ratelimits.clone(),
+                ratelimits: token.guild_state.ratelimits.clone(),
                 pool: token.guild_state.pool.clone(),
             };
 

@@ -9,3 +9,4 @@ pub mod promise;
 pub mod stings;
 pub mod stream;
 pub mod typesext;
+pub mod userinfo;
