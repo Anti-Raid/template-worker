@@ -47,6 +47,61 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
         .description(
             "This plugin allows for templates to interact with user's core information on AntiRaid (permissions etc)",
         )
+        .type_mut("UserInfo", "A user info object", |t| {
+            t.example(std::sync::Arc::new(
+                UserInfo {
+                    discord_permissions: serenity::all::Permissions::all(),
+                    kittycat_staff_permissions: kittycat::perms::StaffPermissions {
+                        user_positions: vec![],
+                        perm_overrides: vec!["global.*".into()],
+                    },
+                    kittycat_resolved_permissions: vec!["moderation.kick".into(), "moderation.ban".into()],
+                    guild_owner_id: serenity::all::UserId::new(1234567890),
+                    roles: vec![serenity::all::RoleId::new(1234567890)],
+                }
+            ))
+            .field("discord_permissions", |f| {
+                f.description("The discord permissions of the user")
+                .typ("string")
+            })
+            .field("kittycat_staff_permissions", |f| {
+                f.description("The staff permissions of the user")
+                .typ("StaffPermissions")
+            })
+            .field("kittycat_resolved_permissions", |f| {
+                f.description("The resolved permissions of the user")
+                .typ("{Permission}")
+            })
+            .field("guild_owner_id", |f| {
+                f.description("The guild owner id")
+                .typ("string")
+            })
+            .field("roles", |f| {
+                f.description("The roles of the user")
+                .typ("{string}")
+            })
+        })
+        .type_mut(
+            "UserInfoExecutor",
+            "DiscordExecutor allows templates to access/use user infos not otherwise sent via events.",
+            |mut t| {
+                t
+                .method_mut("get", |typ| {
+                    typ
+                    .description("Gets the user info of a user.")
+                    .parameter("user", |p| {
+                        p.typ("string").description("The user id to get the info of.")
+                    })
+                    .return_("UserInfo", |p| {
+                        p.description("The user info of the user.")
+                    })
+                    .is_promise(true)
+                })
+            })
+        .method_mut("new", |mut m| {
+            m.parameter("token", |p| p.typ("TemplateContext").description("The token of the template to use."))
+            .return_("executor", |r| r.typ("UserInfoExecutor").description("A userinfo executor."))
+        })
 }
 
 impl LuaUserData for UserInfoExecutor {
