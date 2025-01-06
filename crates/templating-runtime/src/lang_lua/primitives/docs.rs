@@ -131,26 +131,18 @@ pub fn document_primitives() -> crate::doclib::PrimitiveListBuilder {
                 .description("The author of the event, if any. If there is no known author, this field will either be `nil` or `null`.")
             })
         })
-                .type_mut(
-            "TemplatePragma",
-            "`TemplatePragma` contains the pragma of the template. Note that the list of fields below in non-exhaustive as templates can define extra fields on the pragma as well",
-            |t| {
-                t
-                .example(std::sync::Arc::new(crate::TemplatePragma::default()))
-                .field("lang", |f| {
-                    f.typ("string").description("The language of the template.")
-                })
-                .field("allowed_caps", |f| {
-                    f.typ("{string}").description("The allowed capabilities provided to the template.")
-                })
-            },
-        )
         .type_mut(
             "Template",
             "`Template` is a struct that represents the data associated with a template. Fields are still being documented and subject to change.",
             |t| {
                 t
                 .example(std::sync::Arc::new(crate::Template::default()))
+                .field("language", |f| {
+                    f.typ("string").description("The language of the template.")
+                })
+                .field("allowed_caps", |f| {
+                    f.typ("{string}").description("The allowed capabilities provided to the template.")
+                })
             },
         )
         .type_mut(

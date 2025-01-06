@@ -186,7 +186,7 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
 /// templates
 #[derive(Clone)]
 pub struct StingExecutor {
-    pragma: crate::TemplatePragma,
+    allowed_caps: Vec<String>,
     guild_id: serenity::all::GuildId,
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
@@ -195,11 +195,7 @@ pub struct StingExecutor {
 
 impl StingExecutor {
     pub fn check_action(&self, action: String) -> Result<(), crate::Error> {
-        if !self
-            .pragma
-            .allowed_caps
-            .contains(&format!("sting:{}", action))
-        {
+        if !self.allowed_caps.contains(&format!("sting:{}", action)) {
             return Err("Sting operation not allowed in this template context".into());
         }
 
@@ -327,7 +323,7 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
         "new",
         lua.create_function(|_, (token,): (TemplateContextRef,)| {
             let executor = StingExecutor {
-                pragma: token.template_data.pragma.clone(),
+                allowed_caps: token.template_data.allowed_caps.clone(),
                 guild_id: token.guild_state.guild_id,
                 serenity_context: token.guild_state.serenity_context.clone(),
                 ratelimits: token.guild_state.ratelimits.clone(),

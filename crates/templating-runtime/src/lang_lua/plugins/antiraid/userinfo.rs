@@ -9,7 +9,7 @@ use super::promise::lua_promise;
 #[derive(Clone)]
 /// An user info executor is used to fetch UserInfo's about users
 pub struct UserInfoExecutor {
-    pragma: crate::TemplatePragma,
+    allowed_caps: Vec<String>,
     guild_id: serenity::all::GuildId,
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
@@ -22,11 +22,7 @@ pub struct UserInfoExecutor {
 // Executes actions on discord
 impl UserInfoExecutor {
     pub fn check_action(&self, action: String) -> LuaResult<()> {
-        if !self
-            .pragma
-            .allowed_caps
-            .contains(&format!("userinfo:{}", action))
-        {
+        if !self.allowed_caps.contains(&format!("userinfo:{}", action)) {
             return Err(LuaError::runtime(
                 "User info action is not allowed in this template context",
             ));
@@ -141,7 +137,7 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
             .map_err(|e| LuaError::external(format!("Error while parsing role id: {}", e)))?;*/
 
             let executor = UserInfoExecutor {
-                pragma: token.template_data.pragma.clone(),
+                allowed_caps: token.template_data.allowed_caps.clone(),
                 guild_id: token.guild_state.guild_id,
                 serenity_context: token.guild_state.serenity_context.clone(),
                 ratelimits: token.guild_state.ratelimits.clone(),

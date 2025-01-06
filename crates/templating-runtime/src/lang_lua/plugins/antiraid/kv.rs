@@ -10,7 +10,7 @@ use crate::lang_lua::plugins::executor::ExecutorScope;
 /// templates
 #[derive(Clone)]
 pub struct KvExecutor {
-    pragma: crate::TemplatePragma,
+    allowed_caps: Vec<String>,
     /// The guild ID to execute the operation on
     /// 
     /// This can be either ThisGuild or OwnerGuild
@@ -48,19 +48,15 @@ impl KvRecord {
 impl KvExecutor {
     pub fn check(&self, action: String, key: String) -> Result<(), crate::Error> {
         if !self
-        .pragma
         .allowed_caps
         .contains(&"kv:*".to_string()) // KV:* means all KV operations are allowed
         && !self
-        .pragma
         .allowed_caps
         .contains(&format!("kv:{}:*", action)) // kv:{action}:* means that the action can be performed on any key
         && !self
-        .pragma
         .allowed_caps
         .contains(&format!("kv:{}:{}", action, key)) // kv:{action}:{key} means that the action can only be performed on said key
         && !self
-        .pragma
         .allowed_caps
         .contains(&format!("kv:*:{}", key))  // kv:*:{key} means that any action can be performed on said key
         {
@@ -343,7 +339,7 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
             let scope = ExecutorScope::scope_str(scope)?;
             let guild_id = scope.guild(&token);
             let executor = KvExecutor {
-                pragma: token.template_data.pragma.clone(),
+                allowed_caps: token.template_data.allowed_caps.clone(),
                 origin_guild_id: token.guild_state.guild_id,
                 guild_id,
                 scope,

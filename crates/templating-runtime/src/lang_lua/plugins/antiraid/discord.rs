@@ -9,7 +9,7 @@ use std::rc::Rc;
 /// An action executor is used to execute actions such as kick/ban/timeout from Lua
 /// templates
 pub struct DiscordActionExecutor {
-    pragma: crate::TemplatePragma,
+    allowed_caps: Vec<String>,
     guild_id: serenity::all::GuildId,
     serenity_context: serenity::all::Context,
     shard_messenger: serenity::all::ShardMessenger,
@@ -22,11 +22,7 @@ pub struct DiscordActionExecutor {
 // Executes actions on discord
 impl DiscordActionExecutor {
     pub fn check_action(&self, action: String) -> LuaResult<()> {
-        if !self
-            .pragma
-            .allowed_caps
-            .contains(&format!("discord:{}", action))
-        {
+        if !self.allowed_caps.contains(&format!("discord:{}", action)) {
             return Err(LuaError::runtime(
                 "Discord action not allowed in this template context",
             ));
@@ -2081,7 +2077,7 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
         "new",
         lua.create_function(|_, (token,): (TemplateContextRef,)| {
             let executor = DiscordActionExecutor {
-                pragma: token.template_data.pragma.clone(),
+                allowed_caps: token.template_data.allowed_caps.clone(),
                 guild_id: token.guild_state.guild_id,
                 serenity_context: token.guild_state.serenity_context.clone(),
                 shard_messenger: token.guild_state.shard_messenger.clone(),

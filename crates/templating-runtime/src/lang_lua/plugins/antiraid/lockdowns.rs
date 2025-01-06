@@ -7,7 +7,7 @@ use std::{rc::Rc, str::FromStr};
 /// An lockdown executor is used to manage AntiRaid lockdowns from Lua
 /// templates
 pub struct LockdownExecutor {
-    pragma: crate::TemplatePragma,
+    allowed_caps: Vec<String>,
     guild_id: serenity::all::GuildId,
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
@@ -20,11 +20,7 @@ pub struct LockdownExecutor {
 // Executes actions on discord
 impl LockdownExecutor {
     pub fn check_action(&self, action: String) -> LuaResult<()> {
-        if !self
-            .pragma
-            .allowed_caps
-            .contains(&format!("lockdown:{}", action))
-        {
+        if !self.allowed_caps.contains(&format!("lockdown:{}", action)) {
             return Err(LuaError::runtime(
                 "Lockdown action is not allowed in this template context",
             ));
@@ -358,7 +354,7 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
         "new",
         lua.create_function(|_, (token,): (TemplateContextRef,)| {
             let executor = LockdownExecutor {
-                pragma: token.template_data.pragma.clone(),
+                allowed_caps: token.template_data.allowed_caps.clone(),
                 guild_id: token.guild_state.guild_id,
                 serenity_context: token.guild_state.serenity_context.clone(),
                 reqwest_client: token.guild_state.reqwest_client.clone(),

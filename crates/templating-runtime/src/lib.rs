@@ -8,7 +8,7 @@ mod lang_lua;
 pub use cache::{clear_cache, get_all_guild_templates, get_guild_template};
 pub use core::page::Page;
 pub use core::templating_core::{
-    create_shop_template, parse_shop_template, Template, TemplateLanguage, TemplatePragma,
+    create_shop_template, parse_shop_template, Template, TemplateLanguage,
 };
 pub use lang_lua::primitives::{document_primitives, CreateEvent, TemplateContextRef}; // Expose CreateEvent to actually execute events
 pub use lang_lua::state::LuaKVConstraints;

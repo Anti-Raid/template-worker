@@ -189,6 +189,9 @@ pub async fn dispatch_error(
     guild_id: serenity::all::GuildId,
     template: &crate::Template,
 ) -> Result<(), silverpelt::Error> {
+    // Codeblock + escape the error string
+    let error = format!("```lua\n{}```", error.replace('`', "\\`"));
+
     let data = ctx.data::<silverpelt::data::Data>();
 
     if let Some(error_channel) = template.error_channel {
@@ -278,7 +281,6 @@ pub async fn benchmark_vm(
     // Exec simple with wait
 
     let pt = crate::Template {
-        pragma: crate::TemplatePragma::default(),
         content: "return 1".to_string(),
         ..Default::default()
     };
@@ -319,7 +321,6 @@ pub async fn benchmark_vm(
 
     // Exec simple with no wait
     let pt = crate::Template {
-        pragma: crate::TemplatePragma::default(),
         content: "return 1".to_string(),
         ..Default::default()
     };
@@ -352,7 +353,6 @@ pub async fn benchmark_vm(
 
     // Exec simple with wait
     let pt = crate::Template {
-        pragma: crate::TemplatePragma::default(),
         content: "error('MyError')\nreturn 1".to_string(),
         ..Default::default()
     };
