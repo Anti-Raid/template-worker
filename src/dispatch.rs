@@ -57,25 +57,10 @@ pub async fn discord_event_dispatch(
         }
     }
 
-    // Convert to titlecase by capitalizing the first letter of each word
-    let event_titlename = event
-        .snake_case_name()
-        .split('_')
-        .map(|s| {
-            let mut c = s.chars();
-            match c.next() {
-                None => String::new(),
-                Some(f) => f.to_uppercase().chain(c).collect(),
-            }
-        })
-        .collect::<Vec<String>>()
-        .join(" ");
-
     dispatch(
         serenity_context,
         &data,
         CreateEvent::new(
-            event_titlename,
             "Discord".to_string(),
             event.snake_case_name().to_uppercase(),
             serde_json::to_value(event)?,
@@ -88,88 +73,12 @@ pub async fn discord_event_dispatch(
 
 /// Parses an antiraid event into a template event
 pub fn parse_event(event: &AntiraidEvent) -> Result<CreateEvent, silverpelt::Error> {
-    match event {
-        AntiraidEvent::StingCreate(ref sting) => Ok(CreateEvent::new(
-            "(Anti Raid) Sting Created".to_string(),
-            "StingCreate".to_string(),
-            "StingCreate".to_string(),
-            serde_json::to_value(sting)?,
-            Some(sting.creator.to_string()),
-        )),
-        AntiraidEvent::StingUpdate(ref sting) => Ok(CreateEvent::new(
-            "(Anti Raid) Sting Updated".to_string(),
-            "StingUpdate".to_string(),
-            "StingUpdate".to_string(),
-            serde_json::to_value(sting)?,
-            Some(sting.creator.to_string()),
-        )),
-        AntiraidEvent::StingExpire(ref sting) => Ok(CreateEvent::new(
-            "(Anti Raid) Sting Expired".to_string(),
-            "StingExpire".to_string(),
-            "StingExpire".to_string(),
-            serde_json::to_value(sting)?,
-            Some(sting.creator.to_string()),
-        )),
-        AntiraidEvent::StingDelete(ref sting) => Ok(CreateEvent::new(
-            "(Anti Raid) Sting Deleted".to_string(),
-            "StingDelete".to_string(),
-            "StingDelete".to_string(),
-            serde_json::to_value(sting)?,
-            Some(sting.creator.to_string()),
-        )),
-        AntiraidEvent::PunishmentCreate(ref punishment) => Ok(CreateEvent::new(
-            "(Anti Raid) Punishment Created".to_string(),
-            "PunishmentCreate".to_string(),
-            "PunishmentCreate".to_string(),
-            serde_json::to_value(punishment)?,
-            Some(punishment.creator.to_string()),
-        )),
-        AntiraidEvent::PunishmentExpire(ref punishment) => Ok(CreateEvent::new(
-            "(Anti Raid) Punishment Expired".to_string(),
-            "PunishmentExpire".to_string(),
-            "PunishmentExpire".to_string(),
-            serde_json::to_value(punishment)?,
-            Some(punishment.creator.to_string()),
-        )),
-        AntiraidEvent::OnStartup(ref modified) => Ok(CreateEvent::new(
-            "(Anti Raid) On Startup".to_string(),
-            "OnStartup".to_string(),
-            "OnStartup".to_string(),
-            serde_json::json!({
-                    "targets": modified
-                }
-            ),
-            None,
-        )),
-        AntiraidEvent::BuiltinCommandExecute(ref command) => Ok(CreateEvent::new(
-            "(Anti Raid) Builtin Command Execute".to_string(),
-            "BuiltinCommandExecute".to_string(),
-            "BuiltinCommandExecute".to_string(),
-            serde_json::to_value(command)?,
-            Some(command.user_id.to_string()),
-        )),
-        AntiraidEvent::PermissionCheckExecute(ref permission) => Ok(CreateEvent::new(
-            "(Anti Raid) Permission Check Execute".to_string(),
-            "PermissionCheckExecute".to_string(),
-            "PermissionCheckExecute".to_string(),
-            serde_json::to_value(permission)?,
-            Some(permission.user_id.to_string()),
-        )),
-        AntiraidEvent::ModerationStart(ref moderation) => Ok(CreateEvent::new(
-            "(Anti Raid) Moderation Start".to_string(),
-            "ModerationStart".to_string(),
-            "ModerationStart".to_string(),
-            serde_json::to_value(moderation)?,
-            Some(moderation.author.user.id.to_string()),
-        )),
-        AntiraidEvent::ModerationEnd(ref moderation) => Ok(CreateEvent::new(
-            "(Anti Raid) Moderation End".to_string(),
-            "ModerationEnd".to_string(),
-            "ModerationEnd".to_string(),
-            serde_json::to_value(moderation)?,
-            None,
-        )),
-    }
+    Ok(CreateEvent::new(
+        "AntiRaid".to_string(),
+        event.to_string(),
+        event.to_value()?,
+        event.author(),
+    ))
 }
 
 pub async fn dispatch(

@@ -295,7 +295,6 @@ pub async fn benchmark_vm(
         primitives::CreateEvent::new(
             "Benchmark".to_string(),
             "Benchmark".to_string(),
-            "Benchmark".to_string(),
             serde_json::Value::Null,
             None,
         ),
@@ -335,7 +334,6 @@ pub async fn benchmark_vm(
         primitives::CreateEvent::new(
             "Benchmark".to_string(),
             "Benchmark".to_string(),
-            "Benchmark".to_string(),
             serde_json::Value::Null,
             None,
         ),
@@ -365,7 +363,6 @@ pub async fn benchmark_vm(
     let start = std::time::Instant::now();
     let err = execute(
         primitives::CreateEvent::new(
-            "Benchmark".to_string(),
             "Benchmark".to_string(),
             "Benchmark".to_string(),
             serde_json::Value::Null,

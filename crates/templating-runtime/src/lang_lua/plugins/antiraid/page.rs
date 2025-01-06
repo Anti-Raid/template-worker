@@ -46,7 +46,6 @@ impl SettingView for LuaSettingExecutor {
         
         let result = crate::execute(
             crate::CreateEvent::new(
-                "(Anti-Raid) View Setting".to_string(),
                 "Settings/View".to_string(),
                 self.name.clone(),
                 serde_json::to_value(filters).map_err(|e| SettingsError::Generic {
@@ -103,7 +102,6 @@ impl SettingCreator for LuaSettingExecutor {
     ) -> Result<indexmap::IndexMap<String, splashcore_rs::value::Value>, SettingsError> {        
         let result = crate::execute(
             crate::CreateEvent::new(
-                "(Anti-Raid) Create Setting".to_string(),
                 "Settings/Create".to_string(),
                 self.name.clone(),
                 serde_json::to_value(state).map_err(|e| SettingsError::Generic {
@@ -160,7 +158,6 @@ impl SettingUpdater for LuaSettingExecutor {
     ) -> Result<indexmap::IndexMap<String, splashcore_rs::value::Value>, SettingsError> {        
        let result = crate::execute(
             crate::CreateEvent::new(
-                "(Anti-Raid) Update Setting".to_string(),
                 "Settings/Update".to_string(),
                 self.name.clone(),
                 serde_json::to_value(state).map_err(|e| SettingsError::Generic {
@@ -218,7 +215,6 @@ impl SettingDeleter for LuaSettingExecutor {
     ) -> Result<(), SettingsError> {
         let result = crate::execute(
             crate::CreateEvent::new(
-                "(Anti-Raid) Delete Setting".to_string(),
                 "Settings/Delete".to_string(),
                 self.name.clone(),
                 pkey.to_json(),

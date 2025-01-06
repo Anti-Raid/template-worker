@@ -3,8 +3,6 @@ use std::{cell::RefCell, sync::Arc};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct InnerEvent {
-    /// The title name of the event
-    title: String,
     /// The name of the base event
     base_name: String,
     /// The name of the event
@@ -24,7 +22,6 @@ pub struct CreateEvent {
 impl CreateEvent {
     /// Create a new Event
     pub fn new(
-        title: String,
         base_name: String,
         name: String,
         data: serde_json::Value,
@@ -32,7 +29,6 @@ impl CreateEvent {
     ) -> Self {
         Self {
             inner: Arc::new(InnerEvent {
-                title,
                 base_name,
                 name,
                 data,
@@ -74,10 +70,6 @@ impl Event {
 
 impl LuaUserData for Event {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("title", |lua, this| {
-            let title = lua.to_value(&this.inner.title)?;
-            Ok(title)
-        });
         fields.add_field_method_get("base_name", |lua, this| {
             let base_name = lua.to_value(&this.inner.base_name)?;
             Ok(base_name)

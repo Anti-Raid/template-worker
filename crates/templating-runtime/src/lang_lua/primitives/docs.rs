@@ -95,11 +95,6 @@ pub fn document_primitives() -> crate::doclib::PrimitiveListBuilder {
         .add("function", "function", "A Lua function.", |p| p)
         .type_mut("Event", "An event that has been dispatched to the template. This is what `args` is in the template.", |mut t| {
             t
-            .field("title", |f| {
-                f
-                .typ("string")
-                .description("The title name of the event.")
-            })
             .field("base_name", |f| {
                 f
                 .typ("string")
