@@ -126,7 +126,7 @@ pub(super) fn configure_lua_vm(
     let compiler = mlua::Compiler::new()
         .set_optimization_level(2)
         .set_type_info_level(1);
-    lua.set_compiler(compiler.clone());
+    lua.set_compiler(compiler);
 
     // Setup the global table using a metatable
     //
@@ -137,7 +137,6 @@ pub(super) fn configure_lua_vm(
     // Proxy reads to globals if key is in globals, otherwise to the table
     global_mt.set("__index", lua.globals())?;
     global_tab.set("_G", global_tab.clone())?;
-    global_tab.set("__stack", global_tab.clone())?;
 
     // Provies writes
     // Forward to _G if key is in globals, otherwise to the table
