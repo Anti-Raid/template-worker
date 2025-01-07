@@ -933,6 +933,58 @@ mod types {
             pub content: Vec<u8>,
         }
 
+        impl CreateMessageAttachment {
+            pub fn to_files<'a>(
+                attach: Vec<CreateMessageAttachment>,
+            ) -> Result<Vec<serenity::all::CreateAttachment<'a>>, crate::Error> {
+                let mut attachments = Vec::new();
+
+                if attach.len() > message_limits::MESSAGE_MAX_ATTACHMENT_COUNT {
+                    return Err(format!(
+                        "Too many attachments, limit is {}",
+                        message_limits::MESSAGE_MAX_ATTACHMENT_COUNT
+                    )
+                    .into());
+                }
+
+                for attachment in attach {
+                    let desc = attachment.description.unwrap_or_default();
+                    if desc.len() > message_limits::MESSAGE_ATTACHMENT_DESCRIPTION_LIMIT {
+                        return Err(format!(
+                            "Attachment description exceeds limit of {}",
+                            message_limits::MESSAGE_ATTACHMENT_DESCRIPTION_LIMIT
+                        )
+                        .into());
+                    }
+
+                    let content = attachment.content;
+
+                    if content.is_empty() {
+                        return Err("Attachment content cannot be empty".into());
+                    }
+
+                    if content.len() > message_limits::MESSAGE_ATTACHMENT_CONTENT_BYTES_LIMIT {
+                        return Err(format!(
+                            "Attachment content exceeds limit of {} bytes",
+                            message_limits::MESSAGE_ATTACHMENT_CONTENT_BYTES_LIMIT
+                        )
+                        .into());
+                    }
+
+                    let mut ca =
+                        serenity::all::CreateAttachment::bytes(content, attachment.filename);
+
+                    if !desc.is_empty() {
+                        ca = ca.description(desc);
+                    }
+
+                    attachments.push(ca);
+                }
+
+                Ok(attachments)
+            }
+        }
+
         /// Represents a message that can be created by templates
         #[derive(Serialize, Deserialize, Debug, Default, Clone)]
         pub struct CreateMessage {
@@ -1166,51 +1218,13 @@ mod types {
             });
 
             // Lastly handle attachments
-            let mut attachments = Vec::new();
-
-            if let Some(attach) = message.attachments {
-                if attach.len() > message_limits::MESSAGE_MAX_ATTACHMENT_COUNT {
-                    return Err(format!(
-                        "Too many attachments, limit is {}",
-                        message_limits::MESSAGE_MAX_ATTACHMENT_COUNT
-                    )
-                    .into());
+            let attachments = {
+                if let Some(attach) = message.attachments {
+                    CreateMessageAttachment::to_files(attach)?
+                } else {
+                    Vec::new()
                 }
-
-                for attachment in attach {
-                    let desc = attachment.description.unwrap_or_default();
-                    if desc.len() > message_limits::MESSAGE_ATTACHMENT_DESCRIPTION_LIMIT {
-                        return Err(format!(
-                            "Attachment description exceeds limit of {}",
-                            message_limits::MESSAGE_ATTACHMENT_DESCRIPTION_LIMIT
-                        )
-                        .into());
-                    }
-
-                    let content = attachment.content;
-
-                    if content.is_empty() {
-                        return Err("Attachment content cannot be empty".into());
-                    }
-
-                    if content.len() > message_limits::MESSAGE_ATTACHMENT_CONTENT_BYTES_LIMIT {
-                        return Err(format!(
-                            "Attachment content exceeds limit of {} bytes",
-                            message_limits::MESSAGE_ATTACHMENT_CONTENT_BYTES_LIMIT
-                        )
-                        .into());
-                    }
-
-                    let mut ca =
-                        serenity::all::CreateAttachment::bytes(content, attachment.filename);
-
-                    if !desc.is_empty() {
-                        ca = ca.description(desc);
-                    }
-
-                    attachments.push(ca);
-                }
-            }
+            };
 
             if content.is_none() && embeds.is_empty() && attachments.is_empty() {
                 return Err("No content/embeds/attachments set".into());
@@ -1272,6 +1286,16 @@ mod types {
     pub struct SendMessageChannelAction {
         pub channel_id: serenity::all::ChannelId, // Channel *must* be in the same guild
         pub message: messages::CreateMessage,
+    }
+
+    pub mod interactions {
+        #[derive(serde::Serialize, serde::Deserialize)]
+        pub struct CreateInteractionResponse {
+            pub interaction_id: serenity::all::InteractionId,
+            pub interaction_token: String,
+            pub files: Option<Vec<super::messages::CreateMessageAttachment>>,
+            pub data: twilight_model::http::interaction::InteractionResponse,
+        }
     }
 }
 
@@ -2011,6 +2035,133 @@ impl LuaUserData for DiscordActionExecutor {
                     message: msg,
                     shard_messenger: this.shard_messenger.clone(),
                 })
+            }))
+        });
+
+        // Interactions
+        methods.add_method("create_interaction_response", |_, this, data: LuaValue| {
+            Ok(lua_promise!(this, data, |lua, this, data|, {
+                let mut data = lua.from_value::<types::interactions::CreateInteractionResponse>(data)?;
+
+                this.check_action("create_interaction_response".to_string())
+                    .map_err(LuaError::external)?;
+
+                let files = {
+                    let files = data.files.unwrap_or_default();
+
+                    if let Some(ref mut idata) = data.data.data {
+                        if idata.attachments.is_some() {
+                            return Err(LuaError::external(
+                                "Files must be provided using the separate `files` property, not via interaction response body!",
+                            ));
+                        }
+
+                        let attachments = {
+                            let mut id: u64 = 0;
+                            let mut attachments = Vec::new();
+
+                            #[allow(clippy::explicit_counter_loop)] // Using id as loop counter is more readable than .zip()
+                            for file in files.iter() {
+                                attachments.push(
+                                    twilight_model::http::attachment::Attachment {
+                                        description: file.description.clone(),
+                                        file: Vec::new(),
+                                        filename: file.filename.clone(),
+                                        id,
+                                    }
+                                );
+
+                                id += 1;
+                            }
+
+                            attachments
+                        };
+
+                        idata.attachments = Some(attachments);
+                    }
+
+                    types::messages::CreateMessageAttachment::to_files(files)
+                    .map_err(|e| LuaError::external(e.to_string()))?
+                };
+
+                this.serenity_context
+                    .http
+                    .create_interaction_response(data.interaction_id, &data.interaction_token, &data.data, files)
+                    .await
+                    .map_err(LuaError::external)?;
+
+                Ok(())
+            }))
+        });
+
+        // Interactions
+        methods.add_method("create_interaction_response", |_, this, data: LuaValue| {
+            Ok(lua_promise!(this, data, |lua, this, data|, {
+                let mut data = lua.from_value::<types::interactions::CreateInteractionResponse>(data)?;
+
+                this.check_action("create_interaction_response".to_string())
+                    .map_err(LuaError::external)?;
+
+                let files = {
+                    let files = data.files.unwrap_or_default();
+
+                    if let Some(ref mut idata) = data.data.data {
+                        if idata.attachments.is_some() {
+                            return Err(LuaError::external(
+                                "Files must be provided using the separate `files` property, not via interaction response body!",
+                            ));
+                        }
+
+                        let attachments = {
+                            let mut id: u64 = 0;
+                            let mut attachments = Vec::new();
+
+                            #[allow(clippy::explicit_counter_loop)] // Using id as loop counter is more readable than .zip()
+                            for file in files.iter() {
+                                attachments.push(
+                                    twilight_model::http::attachment::Attachment {
+                                        description: file.description.clone(),
+                                        file: Vec::new(),
+                                        filename: file.filename.clone(),
+                                        id,
+                                    }
+                                );
+
+                                id += 1;
+                            }
+
+                            attachments
+                        };
+
+                        idata.attachments = Some(attachments);
+                    }
+
+                    types::messages::CreateMessageAttachment::to_files(files)
+                    .map_err(|e| LuaError::external(e.to_string()))?
+                };        
+
+                this.serenity_context
+                    .http
+                    .create_interaction_response(data.interaction_id, &data.interaction_token, &data.data, files)
+                    .await
+                    .map_err(LuaError::external)?;
+
+                Ok(())
+            }))
+        });
+
+        methods.add_method("get_original_interaction_response", |_, this, interaction_token: String| {
+            Ok(lua_promise!(this, interaction_token, |lua, this, interaction_token|, {
+                this.check_action("get_original_interaction_response".to_string())
+                    .map_err(LuaError::external)?;
+
+                let resp = this.serenity_context
+                    .http
+                    .get_original_interaction_response(&interaction_token)
+                    .await
+                    .map_err(LuaError::external)?;
+
+                lua.to_value(&resp)
             }))
         });
     }

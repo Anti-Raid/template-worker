@@ -51,6 +51,20 @@ impl LuaRatelimits {
             Self::create_quota(NonZeroU32::new(15).unwrap(), Duration::from_secs(20))?;
         let create_message_lim1 = DefaultKeyedRateLimiter::keyed(create_message_quota1);
 
+        // Create Interaction Response
+        let create_interaction_response_quota1 =
+            Self::create_quota(NonZeroU32::new(5).unwrap(), Duration::from_secs(10))?;
+
+        let create_interaction_response_lim1 =
+            DefaultKeyedRateLimiter::keyed(create_interaction_response_quota1);
+
+        // get_original_interaction_response
+        let get_original_interaction_response_quota1 =
+            Self::create_quota(NonZeroU32::new(5).unwrap(), Duration::from_secs(10))?;
+
+        let get_original_interaction_response_lim1 =
+            DefaultKeyedRateLimiter::keyed(get_original_interaction_response_quota1);
+
         // Create the clock
         let clock = QuantaClock::default();
 
@@ -60,6 +74,8 @@ impl LuaRatelimits {
                 "ban".to_string() => vec![ban_lim1, ban_lim2] as Vec<DefaultKeyedRateLimiter<()>>,
                 "kick".to_string() => vec![kick_lim1, kick_lim2] as Vec<DefaultKeyedRateLimiter<()>>,
                 "create_message".to_string() => vec![create_message_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
+                "create_interaction_response".to_string() => vec![create_interaction_response_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
+                "get_original_interaction_response".to_string() => vec![get_original_interaction_response_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
             ),
             clock,
         })
