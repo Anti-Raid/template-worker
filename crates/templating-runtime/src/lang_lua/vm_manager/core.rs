@@ -244,14 +244,12 @@ pub(super) fn create_guild_state(
     guild_id: GuildId,
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
-    shard_messenger: serenity::all::ShardMessenger,
     reqwest_client: reqwest::Client,
 ) -> Result<GuildState, silverpelt::Error> {
     Ok(GuildState {
         pool,
         guild_id,
         serenity_context,
-        shard_messenger,
         reqwest_client,
         kv_constraints: LuaKVConstraints::default(),
         ratelimits: Rc::new(Ratelimits::new()?),
@@ -297,18 +295,10 @@ pub(crate) async fn get_lua_vm(
     guild_id: GuildId,
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
-    shard_messenger: serenity::all::ShardMessenger,
     reqwest_client: reqwest::Client,
 ) -> Result<ArLua, silverpelt::Error> {
     let Some(mut vm) = VMS.get(&guild_id) else {
-        let vm = create_lua_vm(
-            guild_id,
-            pool,
-            serenity_context,
-            shard_messenger,
-            reqwest_client,
-        )
-        .await?;
+        let vm = create_lua_vm(guild_id, pool, serenity_context, reqwest_client).await?;
         if let Err((_, alt_vm)) = VMS.insert_async(guild_id, vm.clone()).await {
             return Ok(alt_vm);
         }
@@ -316,14 +306,7 @@ pub(crate) async fn get_lua_vm(
     };
 
     if vm.broken.load(std::sync::atomic::Ordering::Acquire) {
-        let new_vm = create_lua_vm(
-            guild_id,
-            pool,
-            serenity_context,
-            shard_messenger,
-            reqwest_client,
-        )
-        .await?;
+        let new_vm = create_lua_vm(guild_id, pool, serenity_context, reqwest_client).await?;
         *vm = new_vm.clone();
         Ok(new_vm)
     } else {

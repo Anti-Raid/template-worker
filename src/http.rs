@@ -8,10 +8,7 @@ use silverpelt::ar_event::AntiraidEvent;
 use std::sync::Arc;
 use templating::clear_cache;
 
-use crate::{
-    dispatch::{dispatch, dispatch_and_wait, parse_event},
-    serenitystore::shard_messenger_for_guild,
-};
+use crate::dispatch::{dispatch, dispatch_and_wait, parse_event};
 
 #[derive(Clone)]
 pub struct AppData {
@@ -120,8 +117,6 @@ async fn benchmark_vm(
         guild_id,
         data.pool.clone(),
         serenity_context,
-        shard_messenger_for_guild(guild_id)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?,
         data.reqwest.clone(),
     )
     .await

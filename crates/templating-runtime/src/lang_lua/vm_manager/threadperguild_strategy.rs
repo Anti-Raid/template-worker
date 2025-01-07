@@ -12,7 +12,6 @@ pub async fn create_lua_vm(
     guild_id: GuildId,
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
-    shard_messenger: serenity::all::ShardMessenger,
     reqwest_client: reqwest::Client,
 ) -> Result<ArLua, silverpelt::Error> {
     let broken = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -36,7 +35,6 @@ pub async fn create_lua_vm(
                     guild_id,
                     pool,
                     serenity_context,
-                    shard_messenger,
                     reqwest_client,
                 )
                 .expect("Failed to create Lua VM userdata"),

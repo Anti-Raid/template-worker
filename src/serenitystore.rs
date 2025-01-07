@@ -36,6 +36,7 @@ pub fn shard_ids() -> Result<Vec<serenity::all::ShardId>, silverpelt::Error> {
     Ok(shard_ids)
 }
 
+#[allow(dead_code)]
 /// Get the shard messenger for a guild
 pub fn shard_messenger_for_guild(
     guild_id: serenity::all::GuildId,

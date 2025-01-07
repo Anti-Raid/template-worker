@@ -65,6 +65,11 @@ impl LuaRatelimits {
         let get_original_interaction_response_lim1 =
             DefaultKeyedRateLimiter::keyed(get_original_interaction_response_quota1);
 
+        // get_guild_commands
+        let get_guild_commands_quota1 =
+            Self::create_quota(NonZeroU32::new(1).unwrap(), Duration::from_secs(300))?;
+        let get_guild_commands_lim1 = DefaultKeyedRateLimiter::keyed(get_guild_commands_quota1);
+
         // Create the clock
         let clock = QuantaClock::default();
 
@@ -76,6 +81,7 @@ impl LuaRatelimits {
                 "create_message".to_string() => vec![create_message_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
                 "create_interaction_response".to_string() => vec![create_interaction_response_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
                 "get_original_interaction_response".to_string() => vec![get_original_interaction_response_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
+                "get_guild_commands".to_string() => vec![get_guild_commands_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
             ),
             clock,
         })
@@ -229,7 +235,6 @@ pub struct GuildState {
     pub pool: sqlx::PgPool,
     pub guild_id: serenity::all::GuildId,
     pub serenity_context: serenity::all::Context,
-    pub shard_messenger: serenity::all::ShardMessenger,
     pub reqwest_client: reqwest::Client,
     pub kv_constraints: LuaKVConstraints,
     pub ratelimits: Rc<Ratelimits>,

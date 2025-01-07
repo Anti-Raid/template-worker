@@ -22,7 +22,6 @@ pub async fn execute(
         state.guild_id,
         state.pool,
         state.serenity_context,
-        state.shard_messenger,
         state.reqwest_client,
     )
     .await?;
@@ -253,7 +252,6 @@ pub async fn benchmark_vm(
     guild_id: GuildId,
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
-    shard_messenger: serenity::all::ShardMessenger,
     reqwest_client: reqwest::Client,
 ) -> Result<FireBenchmark, silverpelt::Error> {
     // Get_lua_vm
@@ -263,14 +261,7 @@ pub async fn benchmark_vm(
     let reqwest_client_a = reqwest_client.clone();
 
     let start = std::time::Instant::now();
-    let _ = get_lua_vm(
-        guild_id_a,
-        pool_a,
-        serenity_context_a,
-        shard_messenger.clone(),
-        reqwest_client_a,
-    )
-    .await?;
+    let _ = get_lua_vm(guild_id_a, pool_a, serenity_context_a, reqwest_client_a).await?;
     let get_lua_vm = start.elapsed().as_micros();
 
     let new_map = scc::HashMap::new();
@@ -300,7 +291,6 @@ pub async fn benchmark_vm(
         ),
         ParseCompileState {
             serenity_context: serenity_context_a,
-            shard_messenger: shard_messenger.clone(),
             reqwest_client: reqwest_client_a,
             guild_id: guild_id_a,
             pool: pool_a,
@@ -339,7 +329,6 @@ pub async fn benchmark_vm(
         ),
         ParseCompileState {
             serenity_context: serenity_context_a,
-            shard_messenger: shard_messenger.clone(),
             reqwest_client: reqwest_client_a,
             guild_id: guild_id_a,
             pool: pool_a,
@@ -370,7 +359,6 @@ pub async fn benchmark_vm(
         ),
         ParseCompileState {
             serenity_context: serenity_context_a,
-            shard_messenger: shard_messenger.clone(),
             reqwest_client: reqwest_client_a,
             guild_id: guild_id_a,
             pool: pool_a,
@@ -402,7 +390,6 @@ pub async fn benchmark_vm(
 #[derive(Clone)]
 pub struct ParseCompileState {
     pub serenity_context: serenity::all::Context,
-    pub shard_messenger: serenity::all::ShardMessenger,
     pub reqwest_client: reqwest::Client,
     pub guild_id: GuildId,
     pub pool: sqlx::PgPool,

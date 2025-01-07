@@ -16,7 +16,6 @@ pub const DEFAULT_MAX_THREADS: usize = 100; // Maximum number of threads in the 
 
 struct ThreadEntrySend {
     guild_id: GuildId,
-    shard_messenger: serenity::all::ShardMessenger,
     tx: UnboundedSender<ArLua>,
 }
 
@@ -69,17 +68,12 @@ impl ThreadEntry {
     }
 
     /// Add a guild to the pool with a given shard messenger
-    async fn add_guild(
-        &self,
-        guild: GuildId,
-        shard_messenger: serenity::all::ShardMessenger,
-    ) -> Result<ArLua, silverpelt::Error> {
+    async fn add_guild(&self, guild: GuildId) -> Result<ArLua, silverpelt::Error> {
         let (tx, mut rx) = unbounded_channel::<ArLua>();
 
         self.tx
             .send(ThreadEntrySend {
                 guild_id: guild,
-                shard_messenger,
                 tx,
             })
             .map_err(|_| "Failed to add guild to VM pool [send fail]")?;
@@ -149,7 +143,6 @@ impl ThreadEntry {
                                 send.guild_id,
                                 pool.clone(),
                                 serenity_context.clone(),
-                                send.shard_messenger,
                                 reqwest_client.clone(),
                             )
                             .expect("Failed to create Lua VM userdata"),
@@ -295,7 +288,6 @@ impl ThreadPool {
         guild: GuildId,
         pool: sqlx::PgPool,
         serenity_context: serenity::all::Context,
-        shard_messenger: serenity::all::ShardMessenger,
         reqwest_client: reqwest::Client,
     ) -> Result<ArLua, silverpelt::Error> {
         // Flush out broken threads
@@ -324,7 +316,7 @@ impl ThreadPool {
         }
 
         if let Some(thread) = min_thread {
-            thread.add_guild(guild, shard_messenger).await
+            thread.add_guild(guild).await
         } else {
             Err("Failed to add guild to VM pool [no threads]".into())
         }
@@ -339,16 +331,9 @@ pub async fn create_lua_vm(
     guild_id: GuildId,
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
-    shard_messenger: serenity::all::ShardMessenger,
     reqwest_client: reqwest::Client,
 ) -> Result<ArLua, silverpelt::Error> {
     DEFAULT_THREAD_POOL
-        .add_guild(
-            guild_id,
-            pool,
-            serenity_context,
-            shard_messenger,
-            reqwest_client,
-        )
+        .add_guild(guild_id, pool, serenity_context, reqwest_client)
         .await
 }

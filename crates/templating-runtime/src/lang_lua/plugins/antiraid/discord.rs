@@ -1,6 +1,5 @@
 use super::promise::lua_promise;
-use crate::lang_lua::{primitives::TemplateContextRef, state};
-use futures_util::StreamExt;
+use crate::lang_lua::{plugins::antiraid::lazy::Lazy, primitives::TemplateContextRef, state};
 use mlua::prelude::*;
 use serenity::all::Mentionable;
 use std::rc::Rc;
@@ -12,7 +11,6 @@ pub struct DiscordActionExecutor {
     allowed_caps: Vec<String>,
     guild_id: serenity::all::GuildId,
     serenity_context: serenity::all::Context,
-    shard_messenger: serenity::all::ShardMessenger,
     reqwest_client: reqwest::Client,
     ratelimits: Rc<state::Ratelimits>,
 }
@@ -1289,12 +1287,80 @@ mod types {
     }
 
     pub mod interactions {
+        use std::collections::HashMap;
+
+        use serde::{self, Deserialize, Serialize};
+        use serenity::all::{CommandId, CommandType, GuildId, Permissions};
+        use twilight_model::application::command::CommandOption;
+
         #[derive(serde::Serialize, serde::Deserialize)]
         pub struct CreateInteractionResponse {
             pub interaction_id: serenity::all::InteractionId,
             pub interaction_token: String,
             pub files: Option<Vec<super::messages::CreateMessageAttachment>>,
             pub data: twilight_model::http::interaction::InteractionResponse,
+        }
+
+        /// Taken from a mix of serenity-rs, discord docs and twilight model where appropriate
+        ///
+        /// Data sent to Discord to create a command.
+        ///
+        /// [`CommandOption`]s that are required must be listed before optional ones.
+        /// Command names must be lower case, matching the Regex `^[\w-]{1,32}$`. See
+        /// [Discord Docs/Application Command Object].
+        ///
+        /// [Discord Docs/Application Command Object]: https://discord.com/developers/docs/interactions/application-commands#application-command-object-application-command-structure
+        #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+        pub struct Command {
+            /// Default permissions required for a member to run the command.
+            ///
+            /// Setting this [`Permissions::empty()`] will prohibit anyone from running
+            /// the command, except for guild administrators.
+            pub default_member_permissions: Option<Permissions>,
+            /// Whether the command is available in DMs.
+            ///
+            /// This is only relevant for globally-scoped commands. By default, commands
+            /// are visible in DMs.
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub dm_permission: Option<bool>,
+            /// Description of the command.
+            ///
+            /// For [`User`] and [`Message`] commands, this will be an empty string.
+            ///
+            /// [`User`]: CommandType::User
+            /// [`Message`]: CommandType::Message
+            pub description: String,
+            /// Localization dictionary for the `description` field.
+            ///
+            /// See [Discord Docs/Localization].
+            ///
+            /// [Discord Docs/Localization]: https://discord.com/developers/docs/interactions/application-commands#localization
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub description_localizations: Option<HashMap<String, String>>,
+            /// Guild ID of the command, if not global.
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub guild_id: Option<GuildId>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub id: Option<CommandId>,
+            #[serde(rename = "type")]
+            pub kind: CommandType,
+            pub name: String,
+            /// Localization dictionary for the `name` field.
+            ///
+            /// Keys should be valid locales. See [Discord Docs/Locales],
+            /// [Discord Docs/Localization].
+            ///
+            /// [Discord Docs/Locales]: https://discord.com/developers/docs/reference#locales
+            /// [Discord Docs/Localization]: https://discord.com/developers/docs/interactions/application-commands#localization
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub name_localizations: Option<HashMap<String, String>>,
+            /// Whether the command is age-restricted.
+            ///
+            /// Defaults to false.
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub nsfw: Option<bool>,
+            #[serde(default)]
+            pub options: Vec<CommandOption>,
         }
     }
 }
@@ -1330,15 +1396,13 @@ impl LuaUserData for DiscordActionExecutor {
                     .await
                     .map_err(LuaError::external)?;
 
-                let v = lua.to_value(&logs)?;
-
-                Ok(v)
+                Ok(Lazy::new(logs))
             }))
         });
 
         // Auto Moderation, not yet finished and hence not documented yet
         methods.add_method("list_auto_moderation_rules", |_, this, _: ()| {
-            Ok(lua_promise!(this, |lua, this|, {
+            Ok(lua_promise!(this, |_lua, this|, {
                 this.check_action("list_auto_moderation_rules".to_string())
                     .map_err(LuaError::external)?;
 
@@ -1355,9 +1419,7 @@ impl LuaUserData for DiscordActionExecutor {
                     .await
                     .map_err(LuaError::external)?;
 
-                let v = lua.to_value(&rules)?;
-
-                Ok(v)
+                Ok(Lazy::new(rules))
             }))
         });
 
@@ -1382,9 +1444,7 @@ impl LuaUserData for DiscordActionExecutor {
                     .await
                     .map_err(LuaError::external)?;
 
-                let v = lua.to_value(&rule)?;
-
-                Ok(v)
+                Ok(Lazy::new(rule))
             }))
         });
 
@@ -1452,9 +1512,7 @@ impl LuaUserData for DiscordActionExecutor {
                     .await
                     .map_err(LuaError::external)?;
 
-                let v = lua.to_value(&rule)?;
-
-                Ok(v)
+                Ok(Lazy::new(rule))
             }))
         });
 
@@ -1567,9 +1625,7 @@ impl LuaUserData for DiscordActionExecutor {
                     .await
                     .map_err(LuaError::external)?;
 
-                let v = lua.to_value(&channel)?;
-
-                Ok(v)
+                Ok(Lazy::new(channel))
             }))
         });
 
@@ -1699,9 +1755,7 @@ impl LuaUserData for DiscordActionExecutor {
                     .await
                     .map_err(LuaError::external)?;
 
-                let v = lua.to_value(&channel)?;
-
-                Ok(v)
+                Ok(Lazy::new(channel))
             }))
         });
 
@@ -1764,8 +1818,7 @@ impl LuaUserData for DiscordActionExecutor {
                     .await
                     .map_err(LuaError::external)?;
 
-                let v = lua.to_value(&channel)?;
-                Ok(v)
+                Ok(Lazy::new(channel))
             }))
         });
 
@@ -1790,8 +1843,7 @@ impl LuaUserData for DiscordActionExecutor {
                     .await
                     .map_err(LuaError::external)?;
 
-                let v = lua.to_value(&channel)?;
-                Ok(v)
+                Ok(Lazy::new(channel))
             }))
         });
 
@@ -1940,7 +1992,7 @@ impl LuaUserData for DiscordActionExecutor {
                 let communication_disabled_until =
                     chrono::Utc::now() + std::time::Duration::from_secs(data.duration_seconds);
 
-                this.guild_id
+                let member = this.guild_id
                     .edit_member(
                         &this.serenity_context.http,
                         data.user_id,
@@ -1951,7 +2003,7 @@ impl LuaUserData for DiscordActionExecutor {
                     .await
                     .map_err(LuaError::external)?;
 
-                Ok(())
+                Ok(Lazy::new(member))
             }))
         });
 
@@ -2031,10 +2083,7 @@ impl LuaUserData for DiscordActionExecutor {
                     .await
                     .map_err(LuaError::external)?;
 
-                Ok(MessageHandle {
-                    message: msg,
-                    shard_messenger: this.shard_messenger.clone(),
-                })
+                Ok(Lazy::new(msg))
             }))
         });
 
@@ -2094,129 +2143,56 @@ impl LuaUserData for DiscordActionExecutor {
             }))
         });
 
-        // Interactions
-        methods.add_method("create_interaction_response", |_, this, data: LuaValue| {
-            Ok(lua_promise!(this, data, |lua, this, data|, {
-                let mut data = lua.from_value::<types::interactions::CreateInteractionResponse>(data)?;
+        methods.add_method(
+            "get_original_interaction_response",
+            |_, this, interaction_token: String| {
+                Ok(
+                    lua_promise!(this, interaction_token, |_lua, this, interaction_token|, {
+                        this.check_action("get_original_interaction_response".to_string())
+                            .map_err(LuaError::external)?;
 
-                this.check_action("create_interaction_response".to_string())
-                    .map_err(LuaError::external)?;
+                        let resp = this.serenity_context
+                            .http
+                            .get_original_interaction_response(&interaction_token)
+                            .await
+                            .map_err(LuaError::external)?;
 
-                let files = {
-                    let files = data.files.unwrap_or_default();
+                        Ok(Lazy::new(resp))
+                    }),
+                )
+            },
+        );
 
-                    if let Some(ref mut idata) = data.data.data {
-                        if idata.attachments.is_some() {
-                            return Err(LuaError::external(
-                                "Files must be provided using the separate `files` property, not via interaction response body!",
-                            ));
-                        }
-
-                        let attachments = {
-                            let mut id: u64 = 0;
-                            let mut attachments = Vec::new();
-
-                            #[allow(clippy::explicit_counter_loop)] // Using id as loop counter is more readable than .zip()
-                            for file in files.iter() {
-                                attachments.push(
-                                    twilight_model::http::attachment::Attachment {
-                                        description: file.description.clone(),
-                                        file: Vec::new(),
-                                        filename: file.filename.clone(),
-                                        id,
-                                    }
-                                );
-
-                                id += 1;
-                            }
-
-                            attachments
-                        };
-
-                        idata.attachments = Some(attachments);
-                    }
-
-                    types::messages::CreateMessageAttachment::to_files(files)
-                    .map_err(|e| LuaError::external(e.to_string()))?
-                };        
-
-                this.serenity_context
-                    .http
-                    .create_interaction_response(data.interaction_id, &data.interaction_token, &data.data, files)
-                    .await
-                    .map_err(LuaError::external)?;
-
-                Ok(())
-            }))
-        });
-
-        methods.add_method("get_original_interaction_response", |_, this, interaction_token: String| {
-            Ok(lua_promise!(this, interaction_token, |lua, this, interaction_token|, {
-                this.check_action("get_original_interaction_response".to_string())
+        methods.add_method("get_guild_commands", |_, this, _g: ()| {
+            Ok(lua_promise!(this, _g, |_lua, this, _g|, {
+                this.check_action("get_guild_commands".to_string())
                     .map_err(LuaError::external)?;
 
                 let resp = this.serenity_context
                     .http
-                    .get_original_interaction_response(&interaction_token)
+                    .get_guild_commands(this.guild_id)
                     .await
                     .map_err(LuaError::external)?;
 
-                lua.to_value(&resp)
+                Ok(Lazy::new(resp))
             }))
         });
-    }
-}
 
-pub struct MessageHandle {
-    message: serenity::all::Message,
-    shard_messenger: serenity::all::ShardMessenger,
-}
+        methods.add_method("create_guild_commands", |_, this, data: LuaValue| {
+            Ok(lua_promise!(this, data, |lua, this, data|, {
+                this.check_action("create_guild_commands".to_string())
+                    .map_err(LuaError::external)?;
 
-impl LuaUserData for MessageHandle {
-    fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("data", |lua, this, _: ()| {
-            let v = lua.to_value(&this.message)?;
-            Ok(v)
-        });
+                let data = lua.from_value::<types::interactions::Command>(data)?;
 
-        // Not yet documented
-        methods.add_method("await_component_interaction", |_, this, _: ()| {
-            let stream = super::stream::LuaStream::new(Box::pin(
-                this.message
-                    .id
-                    .await_component_interactions(this.shard_messenger.clone())
-                    .timeout(std::time::Duration::from_secs(60))
-                    .stream()
-                    .map(|interaction| {
-                        let func: super::stream::StreamValue = Box::new(|lua| {
-                            let i = MessageComponentHandle { interaction };
-                            let v = i.into_lua(lua)?;
-                            Ok(v)
-                        });
+                let resp = this.serenity_context
+                    .http
+                    .create_guild_command(this.guild_id, &data)
+                    .await
+                    .map_err(LuaError::external)?;
 
-                        func
-                    }),
-            ));
-
-            Ok(stream)
-        });
-    }
-}
-
-// Not yet documented
-pub struct MessageComponentHandle {
-    pub interaction: serenity::all::ComponentInteraction,
-}
-
-impl LuaUserData for MessageComponentHandle {
-    fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("custom_id", |_, this, _: ()| {
-            Ok(this.interaction.data.custom_id.to_string())
-        });
-
-        methods.add_method("data", |lua, this, _: ()| {
-            let v = lua.to_value(&this.interaction)?;
-            Ok(v)
+                Ok(Lazy::new(resp))
+            }))
         });
     }
 }
@@ -2231,7 +2207,6 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
                 allowed_caps: token.template_data.allowed_caps.clone(),
                 guild_id: token.guild_state.guild_id,
                 serenity_context: token.guild_state.serenity_context.clone(),
-                shard_messenger: token.guild_state.shard_messenger.clone(),
                 reqwest_client: token.guild_state.reqwest_client.clone(),
                 ratelimits: token.guild_state.ratelimits.clone(),
             };

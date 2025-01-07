@@ -14,7 +14,6 @@ pub struct CreatePage {
     pub description: String,
     pub template: Arc<crate::Template>,
     pub settings: Vec<ar_settings::types::Setting>,
-    pub shard_messenger: serenity::all::ShardMessenger,
     pub is_created: bool,
 }
 
@@ -28,9 +27,6 @@ pub struct CreatePageSetting {
 pub struct LuaSettingExecutor {
     /// The template to execute
     pub template: Arc<crate::Template>,
-
-    /// Shard Messenger
-    pub shard_messenger: serenity::all::ShardMessenger,
 
     /// The ID of the setting
     pub name: String,
@@ -57,7 +53,6 @@ impl SettingView for LuaSettingExecutor {
             ),
             crate::ParseCompileState {
                 serenity_context: context.data.serenity_context.clone(),
-                shard_messenger: self.shard_messenger.clone(),
                 pool: context.data.data.pool.clone(),
                 reqwest_client: context.data.data.reqwest.clone(),
                 guild_id: context.guild_id,
@@ -113,7 +108,6 @@ impl SettingCreator for LuaSettingExecutor {
             ),
             crate::ParseCompileState {
                 serenity_context: context.data.serenity_context.clone(),
-                shard_messenger: self.shard_messenger.clone(),
                 pool: context.data.data.pool.clone(),
                 reqwest_client: context.data.data.reqwest.clone(),
                 guild_id: context.guild_id,
@@ -169,7 +163,6 @@ impl SettingUpdater for LuaSettingExecutor {
             ),
             crate::ParseCompileState {
                 serenity_context: context.data.serenity_context.clone(),
-                shard_messenger: self.shard_messenger.clone(),
                 pool: context.data.data.pool.clone(),
                 reqwest_client: context.data.data.reqwest.clone(),
                 guild_id: context.guild_id,
@@ -222,7 +215,6 @@ impl SettingDeleter for LuaSettingExecutor {
             ),
             crate::ParseCompileState {
                 serenity_context: context.data.serenity_context.clone(),
-                shard_messenger: self.shard_messenger.clone(),
                 pool: context.data.data.pool.clone(),
                 reqwest_client: context.data.data.reqwest.clone(),
                 guild_id: context.guild_id,
@@ -369,7 +361,6 @@ impl LuaUserData for CreatePage {
                 let settings_executor = LuaSettingExecutor {
                     template: this.template.clone(),
                     name: setting.setting.id.clone(),
-                    shard_messenger: this.shard_messenger.clone(),
                 };
 
                 let ops = setting.operations;
@@ -464,7 +455,6 @@ impl LuaUserData for CreatePage {
                 description: page.description,
                 template: this.template.clone(),
                 settings: page.settings,
-                shard_messenger: this.shard_messenger.clone(),
                 is_created: true,
             };
 
@@ -788,7 +778,6 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
                 description: "Missing description".to_string(),
                 settings: vec![],
                 is_created: false,
-                shard_messenger: token.guild_state.shard_messenger.clone(),
             };
 
             Ok(page)
