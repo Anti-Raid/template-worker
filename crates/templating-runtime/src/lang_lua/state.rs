@@ -70,6 +70,11 @@ impl LuaRatelimits {
             Self::create_quota(NonZeroU32::new(1).unwrap(), Duration::from_secs(300))?;
         let get_guild_commands_lim1 = DefaultKeyedRateLimiter::keyed(get_guild_commands_quota1);
 
+        // create_guild_command
+        let create_guild_command_quota1 =
+            Self::create_quota(NonZeroU32::new(1).unwrap(), Duration::from_secs(300))?;
+        let create_guild_command_lim1 = DefaultKeyedRateLimiter::keyed(create_guild_command_quota1);
+
         // Create the clock
         let clock = QuantaClock::default();
 
@@ -82,6 +87,7 @@ impl LuaRatelimits {
                 "create_interaction_response".to_string() => vec![create_interaction_response_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
                 "get_original_interaction_response".to_string() => vec![get_original_interaction_response_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
                 "get_guild_commands".to_string() => vec![get_guild_commands_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
+                "create_guild_command".to_string() => vec![create_guild_command_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
             ),
             clock,
         })

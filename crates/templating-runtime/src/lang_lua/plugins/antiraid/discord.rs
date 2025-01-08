@@ -2178,9 +2178,9 @@ impl LuaUserData for DiscordActionExecutor {
             }))
         });
 
-        methods.add_method("create_guild_commands", |_, this, data: LuaValue| {
+        methods.add_method("create_guild_command", |_, this, data: LuaValue| {
             Ok(lua_promise!(this, data, |lua, this, data|, {
-                this.check_action("create_guild_commands".to_string())
+                this.check_action("create_guild_command".to_string())
                     .map_err(LuaError::external)?;
 
                 let data = lua.from_value::<types::interactions::Command>(data)?;
