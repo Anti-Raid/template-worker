@@ -565,52 +565,6 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
                 .description("The attachments of the message")
             })
         })
-        .type_mut(
-            "MessageHandle",
-            "A handle to a message in Discord, as represented by AntiRaid. Internal fields are subject to change",
-            |mut t| {
-                t
-                .method_mut("data", |m| {
-                    m
-                    .description("Gets the data of the message")
-                    .return_("data", |r| {
-                        r
-                        .typ("any")
-                        .description("The inner data of the message")
-                    })
-                })
-                .method_mut("await_component_interaction", |m| {
-                    m
-                    .description("Awaits a component interaction on the message")
-                    .return_("stream", |r| {
-                        r
-                        .typ("LuaStream<MessageComponentHandle>")
-                        .description("The stream of component interaction handles")
-                    })
-                })
-            }
-        )
-        .type_mut("MessageComponentHandle", "A handle to a message component interaction in Discord, as represented by AntiRaid. Internal fields are subject to change", |mut t| {
-            t
-            .method_mut("data", |f| {
-                f
-                .description("The inner data of the message component interaction")
-                .return_("data", |r| {
-                    r
-                    .typ("any")
-                    .description("The inner data of the message component interaction")
-                })
-            })
-            .method_mut("custom_id", |f| {
-                f
-                .description("The custom ID of the message component interaction")
-                .return_("custom_id", |r| {
-                    r
-                    .typ("string")
-                    .description("The custom ID of the message component interaction")
-                })
-            })
-        })
         .type_mut("SendMessageChannelAction", "Options for sending a message in a channel in Discord", |mut t| {
             t
             .field("channel_id", |f| {
@@ -618,10 +572,33 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
                 .typ("string")
                 .description("The channel ID to send the message in")
             })
-            .field("data", |f| {
+            .field("message", |f| {
                 f
                 .typ("Serenity.CreateMessage")
                 .description("The data of the message to send")
+            })
+        })
+        .type_mut("CreateInteractionResponse", "Options for creating an interaction response in Discord", |mut t| {
+            t
+            .field("interaction_id", |f| {
+                f
+                .typ("string")
+                .description("The interaction ID to respond to")
+            })
+            .field("interaction_token", |f| {
+                f
+                .typ("string")
+                .description("The interaction token to respond to")
+            })
+            .field("data", |f| {
+                f
+                .typ("Serenity.InteractionResponse")
+                .description("The interaction response body")
+            })
+            .field("files", |f| {
+                f
+                .typ("{Serenity.CreateMessageAttachment}?")
+                .description("The files to send with the response")
             })
         })
         .type_mut(
@@ -635,7 +612,7 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
                     .parameter("data", |p| {
                         p.typ("GetAuditLogOptions").description("Options for getting audit logs.")
                     })
-                    .return_("Serenity.AuditLogs", |p| {
+                    .return_("Lazy<Serenity.AuditLogs>", |p| {
                         p.description("The audit log entry")
                     })
                     .is_promise(true)
@@ -646,7 +623,7 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
                     .parameter("data", |p| {
                         p.typ("GetChannelOptions").description("Options for getting a channel.")
                     })
-                    .return_("Serenity.GuildChannel", |p| {
+                    .return_("Lazy<Serenity.GuildChannel>", |p| {
                         p.description("The guild channel")
                     })
                     .is_promise(true)
@@ -657,7 +634,7 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
                     .parameter("data", |p| {
                         p.typ("EditChannelOptions").description("Options for editing a channel.")
                     })
-                    .return_("Serenity.GuildChannel", |p| {
+                    .return_("Lazy<Serenity.GuildChannel>", |p| {
                         p.description("The guild channel")
                     })
                     .is_promise(true)
@@ -668,7 +645,7 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
                     .parameter("data", |p| {
                         p.typ("EditThreadOptions").description("Options for editing a thread.")
                     })
-                    .return_("Serenity.GuildChannel", |p| {
+                    .return_("Lazy<Serenity.GuildChannel>", |p| {
                         p.description("The guild channel")
                     })
                     .is_promise(true)
@@ -679,7 +656,7 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
                     .parameter("data", |p| {
                         p.typ("DeleteChannelOption").description("Options for deleting a channel.")
                     })
-                    .return_("Serenity.GuildChannel", |p| {
+                    .return_("Lazy<Serenity.GuildChannel>", |p| {
                         p.description("The guild channel")
                     })
                     .is_promise(true)
@@ -690,11 +667,23 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
                     .parameter("data", |p| {
                         p.typ("SendMessageChannelAction").description("Options for creating a message.")
                     })
-                    .return_("MessageHandle", |p| {
+                    .return_("Lazy<Message>", |p| {
                         p.description("The message")
                     })
                     .is_promise(true)
                 })
+                .method_mut("create_interaction_response", |typ| {
+                    typ
+                    .description("Creates an interaction response")
+                    .parameter("data", |p| {
+                        p.typ("CreateInteractionResponse").description("Options for creating a message.")
+                    })
+                    .return_("Lazy<Message>", |p| {
+                        p.description("The message")
+                    })
+                    .is_promise(true)
+                })
+
             }
         )
         .method_mut("new", |mut m| {
@@ -992,9 +981,230 @@ mod types {
             pub content: Option<String>,
             /// The attachments
             pub attachments: Option<Vec<CreateMessageAttachment>>,
+            /// The components of the message
+            pub components: Option<Vec<twilight_model::channel::message::Component>>,
         }
 
-        /// Converts a templated message to a discord reply
+        /// Validates a set of components
+        pub fn validate_components(
+            components: Vec<twilight_model::channel::message::Component>,
+        ) -> Result<Vec<twilight_model::channel::message::Component>, crate::Error> {
+            const MAX_BUTTONS_PER_ACTION_ROW: usize = 5;
+            const MAX_SELECTS_PER_ACTION_ROW: usize = 1;
+            const MAX_POSSIBLE_COMPONENTS: usize = (5 + 1) * 5; // 5 buttons per a.r. + 1 select menu per a.r times 5 for 5 action rows
+
+            if components.len() > MAX_POSSIBLE_COMPONENTS {
+                return Err(
+                    format!("Too many components, limit is {}", MAX_POSSIBLE_COMPONENTS).into(),
+                );
+            }
+
+            // Create a Vec<ActionRow> from each comp, wrapping the inner component if required
+            let mut components_parsed = Vec::with_capacity(components.len());
+
+            let mut buttons = Vec::new();
+            let mut selects = Vec::new();
+            for component in components {
+                match component {
+                    twilight_model::channel::message::Component::ActionRow(row) => {
+                        // Validate the action row
+                        let mut num_buttons = 0;
+                        let mut num_selects = 0;
+
+                        for component in row.components.iter() {
+                            match component {
+                                twilight_model::channel::message::Component::Button(_) => {
+                                    if num_buttons >= MAX_BUTTONS_PER_ACTION_ROW {
+                                        return Err(format!(
+                                            "Too many buttons in action row, limit is {}",
+                                            MAX_BUTTONS_PER_ACTION_ROW
+                                        )
+                                        .into());
+                                    }
+                                    if num_selects > 0 {
+                                        return Err(
+                                            "Cannot have buttons and a select menu in action row"
+                                                .into(),
+                                        );
+                                    }
+                                    num_buttons += 1;
+                                }
+                                twilight_model::channel::message::Component::SelectMenu(_) => {
+                                    if num_selects >= MAX_SELECTS_PER_ACTION_ROW {
+                                        return Err(format!(
+                                            "Too many select menus in action row, limit is {}",
+                                            MAX_SELECTS_PER_ACTION_ROW
+                                        )
+                                        .into());
+                                    }
+
+                                    if num_buttons > 0 {
+                                        return Err(
+                                            "Cannot have buttons and a select menu in action row"
+                                                .into(),
+                                        );
+                                    }
+
+                                    num_selects += 1;
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        components_parsed
+                            .push(twilight_model::channel::message::Component::ActionRow(row));
+                    }
+                    twilight_model::channel::message::Component::Button(button) => {
+                        // Push to buttons to allow filling in action row
+                        buttons.push(button);
+                    }
+                    twilight_model::channel::message::Component::SelectMenu(select) => {
+                        // Push to selects to allow filling in action row
+                        selects.push(select);
+                    }
+                    _ => {
+                        return Err(
+                            "Invalid component type, must be an action row, button, or select menu"
+                                .into(),
+                        );
+                    }
+                }
+            }
+
+            // Fill in buttons 5 at a time into action rows
+            while !buttons.is_empty() {
+                let mut row = twilight_model::channel::message::component::ActionRow {
+                    components: Vec::with_capacity(MAX_BUTTONS_PER_ACTION_ROW),
+                };
+
+                for _ in 0..std::cmp::min(buttons.len(), MAX_BUTTONS_PER_ACTION_ROW) {
+                    row.components
+                        .push(twilight_model::channel::message::Component::Button(
+                            buttons.remove(0),
+                        ));
+                }
+
+                components_parsed.push(twilight_model::channel::message::Component::ActionRow(row));
+
+                if components_parsed.len() >= MAX_POSSIBLE_COMPONENTS {
+                    return Err(format!(
+                        "Current button distribution would have led to too many components, limit is {}",
+                        MAX_POSSIBLE_COMPONENTS
+                    ).into());
+                }
+            }
+
+            // Fill in selects 1 at a time into action rows
+            while !selects.is_empty() {
+                let mut row = twilight_model::channel::message::component::ActionRow {
+                    components: Vec::with_capacity(MAX_SELECTS_PER_ACTION_ROW),
+                };
+
+                for _ in 0..std::cmp::min(selects.len(), MAX_SELECTS_PER_ACTION_ROW) {
+                    row.components
+                        .push(twilight_model::channel::message::Component::SelectMenu(
+                            selects.remove(0),
+                        ));
+                }
+
+                components_parsed.push(twilight_model::channel::message::Component::ActionRow(row));
+
+                if components_parsed.len() >= MAX_POSSIBLE_COMPONENTS {
+                    return Err(format!(
+                        "Current select distribution would have led to too many components, limit is {}",
+                        MAX_POSSIBLE_COMPONENTS
+                    ).into());
+                }
+            }
+
+            // Final validation
+            let components = components_parsed;
+
+            for component in components.iter() {
+                let twilight_model::channel::message::Component::ActionRow(row) = component else {
+                    return Err("Internal error: component is not an action row despite distribution having taken place".into());
+                };
+
+                if row.components.len() > 5 {
+                    return Err("Too many components in action row, limit is 5".into());
+                }
+
+                for component in &row.components {
+                    match component {
+                        twilight_model::channel::message::Component::Button(button) => {
+                            /*
+                                                        Non-link and Non-premium buttons must have a custom_id, and cannot have a url or a sku_id.
+                            Link buttons must have a url, and cannot have a custom_id
+                            Link buttons do not send an interaction to your app when clicked
+                            Premium buttons must contain a sku_id, and cannot have a custom_id, label, url, or emoji.
+                                                         */
+                            match button.style {
+                                twilight_model::channel::message::component::ButtonStyle::Link => {
+                                    if button.custom_id.is_some() {
+                                        return Err("Link button cannot have a custom_id".into());
+                                    }
+
+                                    if button.url.is_none() {
+                                        return Err("Link button must have a url".into());
+                                    }
+
+                                    let url = button.url.as_ref().unwrap();
+
+                                    if url.is_empty() || url.len() > 1024 {
+                                        return Err("Link button url is either empty or exceeds limit of 1024 characters".into());
+                                    }
+
+                                    if !url.starts_with("http://") && !url.starts_with("https://") {
+                                        return Err(
+                                            "Link button url must start with http:// or https://"
+                                                .into(),
+                                        );
+                                    }
+
+                                    // TODO: Add some form of allow-list/block-list for URLs
+                                }
+                                _ => {
+                                    if button.url.is_some() {
+                                        return Err("Non-link button cannot have a url".into());
+                                    }
+
+                                    if button.custom_id.is_none() {
+                                        return Err(
+                                            "Non-link button must have a custom_id to identify the button with".into()
+                                        );
+                                    }
+
+                                    if button.custom_id.as_ref().unwrap().len() > 100 {
+                                        return Err(
+                                            "Button custom_id exceeds limit of 100 characters"
+                                                .into(),
+                                        );
+                                    }
+                                }
+                            }
+
+                            if button.label.is_none() && button.emoji.is_none() {
+                                return Err("Button must have a label or an emoji".into());
+                            }
+
+                            if button.label.is_some() && button.label.as_ref().unwrap().len() > 80 {
+                                return Err("Button label exceeds limit of 80 characters".into());
+                            }
+                        }
+                        twilight_model::channel::message::Component::SelectMenu(select) => {
+                            if select.options.len() > 25 {
+                                return Err("Too many options in select menu, limit is 25".into());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            Ok(components)
+        }
+
+        /// Converts a message to a discord reply
         ///
         /// This method also handles all of the various discord message+embed limits as well, returning an error if unable to comply
         pub fn to_discord_reply<'a>(
@@ -1228,54 +1438,29 @@ mod types {
                 return Err("No content/embeds/attachments set".into());
             }
 
+            // Validate components
+            let components = if let Some(components) = message.components {
+                Some(validate_components(components)?)
+            } else {
+                None
+            };
+
             Ok(DiscordReply {
                 embeds,
                 content,
                 attachments,
+                components,
             })
         }
 
-        #[derive(Default)]
+        #[derive(Default, serde::Serialize)]
         pub struct DiscordReply<'a> {
             pub content: Option<String>,
             pub embeds: Vec<serenity::all::CreateEmbed<'a>>,
+            pub components: Option<Vec<twilight_model::channel::message::Component>>,
+
+            #[serde(skip)]
             pub attachments: Vec<serenity::all::CreateAttachment<'a>>,
-        }
-
-        impl<'a> DiscordReply<'a> {
-            pub fn create_message(self) -> serenity::all::CreateMessage<'a> {
-                let mut message = serenity::all::CreateMessage::default();
-
-                if let Some(content) = self.content {
-                    message = message.content(content);
-                }
-
-                message = message.embeds(self.embeds);
-
-                for attachment in self.attachments {
-                    message = message.add_file(attachment);
-                }
-
-                message
-            }
-
-            #[allow(dead_code)]
-            pub fn edit_message(self) -> serenity::all::EditMessage<'a> {
-                let mut message = serenity::all::EditMessage::default();
-
-                if let Some(content) = self.content {
-                    message = message.content(content);
-                }
-
-                message = message.embeds(self.embeds);
-
-                // NOTE: This resets old attachments
-                for attachment in self.attachments {
-                    message = message.new_attachment(attachment);
-                }
-
-                message
-            }
         }
     }
 
@@ -2015,7 +2200,7 @@ impl LuaUserData for DiscordActionExecutor {
                 this.check_action("create_message".to_string())
                     .map_err(LuaError::external)?;
 
-                let msg = types::messages::to_discord_reply(data.message)
+                let mut msg = types::messages::to_discord_reply(data.message)
                     .map_err(|e| LuaError::runtime(e.to_string()))?;
 
                 // Perform required checks
@@ -2076,10 +2261,11 @@ impl LuaUserData for DiscordActionExecutor {
                     ));
                 }
 
-                let cm = msg.create_message();
+                let attachments = msg.attachments;
+                msg.attachments = Vec::with_capacity(attachments.len());
 
-                let msg = guild_channel
-                    .send_message(&this.serenity_context.http, cm)
+                let msg = this.serenity_context.http
+                    .send_message(guild_channel.id, attachments, &msg)
                     .await
                     .map_err(LuaError::external)?;
 
@@ -2099,6 +2285,11 @@ impl LuaUserData for DiscordActionExecutor {
                     let files = data.files.unwrap_or_default();
 
                     if let Some(ref mut idata) = data.data.data {
+                        if let Some(components) = idata.components.take() {
+                            idata.components  = Some(types::messages::validate_components(components)
+                            .map_err(|e| LuaError::external(e.to_string()))?);
+                        }
+
                         if idata.attachments.is_some() {
                             return Err(LuaError::external(
                                 "Files must be provided using the separate `files` property, not via interaction response body!",

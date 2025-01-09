@@ -96,7 +96,7 @@ impl LuaRatelimits {
     fn new_kv_rl() -> Result<Self, crate::Error> {
         // Create the global limit
         let global_quota =
-            Self::create_quota(NonZeroU32::new(10).unwrap(), Duration::from_secs(60))?;
+            Self::create_quota(NonZeroU32::new(100).unwrap(), Duration::from_secs(1))?;
         let global1 = DefaultKeyedRateLimiter::keyed(global_quota);
         let global = vec![global1];
 
