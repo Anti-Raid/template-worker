@@ -38,27 +38,6 @@ impl DiscordActionExecutor {
         Ok(())
     }
 
-    pub async fn user_in_guild(&self, user_id: serenity::all::UserId) -> LuaResult<()> {
-        let Some(member) = sandwich_driver::member_in_guild(
-            &self.serenity_context.cache,
-            &self.serenity_context.http,
-            &self.reqwest_client,
-            self.guild_id,
-            user_id,
-        )
-        .await
-        .map_err(|e| LuaError::external(e.to_string()))?
-        else {
-            return Err(LuaError::runtime("User not found in guild"));
-        };
-
-        if member.user.id != user_id {
-            return Err(LuaError::runtime("User not found in guild"));
-        }
-
-        Ok(())
-    }
-
     pub async fn check_permissions(
         &self,
         user_id: serenity::all::UserId,
@@ -357,115 +336,17 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
                 .description("The reason for deleting the channel")
             })
         })
-        .type_mut("CreateMessageEmbedField", "A field in a message embed", |t| {
-            t
-            .example(std::sync::Arc::new(types::messages::CreateMessageEmbedField::default()))
-            .field("name", |f| {
-                f
-                .typ("string")
-                .description("The name of the field")
-            })
-            .field("value", |f| {
-                f
-                .typ("string")
-                .description("The value of the field")
-            })
-            .field("inline", |f| {
-                f
-                .typ("bool")
-                .description("Whether the field is inline")
-            })
-        })
-        .type_mut("CreateMessageEmbedAuthor", "An author in a message embed", |t| {
-            t
-            .example(std::sync::Arc::new(types::messages::CreateMessageEmbedAuthor::default()))
-            .field("name", |f| {
-                f
-                .typ("string")
-                .description("The name of the author")
-            })
-            .field("url", |f| {
-                f
-                .typ("string?")
-                .description("The URL of the author")
-            })
-            .field("icon_url", |f| {
-                f
-                .typ("string?")
-                .description("The icon URL of the author")
-            })
-        })
-        .type_mut("CreateMessageEmbedFooter", "A footer in a message embed", |t| {
-            t
-            .example(std::sync::Arc::new(types::messages::CreateMessageEmbedFooter::default()))
-            .field("text", |f| {
-                f
-                .typ("string")
-                .description("The text of the footer")
-            })
-            .field("icon_url", |f| {
-                f
-                .typ("string?")
-                .description("The icon URL of the footer")
-            })
-        })
-        .type_mut("CreateMessageEmbed", "An embed in a message", |t| {
-            t
-            .example(std::sync::Arc::new(types::messages::CreateMessageEmbed::default()))
-            .field("title", |f| {
-                f
-                .typ("string?")
-                .description("The title of the embed")
-            })
-            .field("description", |f| {
-                f
-                .typ("string?")
-                .description("The description of the embed")
-            })
-            .field("url", |f| {
-                f
-                .typ("string?")
-                .description("The URL of the embed")
-            })
-            .field("timestamp", |f| {
-                f
-                .typ("string?")
-                .description("The timestamp of the embed")
-            })
-            .field("color", |f| {
-                f
-                .typ("number?")
-                .description("The color of the embed")
-            })
-            .field("footer", |f| {
-                f
-                .typ("{Serenity.CreateMessageEmbedFooter}?")
-                .description("The footer of the embed")
-            })
-            .field("image", |f| {
-                f
-                .typ("string?")
-                .description("The image URL of the embed")
-            })
-            .field("thumbnail", |f| {
-                f
-                .typ("string?")
-                .description("The thumbnail URL of the embed")
-            })
-            .field("author", |f| {
-                f
-                .typ("{Serenity.CreateMessageEmbedAuthor}?")
-                .description("The author of the embed")
-            })
-            .field("fields", |f| {
-                f
-                .typ("{Serenity.CreateMessageEmbedField}?")
-                .description("The fields of the embed")
-            })
-        })
         .type_mut("CreateMessageAttachment", "An attachment in a message", |t| {
             t
-            .example(std::sync::Arc::new(types::messages::CreateMessageAttachment::default()))
+            .example(std::sync::Arc::new(builders::CreateMessageAttachment {
+                new_and_existing_attachments: vec![
+                    builders::NewOrExisting::New(builders::SingleCreateMessageAttachment {
+                        filename: "test.txt".into(),
+                        description: Some("Test file".into()),
+                        content: vec![1, 2, 3, 4, 5],
+                    }),
+                ]
+            }))
             .field("filename", |f| {
                 f
                 .typ("string")
@@ -482,33 +363,15 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
                 .description("The content of the attachment")
             })
         })
-        .type_mut("CreateMessage", "Options for creating a message in Discord", |t| {
+        .type_mut("CreateMessageOptions", "Options for sending a message in a channel in Discord", |t| {
             t
-            .example(std::sync::Arc::new(types::messages::CreateMessage::default()))
-            .field("embeds", |f| {
-                f
-                .typ("{Serenity.CreateMessageEmbed}?")
-                .description("The embeds of the message")
-            })
-            .field("content", |f| {
-                f
-                .typ("string?")
-                .description("The content of the message")
-            })
-            .field("attachments", |f| {
-                f
-                .typ("{Serenity.CreateMessageAttachment}?")
-                .description("The attachments of the message")
-            })
-        })
-        .type_mut("SendMessageChannelAction", "Options for sending a message in a channel in Discord", |mut t| {
-            t
+            .example(std::sync::Arc::new(structs::CreateMessageOptions::default()))
             .field("channel_id", |f| {
                 f
                 .typ("string")
                 .description("The channel ID to send the message in")
             })
-            .field("message", |f| {
+            .field("data", |f| {
                 f
                 .typ("Serenity.CreateMessage")
                 .description("The data of the message to send")
@@ -859,25 +722,35 @@ impl LuaUserData for DiscordActionExecutor {
         // Should be documented
         methods.add_method("get_channel", |_, this, data: LuaValue| {
             Ok(lua_promise!(this, data, |lua, this, data|, {
-                let data = lua.from_value::<types::GetChannelOptions>(data)?;
+                let data = lua.from_value::<structs::GetChannelOptions>(data)?;
 
                 this.check_action("get_channel".to_string())
                     .map_err(LuaError::external)?;
 
-                let bot_userid = this.serenity_context.cache.current_user().id;
+                // Perform required checks
+                let channel = sandwich_driver::channel(
+                    &this.serenity_context.cache,
+                    &this.serenity_context.http,
+                    &this.reqwest_client,
+                    Some(this.guild_id),
+                    data.channel_id,
+                )
+                .await
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
-                this.user_in_guild(bot_userid)
-                    .await
-                    .map_err(LuaError::external)?;
+                let Some(channel) = channel else {
+                    return Err(LuaError::external("Channel not found"));
+                };
 
-                let channel = this
-                    .serenity_context
-                    .http
-                    .get_channel(data.channel_id)
-                    .await
-                    .map_err(LuaError::external)?;
+                let Some(guild_channel) = channel.guild() else {
+                    return Err(LuaError::external("Channel not in guild"));
+                };
 
-                Ok(Lazy::new(channel))
+                if guild_channel.guild_id != this.guild_id {
+                    return Err(LuaError::external("Channel not in guild"));
+                }
+
+                Ok(Lazy::new(guild_channel))
             }))
         });
 
@@ -962,7 +835,7 @@ impl LuaUserData for DiscordActionExecutor {
                     }
                 }
 
-                if let Some(topic) = data.data.topic {
+                if let Some(ref topic) = data.data.topic {
                     if topic.len() > 1024 {
                         return Err(LuaError::external(
                             "Topic must be less than 1024 characters",
@@ -970,7 +843,7 @@ impl LuaUserData for DiscordActionExecutor {
                     }
                 }
 
-                if let Some(rate_limit_per_user) = data.data.rate_limit_per_user {
+                if let Some(ref rate_limit_per_user) = data.data.rate_limit_per_user {
                     if rate_limit_per_user.get() > 21600 {
                         return Err(LuaError::external(
                             "Rate limit per user must be less than 21600 seconds",
@@ -1332,7 +1205,7 @@ impl LuaUserData for DiscordActionExecutor {
                     ));
                 }
 
-                let files = if let Some(ref mut attachments) = data.data.attachments {
+                let files = if let Some(ref attachments) = data.data.attachments {
                     attachments.take_files().map_err(|e| LuaError::external(e.to_string()))?
                 } else {
                     Vec::new()
@@ -1350,53 +1223,12 @@ impl LuaUserData for DiscordActionExecutor {
         // Interactions
         methods.add_method("create_interaction_response", |_, this, data: LuaValue| {
             Ok(lua_promise!(this, data, |lua, this, data|, {
-                let mut data = lua.from_value::<types::interactions::CreateInteractionResponse>(data)?;
+                let data = lua.from_value::<structs::CreateInteractionResponseOptions>(data)?;
 
                 this.check_action("create_interaction_response".to_string())
                     .map_err(LuaError::external)?;
 
-                let files = {
-                    let files = data.files.unwrap_or_default();
-
-                    if let Some(ref mut idata) = data.data.data {
-                        if let Some(components) = idata.components.take() {
-                            idata.components  = Some(types::messages::validate_components(components)
-                            .map_err(|e| LuaError::external(e.to_string()))?);
-                        }
-
-                        if idata.attachments.is_some() {
-                            return Err(LuaError::external(
-                                "Files must be provided using the separate `files` property, not via interaction response body!",
-                            ));
-                        }
-
-                        let attachments = {
-                            let mut id: u64 = 0;
-                            let mut attachments = Vec::new();
-
-                            #[allow(clippy::explicit_counter_loop)] // Using id as loop counter is more readable than .zip()
-                            for file in files.iter() {
-                                attachments.push(
-                                    twilight_model::http::attachment::Attachment {
-                                        description: file.description.clone(),
-                                        file: Vec::new(),
-                                        filename: file.filename.clone(),
-                                        id,
-                                    }
-                                );
-
-                                id += 1;
-                            }
-
-                            attachments
-                        };
-
-                        idata.attachments = Some(attachments);
-                    }
-
-                    types::messages::CreateMessageAttachment::to_files(files)
-                    .map_err(|e| LuaError::external(e.to_string()))?
-                };
+                let files = data.data.take_files().map_err(|e| LuaError::external(e.to_string()))?;
 
                 this.serenity_context
                     .http
@@ -1448,11 +1280,11 @@ impl LuaUserData for DiscordActionExecutor {
                 this.check_action("create_guild_command".to_string())
                     .map_err(LuaError::external)?;
 
-                let data = lua.from_value::<types::interactions::Command>(data)?;
+                let data = lua.from_value::<structs::CreateCommandOptions>(data)?;
 
                 let resp = this.serenity_context
                     .http
-                    .create_guild_command(this.guild_id, &data)
+                    .create_guild_command(this.guild_id, &data.data)
                     .await
                     .map_err(LuaError::external)?;
 

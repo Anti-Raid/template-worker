@@ -211,6 +211,41 @@ pub enum CreateInteractionResponse<'a> {
     LaunchActivity,
 }
 
+impl Default for CreateInteractionResponse<'_> {
+    fn default() -> Self {
+        Self::Message(Default::default())
+    }
+}
+
+impl<'a> CreateInteractionResponse<'a> {
+    pub fn take_files(&self) -> Result<Vec<serenity::all::CreateAttachment<'a>>, crate::Error> {
+        match self {
+            Self::Message(x) => {
+                if let Some(ref x) = x.attachments {
+                    x.take_files()
+                } else {
+                    Ok(Vec::new())
+                }
+            }
+            Self::Defer(x) => {
+                if let Some(ref x) = x.attachments {
+                    x.take_files()
+                } else {
+                    Ok(Vec::new())
+                }
+            }
+            Self::UpdateMessage(x) => {
+                if let Some(ref x) = x.attachments {
+                    x.take_files()
+                } else {
+                    Ok(Vec::new())
+                }
+            }
+            _ => Ok(Vec::new()),
+        }
+    }
+}
+
 /// [Discord docs](https://discord.com/developers/docs/interactions/receiving-and-responding#interaction-response-object-messages).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[must_use]

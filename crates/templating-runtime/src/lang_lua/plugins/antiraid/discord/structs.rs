@@ -1,4 +1,4 @@
-use super::builders::{CreateCommand, CreateMessage, EditChannel};
+use super::builders::{CreateCommand, CreateInteractionResponse, CreateMessage, EditChannel};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct GetAuditLogOptions {
@@ -45,5 +45,12 @@ pub struct CreateMessageOptions<'a> {
 
 #[derive(serde::Serialize, Default, serde::Deserialize)]
 pub struct CreateCommandOptions<'a> {
-    pub command: CreateCommand<'a>,
+    pub data: CreateCommand<'a>,
+}
+
+#[derive(serde::Serialize, Default, serde::Deserialize)]
+pub struct CreateInteractionResponseOptions<'a> {
+    pub interaction_id: serenity::all::InteractionId,
+    pub interaction_token: &'a str,
+    pub data: CreateInteractionResponse<'a>,
 }
