@@ -309,7 +309,6 @@ impl<'de> serde::Deserialize<'de> for CreateInteractionResponse {
             .get("type")
             .ok_or_else(|| D::Error::missing_field("type"))?
             .clone();
-        let value = Value::from(map);
 
         let ty = raw_kind
             .as_u64()
@@ -317,12 +316,47 @@ impl<'de> serde::Deserialize<'de> for CreateInteractionResponse {
 
         match ty {
             1 => Ok(Self::Pong),
-            4 => serde_json::from_value(value).map(Self::Message),
-            5 => serde_json::from_value(value).map(Self::Defer),
+            4 => {
+                let data = map
+                    .get("data")
+                    .ok_or_else(|| D::Error::missing_field("data"))?
+                    .clone();
+
+                serde_json::from_value(data).map(Self::Message)
+            }
+            5 => {
+                let data = map
+                    .get("data")
+                    .ok_or_else(|| D::Error::missing_field("data"))?
+                    .clone();
+
+                serde_json::from_value(data).map(Self::Defer)
+            }
             6 => Ok(Self::Acknowledge),
-            7 => serde_json::from_value(value).map(Self::UpdateMessage),
-            8 => serde_json::from_value(value).map(Self::Autocomplete),
-            9 => serde_json::from_value(value).map(Self::Modal),
+            7 => {
+                let data = map
+                    .get("data")
+                    .ok_or_else(|| D::Error::missing_field("data"))?
+                    .clone();
+
+                serde_json::from_value(data).map(Self::UpdateMessage)
+            }
+            8 => {
+                let data = map
+                    .get("data")
+                    .ok_or_else(|| D::Error::missing_field("data"))?
+                    .clone();
+
+                serde_json::from_value(data).map(Self::Autocomplete)
+            }
+            9 => {
+                let data = map
+                    .get("data")
+                    .ok_or_else(|| D::Error::missing_field("data"))?
+                    .clone();
+
+                serde_json::from_value(data).map(Self::Modal)
+            }
             12 => Ok(Self::LaunchActivity),
             _ => {
                 return Err(D::Error::custom(format!(
