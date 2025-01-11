@@ -165,7 +165,7 @@ pub fn validate_embed(embed: &super::builders::CreateEmbed) -> Result<usize, cra
 }
 
 /// Validates all messages
-pub fn validate_message<'a>(message: &super::builders::CreateMessage) -> Result<(), crate::Error> {
+pub fn validate_message(message: &super::builders::CreateMessage) -> Result<(), crate::Error> {
     pub const MESSAGE_CONTENT_LIMIT: usize = 2000;
     pub const MAX_EMBED_CHARACTERS_LIMIT: usize = 6000;
 

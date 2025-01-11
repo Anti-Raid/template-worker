@@ -876,7 +876,7 @@ impl LuaUserData for DiscordActionExecutor {
                 let channel = this
                     .serenity_context
                     .http
-                    .edit_channel(data.channel_id, &data.data, Some(data.reason))
+                    .edit_channel(data.channel_id, &data.data, Some(data.reason.as_str()))
                     .await
                     .map_err(LuaError::external)?;
 
@@ -968,7 +968,7 @@ impl LuaUserData for DiscordActionExecutor {
                 let channel = this
                     .serenity_context
                     .http
-                    .delete_channel(data.channel_id, Some(data.reason))
+                    .delete_channel(data.channel_id, Some(data.reason.as_str()))
                     .await
                     .map_err(LuaError::external)?;
 

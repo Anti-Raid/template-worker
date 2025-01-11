@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 
 use arrayvec::ArrayVec;
@@ -11,9 +10,9 @@ use serenity::all::*;
 use crate::lang_lua::plugins::antiraid::typesext::MultiOption;
 
 #[derive(Deserialize, Debug, Default, Clone)]
-pub struct SingleCreateMessageAttachment<'a> {
-    pub filename: Cow<'static, str>,
-    pub description: Option<Cow<'a, str>>,
+pub struct SingleCreateMessageAttachment {
+    pub filename: String,
+    pub description: Option<String>,
     pub content: Vec<u8>,
 }
 
@@ -24,24 +23,24 @@ pub struct ExistingAttachment {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)] // Serde needs to do either id only for existing or filename/description/content for new
-pub enum NewOrExisting<'a> {
-    New(SingleCreateMessageAttachment<'a>),
+pub enum NewOrExisting {
+    New(SingleCreateMessageAttachment),
     Existing(ExistingAttachment),
 }
 
 #[derive(Deserialize, Debug, Default, Clone)]
-pub struct CreateMessageAttachment<'a> {
+pub struct CreateMessageAttachment {
     #[serde(flatten)]
-    pub new_and_existing_attachments: Vec<NewOrExisting<'a>>,
+    pub new_and_existing_attachments: Vec<NewOrExisting>,
 }
 
-impl Serialize for CreateMessageAttachment<'_> {
+impl Serialize for CreateMessageAttachment {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         #[derive(Serialize)]
         struct NewAttachment<'a> {
             id: u64,
-            filename: &'a Cow<'static, str>,
-            description: &'a Option<Cow<'a, str>>,
+            filename: &'a str,
+            description: &'a Option<String>,
         }
 
         // Instead of an `AttachmentId`, the `id` field for new attachments corresponds to the
@@ -69,8 +68,8 @@ impl Serialize for CreateMessageAttachment<'_> {
     }
 }
 
-impl<'a> CreateMessageAttachment<'a> {
-    pub fn take_files(&self) -> Result<Vec<serenity::all::CreateAttachment<'a>>, crate::Error> {
+impl CreateMessageAttachment {
+    pub fn take_files<'a>(&self) -> Result<Vec<serenity::all::CreateAttachment<'a>>, crate::Error> {
         pub const MESSAGE_ATTACHMENT_DESCRIPTION_LIMIT: usize = 1024;
         pub const MESSAGE_ATTACHMENT_CONTENT_BYTES_LIMIT: usize = 8 * 1024 * 1024; // 8 MB
         pub const MESSAGE_MAX_ATTACHMENT_COUNT: usize = 3;
@@ -86,10 +85,8 @@ impl<'a> CreateMessageAttachment<'a> {
         let mut attachments = Vec::new();
         for attachment in &self.new_and_existing_attachments {
             if let NewOrExisting::New(new_attachment) = attachment {
-                let desc = new_attachment
-                    .description
-                    .as_ref()
-                    .unwrap_or(&Cow::Borrowed(""));
+                let desc = new_attachment.description.clone();
+                let desc = desc.unwrap_or_default();
 
                 if desc.len() > MESSAGE_ATTACHMENT_DESCRIPTION_LIMIT {
                     return Err(format!(
@@ -133,36 +130,36 @@ impl<'a> CreateMessageAttachment<'a> {
 /// [Discord docs](https://discord.com/developers/docs/resources/channel#create-message)
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[must_use]
-pub struct CreateMessage<'a> {
+pub struct CreateMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<Cow<'a, str>>,
+    pub content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nonce: Option<Nonce>,
     #[serde(default)]
     pub tts: bool,
     #[serde(default)]
-    pub embeds: Cow<'a, [CreateEmbed<'a>]>,
+    pub embeds: Vec<CreateEmbed>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub allowed_mentions: Option<CreateAllowedMentions<'a>>,
+    pub allowed_mentions: Option<CreateAllowedMentions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message_reference: Option<MessageReference>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub components: Option<Cow<'a, [ActionRow]>>,
+    pub components: Option<Vec<ActionRow>>,
     #[serde(default)]
-    pub sticker_ids: Cow<'a, [StickerId]>,
+    pub sticker_ids: Vec<StickerId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flags: Option<MessageFlags>,
     #[serde(default)]
     pub enforce_nonce: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub poll: Option<CreatePoll<'a>>,
+    pub poll: Option<CreatePoll>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub attachments: Option<CreateMessageAttachment<'a>>,
+    pub attachments: Option<CreateMessageAttachment>,
 }
 
 /// [Discord docs](https://discord.com/developers/docs/interactions/receiving-and-responding#interaction-response-object).
 #[derive(Clone, Debug)]
-pub enum CreateInteractionResponse<'a> {
+pub enum CreateInteractionResponse {
     /// Acknowledges a Ping (only required when your bot uses an HTTP endpoint URL).
     ///
     /// Corresponds to Discord's `PONG`.
@@ -170,12 +167,12 @@ pub enum CreateInteractionResponse<'a> {
     /// Responds to an interaction with a message.
     ///
     /// Corresponds to Discord's `CHANNEL_MESSAGE_WITH_SOURCE`.
-    Message(CreateInteractionResponseMessage<'a>),
+    Message(CreateInteractionResponseMessage),
     /// Acknowledges the interaction in order to edit a response later. The user sees a loading
     /// state.
     ///
     /// Corresponds to Discord's `DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE`.
-    Defer(CreateInteractionResponseMessage<'a>),
+    Defer(CreateInteractionResponseMessage),
     /// Only valid for component-based interactions (seems to work for modal submit interactions
     /// too even though it's not documented).
     ///
@@ -189,19 +186,19 @@ pub enum CreateInteractionResponse<'a> {
     /// Edits the message the component was attached to.
     ///
     /// Corresponds to Discord's `UPDATE_MESSAGE`.
-    UpdateMessage(CreateInteractionResponseMessage<'a>),
+    UpdateMessage(CreateInteractionResponseMessage),
     /// Only valid for autocomplete interactions.
     ///
     /// Responds to the autocomplete interaction with suggested choices.
     ///
     /// Corresponds to Discord's `APPLICATION_COMMAND_AUTOCOMPLETE_RESULT`.
-    Autocomplete(CreateAutocompleteResponse<'a>),
+    Autocomplete(CreateAutocompleteResponse),
     /// Not valid for Modal and Ping interactions
     ///
     /// Responds to the interaction with a popup modal.
     ///
     /// Corresponds to Discord's `MODAL`.
-    Modal(CreateModal<'a>),
+    Modal(CreateModal),
     /// Not valid for autocomplete and Ping interactions. Only available for applications with
     /// Activities enabled.
     ///
@@ -211,14 +208,14 @@ pub enum CreateInteractionResponse<'a> {
     LaunchActivity,
 }
 
-impl Default for CreateInteractionResponse<'_> {
+impl Default for CreateInteractionResponse {
     fn default() -> Self {
         Self::Message(Default::default())
     }
 }
 
-impl<'a> CreateInteractionResponse<'a> {
-    pub fn take_files(&self) -> Result<Vec<serenity::all::CreateAttachment<'a>>, crate::Error> {
+impl CreateInteractionResponse {
+    pub fn take_files<'a>(&self) -> Result<Vec<serenity::all::CreateAttachment<'a>>, crate::Error> {
         match self {
             Self::Message(x) => {
                 if let Some(ref x) = x.attachments {
@@ -249,26 +246,26 @@ impl<'a> CreateInteractionResponse<'a> {
 /// [Discord docs](https://discord.com/developers/docs/interactions/receiving-and-responding#interaction-response-object-messages).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[must_use]
-pub struct CreateInteractionResponseMessage<'a> {
+pub struct CreateInteractionResponseMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tts: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<Cow<'a, str>>,
+    pub content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub embeds: Option<Cow<'a, [CreateEmbed<'a>]>>,
+    pub embeds: Option<Vec<CreateEmbed>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub allowed_mentions: Option<CreateAllowedMentions<'a>>,
+    pub allowed_mentions: Option<CreateAllowedMentions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flags: Option<InteractionResponseFlags>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub components: Option<Cow<'a, [ActionRow]>>,
+    pub components: Option<Vec<ActionRow>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub poll: Option<CreatePoll<'a>>,
+    pub poll: Option<CreatePoll>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub attachments: Option<CreateMessageAttachment<'a>>,
+    pub attachments: Option<CreateMessageAttachment>,
 }
 
-impl serde::Serialize for CreateInteractionResponse<'_> {
+impl serde::Serialize for CreateInteractionResponse {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap as _;
 
@@ -302,7 +299,7 @@ impl serde::Serialize for CreateInteractionResponse<'_> {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for CreateInteractionResponse<'_> {
+impl<'de> serde::Deserialize<'de> for CreateInteractionResponse {
     fn deserialize<D: serde::Deserializer<'de>>(
         deserializer: D,
     ) -> std::result::Result<Self, D::Error> {
@@ -341,15 +338,15 @@ impl<'de> serde::Deserialize<'de> for CreateInteractionResponse<'_> {
 /// [Discord docs](https://discord.com/developers/docs/interactions/receiving-and-responding#interaction-response-object-autocomplete)
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[must_use]
-pub struct CreateAutocompleteResponse<'a> {
-    choices: Cow<'a, [AutocompleteChoice<'a>]>,
+pub struct CreateAutocompleteResponse {
+    choices: Vec<AutocompleteChoice>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 #[non_exhaustive]
-pub enum AutocompleteValue<'a> {
-    String(Cow<'a, str>),
+pub enum AutocompleteValue {
+    String(String),
     Integer(u64),
     Float(f64),
 }
@@ -358,20 +355,20 @@ pub enum AutocompleteValue<'a> {
 // [Autocomplete docs](https://discord.com/developers/docs/interactions/receiving-and-responding#interaction-response-object-autocomplete).
 #[must_use]
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AutocompleteChoice<'a> {
-    pub name: Cow<'a, str>,
+pub struct AutocompleteChoice {
+    pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub name_localizations: Option<HashMap<Cow<'a, str>, Cow<'a, str>>>,
-    pub value: AutocompleteValue<'a>,
+    pub name_localizations: Option<HashMap<String, String>>,
+    pub value: AutocompleteValue,
 }
 
 /// [Discord docs](https://discord.com/developers/docs/interactions/receiving-and-responding#interaction-response-object-modal).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[must_use]
-pub struct CreateModal<'a> {
-    components: Cow<'a, [ActionRow]>,
-    custom_id: Cow<'a, str>,
-    title: Cow<'a, str>,
+pub struct CreateModal {
+    components: Vec<ActionRow>,
+    custom_id: String,
+    title: String,
 }
 
 /// A builder to create an embed in a message
@@ -379,63 +376,63 @@ pub struct CreateModal<'a> {
 /// [Discord docs](https://discord.com/developers/docs/resources/channel#embed-object)
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[must_use]
-pub struct CreateEmbed<'a> {
+pub struct CreateEmbed {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<Cow<'a, str>>,
+    pub title: Option<String>,
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<Cow<'a, str>>,
+    pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<Cow<'a, str>>,
+    pub url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<Timestamp>,
     #[serde(rename = "color")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub colour: Option<Colour>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub footer: Option<CreateEmbedFooter<'a>>,
+    pub footer: Option<CreateEmbedFooter>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub image: Option<CreateEmbedImage<'a>>,
+    pub image: Option<CreateEmbedImage>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub thumbnail: Option<CreateEmbedImage<'a>>,
+    pub thumbnail: Option<CreateEmbedImage>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub author: Option<CreateEmbedAuthor<'a>>,
+    pub author: Option<CreateEmbedAuthor>,
     /// No point using a Cow slice, as there is no set_fields method
     /// and CreateEmbedField is not public.
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     #[serde(default)]
-    pub fields: Vec<CreateEmbedField<'a>>,
+    pub fields: Vec<CreateEmbedField>,
 }
 
 /// A builder to create the footer data for an embed.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[must_use]
-pub struct CreateEmbedFooter<'a> {
-    pub text: Cow<'a, str>,
-    pub icon_url: Option<Cow<'a, str>>,
+pub struct CreateEmbedFooter {
+    pub text: String,
+    pub icon_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CreateEmbedImage<'a> {
-    pub url: Cow<'a, str>,
+pub struct CreateEmbedImage {
+    pub url: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CreateEmbedField<'a> {
-    pub name: Cow<'a, str>,
-    pub value: Cow<'a, str>,
+pub struct CreateEmbedField {
+    pub name: String,
+    pub value: String,
     pub inline: bool,
 }
 
 /// A builder to create the author data of an embed. See [`CreateEmbed::author`]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[must_use]
-pub struct CreateEmbedAuthor<'a> {
-    pub name: Cow<'a, str>,
-    pub url: Option<Cow<'a, str>>,
-    pub icon_url: Option<Cow<'a, str>>,
+pub struct CreateEmbedAuthor {
+    pub name: String,
+    pub url: Option<String>,
+    pub icon_url: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -449,18 +446,18 @@ pub enum ParseValue {
 /// [Discord docs](https://discord.com/developers/docs/resources/channel#allowed-mentions-object).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[must_use]
-pub struct CreateAllowedMentions<'a> {
+pub struct CreateAllowedMentions {
     pub parse: ArrayVec<ParseValue, 3>,
-    pub users: Cow<'a, [UserId]>,
-    pub roles: Cow<'a, [RoleId]>,
+    pub users: Vec<UserId>,
+    pub roles: Vec<RoleId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replied_user: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct CreatePoll<'a> {
-    pub question: CreatePollMedia<'a>,
-    pub answers: Cow<'a, [CreatePollAnswer<'a>]>,
+pub struct CreatePoll {
+    pub question: CreatePollMedia,
+    pub answers: Vec<CreatePollAnswer>,
     pub duration: u8,
     pub allow_multiselect: bool,
     pub layout_type: Option<PollLayoutType>,
@@ -468,19 +465,19 @@ pub struct CreatePoll<'a> {
 
 /// "Only text is supported."
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct CreatePollMedia<'a> {
-    pub text: Cow<'a, str>,
+pub struct CreatePollMedia {
+    pub text: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
-pub struct CreatePollAnswerMedia<'a> {
-    pub text: Option<Cow<'a, str>>,
+pub struct CreatePollAnswerMedia {
+    pub text: Option<String>,
     pub emoji: Option<PollMediaEmoji>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
-pub struct CreatePollAnswer<'a> {
-    pub poll_media: CreatePollAnswerMedia<'a>,
+pub struct CreatePollAnswer {
+    pub poll_media: CreatePollAnswerMedia,
 }
 
 /// [Discord docs](https://discord.com/developers/docs/resources/channel#modify-channel-json-params-guild-channel).
@@ -488,16 +485,16 @@ pub struct CreatePollAnswer<'a> {
 /// Unlike Serenity, AntiRaid combines EditChannel and EditThread to allow using standard Discord typings
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[must_use]
-pub struct EditChannel<'a> {
+pub struct EditChannel {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<Cow<'a, str>>,
+    pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "type")]
     pub kind: Option<ChannelType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub topic: Option<Cow<'a, str>>,
+    pub topic: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nsfw: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -507,11 +504,11 @@ pub struct EditChannel<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_limit: Option<NonMaxU16>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub permission_overwrites: Option<Cow<'a, [PermissionOverwrite]>>,
+    pub permission_overwrites: Option<Vec<PermissionOverwrite>>,
     #[serde(skip_serializing_if = "MultiOption::should_not_serialize")]
     pub parent_id: MultiOption<ChannelId>,
     #[serde(skip_serializing_if = "MultiOption::should_not_serialize")]
-    pub rtc_region: MultiOption<Cow<'a, str>>,
+    pub rtc_region: MultiOption<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub video_quality_mode: Option<VideoQualityMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -519,7 +516,7 @@ pub struct EditChannel<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flags: Option<ChannelFlags>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub available_tags: Option<Cow<'a, [CreateForumTag<'a>]>>,
+    pub available_tags: Option<Vec<CreateForumTag>>,
     #[serde(skip_serializing_if = "MultiOption::should_not_serialize")]
     pub default_reaction_emoji: MultiOption<ForumEmoji>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -529,7 +526,7 @@ pub struct EditChannel<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_forum_layout: Option<ForumLayoutType>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<Cow<'a, str>>,
+    pub status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     archived: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -539,10 +536,10 @@ pub struct EditChannel<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     invitable: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    applied_tags: Option<Cow<'a, [ForumTagId]>>,
+    applied_tags: Option<Vec<ForumTagId>>,
 }
 
-impl Default for EditChannel<'_> {
+impl Default for EditChannel {
     fn default() -> Self {
         Self {
             name: Some("my-channel".into()),
@@ -581,11 +578,11 @@ impl Default for EditChannel<'_> {
 /// Contrary to the [`ForumTag`] struct, only the name field is required.
 #[must_use]
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CreateForumTag<'a> {
-    pub name: Cow<'a, str>,
+pub struct CreateForumTag {
+    pub name: String,
     pub moderated: bool,
     pub emoji_id: Option<EmojiId>,
-    pub emoji_name: Option<Cow<'a, str>>,
+    pub emoji_name: Option<String>,
 }
 
 /// A builder for creating a new [`Command`].
@@ -597,7 +594,7 @@ pub struct CreateForumTag<'a> {
 /// - [guild command](https://discord.com/developers/docs/interactions/application-commands#create-guild-application-command)
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[must_use]
-pub struct CreateCommand<'a> {
+pub struct CreateCommand {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "type")]
     kind: Option<CommandType>,
@@ -605,10 +602,10 @@ pub struct CreateCommand<'a> {
     handler: Option<EntryPointHandlerType>,
 
     #[serde(flatten)]
-    fields: EditCommand<'a>,
+    fields: EditCommand,
 }
 
-impl Default for CreateCommand<'_> {
+impl Default for CreateCommand {
     fn default() -> Self {
         Self {
             kind: Some(CommandType::ChatInput),
@@ -627,13 +624,13 @@ impl Default for CreateCommand<'_> {
 /// - [guild command](https://discord.com/developers/docs/interactions/application-commands#edit-guild-application-command)
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[must_use]
-pub struct EditCommand<'a> {
-    name: Option<Cow<'a, str>>,
-    name_localizations: HashMap<Cow<'a, str>, Cow<'a, str>>,
+pub struct EditCommand {
+    name: Option<String>,
+    name_localizations: HashMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    description: Option<Cow<'a, str>>,
-    description_localizations: HashMap<Cow<'a, str>, Cow<'a, str>>,
-    options: Cow<'a, [CreateCommandOption<'a>]>,
+    description: Option<String>,
+    description_localizations: HashMap<String, String>,
+    options: Vec<CreateCommandOption>,
     #[serde(skip_serializing_if = "Option::is_none")]
     default_member_permissions: Option<Permissions>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -645,14 +642,14 @@ pub struct EditCommand<'a> {
     nsfw: bool,
 }
 
-impl Default for EditCommand<'_> {
+impl Default for EditCommand {
     fn default() -> Self {
         Self {
             name: Some("my-command".into()),
             name_localizations: HashMap::new(),
             description: Some("My command description".into()),
             description_localizations: HashMap::new(),
-            options: Cow::default(),
+            options: Vec::default(),
             default_member_permissions: None,
             dm_permission: None,
             integration_types: None,
@@ -671,23 +668,23 @@ impl Default for EditCommand<'_> {
 /// [Discord docs](https://discord.com/developers/docs/interactions/application-commands#application-command-object-application-command-option-structure).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[must_use]
-pub struct CreateCommandOption<'a> {
+pub struct CreateCommandOption {
     #[serde(rename = "type")]
     kind: CommandOptionType,
-    name: Cow<'a, str>,
+    name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    name_localizations: Option<HashMap<Cow<'a, str>, Cow<'a, str>>>,
-    description: Cow<'a, str>,
+    name_localizations: Option<HashMap<String, String>>,
+    description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    description_localizations: Option<HashMap<Cow<'a, str>, Cow<'a, str>>>,
+    description_localizations: Option<HashMap<String, String>>,
     #[serde(default)]
     required: bool,
     #[serde(default)]
-    choices: Cow<'a, [CreateCommandOptionChoice<'a>]>,
+    choices: Vec<CreateCommandOptionChoice>,
     #[serde(default)]
-    options: Cow<'a, [CreateCommandOption<'a>]>,
+    options: Vec<CreateCommandOption>,
     #[serde(default)]
-    channel_types: Cow<'a, [ChannelType]>,
+    channel_types: Vec<ChannelType>,
     #[serde(default)]
     min_value: Option<serde_json::Number>,
     #[serde(default)]
@@ -701,9 +698,9 @@ pub struct CreateCommandOption<'a> {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct CreateCommandOptionChoice<'a> {
-    pub name: Cow<'a, str>,
+struct CreateCommandOptionChoice {
+    pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub name_localizations: Option<HashMap<Cow<'a, str>, Cow<'a, str>>>,
+    pub name_localizations: Option<HashMap<String, String>>,
     pub value: Value,
 }

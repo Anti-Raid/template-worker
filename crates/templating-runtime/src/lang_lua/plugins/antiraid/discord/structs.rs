@@ -25,32 +25,32 @@ pub struct GetChannelOptions {
 }
 
 #[derive(serde::Serialize, Default, serde::Deserialize)]
-pub struct EditChannelOptions<'a> {
+pub struct EditChannelOptions {
     pub channel_id: serenity::all::ChannelId,
-    pub reason: &'a str,
-    pub data: EditChannel<'a>,
+    pub reason: String,
+    pub data: EditChannel,
 }
 
 #[derive(serde::Serialize, Default, serde::Deserialize)]
-pub struct DeleteChannelOptions<'a> {
+pub struct DeleteChannelOptions {
     pub channel_id: serenity::all::ChannelId,
-    pub reason: &'a str,
+    pub reason: String,
 }
 
 #[derive(serde::Serialize, Default, serde::Deserialize)]
-pub struct CreateMessageOptions<'a> {
+pub struct CreateMessageOptions {
     pub channel_id: serenity::all::ChannelId, // Channel *must* be in the same guild
-    pub data: CreateMessage<'a>,
+    pub data: CreateMessage,
 }
 
 #[derive(serde::Serialize, Default, serde::Deserialize)]
-pub struct CreateCommandOptions<'a> {
-    pub data: CreateCommand<'a>,
+pub struct CreateCommandOptions {
+    pub data: CreateCommand,
 }
 
 #[derive(serde::Serialize, Default, serde::Deserialize)]
-pub struct CreateInteractionResponseOptions<'a> {
+pub struct CreateInteractionResponseOptions {
     pub interaction_id: serenity::all::InteractionId,
-    pub interaction_token: &'a str,
-    pub data: CreateInteractionResponse<'a>,
+    pub interaction_token: String,
+    pub data: CreateInteractionResponse,
 }
