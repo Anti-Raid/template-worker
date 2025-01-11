@@ -1,4 +1,5 @@
 mod builders;
+mod structs;
 mod validators;
 
 use super::promise::lua_promise;
@@ -174,54 +175,11 @@ impl DiscordActionExecutor {
 pub fn plugin_docs() -> crate::doclib::Plugin {
     crate::doclib::Plugin::default()
         .name("@antiraid/discord")
-        .description("This plugin allows for templates to interact with the Discord API")
-        // Serenity types
-        .type_mut("Serenity.User", "A user object in Discord, as represented by AntiRaid. Internal fields are subject to change", |t| {
-            t
-            .example(std::sync::Arc::new(serenity::model::user::User::default()))
-            .refers_to_serenity("serenity::model::user::User")
-        })
-
-        // audit log
-        .type_mut("Serenity.AuditLogs", "A audit log in Discord, as represented by AntiRaid. Internal fields are subject to change", |t| {
-            t
-            .refers_to_serenity("serenity::model::guild::audit_log::AuditLogs")
-        })
-        .type_mut("Serenity.AuditLogs.Action", "An audit log action in Discord, as represented by AntiRaid. Internal fields are subject to change", |t| {
-            t
-            .example(std::sync::Arc::new(serenity::model::guild::audit_log::Action::GuildUpdate))
-            .refers_to_serenity("serenity::model::guild::audit_log::Action")
-        })
-
-        // channel
-        .type_mut("Serenity.GuildChannel", "A guild channel in Discord, as represented by AntiRaid. Internal fields are subject to change", |t| {
-            t
-            .example(std::sync::Arc::new(serenity::model::channel::GuildChannel::default()))
-            .refers_to_serenity("serenity::model::channel::GuildChannel")
-        })
-
-        // permissions
-        .type_mut("Serenity.PermissionOverwrite", "A permission overwrite in Discord, as represented by AntiRaid. Internal fields are subject to change", |t| {
-            t
-            .example(std::sync::Arc::new(serenity::model::channel::PermissionOverwrite {
-                allow: serenity::model::permissions::Permissions::all(),
-                deny: serenity::model::permissions::Permissions::all(),
-                kind: serenity::model::channel::PermissionOverwriteType::Role(serenity::model::id::RoleId::default()),
-            }))
-            .refers_to_serenity("serenity::model::channel::PermissionOverwrite")
-        })
-
-        // forum emoji
-        .type_mut("Serenity.ForumEmoji", "A forum emoji in Discord, as represented by AntiRaid. Internal fields are subject to change", |t| {
-            t
-            .example(std::sync::Arc::new(serenity::model::channel::ForumEmoji::Id(serenity::model::id::EmojiId::default())))
-            .refers_to_serenity("serenity::model::channel::ForumEmoji")
-        })
-
+        .description("This plugin allows for templates to interact with the Discord API. Types are as defined by Discord if not explicitly documented")
         // Options
         .type_mut("GetAuditLogOptions", "Options for getting audit logs in Discord", |t| {
             t
-            .example(std::sync::Arc::new(types::GetAuditLogOptions::default()))
+            .example(std::sync::Arc::new(structs::GetAuditLogOptions::default()))
             .field("action_type", |f| {
                 f
                 .typ("Serenity.AuditLogs.Action?")
@@ -245,31 +203,16 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
         })
         .type_mut("GetChannelOptions", "Options for getting a channel in Discord", |t| {
             t
-            .example(std::sync::Arc::new(types::GetChannelOptions::default()))
+            .example(std::sync::Arc::new(structs::GetChannelOptions::default()))
             .field("channel_id", |f| {
                 f
                 .typ("string")
                 .description("The channel ID to get")
             })
         })
-        .type_mut("EditChannelOptions", "Options for editing a channel in Discord", |t| {
+        .type_mut("EditChannel", "The data for editing a channel in Discord", |t| {
             t
-            .example(std::sync::Arc::new(types::EditChannelOptions::default()))
-            .field("channel_id", |f| {
-                f
-                .typ("string")
-                .description("The channel ID to edit")
-            })
-            .field("reason", |f| {
-                f
-                .typ("string")
-                .description("The reason for editing the channel")
-            })
-            .field("name", |f| {
-                f
-                .typ("string?")
-                .description("The name of the channel")
-            })
+            .example(std::sync::Arc::new(builders::EditChannel::default()))
             .field("type", |f| {
                 f
                 .typ("number?")
@@ -355,10 +298,35 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
                 .typ("number?")
                 .description("The default forum layout of the channel")
             })
+            .field("archived", |f| {
+                f
+                .typ("bool?")
+                .description("Whether the thread is archived (thread only)")
+            })
+            .field("auto_archive_duration", |f| {
+                f
+                .typ("number?")
+                .description("The auto archive duration of the thread (thread only)")
+            })
+            .field("locked", |f| {
+                f
+                .typ("bool?")
+                .description("Whether the thread is locked (thread only)")
+            })
+            .field("invitable", |f| {
+                f
+                .typ("bool?")
+                .description("Whether the thread is invitable (thread only)")
+            })
+            .field("applied_tags", |f| {
+                f
+                .typ("{Serenity.ForumTag}?")
+                .description("The applied tags of the thread (thread only)")
+            })
         })
-        .type_mut("EditThreadOptions", "Options for editing a thread in Discord", |t| {
+        .type_mut("EditChannelOptions", "Options for editing a channel in Discord", |t| {
             t
-            .example(std::sync::Arc::new(types::EditThreadOptions::default()))
+            .example(std::sync::Arc::new(structs::EditChannelOptions::default()))
             .field("channel_id", |f| {
                 f
                 .typ("string")
@@ -369,50 +337,15 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
                 .typ("string")
                 .description("The reason for editing the channel")
             })
-            .field("name", |f| {
+            .field("data", |f| {
                 f
-                .typ("string?")
-                .description("The name of the thread")
-            })
-            .field("archived", |f| {
-                f
-                .typ("bool?")
-                .description("Whether the thread is archived")
-            })
-            .field("auto_archive_duration", |f| {
-                f
-                .typ("number?")
-                .description("The auto archive duration of the thread")
-            })
-            .field("locked", |f| {
-                f
-                .typ("bool?")
-                .description("Whether the thread is locked")
-            })
-            .field("invitable", |f| {
-                f
-                .typ("bool?")
-                .description("Whether the thread is invitable")
-            })
-            .field("rate_limit_per_user", |f| {
-                f
-                .typ("number?")
-                .description("The rate limit per user/Slow mode of the thread")
-            })
-            .field("flags", |f| {
-                f
-                .typ("string?")
-                .description("The flags of the thread")
-            })
-            .field("applied_tags", |f| {
-                f
-                .typ("{Serenity.ForumTag}?")
-                .description("The applied tags of the thread")
+                .typ("EditChannel")
+                .description("The new channels' data")
             })
         })
-        .type_mut("DeleteChannelOption", "Options for deleting a channel in Discord", |t| {
+        .type_mut("DeleteChannelOptions", "Options for deleting a channel in Discord", |t| {
             t
-            .example(std::sync::Arc::new(types::DeleteChannelOption::default()))
+            .example(std::sync::Arc::new(structs::DeleteChannelOptions::default()))
             .field("channel_id", |f| {
                 f
                 .typ("string")
@@ -642,22 +575,11 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
                     })
                     .is_promise(true)
                 })
-                .method_mut("edit_thread", |typ| {
-                    typ
-                    .description("Edits a thread")
-                    .parameter("data", |p| {
-                        p.typ("EditThreadOptions").description("Options for editing a thread.")
-                    })
-                    .return_("Lazy<Serenity.GuildChannel>", |p| {
-                        p.description("The guild channel")
-                    })
-                    .is_promise(true)
-                })
                 .method_mut("delete_channel", |typ| {
                     typ
                     .description("Deletes a channel")
                     .parameter("data", |p| {
-                        p.typ("DeleteChannelOption").description("Options for deleting a channel.")
+                        p.typ("DeleteChannelOptions").description("Options for deleting a channel.")
                     })
                     .return_("Lazy<Serenity.GuildChannel>", |p| {
                         p.description("The guild channel")
@@ -695,222 +617,6 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
         })
 }
 
-mod types {
-    use crate::lang_lua::plugins::antiraid::typesext::MultiOption;
-
-    #[derive(serde::Serialize, serde::Deserialize)]
-    pub struct GetAuditLogOptions {
-        pub action_type: Option<serenity::all::audit_log::Action>,
-        pub user_id: Option<serenity::all::UserId>,
-        pub before: Option<serenity::all::AuditLogEntryId>,
-        pub limit: Option<serenity::nonmax::NonMaxU8>,
-    }
-
-    impl Default for GetAuditLogOptions {
-        fn default() -> Self {
-            Self {
-                action_type: Some(serenity::all::audit_log::Action::GuildUpdate),
-                user_id: Some(serenity::all::UserId::default()),
-                before: Some(serenity::all::AuditLogEntryId::default()),
-                limit: Some(serenity::nonmax::NonMaxU8::default()),
-            }
-        }
-    }
-
-    #[derive(Default, serde::Serialize, serde::Deserialize)]
-    pub struct GetChannelOptions {
-        pub channel_id: serenity::all::ChannelId,
-    }
-
-    #[derive(serde::Serialize, serde::Deserialize)]
-    pub struct EditChannelOptions {
-        pub channel_id: serenity::all::ChannelId,
-        pub reason: String,
-
-        // Fields that can be edited
-        pub name: Option<String>,                                     // done
-        pub r#type: Option<serenity::all::ChannelType>,               // done
-        pub position: Option<u16>,                                    // done
-        pub topic: Option<String>,                                    // done
-        pub nsfw: Option<bool>,                                       // done
-        pub rate_limit_per_user: Option<serenity::nonmax::NonMaxU16>, // done
-        pub bitrate: Option<u32>,                                     // done
-        pub permission_overwrites: Option<Vec<serenity::all::PermissionOverwrite>>, // done
-        pub parent_id: MultiOption<serenity::all::ChannelId>,         // done
-        pub rtc_region: MultiOption<String>,                          // done
-        pub video_quality_mode: Option<serenity::all::VideoQualityMode>, // done
-        pub default_auto_archive_duration: Option<serenity::all::AutoArchiveDuration>, // done
-        pub flags: Option<serenity::all::ChannelFlags>,               // done
-        pub available_tags: Option<Vec<serenity::all::ForumTag>>,     // done
-        pub default_reaction_emoji: MultiOption<serenity::all::ForumEmoji>, // done
-        pub default_thread_rate_limit_per_user: Option<serenity::nonmax::NonMaxU16>, // done
-        pub default_sort_order: Option<serenity::all::SortOrder>,     // done
-        pub default_forum_layout: Option<serenity::all::ForumLayoutType>, // done
-    }
-
-    impl Default for EditChannelOptions {
-        fn default() -> Self {
-            Self {
-                channel_id: serenity::all::ChannelId::default(),
-                reason: String::default(),
-                name: Some("my-channel".to_string()),
-                r#type: Some(serenity::all::ChannelType::Text),
-                position: Some(7),
-                topic: Some("My channel topic".to_string()),
-                nsfw: Some(true),
-                rate_limit_per_user: Some(serenity::nonmax::NonMaxU16::new(5).unwrap()),
-                bitrate: None,
-                permission_overwrites: None,
-                parent_id: MultiOption::new(Some(serenity::all::ChannelId::default())),
-                rtc_region: MultiOption::new(Some("us-west".to_string())),
-                video_quality_mode: Some(serenity::all::VideoQualityMode::Auto),
-                default_auto_archive_duration: Some(serenity::all::AutoArchiveDuration::OneDay),
-                flags: Some(serenity::all::ChannelFlags::all()),
-                available_tags: None,
-                default_reaction_emoji: MultiOption::new(Some(serenity::all::ForumEmoji::Id(
-                    serenity::all::EmojiId::default(),
-                ))),
-                default_thread_rate_limit_per_user: None,
-                default_sort_order: None,
-                default_forum_layout: None,
-            }
-        }
-    }
-
-    #[derive(serde::Serialize, serde::Deserialize)]
-    pub struct EditThreadOptions {
-        pub channel_id: serenity::all::ChannelId,
-        pub reason: String,
-
-        // Fields that can be edited
-        pub name: Option<String>,
-        pub archived: Option<bool>,
-        pub auto_archive_duration: Option<serenity::all::AutoArchiveDuration>,
-        pub locked: Option<bool>,
-        pub invitable: Option<bool>,
-        pub rate_limit_per_user: Option<serenity::nonmax::NonMaxU16>,
-        pub flags: Option<serenity::all::ChannelFlags>,
-        pub applied_tags: Option<Vec<serenity::all::ForumTag>>,
-    }
-
-    impl Default for EditThreadOptions {
-        fn default() -> Self {
-            Self {
-                channel_id: serenity::all::ChannelId::default(),
-                reason: String::default(),
-                name: Some("my-thread".to_string()),
-                archived: Some(false),
-                auto_archive_duration: Some(serenity::all::AutoArchiveDuration::OneDay),
-                locked: Some(false),
-                invitable: Some(true),
-                rate_limit_per_user: Some(serenity::nonmax::NonMaxU16::new(5).unwrap()),
-                flags: Some(serenity::all::ChannelFlags::all()),
-                applied_tags: None,
-            }
-        }
-    }
-
-    #[derive(serde::Serialize, serde::Deserialize)]
-    pub struct DeleteChannelOption {
-        pub channel_id: serenity::all::ChannelId,
-        pub reason: String,
-    }
-
-    impl Default for DeleteChannelOption {
-        fn default() -> Self {
-            Self {
-                channel_id: serenity::all::ChannelId::default(),
-                reason: "My reason here".to_string(),
-            }
-        }
-    }
-
-    /// Represents a message that can be sent to a channel
-    #[derive(serde::Serialize, serde::Deserialize)]
-    pub struct SendMessageChannelAction {
-        pub channel_id: serenity::all::ChannelId, // Channel *must* be in the same guild
-        pub message: messages::CreateMessage,
-    }
-
-    pub mod interactions {
-        use std::collections::HashMap;
-
-        use serde::{self, Deserialize, Serialize};
-        use serenity::all::{CommandId, CommandType, GuildId, Permissions};
-        use twilight_model::application::command::CommandOption;
-
-        #[derive(serde::Serialize, serde::Deserialize)]
-        pub struct CreateInteractionResponse {
-            pub interaction_id: serenity::all::InteractionId,
-            pub interaction_token: String,
-            pub files: Option<Vec<super::messages::CreateMessageAttachment>>,
-            pub data: twilight_model::http::interaction::InteractionResponse,
-        }
-
-        /// Taken from a mix of serenity-rs, discord docs and twilight model where appropriate
-        ///
-        /// Data sent to Discord to create a command.
-        ///
-        /// [`CommandOption`]s that are required must be listed before optional ones.
-        /// Command names must be lower case, matching the Regex `^[\w-]{1,32}$`. See
-        /// [Discord Docs/Application Command Object].
-        ///
-        /// [Discord Docs/Application Command Object]: https://discord.com/developers/docs/interactions/application-commands#application-command-object-application-command-structure
-        #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-        pub struct Command {
-            /// Default permissions required for a member to run the command.
-            ///
-            /// Setting this [`Permissions::empty()`] will prohibit anyone from running
-            /// the command, except for guild administrators.
-            pub default_member_permissions: Option<Permissions>,
-            /// Whether the command is available in DMs.
-            ///
-            /// This is only relevant for globally-scoped commands. By default, commands
-            /// are visible in DMs.
-            #[serde(skip_serializing_if = "Option::is_none")]
-            pub dm_permission: Option<bool>,
-            /// Description of the command.
-            ///
-            /// For [`User`] and [`Message`] commands, this will be an empty string.
-            ///
-            /// [`User`]: CommandType::User
-            /// [`Message`]: CommandType::Message
-            pub description: String,
-            /// Localization dictionary for the `description` field.
-            ///
-            /// See [Discord Docs/Localization].
-            ///
-            /// [Discord Docs/Localization]: https://discord.com/developers/docs/interactions/application-commands#localization
-            #[serde(skip_serializing_if = "Option::is_none")]
-            pub description_localizations: Option<HashMap<String, String>>,
-            /// Guild ID of the command, if not global.
-            #[serde(skip_serializing_if = "Option::is_none")]
-            pub guild_id: Option<GuildId>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            pub id: Option<CommandId>,
-            #[serde(rename = "type")]
-            pub kind: CommandType,
-            pub name: String,
-            /// Localization dictionary for the `name` field.
-            ///
-            /// Keys should be valid locales. See [Discord Docs/Locales],
-            /// [Discord Docs/Localization].
-            ///
-            /// [Discord Docs/Locales]: https://discord.com/developers/docs/reference#locales
-            /// [Discord Docs/Localization]: https://discord.com/developers/docs/interactions/application-commands#localization
-            #[serde(skip_serializing_if = "Option::is_none")]
-            pub name_localizations: Option<HashMap<String, String>>,
-            /// Whether the command is age-restricted.
-            ///
-            /// Defaults to false.
-            #[serde(skip_serializing_if = "Option::is_none")]
-            pub nsfw: Option<bool>,
-            #[serde(default)]
-            pub options: Vec<CommandOption>,
-        }
-    }
-}
-
 impl LuaUserData for DiscordActionExecutor {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         // Audit Log
@@ -918,7 +624,7 @@ impl LuaUserData for DiscordActionExecutor {
         // Should be documented
         methods.add_method("get_audit_logs", |_, this, data: LuaValue| {
             Ok(lua_promise!(this, data, |lua, this, data|, {
-                let data = lua.from_value::<types::GetAuditLogOptions>(data)?;
+                let data = lua.from_value::<structs::GetAuditLogOptions>(data)?;
 
                 this.check_action("get_audit_logs".to_string())
                     .map_err(LuaError::external)?;
@@ -1178,189 +884,126 @@ impl LuaUserData for DiscordActionExecutor {
         // Should be documented
         methods.add_method("edit_channel", |_, this, data: LuaValue| {
             Ok(lua_promise!(this, data, |lua, this, data|, {
-                let data = lua.from_value::<types::EditChannelOptions>(data)?;
+                let data = lua.from_value::<structs::EditChannelOptions>(data)?;
 
                 this.check_action("edit_channel".to_string())
                     .map_err(LuaError::external)?;
 
-                let bot_userid = this.serenity_context.cache.current_user().id;
+                // Perform required checks
+                let channel = sandwich_driver::channel(
+                    &this.serenity_context.cache,
+                    &this.serenity_context.http,
+                    &this.reqwest_client,
+                    Some(this.guild_id),
+                    data.channel_id,
+                )
+                .await
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
-                this.check_permissions(bot_userid, serenity::all::Permissions::MANAGE_CHANNELS)
-                    .await
-                    .map_err(LuaError::external)?;
+                let Some(channel) = channel else {
+                    return Err(LuaError::external("Channel not found"));
+                };
 
-                let mut ec = serenity::all::EditChannel::default(); // Create a new EditChannel struct
+                let Some(guild_channel) = channel.guild() else {
+                    return Err(LuaError::external("Channel not in guild"));
+                };
 
-                if let Some(name) = data.name {
-                    ec = ec.name(name);
+                if guild_channel.guild_id != this.guild_id {
+                    return Err(LuaError::external("Channel not in guild"));
                 }
 
-                if let Some(r#type) = data.r#type {
-                    ec = ec.kind(r#type);
+                let bot_user_id = this.serenity_context.cache.current_user().id;
+
+                let bot_user = sandwich_driver::member_in_guild(
+                    &this.serenity_context.cache,
+                    &this.serenity_context.http,
+                    &this.reqwest_client,
+                    this.guild_id,
+                    bot_user_id,
+                )
+                .await
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
+
+                let Some(bot_user) = bot_user else {
+                    return Err(LuaError::external("Bot user not found"));
+                };
+
+                let guild = sandwich_driver::guild(
+                    &this.serenity_context.cache,
+                    &this.serenity_context.http,
+                    &this.reqwest_client,
+                    this.guild_id,
+                )
+                .await
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
+
+                match guild_channel.kind {
+                    serenity::all::ChannelType::PublicThread | serenity::all::ChannelType::PrivateThread => {
+                        // Check if the bot has permissions to manage threads
+                        if !guild
+                            .user_permissions_in(&guild_channel, &bot_user)
+                            .manage_threads()
+                        {
+                            return Err(LuaError::external(
+                                "Bot does not have permission to manage this thread",
+                            ));
+                        }
+                    },
+                    _ => {
+                        // Check if the bot has permissions to manage channels
+                        if !guild
+                            .user_permissions_in(&guild_channel, &bot_user)
+                            .manage_channels()
+                        {
+                            return Err(LuaError::external(
+                                "Bot does not have permission to manage this channel",
+                            ));
+                        }
+                    }
                 }
 
-                if let Some(position) = data.position {
-                    ec = ec.position(position);
-                }
-
-                if let Some(topic) = data.topic {
+                if let Some(topic) = data.data.topic {
                     if topic.len() > 1024 {
                         return Err(LuaError::external(
                             "Topic must be less than 1024 characters",
                         ));
                     }
-                    ec = ec.topic(topic);
                 }
 
-                if let Some(nsfw) = data.nsfw {
-                    ec = ec.nsfw(nsfw);
-                }
-
-                if let Some(rate_limit_per_user) = data.rate_limit_per_user {
+                if let Some(rate_limit_per_user) = data.data.rate_limit_per_user {
                     if rate_limit_per_user.get() > 21600 {
                         return Err(LuaError::external(
                             "Rate limit per user must be less than 21600 seconds",
                         ));
                     }
-
-                    ec = ec.rate_limit_per_user(rate_limit_per_user);
-                }
-
-                if let Some(bitrate) = data.bitrate {
-                    ec = ec.bitrate(bitrate);
                 }
 
                 // TODO: Handle permission overwrites permissions
-                if let Some(permission_overwrites) = data.permission_overwrites {
-                    ec = ec.permissions(permission_overwrites);
-                }
 
-                if let Some(parent_id) = data.parent_id.inner {
-                    ec = ec.category(parent_id);
-                }
-
-                if let Some(rtc_region) = data.rtc_region.inner {
-                    ec = ec.voice_region(rtc_region.map(|x| x.into()));
-                }
-
-                if let Some(video_quality_mode) = data.video_quality_mode {
-                    ec = ec.video_quality_mode(video_quality_mode);
-                }
-
-                if let Some(default_auto_archive_duration) = data.default_auto_archive_duration {
-                    ec = ec.default_auto_archive_duration(default_auto_archive_duration);
-                }
-
-                if let Some(flags) = data.flags {
-                    ec = ec.flags(flags);
-                }
-
-                if let Some(available_tags) = data.available_tags {
-                    let mut cft = Vec::new();
-
-                    for tag in available_tags {
+                if let Some(ref available_tags) = data.data.available_tags {
+                    for tag in available_tags.iter() {
                         if tag.name.len() > 20 {
                             return Err(LuaError::external(
                                 "Tag name must be less than 20 characters",
                             ));
                         }
-
-                        let cftt =
-                            serenity::all::CreateForumTag::new(tag.name).moderated(tag.moderated);
-
-                        // TODO: Emoji support
-
-                        cft.push(cftt);
                     }
-
-                    ec = ec.available_tags(cft);
                 }
 
-                if let Some(default_reaction_emoji) = data.default_reaction_emoji.inner {
-                    ec = ec.default_reaction_emoji(default_reaction_emoji);
-                }
-
-                if let Some(default_thread_rate_limit_per_user) =
-                    data.default_thread_rate_limit_per_user
+                if let Some(ref default_thread_rate_limit_per_user) =
+                    data.data.default_thread_rate_limit_per_user
                 {
-                    ec = ec.default_thread_rate_limit_per_user(default_thread_rate_limit_per_user);
-                }
-
-                if let Some(default_sort_order) = data.default_sort_order {
-                    ec = ec.default_sort_order(default_sort_order);
-                }
-
-                if let Some(default_forum_layout) = data.default_forum_layout {
-                    ec = ec.default_forum_layout(default_forum_layout);
+                   if default_thread_rate_limit_per_user.get() > 21600 {
+                        return Err(LuaError::external(
+                            "Default thread rate limit per user must be less than 21600 seconds",
+                        ));
+                    }
                 }
 
                 let channel = this
                     .serenity_context
                     .http
-                    .edit_channel(data.channel_id, &ec, Some(data.reason.as_str()))
-                    .await
-                    .map_err(LuaError::external)?;
-
-                Ok(Lazy::new(channel))
-            }))
-        });
-
-        // Should be documented
-        methods.add_method("edit_thread", |_, this, data: LuaValue| {
-            Ok(lua_promise!(this, data, |lua, this, data|, {
-                let data = lua.from_value::<types::EditThreadOptions>(data)?;
-
-                this.check_action("edit_channel".to_string())
-                    .map_err(LuaError::external)?;
-
-                let bot_userid = this.serenity_context.cache.current_user().id;
-
-                this.check_permissions(
-                    bot_userid,
-                    serenity::all::Permissions::MANAGE_CHANNELS
-                        | serenity::all::Permissions::MANAGE_THREADS,
-                )
-                .await
-                .map_err(LuaError::external)?;
-
-                let mut ec = serenity::all::EditThread::default(); // Create a new EditThread struct
-
-                if let Some(name) = data.name {
-                    ec = ec.name(name);
-                }
-
-                if let Some(archived) = data.archived {
-                    ec = ec.archived(archived);
-                }
-
-                if let Some(auto_archive_duration) = data.auto_archive_duration {
-                    ec = ec.auto_archive_duration(auto_archive_duration);
-                }
-
-                if let Some(locked) = data.locked {
-                    ec = ec.locked(locked);
-                }
-
-                if let Some(invitable) = data.invitable {
-                    ec = ec.invitable(invitable);
-                }
-
-                if let Some(rate_limit_per_user) = data.rate_limit_per_user {
-                    ec = ec.rate_limit_per_user(rate_limit_per_user);
-                }
-
-                if let Some(flags) = data.flags {
-                    ec = ec.flags(flags);
-                }
-
-                if let Some(applied_tags) = data.applied_tags {
-                    ec = ec.applied_tags(applied_tags.iter().map(|x| x.id).collect::<Vec<_>>());
-                }
-
-                let channel = this
-                    .serenity_context
-                    .http
-                    .edit_thread(data.channel_id, &ec, Some(data.reason.as_str()))
+                    .edit_channel(data.channel_id, &data.data, Some(data.reason))
                     .await
                     .map_err(LuaError::external)?;
 
@@ -1371,21 +1014,88 @@ impl LuaUserData for DiscordActionExecutor {
         // Should be documented
         methods.add_method("delete_channel", |_, this, channel_id: LuaValue| {
             Ok(lua_promise!(this, channel_id, |lua, this, channel_id|, {
-                let data = lua.from_value::<types::DeleteChannelOption>(channel_id)?;
+                let data = lua.from_value::<structs::DeleteChannelOptions>(channel_id)?;
 
                 this.check_action("delete_channel".to_string())
                     .map_err(LuaError::external)?;
 
-                let bot_userid = this.serenity_context.cache.current_user().id;
+                // Perform required checks
+                let channel = sandwich_driver::channel(
+                    &this.serenity_context.cache,
+                    &this.serenity_context.http,
+                    &this.reqwest_client,
+                    Some(this.guild_id),
+                    data.channel_id,
+                )
+                .await
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
 
-                this.check_permissions(bot_userid, serenity::all::Permissions::MANAGE_CHANNELS)
-                    .await
-                    .map_err(LuaError::external)?;
+                let Some(channel) = channel else {
+                    return Err(LuaError::external("Channel not found"));
+                };
+
+                let Some(guild_channel) = channel.guild() else {
+                    return Err(LuaError::external("Channel not in guild"));
+                };
+
+                if guild_channel.guild_id != this.guild_id {
+                    return Err(LuaError::external("Channel not in guild"));
+                }
+
+                let bot_user_id = this.serenity_context.cache.current_user().id;
+
+                let bot_user = sandwich_driver::member_in_guild(
+                    &this.serenity_context.cache,
+                    &this.serenity_context.http,
+                    &this.reqwest_client,
+                    this.guild_id,
+                    bot_user_id,
+                )
+                .await
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
+
+                let Some(bot_user) = bot_user else {
+                    return Err(LuaError::external("Bot user not found"));
+                };
+
+                let guild = sandwich_driver::guild(
+                    &this.serenity_context.cache,
+                    &this.serenity_context.http,
+                    &this.reqwest_client,
+                    this.guild_id,
+                )
+                .await
+                .map_err(|e| LuaError::runtime(e.to_string()))?;
+
+                match guild_channel.kind {
+                    serenity::all::ChannelType::PublicThread | serenity::all::ChannelType::PrivateThread => {
+                        // Check if the bot has permissions to manage threads
+                        if !guild
+                            .user_permissions_in(&guild_channel, &bot_user)
+                            .manage_threads()
+                        {
+                            return Err(LuaError::external(
+                                "Bot does not have permission to manage this thread",
+                            ));
+                        }
+                    },
+                    _ => {
+                        // Check if the bot has permissions to manage channels
+                        if !guild
+                            .user_permissions_in(&guild_channel, &bot_user)
+                            .manage_channels()
+                        {
+                            return Err(LuaError::external(
+                                "Bot does not have permission to manage this channel",
+                            ));
+                        }
+                    }
+                }
 
                 let channel = this
                     .serenity_context
                     .http
-                    .delete_channel(data.channel_id, Some(data.reason.as_str()))
+                    .delete_channel(data.channel_id, Some(data.reason))
                     .await
                     .map_err(LuaError::external)?;
 
@@ -1556,13 +1266,13 @@ impl LuaUserData for DiscordActionExecutor {
         // Should be documented
         methods.add_method("create_message", |_, this, data: LuaValue| {
             Ok(lua_promise!(this, data, |lua, this, data|, {
-                let data = lua.from_value::<types::SendMessageChannelAction>(data)?;
+                let data = lua.from_value::<structs::CreateMessageOptions>(data)?;
+
+                validators::validate_message(&data.data)
+                    .map_err(|x| LuaError::external(x.to_string()))?;
 
                 this.check_action("create_message".to_string())
                     .map_err(LuaError::external)?;
-
-                let mut msg = types::messages::to_discord_reply(data.message)
-                    .map_err(|e| LuaError::runtime(e.to_string()))?;
 
                 // Perform required checks
                 let channel = sandwich_driver::channel(
@@ -1622,11 +1332,14 @@ impl LuaUserData for DiscordActionExecutor {
                     ));
                 }
 
-                let attachments = msg.attachments;
-                msg.attachments = Vec::with_capacity(attachments.len());
+                let files = if let Some(ref mut attachments) = data.data.attachments {
+                    attachments.take_files().map_err(|e| LuaError::external(e.to_string()))?
+                } else {
+                    Vec::new()
+                };
 
                 let msg = this.serenity_context.http
-                    .send_message(guild_channel.id, attachments, &msg)
+                    .send_message(guild_channel.id, files, &data.data)
                     .await
                     .map_err(LuaError::external)?;
 

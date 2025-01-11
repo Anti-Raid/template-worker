@@ -8,7 +8,9 @@ use serde::{ser::SerializeSeq, Deserialize, Serialize};
 use serde_json::Value;
 use serenity::all::*;
 
-#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+use crate::lang_lua::plugins::antiraid::typesext::MultiOption;
+
+#[derive(Deserialize, Debug, Default, Clone)]
 pub struct SingleCreateMessageAttachment<'a> {
     pub filename: Cow<'static, str>,
     pub description: Option<Cow<'a, str>>,
@@ -20,7 +22,7 @@ pub struct ExistingAttachment {
     id: AttachmentId,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)] // Serde needs to do either id only for existing or filename/description/content for new
 pub enum NewOrExisting<'a> {
     New(SingleCreateMessageAttachment<'a>),
@@ -29,6 +31,7 @@ pub enum NewOrExisting<'a> {
 
 #[derive(Deserialize, Debug, Default, Clone)]
 pub struct CreateMessageAttachment<'a> {
+    #[serde(flatten)]
     pub new_and_existing_attachments: Vec<NewOrExisting<'a>>,
 }
 
@@ -445,11 +448,10 @@ pub struct CreatePollAnswer<'a> {
     pub poll_media: CreatePollAnswerMedia<'a>,
 }
 
-/// A builder to edit a [`GuildChannel`] for use via [`GuildChannel::edit`].
-///
 /// [Discord docs](https://discord.com/developers/docs/resources/channel#modify-channel-json-params-guild-channel).
 ///
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+/// Unlike Serenity, AntiRaid combines EditChannel and EditThread to allow using standard Discord typings
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[must_use]
 pub struct EditChannel<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -471,10 +473,10 @@ pub struct EditChannel<'a> {
     pub user_limit: Option<NonMaxU16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permission_overwrites: Option<Cow<'a, [PermissionOverwrite]>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_id: Option<Option<ChannelId>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rtc_region: Option<Option<Cow<'a, str>>>,
+    #[serde(skip_serializing_if = "MultiOption::should_not_serialize")]
+    pub parent_id: MultiOption<ChannelId>,
+    #[serde(skip_serializing_if = "MultiOption::should_not_serialize")]
+    pub rtc_region: MultiOption<Cow<'a, str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub video_quality_mode: Option<VideoQualityMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -483,8 +485,8 @@ pub struct EditChannel<'a> {
     pub flags: Option<ChannelFlags>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub available_tags: Option<Cow<'a, [CreateForumTag<'a>]>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_reaction_emoji: Option<Option<ForumEmoji>>,
+    #[serde(skip_serializing_if = "MultiOption::should_not_serialize")]
+    pub default_reaction_emoji: MultiOption<ForumEmoji>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_thread_rate_limit_per_user: Option<NonMaxU16>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -493,101 +495,51 @@ pub struct EditChannel<'a> {
     pub default_forum_layout: Option<ForumLayoutType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<Cow<'a, str>>,
-    pub audit_log_reason: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    archived: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auto_archive_duration: Option<AutoArchiveDuration>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    locked: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    invitable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    applied_tags: Option<Cow<'a, [ForumTagId]>>,
 }
 
-/*impl<'a> Into<serenity::all::EditChannel<'a>> for EditChannel<'a> {
-    fn into(self) -> serenity::all::EditChannel<'a> {
-        let mut builder = serenity::all::EditChannel::default();
-
-        if let Some(name) = self.name {
-            builder = builder.name(name);
+impl Default for EditChannel<'_> {
+    fn default() -> Self {
+        Self {
+            name: Some("my-channel".into()),
+            kind: Some(serenity::all::ChannelType::Text),
+            position: Some(7),
+            topic: Some("My channel topic".into()),
+            nsfw: Some(true),
+            rate_limit_per_user: Some(serenity::nonmax::NonMaxU16::new(5).unwrap()),
+            bitrate: None,
+            permission_overwrites: None,
+            parent_id: MultiOption::new(Some(serenity::all::ChannelId::default())),
+            rtc_region: MultiOption::new(Some("us-west".into())),
+            video_quality_mode: Some(serenity::all::VideoQualityMode::Auto),
+            default_auto_archive_duration: Some(serenity::all::AutoArchiveDuration::OneDay),
+            flags: Some(serenity::all::ChannelFlags::all()),
+            available_tags: None,
+            default_reaction_emoji: MultiOption::new(Some(serenity::all::ForumEmoji::Id(
+                serenity::all::EmojiId::default(),
+            ))),
+            default_thread_rate_limit_per_user: None,
+            default_sort_order: None,
+            default_forum_layout: None,
+            status: Some("online".into()),
+            user_limit: Some(serenity::nonmax::NonMaxU16::new(10).unwrap()),
+            archived: Some(false),
+            auto_archive_duration: Some(serenity::all::AutoArchiveDuration::OneDay),
+            locked: Some(false),
+            invitable: Some(true),
+            applied_tags: None,
         }
-
-        if let Some(kind) = self.kind {
-            builder = builder.kind(kind);
-        }
-
-        if let Some(position) = self.position {
-            builder = builder.position(position);
-        }
-
-        if let Some(topic) = self.topic {
-            builder = builder.topic(topic);
-        }
-
-        if let Some(nsfw) = self.nsfw {
-            builder = builder.nsfw(nsfw);
-        }
-
-        if let Some(rate_limit_per_user) = self.rate_limit_per_user {
-            builder = builder.rate_limit_per_user(rate_limit_per_user);
-        }
-
-        if let Some(bitrate) = self.bitrate {
-            builder = builder.bitrate(bitrate);
-        }
-
-        if let Some(user_limit) = self.user_limit {
-            builder = builder.user_limit(user_limit);
-        }
-
-        if let Some(permission_overwrites) = self.permission_overwrites {
-            builder = builder.permissions(permission_overwrites);
-        }
-
-        if let Some(parent_id) = self.parent_id {
-            builder = builder.category(parent_id);
-        }
-
-        if let Some(rtc_region) = self.rtc_region {
-            builder = builder.voice_region(rtc_region);
-        }
-
-        if let Some(video_quality_mode) = self.video_quality_mode {
-            builder = builder.video_quality_mode(video_quality_mode);
-        }
-
-        if let Some(default_auto_archive_duration) = self.default_auto_archive_duration {
-            builder = builder.default_auto_archive_duration(default_auto_archive_duration);
-        }
-
-        if let Some(flags) = self.flags {
-            builder = builder.flags(flags);
-        }
-
-        if let Some(available_tags) = self.available_tags {
-            builder = builder.available_tags(available_tags.into_iter().map(Into::into));
-        }
-
-        if let Some(default_reaction_emoji) = self.default_reaction_emoji {
-            builder = builder.default_reaction_emoji(default_reaction_emoji);
-        }
-
-        if let Some(default_thread_rate_limit_per_user) = self.default_thread_rate_limit_per_user {
-            builder =
-                builder.default_thread_rate_limit_per_user(default_thread_rate_limit_per_user);
-        }
-
-        if let Some(default_sort_order) = self.default_sort_order {
-            builder = builder.default_sort_order(default_sort_order);
-        }
-
-        if let Some(default_forum_layout) = self.default_forum_layout {
-            builder = builder.default_forum_layout(default_forum_layout);
-        }
-
-        if let Some(status) = self.status {
-            builder = builder.status(status);
-        }
-
-        if let Some(audit_log_reason) = self.audit_log_reason {
-            builder = builder.audit_log_reason(audit_log_reason);
-        }
-
-        builder
     }
-}*/
+}
 
 /// [Discord docs](https://discord.com/developers/docs/resources/channel#forum-tag-object-forum-tag-structure)
 ///
@@ -595,8 +547,128 @@ pub struct EditChannel<'a> {
 #[must_use]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateForumTag<'a> {
+    pub name: Cow<'a, str>,
+    pub moderated: bool,
+    pub emoji_id: Option<EmojiId>,
+    pub emoji_name: Option<Cow<'a, str>>,
+}
+
+/// A builder for creating a new [`Command`].
+///
+/// [`Command`]: crate::model::application::Command
+///
+/// Discord docs:
+/// - [global command](https://discord.com/developers/docs/interactions/application-commands#create-global-application-command)
+/// - [guild command](https://discord.com/developers/docs/interactions/application-commands#create-guild-application-command)
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[must_use]
+pub struct CreateCommand<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "type")]
+    kind: Option<CommandType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    handler: Option<EntryPointHandlerType>,
+
+    #[serde(flatten)]
+    fields: EditCommand<'a>,
+}
+
+impl Default for CreateCommand<'_> {
+    fn default() -> Self {
+        Self {
+            kind: Some(CommandType::ChatInput),
+            handler: Some(EntryPointHandlerType::AppHandler),
+            fields: Default::default(),
+        }
+    }
+}
+
+/// A builder for editing an existing [`Command`].
+///
+/// [`Command`]: crate::model::application::Command
+///
+/// Discord docs:
+/// - [global command](https://discord.com/developers/docs/interactions/application-commands#edit-global-application-command)
+/// - [guild command](https://discord.com/developers/docs/interactions/application-commands#edit-guild-application-command)
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[must_use]
+pub struct EditCommand<'a> {
+    name: Option<Cow<'a, str>>,
+    name_localizations: HashMap<Cow<'a, str>, Cow<'a, str>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<Cow<'a, str>>,
+    description_localizations: HashMap<Cow<'a, str>, Cow<'a, str>>,
+    options: Cow<'a, [CreateCommandOption<'a>]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_member_permissions: Option<Permissions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dm_permission: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    integration_types: Option<Vec<InstallationContext>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    contexts: Option<Vec<InteractionContext>>,
+    nsfw: bool,
+}
+
+impl Default for EditCommand<'_> {
+    fn default() -> Self {
+        Self {
+            name: Some("my-command".into()),
+            name_localizations: HashMap::new(),
+            description: Some("My command description".into()),
+            description_localizations: HashMap::new(),
+            options: Cow::default(),
+            default_member_permissions: None,
+            dm_permission: None,
+            integration_types: None,
+            contexts: None,
+            nsfw: false,
+        }
+    }
+}
+
+/// A builder for creating a new [`CommandOption`].
+///
+/// [`Self::kind`], [`Self::name`], and [`Self::description`] are required fields.
+///
+/// [`CommandOption`]: crate::model::application::CommandOption
+///
+/// [Discord docs](https://discord.com/developers/docs/interactions/application-commands#application-command-object-application-command-option-structure).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[must_use]
+pub struct CreateCommandOption<'a> {
+    #[serde(rename = "type")]
+    kind: CommandOptionType,
     name: Cow<'a, str>,
-    moderated: bool,
-    emoji_id: Option<EmojiId>,
-    emoji_name: Option<Cow<'a, str>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name_localizations: Option<HashMap<Cow<'a, str>, Cow<'a, str>>>,
+    description: Cow<'a, str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description_localizations: Option<HashMap<Cow<'a, str>, Cow<'a, str>>>,
+    #[serde(default)]
+    required: bool,
+    #[serde(default)]
+    choices: Cow<'a, [CreateCommandOptionChoice<'a>]>,
+    #[serde(default)]
+    options: Cow<'a, [CreateCommandOption<'a>]>,
+    #[serde(default)]
+    channel_types: Cow<'a, [ChannelType]>,
+    #[serde(default)]
+    min_value: Option<serde_json::Number>,
+    #[serde(default)]
+    max_value: Option<serde_json::Number>,
+    #[serde(default)]
+    min_length: Option<u16>,
+    #[serde(default)]
+    max_length: Option<u16>,
+    #[serde(default)]
+    autocomplete: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct CreateCommandOptionChoice<'a> {
+    pub name: Cow<'a, str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name_localizations: Option<HashMap<Cow<'a, str>, Cow<'a, str>>>,
+    pub value: Value,
 }

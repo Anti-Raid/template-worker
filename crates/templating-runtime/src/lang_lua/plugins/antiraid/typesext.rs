@@ -1,5 +1,4 @@
 use mlua::prelude::*;
-use serde::ser::SerializeMap;
 
 pub fn plugin_docs() -> crate::doclib::Plugin {
     crate::doclib::Plugin::default()
@@ -289,8 +288,29 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
         })
 }
 
+/// Syntactically:
+///
+/// Null: `None`
+/// Empty object: `Some(None)`
+/// Value: `Some(Some(value))`
 pub struct MultiOption<T: for<'a> serde::Deserialize<'a> + serde::Serialize> {
     pub inner: Option<Option<T>>,
+}
+
+impl<T: for<'a> serde::Deserialize<'a> + serde::Serialize + Clone> Clone for MultiOption<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<T: for<'a> serde::Deserialize<'a> + serde::Serialize + std::fmt::Debug> std::fmt::Debug
+    for MultiOption<T>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("MultiOption").field(&self.inner).finish()
+    }
 }
 
 impl<T: for<'a> serde::Deserialize<'a> + serde::Serialize> Default for MultiOption<T> {
@@ -304,6 +324,13 @@ impl<T: for<'a> serde::Deserialize<'a> + serde::Serialize> MultiOption<T> {
         Self {
             inner: value.map(Some),
         }
+    }
+
+    /// Returns true if the value should not be serialized
+    ///
+    /// E.g, the inner itself is None
+    pub fn should_not_serialize(&self) -> bool {
+        self.inner.is_none()
     }
 }
 
@@ -335,9 +362,10 @@ impl<T: for<'a> serde::Deserialize<'a> + serde::Serialize> serde::Serialize for 
     where
         S: serde::Serializer,
     {
+        use serde::ser::Error;
         match &self.inner {
-            None => serializer.serialize_none(),
-            Some(None) => serializer.serialize_map(Some(0))?.end(),
+            None => Err(S::Error::custom("internal error: serde skip_serializing_if should been set to MultiOption::should_not_serialize")),
+            Some(None) => serializer.serialize_none(), // We want to send null in this case
             Some(Some(value)) => value.serialize(serializer),
         }
     }

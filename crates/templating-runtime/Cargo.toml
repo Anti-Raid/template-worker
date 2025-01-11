@@ -22,7 +22,6 @@ small-fixed-array = { version = "0.4" }
 arrayvec = "0.7"
 mlua_scheduler = { git = "https://github.com/anti-raid/mlua_scheduler"}
 mlua_scheduler_ext = { git = "https://github.com/anti-raid/mlua_scheduler"}
-twilight-model = "0.15" # Used to avoid needing to redefine every single type in existence
 
 # @lune/datetime
 chrono_lc = "0.1"
