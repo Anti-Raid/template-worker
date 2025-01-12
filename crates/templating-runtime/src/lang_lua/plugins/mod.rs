@@ -18,6 +18,7 @@ pub static PLUGINS: LazyLock<indexmap::IndexMap<String, (ModuleFn, Option<Module
             "@antiraid/permissions".to_string() => (antiraid::permissions::init_plugin as ModuleFn, Some(antiraid::permissions::plugin_docs as ModuleDocFn)),
             "@antiraid/promise".to_string() => (antiraid::promise::init_plugin as ModuleFn, Some(antiraid::promise::plugin_docs as ModuleDocFn)),
             "@antiraid/stings".to_string() => (antiraid::stings::init_plugin as ModuleFn, Some(antiraid::stings::plugin_docs as ModuleDocFn)),
+            "@antiraid/datetime".to_string() => (antiraid::datetime::init_plugin as ModuleFn, Some(antiraid::datetime::plugin_docs as ModuleDocFn)),
             "@antiraid/typesext".to_string() => (antiraid::typesext::init_plugin as ModuleFn, Some(antiraid::typesext::plugin_docs as ModuleDocFn)),
             "@antiraid/userinfo".to_string() => (antiraid::userinfo::init_plugin as ModuleFn, Some(antiraid::userinfo::plugin_docs as ModuleDocFn)),
 

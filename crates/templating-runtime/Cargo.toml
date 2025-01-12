@@ -24,6 +24,7 @@ mlua_scheduler = { git = "https://github.com/anti-raid/mlua_scheduler"}
 mlua_scheduler_ext = { git = "https://github.com/anti-raid/mlua_scheduler"}
 
 # @lune/datetime
+chrono-tz = "0.10"
 chrono_lc = "0.1"
 thiserror = "1.0"
 self_cell = "1"
