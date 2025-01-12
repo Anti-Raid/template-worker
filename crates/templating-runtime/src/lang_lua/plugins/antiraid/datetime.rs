@@ -475,6 +475,13 @@ mod tests {
             assert(td.days == 0, "17: Expected 0, got " .. td.days)
             assert(td:offset_string() == "+00:00", "18: Expected +00:00, got " .. td:offset_string())
             assert(date + td == myTz:utcToTz(2021, 1, 1, 8, 0, 10), "19: Expected 2021-01-01T13:30:10+05:30, got " .. tostring(date + td))
+
+            -- Test with_timezone
+            local newDate = date:with_timezone(tz.new("UTC"))
+            assert(newDate:format("%Y-%m-%dT%H:%M:%S%z") == "2021-01-01T08:00:00+0000", "20: Expected 2021-01-01T08:00:00+0000, got " .. newDate:format("%Y-%m-%dT%H:%M:%S%z"))
+            local newDateInEST = date:with_timezone(tz.new("EST"))
+            -- In EST, its 3:00 AM
+            assert(newDateInEST:format("%Y-%m-%dT%H:%M:%S%z") == "2021-01-01T03:00:00-0500", "21: Expected 2021-01-01T03:00:00-0500, got " .. newDateInEST:format("%Y-%m-%dT%H:%M:%S%z"))
         "#,
         )
         .call::<()>(module)
