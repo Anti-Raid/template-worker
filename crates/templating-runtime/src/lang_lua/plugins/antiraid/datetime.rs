@@ -11,8 +11,249 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
         .type_mut(
             "Timezone",
             "A timezone object. Can be used for formatting and/or converting between timezones",
-            |t| t.description("A timezone object."),
+            |t| t
+            .description("A timezone object.")
+            .method_mut("utcToTz", |m| {
+                m.description("Translates a timestamp in UTC time to a datetime in the said specific timezone.")
+                    .parameter("year", |p| {
+                        p.typ("number")
+                            .description("The year to translate.")
+                    })
+                    .parameter("month", |p| {
+                        p.typ("number")
+                            .description("The month to translate.")
+                    })
+                    .parameter("day", |p| {
+                        p.typ("number")
+                            .description("The day to translate.")
+                    })
+                    .parameter("hours", |p| {
+                        p.typ("number")
+                            .description("The hours to translate.")
+                    })
+                    .parameter("minutes", |p| {
+                        p.typ("number")
+                            .description("The minutes to translate.")
+                    })
+                    .parameter("secs", |p| {
+                        p.typ("number")
+                            .description("The seconds to translate.")
+                    })
+                    .parameter("all", |p| {
+                        p.typ("boolean?")
+                            .description("Whether to return both offsets if the time is ambiguous.")
+                    })
+                    .return_("date", |r| {
+                        r.typ("DateTime")
+                            .description("The translated datetime.")
+                    })
+                    .return_("date2", |r| {
+                        r.typ("DateTime?")
+                            .description("The second translated datetime if the time is ambiguous.")
+                    })
+            })
+            .method_mut("tzToUtc", |m| {
+                m.description("Translates a timestamp in the specified timezone to a datetime in UTC.")
+                    .parameter("year", |p| {
+                        p.typ("number")
+                            .description("The year to translate.")
+                    })
+                    .parameter("month", |p| {
+                        p.typ("number")
+                            .description("The month to translate.")
+                    })
+                    .parameter("day", |p| {
+                        p.typ("number")
+                            .description("The day to translate.")
+                    })
+                    .parameter("hours", |p| {
+                        p.typ("number")
+                            .description("The hours to translate.")
+                    })
+                    .parameter("minutes", |p| {
+                        p.typ("number")
+                            .description("The minutes to translate.")
+                    })
+                    .parameter("secs", |p| {
+                        p.typ("number")
+                            .description("The seconds to translate.")
+                    })
+                    .parameter("all", |p| {
+                        p.typ("boolean?")
+                            .description("Whether to return both offsets if the time is ambiguous.")
+                    })
+                    .return_("date", |r| {
+                        r.typ("DateTime")
+                            .description("The translated datetime.")
+                    })
+                    .return_("date2", |r| {
+                        r.typ("DateTime?")
+                            .description("The second translated datetime if the time is ambiguous.")
+                    })
+                    
+            })
+            .method_mut("timeUtcToTz", |m| {
+                m.description("Translates a time of the current day in UTC time to a datetime in the said specific timezone.")
+                    .parameter("hours", |p| {
+                        p.typ("number")
+                            .description("The hours to translate.")
+                    })
+                    .parameter("minutes", |p| {
+                        p.typ("number")
+                            .description("The minutes to translate.")
+                    })
+                    .parameter("secs", |p| {
+                        p.typ("number")
+                            .description("The seconds to translate.")
+                    })
+                    .return_("date", |r| {
+                        r.typ("DateTime")
+                            .description("The translated datetime.")
+                    })
+            })
+            .method_mut("timeTzToUtc", |m| {
+                m.description("Translates a time of the current day in the said specific timezone to a datetime in UTC.")
+                    .parameter("hours", |p| {
+                        p.typ("number")
+                            .description("The hours to translate.")
+                    })
+                    .parameter("minutes", |p| {
+                        p.typ("number")
+                            .description("The minutes to translate.")
+                    })
+                    .parameter("secs", |p| {
+                        p.typ("number")
+                            .description("The seconds to translate.")
+                    })
+                    .return_("date", |r| {
+                        r.typ("DateTime")
+                            .description("The translated datetime.")
+                    })
+            })
+            .method_mut("date", |m| {
+                m.description("Translates the current timestamp to a datetime in the said specific timezone.")
+                    .return_("date", |r| {
+                        r.typ("DateTime")
+                            .description("The translated datetime.")
+                    })
+            })
         )
+        .type_mut("TimeDelta", "A time delta object. Represents a difference in time.", |t| {
+            t.description("A time delta object. Supports addition/subtraction with another TimeDelta object as well as comparisons with them.")
+                .method_mut("offset_string", |m| {
+                    m.description("Returns the offset as a string.")
+                        .return_("offset", |r| {
+                            r.typ("string")
+                                .description("The offset as a string.")
+                        })
+                })
+                .field("nanos", |f| {
+                    f.typ("number")
+                        .description("The number of nanoseconds in the time delta.")
+                })
+                .field("micros", |f| {
+                    f.typ("number")
+                        .description("The number of microseconds in the time delta.")
+                })
+                .field("millis", |f| {
+                    f.typ("number")
+                        .description("The number of milliseconds in the time delta.")
+                })
+                .field("seconds", |f| {
+                    f.typ("number")
+                        .description("The number of seconds in the time delta.")
+                })
+                .field("minutes", |f| {
+                    f.typ("number")
+                        .description("The number of minutes in the time delta.")
+                })
+                .field("hours", |f| {
+                    f.typ("number")
+                        .description("The number of hours in the time delta.")
+                })
+                .field("days", |f| {
+                    f.typ("number")
+                        .description("The number of days in the time delta.")
+                })
+                .field("weeks", |f| {
+                    f.typ("number")
+                        .description("The number of weeks in the time delta.")
+                })
+
+        })
+        .type_mut("DateTime", "A datetime object. Represents a specific point in time.", |t| {
+            t.description("A datetime object. Supports addition/subtraction with TimeDelta objects as well as comparisons with other DateTime objects.")
+                .method_mut("with_timezone", |m| {
+                    m.description("Converts the datetime to the specified timezone.")
+                        .parameter("tz", |p| {
+                            p.typ("Timezone")
+                                .description("The timezone to convert to.")
+                        })
+                        .return_("dt", |r| {
+                            r.typ("DateTime")
+                                .description("The converted datetime.")
+                        })
+                })
+                .method_mut("format", |m| {
+                    m.description("Formats the datetime using the specified format string.")
+                        .parameter("format", |p| {
+                            p.typ("string")
+                                .description("The format string to use.")
+                        })
+                        .return_("formatted", |r| {
+                            r.typ("string")
+                                .description("The formatted datetime.")
+                        })
+                })
+                .field("year", |f| {
+                    f.typ("number")
+                        .description("The year of the datetime.")
+                })
+                .field("month", |f| {
+                    f.typ("number")
+                        .description("The month of the datetime.")
+                })
+                .field("day", |f| {
+                    f.typ("number")
+                        .description("The day of the datetime.")
+                })
+                .field("hour", |f| {
+                    f.typ("number")
+                        .description("The hour of the datetime.")
+                })
+                .field("minute", |f| {
+                    f.typ("number")
+                        .description("The minute of the datetime.")
+                })
+                .field("second", |f| {
+                    f.typ("number")
+                        .description("The second of the datetime.")
+                })
+                .field("timestamp_seconds", |f| {
+                    f.typ("number")
+                        .description("The timestamp in seconds of the datetime from the Unix epoch.")
+                })
+                .field("timestamp_millis", |f| {
+                    f.typ("number")
+                        .description("The timestamp in milliseconds of the datetime from the Unix epoch.")
+                })
+                .field("timestamp_micros", |f| {
+                    f.typ("number")
+                        .description("The timestamp in microseconds of the datetime from the Unix epoch.")
+                })
+                .field("timestamp_nanos", |f| {
+                    f.typ("number")
+                        .description("The timestamp in nanoseconds of the datetime from the Unix epoch.")
+                })
+                .field("tz", |f| {
+                    f.typ("Timezone")
+                        .description("The timezone of the datetime.")
+                })
+                .field("offset", |f| {
+                    f.typ("TimeDelta")
+                        .description("The offset of the datetime.")
+                })
+        })
         .method_mut("new", |m| {
             m.description("Returns a new Timezone object if the timezone is recognized/supported.")
                 .parameter("timezone", |p| {
@@ -22,6 +263,98 @@ pub fn plugin_docs() -> crate::doclib::Plugin {
                 .return_("tzobj", |r| {
                     r.typ("Timezone")
                         .description("The timezone userdata object.")
+                })
+        })
+        .field_mut("UTC", |f| {
+            f.typ("Timezone")
+                .description("The UTC timezone object for simple access to UTC datetime conversions.")
+        })
+        .method_mut("timedelta_weeks", |m| {
+            m.description("Creates a new TimeDelta object with the specified number of weeks.")
+                .parameter("weeks", |p| {
+                    p.typ("number")
+                        .description("The number of weeks.")
+                })
+                .return_("td", |r| {
+                    r.typ("TimeDelta")
+                        .description("The TimeDelta object.")
+                })
+        })
+        .method_mut("timedelta_days", |m| {
+            m.description("Creates a new TimeDelta object with the specified number of days.")
+                .parameter("days", |p| {
+                    p.typ("number")
+                        .description("The number of days.")
+                })
+                .return_("td", |r| {
+                    r.typ("TimeDelta")
+                        .description("The TimeDelta object.")
+                })
+        })
+        .method_mut("timedelta_hours", |m| {
+            m.description("Creates a new TimeDelta object with the specified number of hours.")
+                .parameter("hours", |p| {
+                    p.typ("number")
+                        .description("The number of hours.")
+                })
+                .return_("td", |r| {
+                    r.typ("TimeDelta")
+                        .description("The TimeDelta object.")
+                })
+        })
+        .method_mut("timedelta_minutes", |m| {
+            m.description("Creates a new TimeDelta object with the specified number of minutes.")
+                .parameter("minutes", |p| {
+                    p.typ("number")
+                        .description("The number of minutes.")
+                })
+                .return_("td", |r| {
+                    r.typ("TimeDelta")
+                        .description("The TimeDelta object.")
+                })
+        })
+        .method_mut("timedelta_seconds", |m| {
+            m.description("Creates a new TimeDelta object with the specified number of seconds.")
+                .parameter("seconds", |p| {
+                    p.typ("number")
+                        .description("The number of seconds.")
+                })
+                .return_("td", |r| {
+                    r.typ("TimeDelta")
+                        .description("The TimeDelta object.")
+                })
+        })
+        .method_mut("timedelta_millis", |m| {
+            m.description("Creates a new TimeDelta object with the specified number of milliseconds.")
+                .parameter("millis", |p| {
+                    p.typ("number")
+                        .description("The number of milliseconds.")
+                })
+                .return_("td", |r| {
+                    r.typ("TimeDelta")
+                        .description("The TimeDelta object.")
+                })
+        })
+        .method_mut("timedelta_micros", |m| {
+            m.description("Creates a new TimeDelta object with the specified number of microseconds.")
+                .parameter("micros", |p| {
+                    p.typ("number")
+                        .description("The number of microseconds.")
+                })
+                .return_("td", |r| {
+                    r.typ("TimeDelta")
+                        .description("The TimeDelta object.")
+                })
+        })
+        .method_mut("timedelta_nanos", |m| {
+            m.description("Creates a new TimeDelta object with the specified number of nanoseconds.")
+                .parameter("nanos", |p| {
+                    p.typ("number")
+                        .description("The number of nanoseconds.")
+                })
+                .return_("td", |r| {
+                    r.typ("TimeDelta")
+                        .description("The TimeDelta object.")
                 })
         })
 }
@@ -88,11 +421,14 @@ impl LuaUserData for TimeDelta {
     }
 
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("seconds", |_, this| Ok(this.timedelta.num_seconds()));
+        fields.add_field_method_get("nanos", |_, this| Ok(this.timedelta.num_nanoseconds()));
+        fields.add_field_method_get("micros", |_, this| Ok(this.timedelta.num_microseconds()));
         fields.add_field_method_get("millis", |_, this| Ok(this.timedelta.num_milliseconds()));
+        fields.add_field_method_get("seconds", |_, this| Ok(this.timedelta.num_seconds()));
         fields.add_field_method_get("minutes", |_, this| Ok(this.timedelta.num_minutes()));
         fields.add_field_method_get("hours", |_, this| Ok(this.timedelta.num_hours()));
         fields.add_field_method_get("days", |_, this| Ok(this.timedelta.num_days()));
+        fields.add_field_method_get("weeks", |_, this| Ok(this.timedelta.num_weeks()));
     }
 }
 
@@ -189,6 +525,16 @@ where
         fields.add_field_method_get("hour", |_, this| Ok(this.dt.hour()));
         fields.add_field_method_get("minute", |_, this| Ok(this.dt.minute()));
         fields.add_field_method_get("second", |_, this| Ok(this.dt.second()));
+        fields.add_field_method_get("timestamp_seconds", |_, this| Ok(this.dt.timestamp()));
+        fields.add_field_method_get("timestamp_millis", |_, this| {
+            Ok(this.dt.timestamp_millis())
+        });
+        fields.add_field_method_get("timestamp_micros", |_, this| {
+            Ok(this.dt.timestamp_subsec_micros())
+        });
+        fields.add_field_method_get("timestamp_nanos", |_, this| {
+            Ok(this.dt.timestamp_subsec_nanos())
+        });
         fields.add_field_method_get("tz", |_, this| {
             Ok(Timezone {
                 tz: this.dt.timezone().into(),
@@ -379,16 +725,51 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
 
     // Creates a new TimeDelta object
     module.set(
+        "timedelta_weeks",
+        lua.create_function(|_, weeks: i64| {
+            Ok(TimeDelta {
+                timedelta: chrono::Duration::try_weeks(weeks)
+                .ok_or(mlua::Error::RuntimeError("Invalid number of weeks".to_string()))?,
+            })
+        })?,
+    )?;
+
+    module.set(
+        "timedelta_days",
+        lua.create_function(|_, days: i64| {
+            Ok(TimeDelta {
+                timedelta: chrono::Duration::try_days(days)
+                .ok_or(mlua::Error::RuntimeError("Invalid number of days".to_string()))?,
+            })
+        })?,
+    )?;
+
+    module.set(
+        "timedelta_hours",
+        lua.create_function(|_, hours: i64| {
+            Ok(TimeDelta {
+                timedelta: chrono::Duration::try_hours(hours)
+                .ok_or(mlua::Error::RuntimeError("Invalid number of hours".to_string()))?,
+            })
+        })?,
+    )?;
+
+    module.set(
+        "timedelta_minutes",
+        lua.create_function(|_, minutes: i64| {
+            Ok(TimeDelta {
+                timedelta: chrono::Duration::try_minutes(minutes)
+                .ok_or(mlua::Error::RuntimeError("Invalid number of minutes".to_string()))?,
+            })
+        })?,
+    )?;
+
+    module.set(
         "timedelta_seconds",
         lua.create_function(|_, seconds: i64| {
-            #[allow(clippy::manual_range_contains)]
-            if seconds > i64::MAX / 1_000 || seconds < -i64::MAX / 1_000 {
-                return Err(mlua::Error::RuntimeError(
-                    "Invalid number of seconds".to_string(),
-                ));
-            }
             Ok(TimeDelta {
-                timedelta: chrono::Duration::seconds(seconds),
+                timedelta: chrono::Duration::try_seconds(seconds)
+                .ok_or(mlua::Error::RuntimeError("Invalid number of seconds".to_string()))?,
             })
         })?,
     )?;
@@ -396,15 +777,18 @@ pub fn init_plugin(lua: &Lua) -> LuaResult<LuaTable> {
     module.set(
         "timedelta_millis",
         lua.create_function(|_, millis: i64| {
-            #[allow(clippy::manual_range_contains)]
-            #[allow(clippy::absurd_extreme_comparisons)] // This is intentional
-            if millis > i64::MAX || millis < -i64::MAX {
-                return Err(mlua::Error::RuntimeError(
-                    "Invalid number of milliseconds".to_string(),
-                ));
-            }
             Ok(TimeDelta {
-                timedelta: chrono::Duration::milliseconds(millis),
+                timedelta: chrono::Duration::try_milliseconds(millis)
+                .ok_or(mlua::Error::RuntimeError("Invalid number of milliseconds".to_string()))?,
+            })
+        })?,
+    )?;
+
+    module.set(
+        "timedelta_micros",
+        lua.create_function(|_, micros: i64| {
+            Ok(TimeDelta {
+                timedelta: chrono::Duration::microseconds(micros),
             })
         })?,
     )?;
@@ -475,6 +859,11 @@ mod tests {
             assert(td.days == 0, "17: Expected 0, got " .. td.days)
             assert(td:offset_string() == "+00:00", "18: Expected +00:00, got " .. td:offset_string())
             assert(date + td == myTz:utcToTz(2021, 1, 1, 8, 0, 10), "19: Expected 2021-01-01T13:30:10+05:30, got " .. tostring(date + td))
+            
+            local td2 = tz.timedelta_weeks(10)
+            assert(td2.weeks == 10, "20: Expected 10, got " .. td2.weeks)
+            local date33 = myTz:utcToTz(2021, 1, 1, 8, 0, 0) + td2
+            assert(date33:format("%Y-%m-%dT%H:%M:%S%z") == "2021-03-12T13:30:00+0530", "21: Expected 2021-03-12T13:30:00+0530, got " .. date33:format("%Y-%m-%dT%H:%M:%S%z"))
 
             -- Test with_timezone
             local newDate = date:with_timezone(tz.new("UTC"))
