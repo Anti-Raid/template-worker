@@ -2,11 +2,9 @@ use std::rc::Rc;
 
 use super::core::{resolve_template_to_bytecode, ArLuaThreadInnerState, LuaVmAction, LuaVmResult};
 
-use crate::lang_lua::{
-    primitives::{Event, TemplateContext},
-    state::GuildState,
-};
+use crate::lang_lua::{primitives::ctxprovider::TemplateContextProvider, state::GuildState};
 
+use khronos_runtime::{primitives::event::Event, TemplateContext};
 use mlua::prelude::*;
 use mlua_scheduler_ext::traits::IntoLuaThread;
 
@@ -31,9 +29,6 @@ pub(super) async fn handle_event(
                     }
                 };
 
-            // Now, create the template context that should be passed to the template
-            let template_context = TemplateContext::new(guild_state, template.clone());
-
             let thread = match tis_ref
                 .lua
                 .load(&template_bytecode)
@@ -56,6 +51,14 @@ pub(super) async fn handle_event(
                 }
             };
 
+            // Now, create the template context that should be passed to the template
+            let provider = TemplateContextProvider {
+                guild_state,
+                template_data: template,
+            };
+
+            let template_context = TemplateContext::new(provider);
+
             let scheduler = tis_ref
                 .lua
                 .app_data_ref::<mlua_scheduler_ext::Scheduler>()
@@ -77,7 +80,11 @@ pub(super) async fn handle_event(
                 }
             };
 
-            let value = scheduler.spawn_thread_and_wait("Exec", thread, args).await;
+            let Ok(value) = scheduler.spawn_thread_and_wait("Exec", thread, args).await else {
+                return LuaVmResult::LuaError {
+                    err: "Failed to spawn thread".to_string(),
+                };
+            };
 
             let json_value = if let Some(Ok(values)) = value {
                 match values.len() {

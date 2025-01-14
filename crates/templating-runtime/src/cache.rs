@@ -94,6 +94,7 @@ pub async fn add_page(guild_id: GuildId, page: Page) -> Result<(), crate::Error>
     Ok(())
 }
 
+#[allow(dead_code)]
 /// Adds a page to the page cache
 pub fn add_page_sync(guild_id: GuildId, page: Page) -> Result<(), crate::Error> {
     match PAGES.get(&guild_id) {
@@ -159,6 +160,7 @@ pub async fn take_page(guild_id: GuildId, page_id: String) -> Result<Page, crate
     }
 }
 
+#[allow(dead_code)]
 /// Takes out the page from the page cache by page ID
 pub fn take_page_sync(guild_id: GuildId, page_id: String) -> Result<Page, crate::Error> {
     match PAGES.get(&guild_id) {
@@ -207,6 +209,7 @@ pub async fn remove_page(guild_id: GuildId, page_id: String) -> Result<(), crate
     Ok(())
 }
 
+#[allow(dead_code)]
 /// Removes a page from the page cache by page ID
 pub fn remove_page_sync(guild_id: GuildId, page_id: String) -> Result<(), crate::Error> {
     match PAGES.get(&guild_id) {

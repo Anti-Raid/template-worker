@@ -1,12 +1,3 @@
-pub mod captcha {
-    #[derive(serde::Serialize, serde::Deserialize)]
-    pub struct Captcha {
-        pub text: String,
-        pub content: Option<String>, // Message content
-        pub image: Option<Vec<u8>>,  // Image data
-    }
-}
-
 pub mod templating_core {
     use std::str::FromStr;
 
@@ -205,6 +196,7 @@ pub mod templating_core {
 pub mod page {
     use std::sync::Arc;
 
+    #[allow(dead_code)]
     pub const MAX_PAGE_ID_LENGTH: usize = 128;
 
     pub struct Page {

@@ -22,6 +22,8 @@ small-fixed-array = { version = "0.4" }
 arrayvec = "0.7"
 mlua_scheduler = { git = "https://github.com/anti-raid/mlua_scheduler"}
 mlua_scheduler_ext = { git = "https://github.com/anti-raid/mlua_scheduler"}
+antiraid-types = { git = "https://github.com/anti-raid/antiraid-types" }
+khronos_runtime = { git = "https://github.com/anti-raid/khronos" }
 
 # @lune/datetime
 chrono-tz = "0.10"
@@ -75,7 +77,7 @@ config = { path = "../../../../core/rust/rust.config" }
 async-trait = "0.1.80"
  
 # Template language support
-mlua = { version = "0.10", features = ["async", "luau", "serialize", "macros"] } # Supported by default
+mlua = { git = "https://github.com/mlua-rs/mlua", branch = "dev", features = ["async", "luau", "serialize", "macros"] }
 
 # Documentation
 erased-serde = { version = "0.4", default-features = false, features = ["alloc"] }

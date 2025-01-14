@@ -1,6 +1,6 @@
 mod cache;
 mod core;
-pub mod doclib; // Temporary?
+pub mod doclib;
 
 mod lang_lua;
 
@@ -10,9 +10,7 @@ pub use core::page::Page;
 pub use core::templating_core::{
     create_shop_template, parse_shop_template, Template, TemplateLanguage,
 };
-pub use lang_lua::primitives::{document_primitives, CreateEvent, TemplateContextRef}; // Expose CreateEvent to actually execute events
 pub use lang_lua::state::LuaKVConstraints;
-pub use lang_lua::PLUGINS;
 pub use lang_lua::{
     benchmark_vm, dispatch_error, execute, log_error, FireBenchmark, ParseCompileState,
     RenderTemplateHandle,

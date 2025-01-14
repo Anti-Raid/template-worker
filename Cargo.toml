@@ -17,6 +17,8 @@ axum = { version = "0.7.5", features = ["macros"] }
 tower-http = { version = "0.5.2", features = ["trace"] }
 clap = { version = "4.5.16", features = ["derive"] }
 dashmap = { version = "6", features = ["serde", "inline", "rayon"]  }
+antiraid-types = { git = "https://github.com/anti-raid/antiraid-types" }
+khronos_runtime = { git = "https://github.com/anti-raid/khronos" }
 
 templating = { path = "./crates/templating-runtime" }
 silverpelt = { path = "../../core/rust/rust.silverpelt" }

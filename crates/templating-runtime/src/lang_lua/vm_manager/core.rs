@@ -1,10 +1,11 @@
 use super::AtomicInstant;
-use crate::lang_lua::plugins;
-use crate::lang_lua::primitives::CreateEvent;
+use crate::lang_lua::primitives::ctxprovider::TemplateContextProvider;
 use crate::lang_lua::state::GuildState;
 use crate::lang_lua::state::Ratelimits;
 use crate::MAX_TEMPLATES_EXECUTION_TIME;
 use crate::MAX_TEMPLATE_MEMORY_USAGE;
+use khronos_runtime::primitives::event::CreateEvent;
+use khronos_runtime::utils::pluginholder::PluginSet;
 use mlua::prelude::*;
 use mlua_scheduler::TaskManager;
 use mlua_scheduler_ext::feedbacks::ThreadTracker;
@@ -17,6 +18,12 @@ use std::ops::Deref;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::LazyLock;
+
+pub static PLUGIN_SET: LazyLock<PluginSet> = LazyLock::new(|| {
+    let mut plugins = PluginSet::new();
+    plugins.add_default_plugins::<TemplateContextProvider>();
+    plugins
+});
 
 // Vm creation strategies
 #[cfg(feature = "thread_proc")]
@@ -160,8 +167,10 @@ pub(super) fn configure_lua_vm(
     global_tab.set_metatable(Some(global_mt));
 
     // Override require function for plugin support and increased security
-    lua.globals()
-        .set("require", lua.create_function(plugins::require)?)?;
+    lua.globals().set(
+        "require",
+        lua.create_function(|this, module: String| PLUGIN_SET.require(this, module))?,
+    )?;
 
     // Also create the mlua scheduler in the app data
     let thread_tracker = ThreadTracker::new();

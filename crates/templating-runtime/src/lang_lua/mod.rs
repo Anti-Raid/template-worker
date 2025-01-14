@@ -1,9 +1,7 @@
 pub mod primitives;
 pub(crate) mod state;
 
-mod plugins;
-pub use plugins::PLUGINS;
-
+use khronos_runtime::primitives::event::CreateEvent;
 use serenity::all::GuildId;
 use std::sync::Arc;
 use vm_manager::{get_lua_vm, LuaVmAction, LuaVmResult};
@@ -14,7 +12,7 @@ mod vm_manager;
 ///
 /// Pre-conditions: the serenity context's shard matches the guild itself
 pub async fn execute(
-    event: primitives::CreateEvent,
+    event: CreateEvent,
     state: ParseCompileState,
     template: Arc<crate::Template>,
 ) -> Result<RenderTemplateHandle, silverpelt::Error> {
@@ -283,7 +281,7 @@ pub async fn benchmark_vm(
 
     let start = std::time::Instant::now();
     let n: i32 = execute(
-        primitives::CreateEvent::new(
+        CreateEvent::new(
             "Benchmark".to_string(),
             "Benchmark".to_string(),
             serde_json::Value::Null,
@@ -321,7 +319,7 @@ pub async fn benchmark_vm(
 
     let start = std::time::Instant::now();
     execute(
-        primitives::CreateEvent::new(
+        CreateEvent::new(
             "Benchmark".to_string(),
             "Benchmark".to_string(),
             serde_json::Value::Null,
@@ -351,7 +349,7 @@ pub async fn benchmark_vm(
 
     let start = std::time::Instant::now();
     let err = execute(
-        primitives::CreateEvent::new(
+        CreateEvent::new(
             "Benchmark".to_string(),
             "Benchmark".to_string(),
             serde_json::Value::Null,

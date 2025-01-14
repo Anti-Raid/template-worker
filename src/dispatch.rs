@@ -1,7 +1,8 @@
+use khronos_runtime::primitives::event::CreateEvent;
 use serenity::all::{Context, FullEvent, GuildId, Interaction};
 use silverpelt::ar_event::AntiraidEvent;
 use silverpelt::data::Data;
-use templating::{get_all_guild_templates, CreateEvent};
+use templating::get_all_guild_templates;
 
 #[inline]
 const fn not_audit_loggable_event() -> &'static [&'static str] {

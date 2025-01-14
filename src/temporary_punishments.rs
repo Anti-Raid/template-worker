@@ -1,5 +1,5 @@
+use antiraid_types::punishments::{Punishment, PunishmentTarget};
 use serenity::http;
-use silverpelt::punishments::Punishment;
 
 /// Temporary Punishments event listener
 pub async fn handle_expired_punishment(
@@ -8,7 +8,7 @@ pub async fn handle_expired_punishment(
     punishment: &Punishment,
 ) -> Result<(), silverpelt::Error> {
     let target_user_id = match punishment.target {
-        silverpelt::punishments::PunishmentTarget::User(user_id) => user_id,
+        PunishmentTarget::User(user_id) => user_id,
         _ => return Ok(()),
     };
 

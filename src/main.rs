@@ -1,6 +1,5 @@
 mod cmds;
 mod dispatch;
-mod docgen;
 mod event_handler;
 mod expiry_tasks;
 mod http;
@@ -13,9 +12,6 @@ async fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     match args.get(1).map(|s| s.as_str()) {
-        Some("templatedocs") => {
-            cmds::docgen::docgen();
-        }
         Some("start") => {
             cmds::bot::start().await;
         }
