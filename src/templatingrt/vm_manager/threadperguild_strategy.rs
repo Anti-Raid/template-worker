@@ -2,9 +2,10 @@ use super::core::{
     configure_lua_vm, create_guild_state, ArLua, BytecodeCache, LuaVmAction, LuaVmResult,
 };
 use super::handler::handle_event;
-use crate::MAX_VM_THREAD_STACK_SIZE;
+use crate::templatingrt::MAX_VM_THREAD_STACK_SIZE;
 use serenity::all::GuildId;
 use std::rc::Rc;
+use std::sync::atomic::AtomicBool;
 use std::{panic::PanicHookInfo, sync::Arc, time::Duration};
 
 #[allow(dead_code)]
@@ -14,7 +15,7 @@ pub async fn create_lua_vm(
     serenity_context: serenity::all::Context,
     reqwest_client: reqwest::Client,
 ) -> Result<ArLua, silverpelt::Error> {
-    let broken = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let broken = Arc::new(AtomicBool::new(false));
     let last_execution_time = Arc::new(super::AtomicInstant::new(std::time::Instant::now()));
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(
@@ -51,7 +52,7 @@ pub async fn create_lua_vm(
                 // Catch panics
                 fn panic_catcher(
                     guild_id: GuildId,
-                    broken_ref: Arc<std::sync::atomic::AtomicBool>,
+                    broken_ref: Arc<AtomicBool>,
                 ) -> Box<dyn Fn(&PanicHookInfo<'_>) + 'static + Sync + Send> {
                     Box::new(move |_| {
                         log::error!("Lua thread panicked: {}", guild_id);

@@ -1,3 +1,5 @@
+use crate::templatingrt::state::GuildState;
+use crate::templatingrt::template::Template;
 use antiraid_types::stings::Sting;
 use antiraid_types::userinfo::UserInfo;
 use khronos_runtime::traits::context::KhronosContext;
@@ -14,14 +16,14 @@ use std::{rc::Rc, sync::Arc};
 
 #[derive(Clone)]
 pub struct TemplateContextProvider {
-    pub guild_state: Rc<crate::lang_lua::state::GuildState>,
+    pub guild_state: Rc<GuildState>,
 
     /// The template data
-    pub template_data: Arc<crate::Template>,
+    pub template_data: Arc<Template>,
 }
 
 impl KhronosContext for TemplateContextProvider {
-    type Data = Arc<crate::Template>;
+    type Data = Arc<Template>;
     type KVProvider = ArKVProvider;
     type DiscordProvider = ArDiscordProvider;
     type LockdownProvider = ArLockdownProvider;
@@ -123,15 +125,15 @@ impl KhronosContext for TemplateContextProvider {
 #[derive(Clone)]
 pub struct ArKVProvider {
     guild_id: serenity::all::GuildId,
-    guild_state: Rc<crate::lang_lua::state::GuildState>,
+    guild_state: Rc<GuildState>,
 }
 
 impl KVProvider for ArKVProvider {
-    fn attempt_action(&self, bucket: &str) -> Result<(), crate::Error> {
+    fn attempt_action(&self, bucket: &str) -> Result<(), silverpelt::Error> {
         self.guild_state.ratelimits.kv.check(bucket)
     }
 
-    async fn get(&self, key: String) -> Result<Option<kvprovider::KvRecord>, crate::Error> {
+    async fn get(&self, key: String) -> Result<Option<kvprovider::KvRecord>, silverpelt::Error> {
         // Check key length
         if key.len() > self.guild_state.kv_constraints.max_key_length {
             return Err("Key length too long".into());
@@ -157,7 +159,7 @@ impl KVProvider for ArKVProvider {
         }))
     }
 
-    async fn set(&self, key: String, data: serde_json::Value) -> Result<(), crate::Error> {
+    async fn set(&self, key: String, data: serde_json::Value) -> Result<(), silverpelt::Error> {
         // Check key length
         if key.len() > self.guild_state.kv_constraints.max_key_length {
             return Err("Key length too long".into());
@@ -205,7 +207,7 @@ impl KVProvider for ArKVProvider {
         Ok(())
     }
 
-    async fn delete(&self, key: String) -> Result<(), crate::Error> {
+    async fn delete(&self, key: String) -> Result<(), silverpelt::Error> {
         // Check key length
         if key.len() > self.guild_state.kv_constraints.max_key_length {
             return Err("Key length too long".into());
@@ -222,7 +224,7 @@ impl KVProvider for ArKVProvider {
         Ok(())
     }
 
-    async fn find(&self, query: String) -> Result<Vec<KvRecord>, crate::Error> {
+    async fn find(&self, query: String) -> Result<Vec<KvRecord>, silverpelt::Error> {
         // Check key length
         if query.len() > self.guild_state.kv_constraints.max_key_length {
             return Err("Query length too long".into());
@@ -252,7 +254,7 @@ impl KVProvider for ArKVProvider {
         Ok(records)
     }
 
-    async fn exists(&self, key: String) -> Result<bool, crate::Error> {
+    async fn exists(&self, key: String) -> Result<bool, silverpelt::Error> {
         // Check key length
         if key.len() > self.guild_state.kv_constraints.max_key_length {
             return Err("Key length too long".into());
@@ -269,7 +271,7 @@ impl KVProvider for ArKVProvider {
         Ok(rec.count.unwrap_or(0) > 0)
     }
 
-    async fn keys(&self) -> Result<Vec<String>, crate::Error> {
+    async fn keys(&self) -> Result<Vec<String>, silverpelt::Error> {
         let rec = sqlx::query!(
             "SELECT key FROM guild_templates_kv WHERE guild_id = $1",
             self.guild_id.to_string(),
@@ -290,17 +292,17 @@ impl KVProvider for ArKVProvider {
 #[derive(Clone)]
 pub struct ArDiscordProvider {
     guild_id: serenity::all::GuildId,
-    guild_state: Rc<crate::lang_lua::state::GuildState>,
+    guild_state: Rc<GuildState>,
 }
 
 impl DiscordProvider for ArDiscordProvider {
-    fn attempt_action(&self, bucket: &str) -> serenity::Result<(), crate::Error> {
+    fn attempt_action(&self, bucket: &str) -> serenity::Result<(), silverpelt::Error> {
         self.guild_state.ratelimits.discord.check(bucket)
     }
 
     async fn guild(
         &self,
-    ) -> serenity::Result<serenity::model::prelude::PartialGuild, crate::Error> {
+    ) -> serenity::Result<serenity::model::prelude::PartialGuild, silverpelt::Error> {
         Ok(sandwich_driver::guild(
             &self.guild_state.serenity_context.cache,
             &self.guild_state.serenity_context.http,
@@ -314,7 +316,7 @@ impl DiscordProvider for ArDiscordProvider {
     async fn member(
         &self,
         user_id: serenity::all::UserId,
-    ) -> serenity::Result<Option<serenity::all::Member>, crate::Error> {
+    ) -> serenity::Result<Option<serenity::all::Member>, silverpelt::Error> {
         Ok(sandwich_driver::member_in_guild(
             &self.guild_state.serenity_context.cache,
             &self.guild_state.serenity_context.http,
@@ -329,7 +331,7 @@ impl DiscordProvider for ArDiscordProvider {
     async fn guild_channel(
         &self,
         channel_id: serenity::all::ChannelId,
-    ) -> serenity::Result<serenity::all::GuildChannel, crate::Error> {
+    ) -> serenity::Result<serenity::all::GuildChannel, silverpelt::Error> {
         let channel = sandwich_driver::channel(
             &self.guild_state.serenity_context.cache,
             &self.guild_state.serenity_context.http,
@@ -361,7 +363,7 @@ impl DiscordProvider for ArDiscordProvider {
         user_id: Option<serenity::model::prelude::UserId>,
         before: Option<serenity::model::prelude::AuditLogEntryId>,
         limit: Option<serenity::nonmax::NonMaxU8>,
-    ) -> Result<serenity::model::prelude::AuditLogs, crate::Error> {
+    ) -> Result<serenity::model::prelude::AuditLogs, silverpelt::Error> {
         self.guild_state
             .serenity_context
             .http
@@ -372,7 +374,7 @@ impl DiscordProvider for ArDiscordProvider {
 
     async fn get_automod_rules(
         &self,
-    ) -> Result<Vec<serenity::model::guild::automod::Rule>, crate::Error> {
+    ) -> Result<Vec<serenity::model::guild::automod::Rule>, silverpelt::Error> {
         self.guild_state
             .serenity_context
             .http
@@ -384,7 +386,7 @@ impl DiscordProvider for ArDiscordProvider {
     async fn get_automod_rule(
         &self,
         rule_id: serenity::all::RuleId,
-    ) -> Result<serenity::model::guild::automod::Rule, crate::Error> {
+    ) -> Result<serenity::model::guild::automod::Rule, silverpelt::Error> {
         self.guild_state
             .serenity_context
             .http
@@ -398,7 +400,7 @@ impl DiscordProvider for ArDiscordProvider {
         channel_id: serenity::all::ChannelId,
         map: impl serde::Serialize,
         audit_log_reason: Option<&str>,
-    ) -> Result<serenity::model::channel::GuildChannel, crate::Error> {
+    ) -> Result<serenity::model::channel::GuildChannel, silverpelt::Error> {
         self.guild_state
             .serenity_context
             .http
@@ -411,7 +413,7 @@ impl DiscordProvider for ArDiscordProvider {
         &self,
         channel_id: serenity::all::ChannelId,
         audit_log_reason: Option<&str>,
-    ) -> Result<serenity::model::channel::Channel, crate::Error> {
+    ) -> Result<serenity::model::channel::Channel, silverpelt::Error> {
         self.guild_state
             .serenity_context
             .http
@@ -425,7 +427,7 @@ impl DiscordProvider for ArDiscordProvider {
         user_id: serenity::all::UserId,
         delete_message_seconds: u32,
         reason: Option<&str>,
-    ) -> Result<(), crate::Error> {
+    ) -> Result<(), silverpelt::Error> {
         self.guild_state
             .serenity_context
             .http
@@ -445,7 +447,7 @@ impl DiscordProvider for ArDiscordProvider {
         &self,
         user_id: serenity::all::UserId,
         reason: Option<&str>,
-    ) -> Result<(), crate::Error> {
+    ) -> Result<(), silverpelt::Error> {
         self.guild_state
             .serenity_context
             .http
@@ -459,7 +461,7 @@ impl DiscordProvider for ArDiscordProvider {
         user_id: serenity::all::UserId,
         map: impl serde::Serialize,
         audit_log_reason: Option<&str>,
-    ) -> Result<serenity::all::Member, crate::Error> {
+    ) -> Result<serenity::all::Member, silverpelt::Error> {
         self.guild_state
             .serenity_context
             .http
@@ -473,7 +475,7 @@ impl DiscordProvider for ArDiscordProvider {
         channel_id: serenity::all::ChannelId,
         files: Vec<serenity::all::CreateAttachment<'_>>,
         data: impl serde::Serialize,
-    ) -> Result<serenity::model::channel::Message, crate::Error> {
+    ) -> Result<serenity::model::channel::Message, silverpelt::Error> {
         self.guild_state
             .serenity_context
             .http
@@ -488,7 +490,7 @@ impl DiscordProvider for ArDiscordProvider {
         interaction_token: &str,
         response: impl serde::Serialize,
         files: Vec<serenity::all::CreateAttachment<'_>>,
-    ) -> Result<(), crate::Error> {
+    ) -> Result<(), silverpelt::Error> {
         self.guild_state
             .serenity_context
             .http
@@ -500,7 +502,7 @@ impl DiscordProvider for ArDiscordProvider {
     async fn get_original_interaction_response(
         &self,
         interaction_token: &str,
-    ) -> Result<serenity::model::channel::Message, crate::Error> {
+    ) -> Result<serenity::model::channel::Message, silverpelt::Error> {
         self.guild_state
             .serenity_context
             .http
@@ -509,7 +511,7 @@ impl DiscordProvider for ArDiscordProvider {
             .map_err(|e| format!("Failed to get original interaction response: {}", e).into())
     }
 
-    async fn get_guild_commands(&self) -> Result<Vec<serenity::all::Command>, crate::Error> {
+    async fn get_guild_commands(&self) -> Result<Vec<serenity::all::Command>, silverpelt::Error> {
         self.guild_state
             .serenity_context
             .http
@@ -521,7 +523,7 @@ impl DiscordProvider for ArDiscordProvider {
     async fn get_guild_command(
         &self,
         command_id: serenity::all::CommandId,
-    ) -> Result<serenity::all::Command, crate::Error> {
+    ) -> Result<serenity::all::Command, silverpelt::Error> {
         self.guild_state
             .serenity_context
             .http
@@ -533,7 +535,7 @@ impl DiscordProvider for ArDiscordProvider {
     async fn create_guild_command(
         &self,
         map: impl serde::Serialize,
-    ) -> Result<serenity::all::Command, crate::Error> {
+    ) -> Result<serenity::all::Command, silverpelt::Error> {
         self.guild_state
             .serenity_context
             .http
@@ -547,7 +549,7 @@ impl DiscordProvider for ArDiscordProvider {
         channel_id: serenity::all::ChannelId,
         target: Option<serenity::all::MessagePagination>,
         limit: Option<serenity::nonmax::NonMaxU8>,
-    ) -> Result<Vec<serenity::all::Message>, crate::Error> {
+    ) -> Result<Vec<serenity::all::Message>, silverpelt::Error> {
         self.guild_state
             .serenity_context
             .http
@@ -560,7 +562,7 @@ impl DiscordProvider for ArDiscordProvider {
         &self,
         channel_id: serenity::all::ChannelId,
         message_id: serenity::all::MessageId,
-    ) -> Result<serenity::all::Message, crate::Error> {
+    ) -> Result<serenity::all::Message, silverpelt::Error> {
         self.guild_state
             .serenity_context
             .http
@@ -573,17 +575,17 @@ impl DiscordProvider for ArDiscordProvider {
 #[derive(Clone)]
 pub struct ArLockdownProvider {
     guild_id: serenity::all::GuildId,
-    guild_state: Rc<crate::lang_lua::state::GuildState>,
+    guild_state: Rc<GuildState>,
 }
 
 impl LockdownProvider for ArLockdownProvider {
-    fn attempt_action(&self, bucket: &str) -> serenity::Result<(), crate::Error> {
+    fn attempt_action(&self, bucket: &str) -> serenity::Result<(), silverpelt::Error> {
         self.guild_state.ratelimits.lockdowns.check(bucket)
     }
 
     async fn list(
         &self,
-    ) -> Result<Vec<khronos_runtime::traits::lockdownprovider::Lockdown>, crate::Error> {
+    ) -> Result<Vec<khronos_runtime::traits::lockdownprovider::Lockdown>, silverpelt::Error> {
         let lockdowns = lockdowns::LockdownSet::guild(self.guild_id, &self.guild_state.pool)
             .await
             .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
@@ -603,7 +605,7 @@ impl LockdownProvider for ArLockdownProvider {
         Ok(result)
     }
 
-    async fn qsl(&self, reason: String) -> Result<sqlx::types::uuid::Uuid, crate::Error> {
+    async fn qsl(&self, reason: String) -> Result<sqlx::types::uuid::Uuid, silverpelt::Error> {
         let mut lockdowns = lockdowns::LockdownSet::guild(self.guild_id, &self.guild_state.pool)
             .await
             .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
@@ -626,7 +628,7 @@ impl LockdownProvider for ArLockdownProvider {
         Ok(id)
     }
 
-    async fn tsl(&self, reason: String) -> Result<sqlx::types::uuid::Uuid, crate::Error> {
+    async fn tsl(&self, reason: String) -> Result<sqlx::types::uuid::Uuid, silverpelt::Error> {
         let mut lockdowns = lockdowns::LockdownSet::guild(self.guild_id, &self.guild_state.pool)
             .await
             .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
@@ -653,7 +655,7 @@ impl LockdownProvider for ArLockdownProvider {
         &self,
         channel_id: serenity::all::ChannelId,
         reason: String,
-    ) -> Result<sqlx::types::uuid::Uuid, crate::Error> {
+    ) -> Result<sqlx::types::uuid::Uuid, silverpelt::Error> {
         let mut lockdowns = lockdowns::LockdownSet::guild(self.guild_id, &self.guild_state.pool)
             .await
             .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
@@ -680,7 +682,7 @@ impl LockdownProvider for ArLockdownProvider {
         &self,
         role_id: serenity::all::RoleId,
         reason: String,
-    ) -> Result<sqlx::types::uuid::Uuid, crate::Error> {
+    ) -> Result<sqlx::types::uuid::Uuid, silverpelt::Error> {
         let mut lockdowns = lockdowns::LockdownSet::guild(self.guild_id, &self.guild_state.pool)
             .await
             .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
@@ -703,7 +705,7 @@ impl LockdownProvider for ArLockdownProvider {
         Ok(id)
     }
 
-    async fn remove(&self, id: sqlx::types::uuid::Uuid) -> Result<(), crate::Error> {
+    async fn remove(&self, id: sqlx::types::uuid::Uuid) -> Result<(), silverpelt::Error> {
         let mut lockdowns = lockdowns::LockdownSet::guild(self.guild_id, &self.guild_state.pool)
             .await
             .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
@@ -727,15 +729,15 @@ impl LockdownProvider for ArLockdownProvider {
 #[derive(Clone)]
 pub struct ArUserInfoProvider {
     guild_id: serenity::all::GuildId,
-    guild_state: Rc<crate::lang_lua::state::GuildState>,
+    guild_state: Rc<GuildState>,
 }
 
 impl UserInfoProvider for ArUserInfoProvider {
-    fn attempt_action(&self, bucket: &str) -> serenity::Result<(), crate::Error> {
+    fn attempt_action(&self, bucket: &str) -> serenity::Result<(), silverpelt::Error> {
         self.guild_state.ratelimits.userinfo.check(bucket)
     }
 
-    async fn get(&self, user_id: serenity::all::UserId) -> Result<UserInfo, crate::Error> {
+    async fn get(&self, user_id: serenity::all::UserId) -> Result<UserInfo, silverpelt::Error> {
         let userinfo = UserInfo::get(
             self.guild_id,
             user_id,
@@ -754,15 +756,15 @@ impl UserInfoProvider for ArUserInfoProvider {
 #[derive(Clone)]
 pub struct ArStingProvider {
     guild_id: serenity::all::GuildId,
-    guild_state: Rc<crate::lang_lua::state::GuildState>,
+    guild_state: Rc<GuildState>,
 }
 
 impl StingProvider for ArStingProvider {
-    fn attempt_action(&self, bucket: &str) -> Result<(), crate::Error> {
+    fn attempt_action(&self, bucket: &str) -> Result<(), silverpelt::Error> {
         self.guild_state.ratelimits.stings.check(bucket)
     }
 
-    async fn list(&self, page: usize) -> Result<Vec<Sting>, crate::Error> {
+    async fn list(&self, page: usize) -> Result<Vec<Sting>, silverpelt::Error> {
         let stings = Sting::list(&self.guild_state.pool, self.guild_id, page).await?;
 
         Ok(stings)
@@ -771,7 +773,7 @@ impl StingProvider for ArStingProvider {
     async fn get(
         &self,
         id: sqlx::types::uuid::Uuid,
-    ) -> Result<Option<antiraid_types::stings::Sting>, crate::Error> {
+    ) -> Result<Option<antiraid_types::stings::Sting>, silverpelt::Error> {
         let sting = Sting::get(&self.guild_state.pool, self.guild_id, id).await?;
 
         if let Some(ref pot_sting) = sting {
@@ -786,7 +788,7 @@ impl StingProvider for ArStingProvider {
     async fn create(
         &self,
         sting: antiraid_types::stings::StingCreate,
-    ) -> Result<sqlx::types::uuid::Uuid, crate::Error> {
+    ) -> Result<sqlx::types::uuid::Uuid, silverpelt::Error> {
         if sting.guild_id != self.guild_id {
             return Err("stingcreate not associated with this guild".into());
         }
@@ -801,7 +803,7 @@ impl StingProvider for ArStingProvider {
         Ok(sting)
     }
 
-    async fn update(&self, sting: antiraid_types::stings::Sting) -> Result<(), crate::Error> {
+    async fn update(&self, sting: antiraid_types::stings::Sting) -> Result<(), silverpelt::Error> {
         if sting.guild_id != self.guild_id {
             return Err("sting not associated with this guild".into());
         }
@@ -825,7 +827,7 @@ impl StingProvider for ArStingProvider {
         todo!()
     }
 
-    async fn delete(&self, id: sqlx::types::uuid::Uuid) -> Result<(), crate::Error> {
+    async fn delete(&self, id: sqlx::types::uuid::Uuid) -> Result<(), silverpelt::Error> {
         let Some(sting) = Sting::get(&self.guild_state.pool, self.guild_id, id)
             .await
             .map_err(|e| format!("failed to fetch sting information: {:?}", e))?

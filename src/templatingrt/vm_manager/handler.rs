@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use super::core::{resolve_template_to_bytecode, ArLuaThreadInnerState, LuaVmAction, LuaVmResult};
 
-use crate::lang_lua::{primitives::ctxprovider::TemplateContextProvider, state::GuildState};
+use crate::templatingrt::{primitives::ctxprovider::TemplateContextProvider, state::GuildState};
 
 use khronos_runtime::{primitives::event::Event, TemplateContext};
 use mlua::prelude::*;

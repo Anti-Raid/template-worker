@@ -9,7 +9,7 @@ use std::time::Duration;
 use super::vm_manager::AtomicInstant;
 
 impl Ratelimits {
-    fn new_discord_rl() -> Result<LuaRatelimits, crate::Error> {
+    fn new_discord_rl() -> Result<LuaRatelimits, silverpelt::Error> {
         // Create the global limit
         let global_quota =
             LuaRatelimits::create_quota(NonZeroU32::new(10).unwrap(), Duration::from_secs(10))?;
@@ -78,7 +78,7 @@ impl Ratelimits {
         })
     }
 
-    fn new_kv_rl() -> Result<LuaRatelimits, crate::Error> {
+    fn new_kv_rl() -> Result<LuaRatelimits, silverpelt::Error> {
         // Create the global limit
         let global_quota =
             LuaRatelimits::create_quota(NonZeroU32::new(100).unwrap(), Duration::from_secs(1))?;
@@ -95,7 +95,7 @@ impl Ratelimits {
         })
     }
 
-    fn new_stings_rl() -> Result<LuaRatelimits, crate::Error> {
+    fn new_stings_rl() -> Result<LuaRatelimits, silverpelt::Error> {
         // Create the global limit
         let global_quota =
             LuaRatelimits::create_quota(NonZeroU32::new(10).unwrap(), Duration::from_secs(60))?;
@@ -112,7 +112,7 @@ impl Ratelimits {
         })
     }
 
-    fn new_lockdowns_rl() -> Result<LuaRatelimits, crate::Error> {
+    fn new_lockdowns_rl() -> Result<LuaRatelimits, silverpelt::Error> {
         // Create the global limit
         let global_quota =
             LuaRatelimits::create_quota(NonZeroU32::new(3).unwrap(), Duration::from_secs(60))?;
@@ -138,7 +138,7 @@ impl Ratelimits {
         })
     }
 
-    fn new_userinfo_rl() -> Result<LuaRatelimits, crate::Error> {
+    fn new_userinfo_rl() -> Result<LuaRatelimits, silverpelt::Error> {
         // Create the global limit
         let global_quota =
             LuaRatelimits::create_quota(NonZeroU32::new(7).unwrap(), Duration::from_secs(60))?;
@@ -174,7 +174,7 @@ pub struct Ratelimits {
 }
 
 impl Ratelimits {
-    pub fn new() -> Result<Self, crate::Error> {
+    pub fn new() -> Result<Self, silverpelt::Error> {
         Ok(Ratelimits {
             discord: Ratelimits::new_discord_rl()?,
             kv: Ratelimits::new_kv_rl()?,

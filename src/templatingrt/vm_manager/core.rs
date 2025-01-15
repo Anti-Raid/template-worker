@@ -1,9 +1,10 @@
 use super::AtomicInstant;
-use crate::lang_lua::primitives::ctxprovider::TemplateContextProvider;
-use crate::lang_lua::state::GuildState;
-use crate::lang_lua::state::Ratelimits;
-use crate::MAX_TEMPLATES_EXECUTION_TIME;
-use crate::MAX_TEMPLATE_MEMORY_USAGE;
+use crate::templatingrt::primitives::ctxprovider::TemplateContextProvider;
+use crate::templatingrt::state::GuildState;
+use crate::templatingrt::state::Ratelimits;
+use crate::templatingrt::template::Template;
+use crate::templatingrt::MAX_TEMPLATES_EXECUTION_TIME;
+use crate::templatingrt::MAX_TEMPLATE_MEMORY_USAGE;
 use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::utils::pluginholder::PluginSet;
 use mlua::prelude::*;
@@ -39,7 +40,7 @@ static VMS: LazyLock<scc::HashMap<GuildId, ArLua>> = LazyLock::new(scc::HashMap:
 pub enum LuaVmAction {
     /// Execute a template
     Exec {
-        template: Arc<crate::Template>,
+        template: Arc<Template>,
         event: CreateEvent,
     },
     /// Stop the Lua VM entirely
@@ -268,7 +269,7 @@ pub(super) fn create_guild_state(
 
 /// Helper method to fetch a template from bytecode or compile it if it doesnt exist in bytecode cache
 pub(crate) async fn resolve_template_to_bytecode(
-    template: &crate::Template,
+    template: &Template,
     bytecode_cache_ref: &BytecodeCache,
 ) -> Result<Vec<u8>, LuaError> {
     // Check if the source hash matches the expected source hash

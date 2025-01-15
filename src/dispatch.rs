@@ -1,8 +1,9 @@
+use crate::templatingrt::cache::get_all_guild_templates;
+use crate::templatingrt::{dispatch_error, execute, log_error, ParseCompileState};
 use khronos_runtime::primitives::event::CreateEvent;
 use serenity::all::{Context, FullEvent, GuildId, Interaction};
 use silverpelt::ar_event::AntiraidEvent;
 use silverpelt::data::Data;
-use templating::get_all_guild_templates;
 
 #[inline]
 const fn not_audit_loggable_event() -> &'static [&'static str] {
@@ -94,9 +95,9 @@ pub async fn dispatch(
     }) {
         log::info!("Dispatching event: {} to {}", event.name(), template.name);
 
-        match templating::execute(
+        match execute(
             event.clone(),
-            templating::ParseCompileState {
+            ParseCompileState {
                 serenity_context: ctx.clone(),
                 pool: data.pool.clone(),
                 reqwest_client: data.reqwest.clone(),
@@ -120,7 +121,7 @@ pub async fn dispatch(
                 });
             }
             Err(e) => {
-                templating::dispatch_error(ctx, &e.to_string(), guild_id, template).await?;
+                dispatch_error(ctx, &e.to_string(), guild_id, template).await?;
             }
         }
     }
@@ -144,9 +145,9 @@ pub async fn dispatch_and_wait(
     }) {
         log::info!("Dispatching event: {} to {}", event.name(), template.name);
 
-        match templating::execute(
+        match execute(
             event.clone(),
-            templating::ParseCompileState {
+            ParseCompileState {
                 serenity_context: ctx.clone(),
                 pool: data.pool.clone(),
                 reqwest_client: data.reqwest.clone(),
@@ -187,20 +188,14 @@ pub async fn dispatch_and_wait(
 
                 // Try logging error
                 if let Err(e) =
-                    templating::log_error(guild_id, &data.pool, ctx, &template_name, e.to_string())
-                        .await
+                    log_error(guild_id, &data.pool, ctx, &template_name, e.to_string()).await
                 {
                     log::error!("Error while logging error: {}", e);
                 }
 
-                templating::dispatch_error(
-                    ctx,
-                    &e.to_string(),
-                    guild_id,
-                    &templates[results.len()],
-                )
-                .await
-                .ok();
+                dispatch_error(ctx, &e.to_string(), guild_id, &templates[results.len()])
+                    .await
+                    .ok();
 
                 return Err(e);
             }

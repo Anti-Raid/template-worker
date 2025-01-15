@@ -1,3 +1,7 @@
+use crate::templatingrt::{
+    benchmark_vm as benchmark_vm_impl, cache::clear_cache, FireBenchmark,
+    MAX_TEMPLATES_RETURN_WAIT_TIME,
+};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -6,7 +10,6 @@ use axum::{
 };
 use silverpelt::ar_event::AntiraidEvent;
 use std::sync::Arc;
-use templating::clear_cache;
 
 use crate::dispatch::{dispatch, dispatch_and_wait, parse_event};
 
@@ -87,14 +90,14 @@ async fn dispatch_event_and_wait(
 ) -> Response<Vec<serde_json::Value>> {
     // Clear cache if event is OnStartup
     if let AntiraidEvent::OnStartup(_) = event {
-        templating::clear_cache(guild_id).await;
+        clear_cache(guild_id).await;
     }
 
     let event = parse_event(&event).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
     let wait_timeout = match query.wait_timeout {
         Some(timeout) => std::time::Duration::from_millis(timeout),
-        None => templating::MAX_TEMPLATES_RETURN_WAIT_TIME,
+        None => MAX_TEMPLATES_RETURN_WAIT_TIME,
     };
 
     let results = dispatch_and_wait(&serenity_context, &data, event, guild_id, wait_timeout)
@@ -112,8 +115,8 @@ async fn benchmark_vm(
         ..
     }): State<AppData>,
     Path(guild_id): Path<serenity::all::GuildId>,
-) -> Response<templating::FireBenchmark> {
-    let bvm = templating::benchmark_vm(
+) -> Response<FireBenchmark> {
+    let bvm = benchmark_vm_impl(
         guild_id,
         data.pool.clone(),
         serenity_context,

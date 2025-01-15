@@ -1,12 +1,20 @@
+pub mod cache;
 pub mod primitives;
-pub(crate) mod state;
+pub mod state;
+pub mod template;
+mod vm_manager;
 
 use khronos_runtime::primitives::event::CreateEvent;
 use serenity::all::GuildId;
-use std::sync::Arc;
+use std::sync::{atomic::Ordering, Arc};
+use template::Template;
 use vm_manager::{get_lua_vm, LuaVmAction, LuaVmResult};
 
-mod vm_manager;
+pub const MAX_TEMPLATE_MEMORY_USAGE: usize = 1024 * 1024 * 3; // 3MB maximum memory
+pub const MAX_VM_THREAD_STACK_SIZE: usize = 1024 * 1024 * 8; // 8MB maximum memory
+pub const MAX_TEMPLATES_EXECUTION_TIME: std::time::Duration =
+    std::time::Duration::from_secs(60 * 5); // 5 minute maximum execution time
+pub const MAX_TEMPLATES_RETURN_WAIT_TIME: std::time::Duration = std::time::Duration::from_secs(10); // 10 seconds maximum execution time
 
 /// Render a template given an event, state and template
 ///
@@ -14,7 +22,7 @@ mod vm_manager;
 pub async fn execute(
     event: CreateEvent,
     state: ParseCompileState,
-    template: Arc<crate::Template>,
+    template: Arc<Template>,
 ) -> Result<RenderTemplateHandle, silverpelt::Error> {
     let lua = get_lua_vm(
         state.guild_id,
@@ -25,10 +33,8 @@ pub async fn execute(
     .await?;
 
     // Update last execution time.
-    lua.last_execution_time.store(
-        std::time::Instant::now(),
-        std::sync::atomic::Ordering::Release,
-    );
+    lua.last_execution_time
+        .store(std::time::Instant::now(), Ordering::Release);
 
     let (tx, rx) = tokio::sync::oneshot::channel();
 
@@ -56,6 +62,7 @@ impl LuaVmResultHandle {
         }
     }
 
+    #[allow(dead_code)]
     /// Returns ``true`` if the result is an LuaError or VmBroken
     pub fn is_error(&self) -> bool {
         matches!(
@@ -64,6 +71,7 @@ impl LuaVmResultHandle {
         )
     }
 
+    #[allow(dead_code)]
     /// Returns ``true`` if the result is caused by a broken VM
     pub fn is_vm_broken(&self) -> bool {
         matches!(self.result, LuaVmResult::VmBroken {})
@@ -89,7 +97,7 @@ impl LuaVmResultHandle {
         match self.result {
             LuaVmResult::VmBroken {} => {
                 log::error!("Lua VM is broken in template {}", template_name);
-                crate::lang_lua::log_error(
+                log_error(
                     guild_id,
                     pool,
                     serenity_context,
@@ -101,7 +109,7 @@ impl LuaVmResultHandle {
             LuaVmResult::LuaError { ref err } => {
                 log::error!("Lua error in template {}: {}", template_name, err);
 
-                crate::lang_lua::log_error(
+                log_error(
                     guild_id,
                     pool,
                     serenity_context,
@@ -172,7 +180,7 @@ pub async fn log_error(
 ) -> Result<(), silverpelt::Error> {
     log::error!("Lua thread error: {}: {}", template_name, e);
 
-    let Ok(template) = crate::cache::get_guild_template(guild_id, template_name, pool).await else {
+    let Ok(template) = cache::get_guild_template(guild_id, template_name, pool).await else {
         return Err("Failed to get template data for error reporting".into());
     };
 
@@ -184,7 +192,7 @@ pub async fn dispatch_error(
     ctx: &serenity::all::Context,
     error: &str,
     guild_id: serenity::all::GuildId,
-    template: &crate::Template,
+    template: &Template,
 ) -> Result<(), silverpelt::Error> {
     // Codeblock + escape the error string
     let error = format!("```lua\n{}```", error.replace('`', "\\`"));
@@ -269,7 +277,7 @@ pub async fn benchmark_vm(
 
     // Exec simple with wait
 
-    let pt = crate::Template {
+    let pt = Template {
         content: "return 1".to_string(),
         ..Default::default()
     };
@@ -307,7 +315,7 @@ pub async fn benchmark_vm(
     }
 
     // Exec simple with no wait
-    let pt = crate::Template {
+    let pt = Template {
         content: "return 1".to_string(),
         ..Default::default()
     };
@@ -337,7 +345,7 @@ pub async fn benchmark_vm(
     let exec_no_wait = start.elapsed().as_micros();
 
     // Exec simple with wait
-    let pt = crate::Template {
+    let pt = Template {
         content: "error('MyError')\nreturn 1".to_string(),
         ..Default::default()
     };

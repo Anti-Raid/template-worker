@@ -1,7 +1,7 @@
 use serenity::all::GuildId;
 use std::panic::PanicHookInfo;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -9,8 +9,8 @@ use tokio::sync::RwLock;
 
 use super::core::{create_guild_state, ArLua, BytecodeCache, LuaVmAction, LuaVmResult};
 use super::handler::handle_event;
-use crate::lang_lua::vm_manager::core::configure_lua_vm;
-use crate::MAX_VM_THREAD_STACK_SIZE;
+use crate::templatingrt::vm_manager::core::configure_lua_vm;
+use crate::templatingrt::MAX_VM_THREAD_STACK_SIZE;
 
 pub const DEFAULT_MAX_THREADS: usize = 100; // Maximum number of threads in the pool
 
@@ -112,12 +112,12 @@ impl ThreadEntry {
                     // Catch panics
                     fn panic_catcher(
                         id: u64,
-                        broken_ref: Arc<std::sync::atomic::AtomicBool>,
+                        broken_ref: Arc<AtomicBool>,
                     ) -> Box<dyn Fn(&PanicHookInfo<'_>) + 'static + Sync + Send>
                     {
                         Box::new(move |pi| {
                             log::error!("Lua thread panicked: {} ({})", id, pi);
-                            broken_ref.store(true, std::sync::atomic::Ordering::Release);
+                            broken_ref.store(true, Ordering::Release);
                         })
                     }
 
