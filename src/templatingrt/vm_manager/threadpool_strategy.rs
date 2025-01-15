@@ -3,7 +3,6 @@ use std::panic::PanicHookInfo;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
-use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::RwLock;
 
@@ -163,29 +162,6 @@ impl ThreadEntry {
                                 }
                             },
                         );
-
-                        // Start the scheduler in a tokio task
-                        let broken_sched_ref = tis_ref.broken.clone();
-                        let scheduler = tis_ref.scheduler.clone();
-                        tokio::task::spawn_local(async move {
-                            log::info!("Starting Lua scheduler");
-                            match scheduler.run(Duration::from_millis(1)).await {
-                                Ok(_) => {
-                                    log::info!("Lua scheduler exited. This should not happen.");
-
-                                    // If the scheduler exited, the Lua VM is broken
-                                    broken_sched_ref
-                                        .store(true, std::sync::atomic::Ordering::Release);
-                                }
-                                Err(e) => {
-                                    log::error!("Lua scheduler exited with error: {}", e);
-
-                                    // If the scheduler exited, the Lua VM is broken
-                                    broken_sched_ref
-                                        .store(true, std::sync::atomic::Ordering::Release);
-                                }
-                            }
-                        });
 
                         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(
                             LuaVmAction,

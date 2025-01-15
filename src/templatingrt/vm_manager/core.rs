@@ -19,6 +19,7 @@ use std::ops::Deref;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::LazyLock;
+use std::time::Duration;
 
 pub static PLUGIN_SET: LazyLock<PluginSet> = LazyLock::new(|| {
     let mut plugins = PluginSet::new();
@@ -110,6 +111,7 @@ pub(super) struct ArLuaThreadInnerState {
     /// Stores the servers global table
     pub global_table: mlua::Table,
 
+    #[allow(dead_code)]
     /// The scheduler
     pub scheduler: Scheduler,
 }
@@ -176,9 +178,44 @@ pub(super) fn configure_lua_vm(
     // Also create the mlua scheduler in the app data
     let thread_tracker = ThreadTracker::new();
 
+    pub struct ThreadLimiter {
+        pub thread_limit: usize,
+        pub threads: std::cell::RefCell<usize>,
+    }
+
+    impl mlua_scheduler_ext::feedbacks::ThreadAddMiddleware for ThreadLimiter {
+        fn on_thread_add(
+            &self,
+            _label: &str,
+            _creator: &mlua::Thread,
+            _thread: &mlua::Thread,
+        ) -> mlua::Result<()> {
+            let mut threads = self.threads.borrow_mut();
+            if *threads >= self.thread_limit {
+                return Err(mlua::Error::external("Thread limit reached"));
+            }
+
+            *threads += 1;
+
+            Ok(())
+        }
+    }
+
     lua.set_app_data(thread_tracker.clone());
 
-    let scheduler = Scheduler::new(TaskManager::new(lua.clone(), Rc::new(thread_tracker)));
+    let combined = mlua_scheduler_ext::feedbacks::ThreadAddMiddlewareFeedback::new(
+        thread_tracker,
+        ThreadLimiter {
+            thread_limit: 100000000,
+            threads: std::cell::RefCell::new(0),
+        },
+    );
+
+    let scheduler = Scheduler::new(TaskManager::new(
+        lua.clone(),
+        Rc::new(combined),
+        Duration::from_millis(1),
+    ));
 
     scheduler.attach();
 

@@ -6,7 +6,7 @@ use crate::templatingrt::MAX_VM_THREAD_STACK_SIZE;
 use serenity::all::GuildId;
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
-use std::{panic::PanicHookInfo, sync::Arc, time::Duration};
+use std::{panic::PanicHookInfo, sync::Arc};
 
 #[allow(dead_code)]
 pub async fn create_lua_vm(
@@ -71,27 +71,6 @@ pub async fn create_lua_vm(
                         }
                     },
                 );
-
-                // Start the scheduler in a tokio task
-                let broken_sched_ref = tis_ref.broken.clone();
-                let scheduler = tis_ref.scheduler.clone();
-                tokio::task::spawn_local(async move {
-                    log::info!("Starting Lua scheduler");
-                    match scheduler.run(Duration::from_millis(1)).await {
-                        Ok(_) => {
-                            log::info!("Lua scheduler exited. This should not happen.");
-
-                            // If the scheduler exited, the Lua VM is broken
-                            broken_sched_ref.store(true, std::sync::atomic::Ordering::Release);
-                        }
-                        Err(e) => {
-                            log::error!("Lua scheduler exited with error: {}", e);
-
-                            // If the scheduler exited, the Lua VM is broken
-                            broken_sched_ref.store(true, std::sync::atomic::Ordering::Release);
-                        }
-                    }
-                });
 
                 super::perthreadpanichook::set_hook(panic_catcher(
                     guild_id,
