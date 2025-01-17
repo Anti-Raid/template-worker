@@ -206,7 +206,7 @@ pub(super) fn configure_lua_vm(
     let combined = mlua_scheduler_ext::feedbacks::ThreadAddMiddlewareFeedback::new(
         thread_tracker,
         ThreadLimiter {
-            thread_limit: 100000000,
+            thread_limit: 10000,
             threads: std::cell::RefCell::new(0),
         },
     );

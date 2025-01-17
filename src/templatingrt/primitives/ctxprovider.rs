@@ -9,10 +9,20 @@ use khronos_runtime::traits::lockdownprovider::LockdownProvider;
 use khronos_runtime::traits::stingprovider::StingProvider;
 use khronos_runtime::traits::userinfoprovider::UserInfoProvider;
 use khronos_runtime::utils::executorscope::ExecutorScope;
+use moka::future::Cache;
 use silverpelt::stings::{StingCreateOperations, StingOperations};
 use silverpelt::userinfo::{NoMember, UserInfoOperations};
 use std::num::TryFromIntError;
+use std::sync::LazyLock;
 use std::{rc::Rc, sync::Arc};
+
+/// Internal short-lived channel cache
+pub static CHANNEL_CACHE: LazyLock<Cache<serenity::all::ChannelId, serenity::all::GuildChannel>> =
+    LazyLock::new(|| {
+        Cache::builder()
+            .time_to_idle(std::time::Duration::from_secs(30))
+            .build()
+    });
 
 #[derive(Clone)]
 pub struct TemplateContextProvider {
@@ -36,6 +46,10 @@ impl KhronosContext for TemplateContextProvider {
 
     fn allowed_caps(&self) -> &[String] {
         self.template_data.allowed_caps.as_ref()
+    }
+
+    fn has_cap(&self, cap: &str) -> bool {
+        self.template_data.allowed_caps.contains(&cap.to_string())
     }
 
     fn guild_id(&self) -> Option<serenity::all::GuildId> {
@@ -332,6 +346,19 @@ impl DiscordProvider for ArDiscordProvider {
         &self,
         channel_id: serenity::all::ChannelId,
     ) -> serenity::Result<serenity::all::GuildChannel, silverpelt::Error> {
+        {
+            // Check cache first
+            let cached_channel = CHANNEL_CACHE.get(&channel_id).await;
+
+            if let Some(cached_channel) = cached_channel {
+                if cached_channel.guild_id != self.guild_id {
+                    return Err("Channel not in guild".into());
+                }
+
+                return Ok(cached_channel);
+            }
+        }
+
         let channel = sandwich_driver::channel(
             &self.guild_state.serenity_context.cache,
             &self.guild_state.serenity_context.http,
@@ -401,12 +428,18 @@ impl DiscordProvider for ArDiscordProvider {
         map: impl serde::Serialize,
         audit_log_reason: Option<&str>,
     ) -> Result<serenity::model::channel::GuildChannel, silverpelt::Error> {
-        self.guild_state
+        let chan = self
+            .guild_state
             .serenity_context
             .http
             .edit_channel(channel_id, &map, audit_log_reason)
             .await
-            .map_err(|e| format!("Failed to edit channel: {}", e).into())
+            .map_err(|e| format!("Failed to edit channel: {}", e))?;
+
+        // Update cache
+        CHANNEL_CACHE.insert(channel_id, chan.clone()).await;
+
+        Ok(chan)
     }
 
     async fn delete_channel(
@@ -414,12 +447,18 @@ impl DiscordProvider for ArDiscordProvider {
         channel_id: serenity::all::ChannelId,
         audit_log_reason: Option<&str>,
     ) -> Result<serenity::model::channel::Channel, silverpelt::Error> {
-        self.guild_state
+        let chan = self
+            .guild_state
             .serenity_context
             .http
             .delete_channel(channel_id, audit_log_reason)
             .await
-            .map_err(|e| format!("Failed to delete channel: {}", e).into())
+            .map_err(|e| format!("Failed to delete channel: {}", e))?;
+
+        // Remove from cache
+        CHANNEL_CACHE.remove(&channel_id).await;
+
+        Ok(chan)
     }
 
     async fn create_member_ban(
