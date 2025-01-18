@@ -1,5 +1,5 @@
 use crate::templatingrt::cache::get_all_guild_templates;
-use crate::templatingrt::{dispatch_error, execute, log_error, ParseCompileState};
+use crate::templatingrt::{dispatch_error, execute, ParseCompileState};
 use khronos_runtime::primitives::event::CreateEvent;
 use serenity::all::{Context, FullEvent, GuildId, Interaction};
 use silverpelt::ar_event::AntiraidEvent;
@@ -186,16 +186,11 @@ pub async fn dispatch_and_wait(
                     // Drain the rest of the results
                 }
 
-                // Try logging error
-                if let Err(e) =
-                    log_error(guild_id, &data.pool, ctx, &template_name, e.to_string()).await
-                {
-                    log::error!("Error while logging error: {}", e);
-                }
+                let template = templates.iter().find(|t| t.name == template_name).unwrap();
 
-                dispatch_error(ctx, &e.to_string(), guild_id, &templates[results.len()])
-                    .await
-                    .ok();
+                if let Err(e) = dispatch_error(ctx, &e.to_string(), guild_id, template).await {
+                    log::error!("Error while dispatching error: {}", e);
+                };
 
                 return Err(e);
             }
