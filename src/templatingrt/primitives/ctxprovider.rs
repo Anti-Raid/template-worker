@@ -10,6 +10,7 @@ use khronos_runtime::traits::stingprovider::StingProvider;
 use khronos_runtime::traits::userinfoprovider::UserInfoProvider;
 use khronos_runtime::utils::executorscope::ExecutorScope;
 use moka::future::Cache;
+use serenity::all::InteractionId;
 use silverpelt::stings::{StingCreateOperations, StingOperations};
 use silverpelt::userinfo::{NoMember, UserInfoOperations};
 use std::num::TryFromIntError;
@@ -525,7 +526,7 @@ impl DiscordProvider for ArDiscordProvider {
 
     async fn create_interaction_response(
         &self,
-        interaction_id: serenity::all::InteractionId,
+        interaction_id: InteractionId,
         interaction_token: &str,
         response: impl serde::Serialize,
         files: Vec<serenity::all::CreateAttachment<'_>>,
@@ -536,6 +537,20 @@ impl DiscordProvider for ArDiscordProvider {
             .create_interaction_response(interaction_id, interaction_token, &response, files)
             .await
             .map_err(|e| format!("Failed to create interaction response: {}", e).into())
+    }
+
+    async fn create_followup_message(
+        &self,
+        interaction_token: &str,
+        response: impl serde::Serialize,
+        files: Vec<serenity::all::CreateAttachment<'_>>,
+    ) -> Result<serenity::all::Message, silverpelt::Error> {
+        self.guild_state
+            .serenity_context
+            .http
+            .create_followup_message(interaction_token, &response, files)
+            .await
+            .map_err(|e| format!("Failed to create interaction followup: {}", e).into())
     }
 
     async fn get_original_interaction_response(
