@@ -32,8 +32,8 @@ pub async fn discord_event_dispatch(
 
     let user_id = gwevent::core::get_event_user_id(event);
 
-    match event {
-        FullEvent::GuildAuditLogEntryCreate { .. } => {}
+    let event_data = match event {
+        FullEvent::GuildAuditLogEntryCreate { .. } => serde_json::to_value(event)?,
         FullEvent::InteractionCreate { interaction } => {
             match interaction {
                 Interaction::Ping(_) => return Ok(()),
@@ -43,8 +43,39 @@ pub async fn discord_event_dispatch(
                     {
                         return Ok(());
                     }
+
+                    let mut value = serde_json::to_value(event)?;
+
+                    // Inject in type
+                    if let serde_json::Value::Object(ref mut map) = value {
+                        let typ: u8 = serenity::all::InteractionType::Command.0;
+                        map.insert("type".to_string(), serde_json::Value::Number(typ.into()));
+                    }
+
+                    value
                 }
-                _ => {} // Allow Component+Modal interactions to freely passed through
+                _ => {
+                    let mut value = serde_json::to_value(event)?; // Allow Component+Modal interactions to freely passed through
+
+                    // Inject in type
+                    if let serde_json::Value::Object(ref mut map) = value {
+                        let typ: u8 = match interaction {
+                            Interaction::Ping(_) => serenity::all::InteractionType::Ping.0,
+                            Interaction::Command(_) => serenity::all::InteractionType::Command.0,
+                            Interaction::Autocomplete(_) => {
+                                serenity::all::InteractionType::Autocomplete.0
+                            }
+                            Interaction::Component(_) => {
+                                serenity::all::InteractionType::Component.0
+                            }
+                            Interaction::Modal(_) => serenity::all::InteractionType::Modal.0,
+                            _ => 99,
+                        };
+                        map.insert("type".to_string(), serde_json::Value::Number(typ.into()));
+                    }
+
+                    value
+                }
             }
         }
         // Ignore ourselves as well as interaction creates that are reserved
@@ -54,8 +85,10 @@ pub async fn discord_event_dispatch(
                     return Ok(());
                 }
             }
+
+            serde_json::to_value(event)?
         }
-    }
+    };
 
     dispatch(
         serenity_context,
@@ -63,7 +96,7 @@ pub async fn discord_event_dispatch(
         CreateEvent::new(
             "Discord".to_string(),
             event.snake_case_name().to_uppercase(),
-            serde_json::to_value(event)?,
+            event_data,
             user_id.map(|u| u.to_string()),
         ),
         guild_id,
