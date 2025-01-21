@@ -1,5 +1,5 @@
 use crate::templatingrt::{
-    benchmark_vm as benchmark_vm_impl, cache::clear_cache, FireBenchmark,
+    benchmark_vm as benchmark_vm_impl, cache::regenerate_cache, FireBenchmark,
     MAX_TEMPLATES_RETURN_WAIT_TIME,
 };
 use axum::{
@@ -56,9 +56,9 @@ async fn dispatch_event(
     Path(guild_id): Path<serenity::all::GuildId>,
     Json(event): Json<AntiraidEvent>,
 ) -> Response<()> {
-    // Clear cache if event is OnStartup
+    // Regenerate cache for guild if event is OnStartup
     if let AntiraidEvent::OnStartup(_) = event {
-        clear_cache(guild_id).await;
+        regenerate_cache(guild_id, &data.pool).await;
     }
 
     let event = parse_event(&event).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
@@ -88,9 +88,9 @@ async fn dispatch_event_and_wait(
     Query(query): Query<DispatchEventAndWaitQuery>,
     Json(event): Json<AntiraidEvent>,
 ) -> Response<Vec<serde_json::Value>> {
-    // Clear cache if event is OnStartup
+    // Regenerate cache for guild if event is OnStartup
     if let AntiraidEvent::OnStartup(_) = event {
-        clear_cache(guild_id).await;
+        regenerate_cache(guild_id, &data.pool).await;
     }
 
     let event = parse_event(&event).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;

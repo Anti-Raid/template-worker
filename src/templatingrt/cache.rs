@@ -1,6 +1,7 @@
 use super::template::Template;
 use moka::future::Cache;
 use serenity::all::GuildId;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -9,62 +10,90 @@ pub static TEMPLATES_CACHE: LazyLock<Cache<GuildId, Arc<Vec<Arc<Template>>>>> =
     LazyLock::new(|| {
         Cache::builder()
             .support_invalidation_closures()
-            .time_to_idle(Duration::from_secs(60 * 5)) // Expire the audit log sink cache after 5 minutes
+            .time_to_idle(Duration::from_secs(60 * 5))
             .build()
     });
 
 /// Gets all templates for a guild
 #[allow(dead_code)]
-pub async fn get_all_guild_templates(
-    guild_id: GuildId,
-    pool: &sqlx::PgPool,
-) -> Result<Arc<Vec<Arc<Template>>>, silverpelt::Error> {
-    if let Some(templates) = TEMPLATES_CACHE.get(&guild_id).await {
-        return Ok(templates.clone());
+pub async fn get_all_guild_templates(guild_id: GuildId) -> Option<Arc<Vec<Arc<Template>>>> {
+    TEMPLATES_CACHE.get(&guild_id).await
+}
+
+/// Gets a guild template by name
+pub async fn get_guild_template(guild_id: GuildId, name: &str) -> Option<Arc<Template>> {
+    let templates = TEMPLATES_CACHE.get(&guild_id).await?;
+
+    for t in templates.iter() {
+        if t.name == name {
+            return Some(t.clone());
+        }
     }
 
-    let names = sqlx::query!(
+    None
+}
+
+/// Sets up the initial template cache
+pub async fn setup(pool: &sqlx::PgPool) -> Result<(), silverpelt::Error> {
+    get_all_templates_from_db(pool).await?;
+    Ok(())
+}
+
+/// Clears the template cache for a guild. This refetches the templates
+/// into cache
+pub async fn regenerate_cache(guild_id: GuildId, pool: &sqlx::PgPool) {
+    TEMPLATES_CACHE.remove(&guild_id).await;
+
+    let _ = get_all_guild_templates_from_db(guild_id, pool).await;
+}
+
+async fn get_all_templates_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt::Error> {
+    let partials = sqlx::query!("SELECT name, guild_id FROM guild_templates",)
+        .fetch_all(pool)
+        .await?;
+
+    let mut templates: HashMap<serenity::all::GuildId, Vec<Arc<Template>>> = HashMap::new();
+
+    for partial in partials {
+        let guild_id = partial.guild_id.parse()?;
+        let template = Template::guild(guild_id, &partial.name, pool).await?;
+
+        if let Some(templates_vec) = templates.get_mut(&guild_id) {
+            templates_vec.push(Arc::new(template));
+        } else {
+            templates.insert(guild_id, vec![Arc::new(template)]);
+        }
+    }
+
+    // Store the templates in the cache
+    for (guild_id, templates) in templates {
+        let templates = Arc::new(templates.clone());
+        TEMPLATES_CACHE.insert(guild_id, templates.clone()).await;
+    }
+
+    Ok(())
+}
+
+async fn get_all_guild_templates_from_db(
+    guild_id: GuildId,
+    pool: &sqlx::PgPool,
+) -> Result<(), silverpelt::Error> {
+    let partials = sqlx::query!(
         "SELECT name FROM guild_templates WHERE guild_id = $1",
         guild_id.to_string()
     )
     .fetch_all(pool)
-    .await?
-    .into_iter()
-    .map(|r| r.name)
-    .collect::<Vec<String>>();
+    .await?;
 
     let mut templates = Vec::new();
 
-    for name in names {
-        let template = Template::guild(guild_id, &name, pool).await?;
+    for partial in partials {
+        let template = Template::guild(guild_id, &partial.name, pool).await?;
         templates.push(Arc::new(template));
     }
 
     // Store the templates in the cache
     let templates = Arc::new(templates.clone());
     TEMPLATES_CACHE.insert(guild_id, templates.clone()).await;
-
-    Ok(templates)
-}
-
-/// Gets a guild template by name
-pub async fn get_guild_template(
-    guild_id: GuildId,
-    name: &str,
-    pool: &sqlx::PgPool,
-) -> Result<Arc<Template>, silverpelt::Error> {
-    let template = get_all_guild_templates(guild_id, pool).await?;
-
-    for t in template.iter() {
-        if t.name == name {
-            return Ok(t.clone());
-        }
-    }
-
-    Err("Template not found".into())
-}
-
-/// Clears the template cache for a guild
-pub async fn clear_cache(guild_id: GuildId) {
-    TEMPLATES_CACHE.remove(&guild_id).await;
+    Ok(())
 }

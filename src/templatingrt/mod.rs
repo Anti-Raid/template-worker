@@ -91,7 +91,6 @@ impl LuaVmResultHandle {
         &self,
         template_name: &str,
         guild_id: serenity::all::GuildId,
-        pool: &sqlx::PgPool,
         serenity_context: &serenity::all::Context,
     ) -> Result<(), silverpelt::Error> {
         match self.result {
@@ -99,7 +98,6 @@ impl LuaVmResultHandle {
                 log::error!("Lua VM is broken in template {}", template_name);
                 log_error(
                     guild_id,
-                    pool,
                     serenity_context,
                     template_name,
                     "Lua VM has been marked as broken".to_string(),
@@ -109,14 +107,7 @@ impl LuaVmResultHandle {
             LuaVmResult::LuaError { ref err } => {
                 log::error!("Lua error in template {}: {}", template_name, err);
 
-                log_error(
-                    guild_id,
-                    pool,
-                    serenity_context,
-                    template_name,
-                    err.to_string(),
-                )
-                .await?;
+                log_error(guild_id, serenity_context, template_name, err.to_string()).await?;
             }
             _ => {}
         }
@@ -146,11 +137,10 @@ impl RenderTemplateHandle {
         self,
         template_name: &str,
         guild_id: serenity::all::GuildId,
-        pool: &sqlx::PgPool,
         serenity_context: &serenity::all::Context,
     ) -> Result<LuaVmResultHandle, silverpelt::Error> {
         let res = self.wait().await?;
-        res.log_error(template_name, guild_id, pool, serenity_context)
+        res.log_error(template_name, guild_id, serenity_context)
             .await?;
         Ok(res)
     }
@@ -173,14 +163,13 @@ impl RenderTemplateHandle {
 /// Equivalent to calling `get_guild_template` to get the template and then calling `dispatch_error`
 pub async fn log_error(
     guild_id: serenity::all::GuildId,
-    pool: &sqlx::PgPool,
     serenity_context: &serenity::all::Context,
     template_name: &str,
     e: String,
 ) -> Result<(), silverpelt::Error> {
     log::error!("Lua thread error: {}: {}", template_name, e);
 
-    let Ok(template) = cache::get_guild_template(guild_id, template_name, pool).await else {
+    let Some(template) = cache::get_guild_template(guild_id, template_name).await else {
         return Err("Failed to get template data for error reporting".into());
     };
 

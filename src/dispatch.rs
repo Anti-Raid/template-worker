@@ -129,7 +129,9 @@ pub async fn dispatch(
     event: CreateEvent,
     guild_id: GuildId,
 ) -> Result<(), silverpelt::Error> {
-    let templates = get_all_guild_templates(guild_id, &data.pool).await?;
+    let Some(templates) = get_all_guild_templates(guild_id).await else {
+        return Ok(());
+    };
 
     for template in templates.iter().filter(|template| {
         template.events.contains(&event.name().to_string())
@@ -151,11 +153,10 @@ pub async fn dispatch(
         {
             Ok(handle) => {
                 let template_name = template.name.clone();
-                let pool = data.pool.clone();
                 let serenity_context = ctx.clone();
                 tokio::task::spawn(async move {
                     handle
-                        .wait_and_log_error(&template_name, guild_id, &pool, &serenity_context)
+                        .wait_and_log_error(&template_name, guild_id, &serenity_context)
                         .await
                         .map_err(|e| {
                             log::error!("Error while waiting for template: {}", e);
@@ -178,7 +179,9 @@ pub async fn dispatch_and_wait(
     guild_id: GuildId,
     wait_timeout: std::time::Duration,
 ) -> Result<Vec<serde_json::Value>, silverpelt::Error> {
-    let templates = get_all_guild_templates(guild_id, &data.pool).await?;
+    let Some(templates) = get_all_guild_templates(guild_id).await else {
+        return Ok(vec![]);
+    };
 
     let mut local_set = tokio::task::JoinSet::new();
     for template in templates.iter().filter(|template| {

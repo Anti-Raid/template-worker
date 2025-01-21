@@ -1,4 +1,5 @@
 use crate::event_handler::EventFramework;
+use crate::templatingrt::cache::setup;
 use clap::Parser;
 use log::{error, info};
 use serenity::all::HttpBuilder;
@@ -120,6 +121,12 @@ pub async fn start() {
             return;
         }
     }
+
+    info!("Setting up template cache");
+
+    setup(&pg_pool)
+        .await
+        .expect("Failed to setup template cache");
 
     info!("Starting using autosharding");
 
