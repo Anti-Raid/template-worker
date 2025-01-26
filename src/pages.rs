@@ -11,9 +11,9 @@ use silverpelt::Error;
 use std::sync::{Arc, LazyLock};
 
 pub struct Page {
-    title: String,
-    description: String,
-    settings: Vec<Setting<SettingExecutionData>>,
+    pub title: String,
+    pub description: String,
+    pub settings: Vec<Setting<SettingExecutionData>>,
 }
 
 #[derive(Clone)]
@@ -21,6 +21,16 @@ pub struct SettingExecutionData {
     pub data: Arc<Data>,
     pub serenity_context: serenity::all::Context,
     pub author: UserId,
+}
+
+impl SettingExecutionData {
+    pub fn new(data: Arc<Data>, serenity_context: serenity::all::Context, author: UserId) -> Self {
+        Self {
+            data,
+            serenity_context,
+            author,
+        }
+    }
 }
 
 #[derive(Clone, Default)]

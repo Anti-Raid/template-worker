@@ -2,12 +2,15 @@ use crate::templatingrt::{
     benchmark_vm as benchmark_vm_impl, cache::regenerate_cache, FireBenchmark,
     MAX_TEMPLATES_RETURN_WAIT_TIME,
 };
+use ar_settings::types::OperationType;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     routing::post,
     Json, Router,
 };
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use silverpelt::ar_event::AntiraidEvent;
 use std::sync::Arc;
 
@@ -41,7 +44,11 @@ pub fn create(
             "/dispatch-event/:guild_id/@wait",
             post(dispatch_event_and_wait),
         )
-        .route("/benchmark-vm/:guild_id", post(benchmark_vm));
+        .route("/benchmark-vm/:guild_id", post(benchmark_vm))
+        .route(
+            "/page-settings-operation/:guild_id/:user_id",
+            post(settings_operation),
+        );
     let router: Router<()> = router.with_state(AppData::new(data, ctx));
     router.into_make_service()
 }
@@ -126,4 +133,120 @@ async fn benchmark_vm(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(bvm))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SettingsOperationRequest {
+    pub fields: indexmap::IndexMap<String, Value>,
+    pub op: OperationType,
+    pub template: String,
+    pub setting_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CanonicalSettingsResult {
+    Ok {
+        fields: Vec<indexmap::IndexMap<String, Value>>,
+    },
+    Err {
+        error: String,
+    },
+}
+
+/// Executes an operation on a setting [SettingsOperation]
+pub(crate) async fn settings_operation(
+    State(AppData {
+        serenity_context,
+        data,
+    }): State<AppData>,
+    Path((guild_id, user_id)): Path<(serenity::all::GuildId, serenity::all::UserId)>,
+    Json(req): Json<SettingsOperationRequest>,
+) -> Json<CanonicalSettingsResult> {
+    let op: OperationType = req.op;
+
+    // Find the setting
+    let Some(page) = crate::pages::get_page_by_id(guild_id, &req.template).await else {
+        return Json(CanonicalSettingsResult::Err {
+            error: "Template not found".to_string(),
+        });
+    };
+
+    let mut setting = None;
+    for setting_obj in page.settings.iter() {
+        if setting_obj.id == req.setting_id {
+            setting = Some(setting_obj);
+            break;
+        }
+    }
+
+    let Some(setting) = setting else {
+        return Json(CanonicalSettingsResult::Err {
+            error: "Setting not found".to_string(),
+        });
+    };
+
+    match op {
+        OperationType::View => {
+            match ar_settings::cfg::settings_view(
+                setting,
+                &crate::pages::SettingExecutionData::new(data.clone(), serenity_context, user_id),
+                req.fields,
+            )
+            .await
+            {
+                Ok(res) => Json(CanonicalSettingsResult::Ok { fields: res }),
+                Err(e) => Json(CanonicalSettingsResult::Err {
+                    error: e.to_string(),
+                }),
+            }
+        }
+        OperationType::Create => {
+            match ar_settings::cfg::settings_create(
+                setting,
+                &crate::pages::SettingExecutionData::new(data.clone(), serenity_context, user_id),
+                req.fields,
+            )
+            .await
+            {
+                Ok(res) => Json(CanonicalSettingsResult::Ok { fields: vec![res] }),
+                Err(e) => Json(CanonicalSettingsResult::Err {
+                    error: e.to_string(),
+                }),
+            }
+        }
+        OperationType::Update => {
+            match ar_settings::cfg::settings_update(
+                setting,
+                &crate::pages::SettingExecutionData::new(data.clone(), serenity_context, user_id),
+                req.fields,
+            )
+            .await
+            {
+                Ok(res) => Json(CanonicalSettingsResult::Ok { fields: vec![res] }),
+                Err(e) => Json(CanonicalSettingsResult::Err {
+                    error: e.to_string(),
+                }),
+            }
+        }
+        OperationType::Delete => {
+            let Some(pkey) = req.fields.get(&setting.primary_key) else {
+                return Json(CanonicalSettingsResult::Err {
+                    error: format!("Missing or invalid field: `{}`", setting.primary_key),
+                });
+            };
+
+            match ar_settings::cfg::settings_delete(
+                setting,
+                &crate::pages::SettingExecutionData::new(data.clone(), serenity_context, user_id),
+                pkey.clone(),
+            )
+            .await
+            {
+                Ok(_res) => Json(CanonicalSettingsResult::Ok { fields: vec![] }),
+                Err(e) => Json(CanonicalSettingsResult::Err {
+                    error: e.to_string(),
+                }),
+            }
+        }
+    }
 }
