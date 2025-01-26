@@ -1,17 +1,19 @@
 use crate::templatingrt::state::GuildState;
 use crate::templatingrt::template::Template;
-use antiraid_types::stings::Sting;
+use antiraid_types::stings::{Sting, StingAggregate};
 use antiraid_types::userinfo::UserInfo;
 use khronos_runtime::traits::context::KhronosContext;
 use khronos_runtime::traits::discordprovider::DiscordProvider;
-use khronos_runtime::traits::kvprovider::{self, KVProvider, KvRecord};
+use khronos_runtime::traits::ir::{kv::KvRecord, Lockdown};
+use khronos_runtime::traits::kvprovider::KVProvider;
 use khronos_runtime::traits::lockdownprovider::LockdownProvider;
+use khronos_runtime::traits::pageprovider::PageProvider;
 use khronos_runtime::traits::stingprovider::StingProvider;
 use khronos_runtime::traits::userinfoprovider::UserInfoProvider;
 use khronos_runtime::utils::executorscope::ExecutorScope;
 use moka::future::Cache;
 use serenity::all::InteractionId;
-use silverpelt::stings::{StingCreateOperations, StingOperations};
+use silverpelt::stings::{StingAggregateOperations, StingCreateOperations, StingOperations};
 use silverpelt::userinfo::{NoMember, UserInfoOperations};
 use std::num::TryFromIntError;
 use std::sync::LazyLock;
@@ -31,6 +33,9 @@ pub struct TemplateContextProvider {
 
     /// The template data
     pub template_data: Arc<Template>,
+
+    /// The global table used
+    pub global_table: mlua::Table,
 }
 
 impl KhronosContext for TemplateContextProvider {
@@ -40,6 +45,7 @@ impl KhronosContext for TemplateContextProvider {
     type LockdownProvider = ArLockdownProvider;
     type UserInfoProvider = ArUserInfoProvider;
     type StingProvider = ArStingProvider;
+    type PageProvider = ArPageProvider;
 
     fn data(&self) -> Self::Data {
         self.template_data.clone()
@@ -135,6 +141,24 @@ impl KhronosContext for TemplateContextProvider {
             guild_state: self.guild_state.clone(),
         })
     }
+
+    fn global_table(&self) -> mlua::Table {
+        self.global_table.clone()
+    }
+
+    fn page_provider(&self, scope: ExecutorScope) -> Option<Self::PageProvider> {
+        Some(ArPageProvider {
+            guild_id: match scope {
+                ExecutorScope::ThisGuild => self.guild_state.guild_id,
+                ExecutorScope::OwnerGuild => self
+                    .template_data
+                    .shop_owner
+                    .unwrap_or(self.guild_state.guild_id), // TODO: consider if we should support ownerguild scope here
+            },
+            guild_state: self.guild_state.clone(),
+            template_id: self.template_data.name.clone(),
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -148,7 +172,7 @@ impl KVProvider for ArKVProvider {
         self.guild_state.ratelimits.kv.check(bucket)
     }
 
-    async fn get(&self, key: String) -> Result<Option<kvprovider::KvRecord>, silverpelt::Error> {
+    async fn get(&self, key: String) -> Result<Option<KvRecord>, silverpelt::Error> {
         // Check key length
         if key.len() > self.guild_state.kv_constraints.max_key_length {
             return Err("Key length too long".into());
@@ -637,9 +661,7 @@ impl LockdownProvider for ArLockdownProvider {
         self.guild_state.ratelimits.lockdowns.check(bucket)
     }
 
-    async fn list(
-        &self,
-    ) -> Result<Vec<khronos_runtime::traits::lockdownprovider::Lockdown>, silverpelt::Error> {
+    async fn list(&self) -> Result<Vec<Lockdown>, silverpelt::Error> {
         let lockdowns = lockdowns::LockdownSet::guild(self.guild_id, &self.guild_state.pool)
             .await
             .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
@@ -647,7 +669,7 @@ impl LockdownProvider for ArLockdownProvider {
         let mut result = vec![];
 
         for lockdown in lockdowns.lockdowns {
-            result.push(khronos_runtime::traits::lockdownprovider::Lockdown {
+            result.push(Lockdown {
                 id: lockdown.id,
                 reason: lockdown.reason,
                 r#type: lockdown.r#type.string_form(),
@@ -901,6 +923,65 @@ impl StingProvider for ArStingProvider {
             .await
             .map_err(|e| format!("failed to delete sting: {}", e))?;
 
+        Ok(())
+    }
+
+    async fn guild_aggregate(
+        &self,
+    ) -> Result<Vec<antiraid_types::stings::StingAggregate>, khronos_runtime::Error> {
+        let stings = StingAggregate::guild(&self.guild_state.pool, self.guild_id)
+            .await
+            .map_err(|e| format!("failed to fetch sting aggregate: {}", e))?;
+
+        Ok(stings)
+    }
+
+    async fn guild_user_aggregate(
+        &self,
+        target: serenity::all::UserId,
+    ) -> Result<Vec<StingAggregate>, khronos_runtime::Error> {
+        let stings = StingAggregate::guild_user(&self.guild_state.pool, self.guild_id, target)
+            .await
+            .map_err(|e| format!("failed to fetch sting aggregate: {}", e))?;
+
+        Ok(stings)
+    }
+}
+
+#[derive(Clone)]
+pub struct ArPageProvider {
+    template_id: String,
+    guild_id: serenity::all::GuildId,
+    guild_state: Rc<GuildState>,
+}
+
+impl PageProvider for ArPageProvider {
+    fn attempt_action(&self, bucket: &str) -> Result<(), silverpelt::Error> {
+        self.guild_state.ratelimits.page.check(bucket)
+    }
+
+    async fn get_page(&self) -> Option<khronos_runtime::traits::ir::Page> {
+        crate::pages::get_page_by_id(self.guild_id, &self.template_id)
+            .await
+            .map(crate::pages::unravel_page)
+    }
+
+    async fn set_page(
+        &self,
+        page: khronos_runtime::traits::ir::Page,
+    ) -> Result<(), khronos_runtime::Error> {
+        crate::pages::set_page(
+            self.guild_id,
+            self.template_id.clone(),
+            crate::pages::create_page(page, self.guild_id, self.template_id.clone()),
+        )
+        .await;
+
+        Ok(())
+    }
+
+    async fn delete_page(&self) -> Result<(), khronos_runtime::Error> {
+        crate::pages::remove_page(self.guild_id, &self.template_id).await;
         Ok(())
     }
 }

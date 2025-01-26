@@ -49,7 +49,6 @@ pub async fn discord_event_dispatch(
                     // Inject in type
                     if let serde_json::Value::Object(ref mut map) = value {
                         let typ: u8 = serenity::all::InteractionType::Command.0;
-                        println!("Interaction type: {}", typ);
                         map.insert("type".to_string(), serde_json::Value::Number(typ.into()));
                     }
 
@@ -64,18 +63,7 @@ pub async fn discord_event_dispatch(
 
                     // Inject in type
                     if let serde_json::Value::Object(ref mut map) = value {
-                        let typ: u8 = match interaction {
-                            Interaction::Ping(_) => serenity::all::InteractionType::Ping.0,
-                            Interaction::Command(_) => serenity::all::InteractionType::Command.0,
-                            Interaction::Autocomplete(_) => {
-                                serenity::all::InteractionType::Autocomplete.0
-                            }
-                            Interaction::Component(_) => {
-                                serenity::all::InteractionType::Component.0
-                            }
-                            Interaction::Modal(_) => serenity::all::InteractionType::Modal.0,
-                            _ => 99,
-                        };
+                        let typ: u8 = interaction.kind().0;
                         map.insert("type".to_string(), serde_json::Value::Number(typ.into()));
                     }
 

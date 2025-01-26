@@ -4,15 +4,9 @@ use serenity::all::GuildId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
-use std::time::Duration;
 
 pub static TEMPLATES_CACHE: LazyLock<Cache<GuildId, Arc<Vec<Arc<Template>>>>> =
-    LazyLock::new(|| {
-        Cache::builder()
-            .support_invalidation_closures()
-            .time_to_idle(Duration::from_secs(60 * 5))
-            .build()
-    });
+    LazyLock::new(|| Cache::builder().build());
 
 /// Gets all templates for a guild
 #[allow(dead_code)]

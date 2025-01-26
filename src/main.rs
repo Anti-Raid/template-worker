@@ -3,6 +3,7 @@ mod dispatch;
 mod event_handler;
 mod expiry_tasks;
 mod http;
+mod pages;
 mod serenitystore;
 mod templatingrt;
 mod temporary_punishments;

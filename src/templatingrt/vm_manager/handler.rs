@@ -55,6 +55,7 @@ pub(super) async fn handle_event(
             let provider = TemplateContextProvider {
                 guild_state,
                 template_data: template,
+                global_table: tis_ref.global_table.clone(),
             };
 
             let template_context = TemplateContext::new(provider);
