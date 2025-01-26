@@ -159,7 +159,7 @@ impl SettingView<SettingExecutionData> for TemplateSettingExecutor {
         if let Some(value) = TemplateSettingExecutor::find_results(correlation_id, result) {
             Ok(value)
         } else {
-            Err("Failed to find result".into())
+            Ok(vec![])
         }
     }
 }
@@ -198,7 +198,7 @@ impl SettingCreator<SettingExecutionData> for TemplateSettingExecutor {
         if let Some(value) = TemplateSettingExecutor::find_result(correlation_id, result) {
             Ok(value)
         } else {
-            Err("Failed to find result".into())
+            Ok(indexmap::IndexMap::new())
         }
     }
 }
@@ -237,7 +237,7 @@ impl SettingUpdater<SettingExecutionData> for TemplateSettingExecutor {
         if let Some(value) = TemplateSettingExecutor::find_result(correlation_id, result) {
             Ok(value)
         } else {
-            Err("Failed to find result".into())
+            Ok(indexmap::IndexMap::new())
         }
     }
 }
@@ -276,7 +276,7 @@ impl SettingDeleter<SettingExecutionData> for TemplateSettingExecutor {
         if let Some(()) = TemplateSettingExecutor::find_correlation(correlation_id, result) {
             Ok(())
         } else {
-            Err("Failed to find result".into())
+            Err("Failed to delete result? (no correlation found!)".into())
         }
     }
 }
