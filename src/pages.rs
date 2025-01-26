@@ -316,8 +316,15 @@ pub async fn get_page_by_id(guild_id: GuildId, template_id: &str) -> Option<Arc<
 }
 
 pub async fn set_page(guild_id: GuildId, template_id: String, page: Arc<Page>) {
-    if let Some(v) = PAGES.get_async(&guild_id).await {
-        v.upsert_async(template_id.clone(), page).await;
+    match PAGES.get_async(&guild_id).await {
+        Some(v) => {
+            v.upsert_async(template_id.clone(), page).await;
+        }
+        None => {
+            let map = HashMap::new();
+            map.upsert_async(template_id.clone(), page).await;
+            PAGES.upsert_async(guild_id, Arc::new(map)).await;
+        }
     };
 }
 
