@@ -3,14 +3,18 @@ use crate::templatingrt::MAX_TEMPLATES_RETURN_WAIT_TIME;
 use ar_settings::types::{Setting, SettingView};
 use ar_settings::types::{SettingCreator, SettingDeleter, SettingUpdater};
 use scc::HashMap;
+use serde::Serialize;
 use serde_json::Value;
 use serenity::all::{GuildId, UserId};
 use silverpelt::ar_event::TemplateSettingExecuteEventDataAction;
 use silverpelt::data::Data;
 use silverpelt::Error;
+use std::collections::HashMap as StdHashMap;
 use std::sync::{Arc, LazyLock};
 
+#[derive(Serialize)]
 pub struct Page {
+    pub template_id: String,
     pub title: String,
     pub description: String,
     pub settings: Vec<Setting<SettingExecutionData>>,
@@ -21,6 +25,15 @@ pub struct SettingExecutionData {
     pub data: Arc<Data>,
     pub serenity_context: serenity::all::Context,
     pub author: UserId,
+}
+
+impl serde::Serialize for SettingExecutionData {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.author.serialize(serializer) // This is a dummy impl to satisfy the compiler
+    }
 }
 
 impl SettingExecutionData {
@@ -271,6 +284,26 @@ impl SettingDeleter<SettingExecutionData> for TemplateSettingExecutor {
 #[allow(clippy::type_complexity)]
 static PAGES: LazyLock<HashMap<GuildId, Arc<HashMap<String, Arc<Page>>>>> =
     LazyLock::new(HashMap::new);
+
+pub async fn get_all_pages(guild_id: GuildId) -> Option<Vec<Arc<Page>>> {
+    let pages = PAGES.read_async(&guild_id, |_, v| v.clone()).await?;
+
+    let mut pages_set = StdHashMap::new();
+
+    pages
+        .scan_async(|_, page| {
+            pages_set.insert(page.template_id.clone(), page.clone());
+        })
+        .await;
+
+    let mut pages_list = Vec::with_capacity(pages_set.len());
+
+    for (_, page) in pages_set {
+        pages_list.push(page);
+    }
+
+    Some(pages_list)
+}
 
 pub async fn get_page_by_id(guild_id: GuildId, template_id: &str) -> Option<Arc<Page>> {
     if let Some(page) = PAGES.read_async(&guild_id, |_, v| v.clone()).await {
@@ -568,6 +601,7 @@ pub fn create_page(
         .collect::<Vec<_>>();
 
     Arc::new(Page {
+        template_id,
         title: page.title,
         description: page.description,
         settings,

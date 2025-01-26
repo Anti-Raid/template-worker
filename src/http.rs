@@ -45,6 +45,7 @@ pub fn create(
             post(dispatch_event_and_wait),
         )
         .route("/benchmark-vm/:guild_id", post(benchmark_vm))
+        .route("/pages/:guild_id", post(get_pages_for_guild))
         .route(
             "/page-settings-operation/:guild_id/:user_id",
             post(settings_operation),
@@ -151,6 +152,18 @@ pub enum CanonicalSettingsResult {
     Err {
         error: String,
     },
+}
+
+/// Gets the pages for a guild
+pub(crate) async fn get_pages_for_guild(
+    State(AppData { .. }): State<AppData>,
+    Path(guild_id): Path<serenity::all::GuildId>,
+) -> Json<Vec<Arc<crate::pages::Page>>> {
+    let Some(pages) = crate::pages::get_all_pages(guild_id).await else {
+        return Json(vec![]);
+    };
+
+    Json(pages)
 }
 
 /// Executes an operation on a setting [SettingsOperation]
