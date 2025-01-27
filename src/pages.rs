@@ -58,9 +58,9 @@ pub struct TemplateSettingExecutor {
 impl TemplateSettingExecutor {
     fn find_result(
         correlation_id: uuid::Uuid,
-        results: Vec<Value>,
+        results: StdHashMap<String, Value>,
     ) -> Option<indexmap::IndexMap<String, Value>> {
-        for result in results {
+        for (_, result) in results {
             if let Value::Object(mut map) = result {
                 if let Some(Value::String(id)) = map.get("correlation_id") {
                     if *id == correlation_id.to_string() {
@@ -83,9 +83,9 @@ impl TemplateSettingExecutor {
 
     fn find_results(
         correlation_id: uuid::Uuid,
-        results: Vec<Value>,
+        results: StdHashMap<String, Value>,
     ) -> Option<Vec<indexmap::IndexMap<String, Value>>> {
-        for result in results {
+        for (_, result) in results {
             if let Value::Object(mut map) = result {
                 if let Some(Value::String(id)) = map.get("correlation_id") {
                     if *id == correlation_id.to_string() {
@@ -112,8 +112,11 @@ impl TemplateSettingExecutor {
         None
     }
 
-    fn find_correlation(correlation_id: uuid::Uuid, results: Vec<Value>) -> Option<()> {
-        for result in results {
+    fn find_correlation(
+        correlation_id: uuid::Uuid,
+        results: StdHashMap<String, Value>,
+    ) -> Option<()> {
+        for (_, result) in results {
             if let Value::Object(map) = result {
                 if let Some(Value::String(id)) = map.get("correlation_id") {
                     if *id == correlation_id.to_string() {

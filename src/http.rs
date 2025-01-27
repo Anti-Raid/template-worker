@@ -12,7 +12,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::dispatch::{dispatch, dispatch_and_wait, parse_event};
 
@@ -95,7 +95,7 @@ async fn dispatch_event_and_wait(
     Path(guild_id): Path<serenity::all::GuildId>,
     Query(query): Query<DispatchEventAndWaitQuery>,
     Json(event): Json<AntiraidEvent>,
-) -> Response<Vec<serde_json::Value>> {
+) -> Response<HashMap<String, serde_json::Value>> {
     // Regenerate cache for guild if event is OnStartup
     if let AntiraidEvent::OnStartup(_) = event {
         regenerate_cache(guild_id, &data.pool).await;

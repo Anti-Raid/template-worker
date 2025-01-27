@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::templatingrt::cache::get_all_guild_templates;
 use crate::templatingrt::{dispatch_error, execute, ParseCompileState};
 use antiraid_types::ar_event::AntiraidEvent;
@@ -166,9 +168,9 @@ pub async fn dispatch_and_wait(
     event: CreateEvent,
     guild_id: GuildId,
     wait_timeout: std::time::Duration,
-) -> Result<Vec<serde_json::Value>, silverpelt::Error> {
+) -> Result<HashMap<String, serde_json::Value>, silverpelt::Error> {
     let Some(templates) = get_all_guild_templates(guild_id).await else {
-        return Ok(vec![]);
+        return Ok(HashMap::new());
     };
 
     let mut local_set = tokio::task::JoinSet::new();
@@ -196,6 +198,7 @@ pub async fn dispatch_and_wait(
                     match handle.wait_timeout(wait_timeout).await {
                         Ok(Some(action)) => action
                             .into_response::<serde_json::Value>()
+                            .map(|r| (r, template.clone()))
                             .map_err(|e| (e, template)),
                         Ok(None) => Err(("Timed out while waiting for response".into(), template)),
                         Err(e) => Err((e.to_string().into(), template)),
@@ -206,12 +209,14 @@ pub async fn dispatch_and_wait(
         }
     }
 
-    let mut results = Vec::with_capacity(local_set.len());
+    let mut results = HashMap::with_capacity(local_set.len());
 
     while let Some(result) = local_set.join_next().await {
         let result = result?;
         match result {
-            Ok(r) => results.push(r),
+            Ok((r, template)) => {
+                results.insert(template, r);
+            }
             Err((e, template_name)) => {
                 local_set.abort_all();
 
