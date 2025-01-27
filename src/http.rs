@@ -2,6 +2,7 @@ use crate::templatingrt::{
     benchmark_vm as benchmark_vm_impl, cache::regenerate_cache, FireBenchmark,
     MAX_TEMPLATES_RETURN_WAIT_TIME,
 };
+use antiraid_types::ar_event::AntiraidEvent;
 use ar_settings::types::OperationType;
 use axum::{
     extract::{Path, Query, State},
@@ -11,7 +12,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use silverpelt::ar_event::AntiraidEvent;
 use std::sync::Arc;
 
 use crate::dispatch::{dispatch, dispatch_and_wait, parse_event};

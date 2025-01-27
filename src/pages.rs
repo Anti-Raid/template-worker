@@ -1,12 +1,14 @@
 use crate::dispatch::{dispatch_and_wait, parse_event};
 use crate::templatingrt::MAX_TEMPLATES_RETURN_WAIT_TIME;
+use antiraid_types::ar_event::{
+    AntiraidEvent, TemplateSettingExecuteEventData, TemplateSettingExecuteEventDataAction,
+};
 use ar_settings::types::{Setting, SettingView};
 use ar_settings::types::{SettingCreator, SettingDeleter, SettingUpdater};
 use scc::HashMap;
 use serde::Serialize;
 use serde_json::Value;
 use serenity::all::{GuildId, UserId};
-use silverpelt::ar_event::TemplateSettingExecuteEventDataAction;
 use silverpelt::data::Data;
 use silverpelt::Error;
 use std::collections::HashMap as StdHashMap;
@@ -133,15 +135,13 @@ impl SettingView<SettingExecutionData> for TemplateSettingExecutor {
         filters: indexmap::IndexMap<String, Value>,
     ) -> Result<Vec<indexmap::IndexMap<String, Value>>, Error> {
         let correlation_id = uuid::Uuid::new_v4();
-        let event = silverpelt::ar_event::AntiraidEvent::TemplateSettingExecute(
-            silverpelt::ar_event::TemplateSettingExecuteEventData {
-                template_id: self.template_id.clone(),
-                setting_id: self.setting_id.clone(),
-                action: TemplateSettingExecuteEventDataAction::View { filters },
-                author: context.author,
-                correlation_id,
-            },
-        );
+        let event = AntiraidEvent::TemplateSettingExecute(TemplateSettingExecuteEventData {
+            template_id: self.template_id.clone(),
+            setting_id: self.setting_id.clone(),
+            action: TemplateSettingExecuteEventDataAction::View { filters },
+            author: context.author,
+            correlation_id,
+        });
 
         let create_event =
             parse_event(&event).map_err(|e| format!("Failed to send event to template: {}", e))?;
@@ -172,15 +172,13 @@ impl SettingCreator<SettingExecutionData> for TemplateSettingExecutor {
         fields: indexmap::IndexMap<String, Value>,
     ) -> Result<indexmap::IndexMap<String, Value>, Error> {
         let correlation_id = uuid::Uuid::new_v4();
-        let event = silverpelt::ar_event::AntiraidEvent::TemplateSettingExecute(
-            silverpelt::ar_event::TemplateSettingExecuteEventData {
-                template_id: self.template_id.clone(),
-                setting_id: self.setting_id.clone(),
-                action: TemplateSettingExecuteEventDataAction::Create { fields },
-                author: context.author,
-                correlation_id,
-            },
-        );
+        let event = AntiraidEvent::TemplateSettingExecute(TemplateSettingExecuteEventData {
+            template_id: self.template_id.clone(),
+            setting_id: self.setting_id.clone(),
+            action: TemplateSettingExecuteEventDataAction::Create { fields },
+            author: context.author,
+            correlation_id,
+        });
 
         let create_event =
             parse_event(&event).map_err(|e| format!("Failed to send event to template: {}", e))?;
@@ -211,15 +209,13 @@ impl SettingUpdater<SettingExecutionData> for TemplateSettingExecutor {
         fields: indexmap::IndexMap<String, Value>,
     ) -> Result<indexmap::IndexMap<String, Value>, Error> {
         let correlation_id = uuid::Uuid::new_v4();
-        let event = silverpelt::ar_event::AntiraidEvent::TemplateSettingExecute(
-            silverpelt::ar_event::TemplateSettingExecuteEventData {
-                template_id: self.template_id.clone(),
-                setting_id: self.setting_id.clone(),
-                action: TemplateSettingExecuteEventDataAction::Update { fields },
-                author: context.author,
-                correlation_id,
-            },
-        );
+        let event = AntiraidEvent::TemplateSettingExecute(TemplateSettingExecuteEventData {
+            template_id: self.template_id.clone(),
+            setting_id: self.setting_id.clone(),
+            action: TemplateSettingExecuteEventDataAction::Update { fields },
+            author: context.author,
+            correlation_id,
+        });
 
         let create_event =
             parse_event(&event).map_err(|e| format!("Failed to send event to template: {}", e))?;
@@ -250,15 +246,13 @@ impl SettingDeleter<SettingExecutionData> for TemplateSettingExecutor {
         primary_key: Value,
     ) -> Result<(), Error> {
         let correlation_id = uuid::Uuid::new_v4();
-        let event = silverpelt::ar_event::AntiraidEvent::TemplateSettingExecute(
-            silverpelt::ar_event::TemplateSettingExecuteEventData {
-                template_id: self.template_id.clone(),
-                setting_id: self.setting_id.clone(),
-                action: TemplateSettingExecuteEventDataAction::Delete { primary_key },
-                author: context.author,
-                correlation_id,
-            },
-        );
+        let event = AntiraidEvent::TemplateSettingExecute(TemplateSettingExecuteEventData {
+            template_id: self.template_id.clone(),
+            setting_id: self.setting_id.clone(),
+            action: TemplateSettingExecuteEventDataAction::Delete { primary_key },
+            author: context.author,
+            correlation_id,
+        });
 
         let create_event =
             parse_event(&event).map_err(|e| format!("Failed to send event to template: {}", e))?;

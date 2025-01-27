@@ -1,11 +1,9 @@
-use antiraid_types::{punishments::Punishment, stings::Sting};
+use antiraid_types::{ar_event::AntiraidEvent, punishments::Punishment, stings::Sting};
 use serenity::{
     all::{shard_id, ShardId},
     futures::FutureExt,
 };
-use silverpelt::{
-    ar_event::AntiraidEvent, data::Data, punishments::PunishmentOperations, stings::StingOperations,
-};
+use silverpelt::{data::Data, punishments::PunishmentOperations, stings::StingOperations};
 use std::time::Duration;
 
 use crate::{
