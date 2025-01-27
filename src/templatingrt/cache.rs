@@ -8,6 +8,17 @@ use std::sync::LazyLock;
 pub static TEMPLATES_CACHE: LazyLock<Cache<GuildId, Arc<Vec<Arc<Template>>>>> =
     LazyLock::new(|| Cache::builder().build());
 
+/// Gets all guilds with templates
+pub fn get_all_guilds() -> Vec<GuildId> {
+    let mut templates = Vec::new();
+
+    for (guild_id, _) in TEMPLATES_CACHE.iter() {
+        templates.push(*guild_id);
+    }
+
+    templates
+}
+
 /// Gets all templates for a guild
 #[allow(dead_code)]
 pub async fn get_all_guild_templates(guild_id: GuildId) -> Option<Arc<Vec<Arc<Template>>>> {

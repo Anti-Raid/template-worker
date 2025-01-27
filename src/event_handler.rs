@@ -1,5 +1,7 @@
-use crate::dispatch::discord_event_dispatch;
+use crate::dispatch::{discord_event_dispatch, dispatch, parse_event};
 use crate::expiry_tasks::tasks;
+use crate::templatingrt::cache::{get_all_guild_templates, get_all_guilds};
+use antiraid_types::ar_event::AntiraidEvent;
 use async_trait::async_trait;
 use serenity::all::Framework;
 use serenity::gateway::client::Context;
@@ -45,6 +47,38 @@ impl Framework for EventFramework {
                     tokio::task::spawn(async move {
                         botox::taskman::start_all_tasks(tasks(), ctx2).await;
                     });
+                });
+
+                // Fire OnStartup event to all templates
+                let ctx3 = ctx.clone();
+                tokio::task::spawn(async move {
+                    log::info!("Firing OnStartup event to all templates");
+
+                    for guild in get_all_guilds() {
+                        let ctx = ctx3.clone();
+                        let data = ctx.data::<silverpelt::data::Data>();
+                        tokio::task::spawn(async move {
+                            let Some(templates) = get_all_guild_templates(guild).await else {
+                                return;
+                            };
+                            let templates = templates.iter().map(|t| t.name.clone()).collect();
+                            let create_event =
+                                match parse_event(&AntiraidEvent::OnStartup(templates)) {
+                                    Ok(e) => e,
+                                    Err(e) => {
+                                        log::error!("Error parsing event: {:?}", e);
+                                        return;
+                                    }
+                                };
+
+                            match dispatch(&ctx, &data, create_event, guild).await {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    log::error!("Error dispatching event: {:?}", e);
+                                }
+                            }
+                        });
+                    }
                 });
             });
         }
