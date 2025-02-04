@@ -11,8 +11,10 @@ use khronos_runtime::traits::pageprovider::PageProvider;
 use khronos_runtime::traits::stingprovider::StingProvider;
 use khronos_runtime::traits::userinfoprovider::UserInfoProvider;
 use khronos_runtime::utils::executorscope::ExecutorScope;
+use lockdowns::LockdownMode;
 use moka::future::Cache;
 use serenity::all::InteractionId;
+use silverpelt::lockdowns::LockdownData;
 use silverpelt::stings::{StingAggregateOperations, StingCreateOperations, StingOperations};
 use silverpelt::userinfo::{NoMember, UserInfoOperations};
 use std::num::TryFromIntError;
@@ -661,15 +663,53 @@ pub struct ArLockdownProvider {
     guild_state: Rc<GuildState>,
 }
 
+impl ArLockdownProvider {
+    async fn init_lockdown(
+        &self,
+        lockdown_type: Box<dyn LockdownMode>,
+        reason: String,
+    ) -> Result<sqlx::types::uuid::Uuid, silverpelt::Error> {
+        let mut lockdowns = lockdowns::LockdownSet::guild(
+            self.guild_id,
+            LockdownData::new(
+                &self.guild_state.serenity_context.cache,
+                &self.guild_state.serenity_context.http,
+                self.guild_state.pool.clone(),
+                self.guild_state.reqwest_client.clone(),
+                sandwich_config(),
+            ),
+        )
+        .await
+        .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
+
+        // Create the lockdown
+        let id = lockdowns
+            .easy_apply(lockdown_type, &reason)
+            .await
+            .map_err(|e| format!("Error while applying lockdown: {}", e))?;
+
+        Ok(id)
+    }
+}
+
 impl LockdownProvider for ArLockdownProvider {
     fn attempt_action(&self, bucket: &str) -> serenity::Result<(), silverpelt::Error> {
         self.guild_state.ratelimits.lockdowns.check(bucket)
     }
 
     async fn list(&self) -> Result<Vec<Lockdown>, silverpelt::Error> {
-        let lockdowns = lockdowns::LockdownSet::guild(self.guild_id, &self.guild_state.pool)
-            .await
-            .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
+        let lockdowns = lockdowns::LockdownSet::guild(
+            self.guild_id,
+            LockdownData::new(
+                &self.guild_state.serenity_context.cache,
+                &self.guild_state.serenity_context.http,
+                self.guild_state.pool.clone(),
+                self.guild_state.reqwest_client.clone(),
+                sandwich_config(),
+            ),
+        )
+        .await
+        .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
 
         let mut result = vec![];
 
@@ -687,59 +727,16 @@ impl LockdownProvider for ArLockdownProvider {
     }
 
     async fn qsl(&self, reason: String) -> Result<sqlx::types::uuid::Uuid, silverpelt::Error> {
-        let mut lockdowns = lockdowns::LockdownSet::guild(self.guild_id, &self.guild_state.pool)
+        self.init_lockdown(Box::new(lockdowns::qsl::QuickServerLockdown {}), reason)
             .await
-            .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
-
-        // Create the lockdown
-        let lockdown_type = lockdowns::qsl::QuickServerLockdown {};
-
-        let lockdown_data = lockdowns::LockdownData {
-            cache: &self.guild_state.serenity_context.cache,
-            http: &self.guild_state.serenity_context.http,
-            pool: self.guild_state.pool.clone(),
-            reqwest: self.guild_state.reqwest_client.clone(),
-        };
-
-        let id = lockdowns
-            .easy_apply(
-                Box::new(lockdown_type),
-                &lockdown_data,
-                &reason,
-                &sandwich_config(),
-            )
-            .await
-            .map_err(|e| format!("Error while applying lockdown: {}", e))?;
-
-        Ok(id)
     }
 
     async fn tsl(&self, reason: String) -> Result<sqlx::types::uuid::Uuid, silverpelt::Error> {
-        let mut lockdowns = lockdowns::LockdownSet::guild(self.guild_id, &self.guild_state.pool)
-            .await
-            .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
-
-        // Create the lockdown
-        let lockdown_type = lockdowns::tsl::TraditionalServerLockdown {};
-
-        let lockdown_data = lockdowns::LockdownData {
-            cache: &self.guild_state.serenity_context.cache,
-            http: &self.guild_state.serenity_context.http,
-            pool: self.guild_state.pool.clone(),
-            reqwest: self.guild_state.reqwest_client.clone(),
-        };
-
-        let id = lockdowns
-            .easy_apply(
-                Box::new(lockdown_type),
-                &lockdown_data,
-                &reason,
-                &sandwich_config(),
-            )
-            .await
-            .map_err(|e| format!("Error while applying lockdown: {}", e))?;
-
-        Ok(id)
+        self.init_lockdown(
+            Box::new(lockdowns::tsl::TraditionalServerLockdown {}),
+            reason,
+        )
+        .await
     }
 
     async fn scl(
@@ -747,31 +744,11 @@ impl LockdownProvider for ArLockdownProvider {
         channel_id: serenity::all::ChannelId,
         reason: String,
     ) -> Result<sqlx::types::uuid::Uuid, silverpelt::Error> {
-        let mut lockdowns = lockdowns::LockdownSet::guild(self.guild_id, &self.guild_state.pool)
-            .await
-            .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
-
-        // Create the lockdown
-        let lockdown_type = lockdowns::scl::SingleChannelLockdown(channel_id);
-
-        let lockdown_data = lockdowns::LockdownData {
-            cache: &self.guild_state.serenity_context.cache,
-            http: &self.guild_state.serenity_context.http,
-            pool: self.guild_state.pool.clone(),
-            reqwest: self.guild_state.reqwest_client.clone(),
-        };
-
-        let id = lockdowns
-            .easy_apply(
-                Box::new(lockdown_type),
-                &lockdown_data,
-                &reason,
-                &sandwich_config(),
-            )
-            .await
-            .map_err(|e| format!("Error while applying lockdown: {}", e))?;
-
-        Ok(id)
+        self.init_lockdown(
+            Box::new(lockdowns::scl::SingleChannelLockdown(channel_id)),
+            reason,
+        )
+        .await
     }
 
     async fn role(
@@ -779,47 +756,26 @@ impl LockdownProvider for ArLockdownProvider {
         role_id: serenity::all::RoleId,
         reason: String,
     ) -> Result<sqlx::types::uuid::Uuid, silverpelt::Error> {
-        let mut lockdowns = lockdowns::LockdownSet::guild(self.guild_id, &self.guild_state.pool)
+        self.init_lockdown(Box::new(lockdowns::role::RoleLockdown(role_id)), reason)
             .await
-            .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
-
-        // Create the lockdown
-        let lockdown_type = lockdowns::role::RoleLockdown(role_id);
-
-        let lockdown_data = lockdowns::LockdownData {
-            cache: &self.guild_state.serenity_context.cache,
-            http: &self.guild_state.serenity_context.http,
-            pool: self.guild_state.pool.clone(),
-            reqwest: self.guild_state.reqwest_client.clone(),
-        };
-
-        let id = lockdowns
-            .easy_apply(
-                Box::new(lockdown_type),
-                &lockdown_data,
-                &reason,
-                &sandwich_config(),
-            )
-            .await
-            .map_err(|e| format!("Error while applying lockdown: {}", e))?;
-
-        Ok(id)
     }
 
     async fn remove(&self, id: sqlx::types::uuid::Uuid) -> Result<(), silverpelt::Error> {
-        let mut lockdowns = lockdowns::LockdownSet::guild(self.guild_id, &self.guild_state.pool)
-            .await
-            .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
-
-        let lockdown_data = lockdowns::LockdownData {
-            cache: &self.guild_state.serenity_context.cache,
-            http: &self.guild_state.serenity_context.http,
-            pool: self.guild_state.pool.clone(),
-            reqwest: self.guild_state.reqwest_client.clone(),
-        };
+        let mut lockdowns = lockdowns::LockdownSet::guild(
+            self.guild_id,
+            LockdownData::new(
+                &self.guild_state.serenity_context.cache,
+                &self.guild_state.serenity_context.http,
+                self.guild_state.pool.clone(),
+                self.guild_state.reqwest_client.clone(),
+                sandwich_config(),
+            ),
+        )
+        .await
+        .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
 
         lockdowns
-            .easy_remove(id, &lockdown_data, &sandwich_config())
+            .easy_remove(id)
             .await
             .map_err(|e| format!("Error while applying lockdown: {}", e))?;
 
