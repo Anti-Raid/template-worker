@@ -19,6 +19,8 @@ use std::num::TryFromIntError;
 use std::sync::LazyLock;
 use std::{rc::Rc, sync::Arc};
 
+use super::{kittycat_permission_config_data, sandwich_config};
+
 /// Internal short-lived channel cache
 pub static CHANNEL_CACHE: LazyLock<Cache<serenity::all::ChannelId, serenity::all::GuildChannel>> =
     LazyLock::new(|| {
@@ -347,6 +349,7 @@ impl DiscordProvider for ArDiscordProvider {
             &self.guild_state.serenity_context.http,
             &self.guild_state.reqwest_client,
             self.guild_id,
+            &sandwich_config(),
         )
         .await
         .map_err(|e| format!("Failed to fetch guild information from sandwich: {}", e))?)
@@ -362,6 +365,7 @@ impl DiscordProvider for ArDiscordProvider {
             &self.guild_state.reqwest_client,
             self.guild_id,
             user_id,
+            &sandwich_config(),
         )
         .await
         .map_err(|e| format!("Failed to fetch member information from sandwich: {}", e))?)
@@ -390,6 +394,7 @@ impl DiscordProvider for ArDiscordProvider {
             &self.guild_state.reqwest_client,
             Some(self.guild_id),
             channel_id,
+            &sandwich_config(),
         )
         .await
         .map_err(|e| format!("Failed to fetch channel information from sandwich: {}", e))?;
@@ -697,7 +702,12 @@ impl LockdownProvider for ArLockdownProvider {
         };
 
         let id = lockdowns
-            .easy_apply(Box::new(lockdown_type), &lockdown_data, &reason)
+            .easy_apply(
+                Box::new(lockdown_type),
+                &lockdown_data,
+                &reason,
+                &sandwich_config(),
+            )
             .await
             .map_err(|e| format!("Error while applying lockdown: {}", e))?;
 
@@ -720,7 +730,12 @@ impl LockdownProvider for ArLockdownProvider {
         };
 
         let id = lockdowns
-            .easy_apply(Box::new(lockdown_type), &lockdown_data, &reason)
+            .easy_apply(
+                Box::new(lockdown_type),
+                &lockdown_data,
+                &reason,
+                &sandwich_config(),
+            )
             .await
             .map_err(|e| format!("Error while applying lockdown: {}", e))?;
 
@@ -747,7 +762,12 @@ impl LockdownProvider for ArLockdownProvider {
         };
 
         let id = lockdowns
-            .easy_apply(Box::new(lockdown_type), &lockdown_data, &reason)
+            .easy_apply(
+                Box::new(lockdown_type),
+                &lockdown_data,
+                &reason,
+                &sandwich_config(),
+            )
             .await
             .map_err(|e| format!("Error while applying lockdown: {}", e))?;
 
@@ -774,7 +794,12 @@ impl LockdownProvider for ArLockdownProvider {
         };
 
         let id = lockdowns
-            .easy_apply(Box::new(lockdown_type), &lockdown_data, &reason)
+            .easy_apply(
+                Box::new(lockdown_type),
+                &lockdown_data,
+                &reason,
+                &sandwich_config(),
+            )
             .await
             .map_err(|e| format!("Error while applying lockdown: {}", e))?;
 
@@ -794,7 +819,7 @@ impl LockdownProvider for ArLockdownProvider {
         };
 
         lockdowns
-            .easy_remove(id, &lockdown_data)
+            .easy_remove(id, &lockdown_data, &sandwich_config())
             .await
             .map_err(|e| format!("Error while applying lockdown: {}", e))?;
 
@@ -820,6 +845,8 @@ impl UserInfoProvider for ArUserInfoProvider {
             &self.guild_state.pool,
             &self.guild_state.serenity_context,
             &self.guild_state.reqwest_client,
+            kittycat_permission_config_data(),
+            &sandwich_config(),
             None::<NoMember>,
         )
         .await
@@ -870,13 +897,10 @@ impl StingProvider for ArStingProvider {
         }
 
         let sting = sting
-            .create_and_dispatch_returning_id(
-                self.guild_state.serenity_context.clone(),
-                &self.guild_state.pool,
-            )
+            .create_without_dispatch(&self.guild_state.pool)
             .await?;
 
-        Ok(sting)
+        Ok(sting.id)
     }
 
     async fn update(&self, sting: antiraid_types::stings::Sting) -> Result<(), silverpelt::Error> {
@@ -893,33 +917,15 @@ impl StingProvider for ArStingProvider {
         }
 
         sting
-            .update_and_dispatch(
-                &self.guild_state.pool,
-                self.guild_state.serenity_context.clone(),
-            )
+            .update_without_dispatch(&self.guild_state.pool)
             .await
             .map_err(|e| format!("failed to update sting: {}", e))?;
 
-        todo!()
+        Ok(())
     }
 
     async fn delete(&self, id: sqlx::types::uuid::Uuid) -> Result<(), silverpelt::Error> {
-        let Some(sting) = Sting::get(&self.guild_state.pool, self.guild_id, id)
-            .await
-            .map_err(|e| format!("failed to fetch sting information: {:?}", e))?
-        else {
-            return Err("Sting not found".into());
-        };
-
-        if sting.guild_id != self.guild_id {
-            return Err("sting not associated with this guild".into());
-        }
-
-        sting
-            .delete_and_dispatch(
-                &self.guild_state.pool,
-                self.guild_state.serenity_context.clone(),
-            )
+        Sting::delete_without_dispatch(&self.guild_state.pool, self.guild_id, id)
             .await
             .map_err(|e| format!("failed to delete sting: {}", e))?;
 

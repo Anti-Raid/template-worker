@@ -5,6 +5,7 @@ pub mod template;
 mod vm_manager;
 
 use khronos_runtime::primitives::event::CreateEvent;
+use primitives::sandwich_config;
 use serenity::all::GuildId;
 use std::sync::{atomic::Ordering, Arc};
 use template::Template;
@@ -195,6 +196,7 @@ pub async fn dispatch_error(
             &data.reqwest,
             Some(guild_id),
             error_channel,
+            &sandwich_config(),
         )
         .await?
         else {

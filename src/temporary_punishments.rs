@@ -1,6 +1,8 @@
 use antiraid_types::punishments::{Punishment, PunishmentTarget};
 use serenity::http;
 
+use crate::templatingrt::primitives::sandwich_config;
+
 /// Temporary Punishments event listener
 pub async fn handle_expired_punishment(
     data: &silverpelt::data::Data,
@@ -19,6 +21,7 @@ pub async fn handle_expired_punishment(
         &serenity_context.http,
         &data.reqwest,
         punishment.guild_id,
+        &sandwich_config(),
     )
     .await?;
 
@@ -28,6 +31,7 @@ pub async fn handle_expired_punishment(
         &data.reqwest,
         punishment.guild_id,
         bot_id,
+        &sandwich_config(),
     )
     .await?
     {
