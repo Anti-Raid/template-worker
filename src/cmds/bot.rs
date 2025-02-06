@@ -1,3 +1,4 @@
+use crate::config::CONFIG;
 use crate::event_handler::EventFramework;
 use crate::templatingrt::cache::setup;
 use clap::Parser;
@@ -38,12 +39,12 @@ pub async fn start() {
 
     env_builder.init();
 
-    let proxy_url = config::CONFIG.meta.proxy.clone();
+    let proxy_url = CONFIG.meta.proxy.clone();
 
     info!("Proxy URL: {}", proxy_url);
 
     let http = Arc::new(
-        HttpBuilder::new(&config::CONFIG.discord_auth.token)
+        HttpBuilder::new(&CONFIG.discord_auth.token)
             .proxy(proxy_url)
             .ratelimiter_disabled(true)
             .build(),
@@ -65,7 +66,7 @@ pub async fn start() {
 
     let pg_pool = PgPoolOptions::new()
         .max_connections(POSTGRES_MAX_CONNECTIONS)
-        .connect(&config::CONFIG.meta.postgres_url)
+        .connect(&CONFIG.meta.postgres_url)
         .await
         .expect("Could not initialize connection");
 
@@ -77,7 +78,7 @@ pub async fn start() {
 
     let data = Data {
         object_store: Arc::new(
-            config::CONFIG
+            CONFIG
                 .object_storage
                 .build()
                 .expect("Could not initialize object store"),

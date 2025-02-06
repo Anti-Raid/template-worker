@@ -1,4 +1,5 @@
 mod cmds;
+mod config;
 mod dispatch;
 mod event_handler;
 mod expiry_tasks;

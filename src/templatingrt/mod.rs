@@ -11,6 +11,8 @@ use std::sync::{atomic::Ordering, Arc};
 use template::Template;
 use vm_manager::{get_lua_vm, LuaVmAction, LuaVmResult};
 
+use crate::config::CONFIG;
+
 pub const MAX_TEMPLATE_MEMORY_USAGE: usize = 1024 * 1024 * 3; // 3MB maximum memory
 pub const MAX_VM_THREAD_STACK_SIZE: usize = 1024 * 1024 * 8; // 8MB maximum memory
 pub const MAX_TEMPLATES_EXECUTION_TIME: std::time::Duration =
@@ -223,7 +225,7 @@ pub async fn dispatch_error(
                     )
                     .components(vec![serenity::all::CreateActionRow::Buttons(
                         vec![serenity::all::CreateButton::new_link(
-                            &config::CONFIG.meta.support_server_invite,
+                            &CONFIG.meta.support_server_invite,
                         )
                         .label("Support Server")]
                         .into(),

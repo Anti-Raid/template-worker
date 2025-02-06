@@ -13,6 +13,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 async-trait = "0.1.80"
 serde = "1.0"
 serde_json = "1.0"
+serde_yaml = "0.9"
 scc = "2"
 governor = "0.6"
 rand = "0.8"
@@ -35,7 +36,6 @@ gwevent = { git = "https://github.com/Anti-Raid/gwevent" }
 
 silverpelt = { path = "../../core/rust/rust.silverpelt" }
 sandwich_driver = { path = "../../core/rust/rust.sandwich_driver" }
-config = { path = "../../core/rust/rust.config" }
 rust_rpc_server = { path = "../../core/rust/rust.rpc_server" }
 splashcore_rs = { path = "../../core/rust/rust.std" }
 limits = { path = "../../core/rust/rust.limits" }

@@ -1,3 +1,4 @@
+use crate::config::CONFIG;
 use crate::dispatch::{discord_event_dispatch, dispatch, parse_event};
 use crate::expiry_tasks::tasks;
 use crate::templatingrt::cache::{get_all_guild_templates, get_all_guilds};
@@ -32,8 +33,8 @@ impl Framework for EventFramework {
                     let opts = rust_rpc_server::CreateRpcServerOptions {
                         bind: rust_rpc_server::CreateRpcServerBind::Address(format!(
                             "{}:{}",
-                            config::CONFIG.base_ports.template_worker_addr,
-                            config::CONFIG.base_ports.template_worker_port
+                            CONFIG.base_ports.template_worker_addr,
+                            CONFIG.base_ports.template_worker_port
                         )),
                     };
 
