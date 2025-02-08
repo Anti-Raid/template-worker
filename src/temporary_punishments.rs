@@ -41,7 +41,7 @@ pub async fn handle_expired_punishment(
         }
     };
 
-    let permissions = splashcore_rs::serenity_backport::member_permissions(&guild, &current_user);
+    let permissions = botox::serenity_backports::member_permissions(&guild, &current_user);
 
     // Bot doesn't have permissions to unban
     if !permissions.ban_members() {

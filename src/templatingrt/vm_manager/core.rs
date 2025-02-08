@@ -7,6 +7,7 @@ use crate::templatingrt::MAX_TEMPLATES_EXECUTION_TIME;
 use crate::templatingrt::MAX_TEMPLATE_MEMORY_USAGE;
 use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::utils::pluginholder::PluginSet;
+use khronos_runtime::utils::proxyglobal::proxy_global;
 use mlua::prelude::*;
 use mlua_scheduler::TaskManager;
 use mlua_scheduler_ext::feedbacks::ThreadTracker;
@@ -138,36 +139,7 @@ pub(super) fn configure_lua_vm(
         .set_type_info_level(1);
     lua.set_compiler(compiler);
 
-    // Setup the global table using a metatable
-    //
-    // SAFETY: This works because the global table will not change in the VM
-    let global_mt = lua.create_table()?;
-    let global_tab = lua.create_table()?;
-
-    // Proxy reads to globals if key is in globals, otherwise to the table
-    global_mt.set("__index", lua.globals())?;
-    global_tab.set("_G", global_tab.clone())?;
-
-    // Provies writes
-    // Forward to _G if key is in globals, otherwise to the table
-    let globals_ref = lua.globals();
-    global_mt.set(
-        "__newindex",
-        lua.create_function(
-            move |_lua, (tab, key, value): (LuaTable, LuaValue, LuaValue)| {
-                let v = globals_ref.get::<LuaValue>(key.clone())?;
-
-                if !v.is_nil() {
-                    globals_ref.set(key, value)
-                } else {
-                    tab.raw_set(key, value)
-                }
-            },
-        )?,
-    )?;
-
-    // Set __index on global_tab to point to _G
-    global_tab.set_metatable(Some(global_mt));
+    let global_tab = proxy_global(&lua)?;
 
     // Override require function for plugin support and increased security
     lua.globals().set(
