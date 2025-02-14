@@ -98,7 +98,7 @@ impl Ratelimits {
     fn new_stings_rl() -> Result<LuaRatelimits, silverpelt::Error> {
         // Create the global limit
         let global_quota =
-            LuaRatelimits::create_quota(NonZeroU32::new(10).unwrap(), Duration::from_secs(60))?;
+            LuaRatelimits::create_quota(NonZeroU32::new(100).unwrap(), Duration::from_secs(3))?;
         let global1 = DefaultKeyedRateLimiter::keyed(global_quota);
         let global = vec![global1];
 

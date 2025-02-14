@@ -53,7 +53,7 @@ pub async fn regenerate_cache(guild_id: GuildId, pool: &sqlx::PgPool) {
 }
 
 async fn get_all_templates_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt::Error> {
-    let partials = sqlx::query!("SELECT name, guild_id FROM guild_templates",)
+    let partials = sqlx::query!("SELECT guild_id FROM guild_templates GROUP BY guild_id")
         .fetch_all(pool)
         .await?;
 
@@ -61,12 +61,10 @@ async fn get_all_templates_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt
 
     for partial in partials {
         let guild_id = partial.guild_id.parse()?;
-        let template = Template::guild(guild_id, &partial.name, pool).await?;
 
-        if let Some(templates_vec) = templates.get_mut(&guild_id) {
-            templates_vec.push(Arc::new(template));
-        } else {
-            templates.insert(guild_id, vec![Arc::new(template)]);
+        if let Ok(templates_vec) = Template::guild(guild_id, pool).await {
+            let templates_vec = templates_vec.into_iter().map(Arc::new).collect::<Vec<_>>();
+            templates.insert(guild_id, templates_vec);
         }
     }
 
@@ -83,22 +81,14 @@ async fn get_all_guild_templates_from_db(
     guild_id: GuildId,
     pool: &sqlx::PgPool,
 ) -> Result<(), silverpelt::Error> {
-    let partials = sqlx::query!(
-        "SELECT name FROM guild_templates WHERE guild_id = $1",
-        guild_id.to_string()
-    )
-    .fetch_all(pool)
-    .await?;
-
-    let mut templates = Vec::new();
-
-    for partial in partials {
-        let template = Template::guild(guild_id, &partial.name, pool).await?;
-        templates.push(Arc::new(template));
-    }
+    let templates_vec = Template::guild(guild_id, pool)
+        .await?
+        .into_iter()
+        .map(Arc::new)
+        .collect::<Vec<_>>();
 
     // Store the templates in the cache
-    let templates = Arc::new(templates.clone());
+    let templates = Arc::new(templates_vec);
     TEMPLATES_CACHE.insert(guild_id, templates.clone()).await;
     Ok(())
 }
