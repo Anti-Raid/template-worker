@@ -431,9 +431,9 @@ impl DiscordProvider for ArDiscordProvider {
             .map_err(|e| format!("Failed to fetch audit logs: {}", e).into())
     }
 
-    async fn get_automod_rules(
+    async fn list_auto_moderation_rules(
         &self,
-    ) -> Result<Vec<serenity::model::guild::automod::Rule>, silverpelt::Error> {
+    ) -> Result<Vec<serenity::model::guild::automod::Rule>, khronos_runtime::Error> {
         self.guild_state
             .serenity_context
             .http
@@ -442,16 +442,71 @@ impl DiscordProvider for ArDiscordProvider {
             .map_err(|e| format!("Failed to fetch automod rules: {}", e).into())
     }
 
-    async fn get_automod_rule(
+    async fn get_auto_moderation_rule(
         &self,
         rule_id: serenity::all::RuleId,
-    ) -> Result<serenity::model::guild::automod::Rule, silverpelt::Error> {
+    ) -> Result<serenity::model::guild::automod::Rule, khronos_runtime::Error> {
         self.guild_state
             .serenity_context
             .http
             .get_automod_rule(self.guild_id, rule_id)
             .await
             .map_err(|e| format!("Failed to fetch automod rule: {}", e).into())
+    }
+
+    async fn create_auto_moderation_rule(
+        &self,
+        map: impl serde::Serialize,
+        audit_log_reason: Option<&str>,
+    ) -> Result<serenity::model::guild::automod::Rule, khronos_runtime::Error> {
+        self.guild_state
+            .serenity_context
+            .http
+            .create_automod_rule(self.guild_id, &map, audit_log_reason)
+            .await
+            .map_err(|e| format!("Failed to create automod rule: {}", e).into())
+    }
+
+    async fn edit_auto_moderation_rule(
+        &self,
+        rule_id: serenity::all::RuleId,
+        map: impl serde::Serialize,
+        audit_log_reason: Option<&str>,
+    ) -> Result<serenity::model::guild::automod::Rule, khronos_runtime::Error> {
+        self.guild_state
+            .serenity_context
+            .http
+            .edit_automod_rule(self.guild_id, rule_id, &map, audit_log_reason)
+            .await
+            .map_err(|e| format!("Failed to edit automod rule: {}", e).into())
+    }
+
+    async fn delete_auto_moderation_rule(
+        &self,
+        rule_id: serenity::all::RuleId,
+        audit_log_reason: Option<&str>,
+    ) -> Result<(), khronos_runtime::Error> {
+        self.guild_state
+            .serenity_context
+            .http
+            .delete_automod_rule(self.guild_id, rule_id, audit_log_reason)
+            .await
+            .map_err(|e| format!("Failed to delete automod rule: {}", e).into())
+    }
+
+    async fn edit_channel_permissions(
+        &self,
+        channel_id: serenity::all::ChannelId,
+        target_id: serenity::all::TargetId,
+        data: impl serde::Serialize,
+        audit_log_reason: Option<&str>,
+    ) -> Result<(), khronos_runtime::Error> {
+        self.guild_state
+            .serenity_context
+            .http
+            .create_permission(channel_id, target_id, &data, audit_log_reason)
+            .await
+            .map_err(|e| format!("Failed to edit channel permissions: {}", e).into())
     }
 
     async fn edit_channel(
