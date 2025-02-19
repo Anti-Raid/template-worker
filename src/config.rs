@@ -1,3 +1,4 @@
+use clap::{Parser, ValueEnum};
 use serde::{Deserialize, Serialize};
 use serenity::all::UserId;
 use silverpelt::objectstore::ObjectStore;
@@ -5,6 +6,42 @@ use std::fs::File;
 use std::sync::LazyLock;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
+
+#[derive(Debug, ValueEnum, Clone, Copy)]
+pub enum VmDistributionStrategy {
+    /// Use a thread pool that each stores a set of VMs where each guild is assigned a VM on the threadpool
+    ThreadPool,
+    /// Use a dedicated thread for each VM where each guild is assigned a VM (on a dedicated thread)
+    ThreadPerGuild,
+}
+
+/// Command line arguments
+#[derive(Parser, Debug, Clone)]
+pub struct CmdArgs {
+    /// Shard IDs to start. Mutually exclusive with `shard_count` and neither passed [default is to autoshard]
+    #[clap(long)]
+    pub shards: Option<Vec<u16>>,
+
+    /// Number of shards to start. Mutually exclusive with `shards` and neither passed [default is to autoshard]
+    #[clap(long)]
+    pub shard_count: Option<u16>,
+
+    /// Max connections that should be made to the database
+    #[clap(long, default_value = "7")]
+    pub max_db_connections: u32,
+
+    /// Distribution strategy for VMs
+    #[clap(long, default_value = "thread_pool")]
+    pub vm_distribution_strategy: VmDistributionStrategy,
+}
+
+/// Global internal config object
+pub static CMD_ARGS: LazyLock<CmdArgs> = LazyLock::new(|| {
+    let mut env_args = std::env::args().collect::<Vec<String>>();
+    env_args.remove(1);
+
+    CmdArgs::parse_from(env_args)
+});
 
 /// Global config object
 pub static CONFIG: LazyLock<Config> =

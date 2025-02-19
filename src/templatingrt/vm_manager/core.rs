@@ -1,4 +1,6 @@
 use super::AtomicInstant;
+use crate::config::VmDistributionStrategy;
+use crate::config::CMD_ARGS;
 use crate::templatingrt::primitives::ctxprovider::TemplateContextProvider;
 use crate::templatingrt::state::GuildState;
 use crate::templatingrt::state::Ratelimits;
@@ -29,10 +31,8 @@ pub static PLUGIN_SET: LazyLock<PluginSet> = LazyLock::new(|| {
 });
 
 // Vm creation strategies
-#[cfg(feature = "thread_proc")]
-use super::threadperguild_strategy::create_lua_vm;
-#[cfg(feature = "threadpool_proc")]
-use super::threadpool_strategy::create_lua_vm;
+use super::threadperguild_strategy::create_lua_vm as create_lua_vm_threadperguild;
+use super::threadpool_strategy::create_lua_vm as create_lua_vm_threadpool;
 
 /// VM cache
 static VMS: LazyLock<scc::HashMap<GuildId, ArLua>> = LazyLock::new(scc::HashMap::new);
@@ -237,6 +237,7 @@ pub(super) fn configure_lua_vm(
 
     lua.globals().set_readonly(true);
 
+    let broken_ref = broken.clone();
     // Create an interrupt to limit the execution time of a template
     lua.set_interrupt(move |_| {
         if last_execution_time
@@ -246,6 +247,11 @@ pub(super) fn configure_lua_vm(
         {
             return Ok(LuaVmState::Yield);
         }
+
+        if broken_ref.load(std::sync::atomic::Ordering::Acquire) {
+            return Ok(LuaVmState::Yield);
+        }
+
         Ok(LuaVmState::Continue)
     });
 
@@ -317,7 +323,15 @@ pub(crate) async fn get_lua_vm(
     reqwest_client: reqwest::Client,
 ) -> Result<ArLua, silverpelt::Error> {
     let Some(mut vm) = VMS.get(&guild_id) else {
-        let vm = create_lua_vm(guild_id, pool, serenity_context, reqwest_client).await?;
+        let vm = match CMD_ARGS.vm_distribution_strategy {
+            VmDistributionStrategy::ThreadPool => {
+                create_lua_vm_threadpool(guild_id, pool, serenity_context, reqwest_client).await?
+            }
+            VmDistributionStrategy::ThreadPerGuild => {
+                create_lua_vm_threadperguild(guild_id, pool, serenity_context, reqwest_client)
+                    .await?
+            }
+        };
         if let Err((_, alt_vm)) = VMS.insert_async(guild_id, vm.clone()).await {
             return Ok(alt_vm);
         }
@@ -325,7 +339,16 @@ pub(crate) async fn get_lua_vm(
     };
 
     if vm.broken.load(std::sync::atomic::Ordering::Acquire) {
-        let new_vm = create_lua_vm(guild_id, pool, serenity_context, reqwest_client).await?;
+        let new_vm = match CMD_ARGS.vm_distribution_strategy {
+            VmDistributionStrategy::ThreadPool => {
+                create_lua_vm_threadpool(guild_id, pool, serenity_context, reqwest_client).await?
+            }
+            VmDistributionStrategy::ThreadPerGuild => {
+                create_lua_vm_threadperguild(guild_id, pool, serenity_context, reqwest_client)
+                    .await?
+            }
+        };
+
         *vm = new_vm.clone();
         Ok(new_vm)
     } else {

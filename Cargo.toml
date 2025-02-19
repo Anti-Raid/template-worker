@@ -51,8 +51,3 @@ features = ["model", "http", "cache", "rustls_backend", "unstable"]
 [dependencies.botox]
 git = "https://github.com/Anti-Raid/botox"
 branch = "main"
-
-[features]
-default = ["threadpool_proc"]
-thread_proc = [] # Use threads for the Lua VM
-threadpool_proc = [] # Use fixed-size thread pool for Lua VMs
