@@ -20,6 +20,11 @@ pub(super) async fn handle_event(
                 return LuaVmResult::VmBroken {};
             }
 
+            tis_ref.last_execution_time.store(
+                std::time::Instant::now(),
+                std::sync::atomic::Ordering::Release,
+            );
+
             // Check bytecode cache first, compile template if not found
             let template_bytecode =
                 match resolve_template_to_bytecode(&template, &tis_ref.bytecode_cache).await {

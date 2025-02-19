@@ -6,8 +6,9 @@ use std::sync::{Arc, LazyLock};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::RwLock;
 
-use super::core::{create_guild_state, ArLua, BytecodeCache, LuaVmAction, LuaVmResult};
+use super::core::{create_guild_state, ArLuaHandle, BytecodeCache, LuaVmAction, LuaVmResult};
 use super::handler::handle_event;
+use super::{ArLua, AtomicInstant};
 use crate::templatingrt::vm_manager::core::configure_lua_vm;
 use crate::templatingrt::MAX_VM_THREAD_STACK_SIZE;
 
@@ -15,7 +16,7 @@ pub const DEFAULT_MAX_THREADS: usize = 100; // Maximum number of threads in the 
 
 struct ThreadEntrySend {
     guild_id: GuildId,
-    tx: UnboundedSender<ArLua>,
+    tx: UnboundedSender<ThreadPoolLuaHandle>,
 }
 
 /// A thread entry in the pool (worker thread)
@@ -67,8 +68,8 @@ impl ThreadEntry {
     }
 
     /// Add a guild to the pool with a given shard messenger
-    async fn add_guild(&self, guild: GuildId) -> Result<ArLua, silverpelt::Error> {
-        let (tx, mut rx) = unbounded_channel::<ArLua>();
+    async fn add_guild(&self, guild: GuildId) -> Result<ThreadPoolLuaHandle, silverpelt::Error> {
+        let (tx, mut rx) = unbounded_channel::<ThreadPoolLuaHandle>();
 
         self.tx
             .send(ThreadEntrySend {
@@ -106,7 +107,6 @@ impl ThreadEntry {
                     .unwrap();
 
                 let local = tokio::task::LocalSet::new();
-
                 local.block_on(&rt, async {
                     // Catch panics
                     fn panic_catcher(
@@ -179,10 +179,11 @@ impl ThreadEntry {
                             }
                         });
 
-                        if let Err(e) = send.tx.send(ArLua {
+                        if let Err(e) = send.tx.send(ThreadPoolLuaHandle {
                             last_execution_time,
                             handle: tx,
                             broken,
+                            worker_broken,
                         }) {
                             log::error!("Failed to send new guild handle: {}", e);
                         }
@@ -265,7 +266,7 @@ impl ThreadPool {
         pool: sqlx::PgPool,
         serenity_context: serenity::all::Context,
         reqwest_client: reqwest::Client,
-    ) -> Result<ArLua, silverpelt::Error> {
+    ) -> Result<ThreadPoolLuaHandle, silverpelt::Error> {
         // Flush out broken threads
         self.remove_broken_threads().await;
 
@@ -309,7 +310,55 @@ pub async fn create_lua_vm(
     serenity_context: serenity::all::Context,
     reqwest_client: reqwest::Client,
 ) -> Result<ArLua, silverpelt::Error> {
-    DEFAULT_THREAD_POOL
+    let thread_pool_handle = DEFAULT_THREAD_POOL
         .add_guild(guild_id, pool, serenity_context, reqwest_client)
-        .await
+        .await?;
+
+    Ok(ArLua::ThreadPool(thread_pool_handle))
+}
+
+#[derive(Clone)]
+pub struct ThreadPoolLuaHandle {
+    /// The last execution time of the Lua VM
+    pub last_execution_time: Arc<AtomicInstant>,
+
+    /// The thread handle for the Lua VM
+    pub handle: tokio::sync::mpsc::UnboundedSender<(
+        LuaVmAction,
+        tokio::sync::oneshot::Sender<LuaVmResult>,
+    )>,
+
+    /// Is the VM broken/needs to be remade
+    pub broken: Arc<std::sync::atomic::AtomicBool>,
+
+    /// Is the worker itself marked as broken
+    pub worker_broken: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl ArLuaHandle for ThreadPoolLuaHandle {
+    fn broken(&self) -> bool {
+        self.broken.load(std::sync::atomic::Ordering::Acquire)
+            || self
+                .worker_broken
+                .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn set_broken(&self) {
+        self.broken
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    fn last_execution_time(&self) -> std::time::Instant {
+        self.last_execution_time
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn send_action(
+        &self,
+        action: LuaVmAction,
+        callback: tokio::sync::oneshot::Sender<LuaVmResult>,
+    ) -> Result<(), khronos_runtime::Error> {
+        self.handle.send((action, callback))?;
+        Ok(())
+    }
 }

@@ -4,10 +4,11 @@ pub mod state;
 pub mod template;
 mod vm_manager;
 
+use crate::templatingrt::vm_manager::ArLuaHandle;
 use khronos_runtime::primitives::event::CreateEvent;
 use primitives::sandwich_config;
 use serenity::all::GuildId;
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::Arc;
 use template::Template;
 use vm_manager::{get_lua_vm, LuaVmAction, LuaVmResult};
 
@@ -35,14 +36,9 @@ pub async fn execute(
     )
     .await?;
 
-    // Update last execution time.
-    lua.last_execution_time
-        .store(std::time::Instant::now(), Ordering::Release);
-
     let (tx, rx) = tokio::sync::oneshot::channel();
 
-    lua.handle
-        .send((LuaVmAction::Exec { template, event }, tx))
+    lua.send_action(LuaVmAction::Exec { template, event }, tx)
         .map_err(|e| format!("Could not send data to Lua thread: {}", e))?;
 
     Ok(RenderTemplateHandle { rx })

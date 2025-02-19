@@ -10,4 +10,4 @@ pub(crate) use atomicinstant::AtomicInstant;
 #[allow(unused_imports)]
 pub(crate) use core::{get_lua_vm, ArLua};
 
-pub use core::{LuaVmAction, LuaVmResult};
+pub use core::{ArLuaHandle, LuaVmAction, LuaVmResult};

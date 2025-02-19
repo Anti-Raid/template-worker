@@ -1,3 +1,5 @@
+use super::threadperguild_strategy::PerThreadLuaHandle;
+use super::threadpool_strategy::ThreadPoolLuaHandle;
 use super::AtomicInstant;
 use crate::config::VmDistributionStrategy;
 use crate::config::CMD_ARGS;
@@ -9,6 +11,7 @@ use crate::templatingrt::MAX_TEMPLATES_EXECUTION_TIME;
 use crate::templatingrt::MAX_TEMPLATE_MEMORY_USAGE;
 use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::utils::pluginholder::PluginSet;
+use khronos_runtime::utils::prelude::setup_prelude;
 use khronos_runtime::utils::proxyglobal::proxy_global;
 use mlua::prelude::*;
 use mlua_scheduler::TaskManager;
@@ -23,6 +26,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::time::Duration;
+use std::time::Instant;
 
 pub static PLUGIN_SET: LazyLock<PluginSet> = LazyLock::new(|| {
     let mut plugins = PluginSet::new();
@@ -80,28 +84,74 @@ impl Deref for BytecodeCache {
     }
 }
 
-/// ArLua provides a handle to a Lua VM
+#[derive(Clone)]
+pub enum ArLua {
+    ThreadPool(ThreadPoolLuaHandle),
+    ThreadPerGuild(PerThreadLuaHandle),
+}
+
+impl ArLuaHandle for ArLua {
+    fn last_execution_time(&self) -> Instant {
+        match self {
+            ArLua::ThreadPool(handle) => handle.last_execution_time(),
+            ArLua::ThreadPerGuild(handle) => handle.last_execution_time(),
+        }
+    }
+
+    fn send_action(
+        &self,
+        action: LuaVmAction,
+        callback: tokio::sync::oneshot::Sender<LuaVmResult>,
+    ) -> Result<(), khronos_runtime::Error> {
+        match self {
+            ArLua::ThreadPool(handle) => handle.send_action(action, callback),
+            ArLua::ThreadPerGuild(handle) => handle.send_action(action, callback),
+        }
+    }
+
+    fn broken(&self) -> bool {
+        match self {
+            ArLua::ThreadPool(handle) => handle.broken(),
+            ArLua::ThreadPerGuild(handle) => handle.broken(),
+        }
+    }
+
+    fn set_broken(&self) {
+        match self {
+            ArLua::ThreadPool(handle) => handle.set_broken(),
+            ArLua::ThreadPerGuild(handle) => handle.set_broken(),
+        }
+    }
+}
+
+/// ArLuaHandle provides a handle to a Lua VM
 ///
 /// Note that the Lua VM is not directly exposed both due to thread safety issues
 /// and to allow for multiple VM-thread allocation strategies in vm_manager
-#[derive(Clone)]
-pub(crate) struct ArLua {
-    /// The last execution time of the Lua VM
-    pub last_execution_time: Arc<AtomicInstant>,
+pub trait ArLuaHandle: Clone + Send + Sync {
+    /// Returns the last execution time of the Lua VM
+    fn last_execution_time(&self) -> Instant;
 
-    /// The thread handle for the Lua VM
-    pub handle: tokio::sync::mpsc::UnboundedSender<(
-        LuaVmAction,
-        tokio::sync::oneshot::Sender<LuaVmResult>,
-    )>,
+    /// Returns the thread handle for the Lua VM
+    fn send_action(
+        &self,
+        action: LuaVmAction,
+        callback: tokio::sync::oneshot::Sender<LuaVmResult>,
+    ) -> Result<(), khronos_runtime::Error>;
 
-    /// Is the VM broken/needs to be remade
-    pub broken: Arc<std::sync::atomic::AtomicBool>,
+    /// Returns if the VM is broken
+    fn broken(&self) -> bool;
+
+    /// Sets the VM to be broken
+    fn set_broken(&self);
 }
 
 pub(super) struct ArLuaThreadInnerState {
     /// The Lua VM
     pub lua: Lua,
+
+    /// Last execution time
+    pub last_execution_time: Arc<AtomicInstant>,
 
     /// The bytecode cache maps template to (bytecode, source hash)
     pub bytecode_cache: BytecodeCache,
@@ -140,6 +190,9 @@ pub(super) fn configure_lua_vm(
     lua.set_compiler(compiler);
 
     let global_tab = proxy_global(&lua)?;
+
+    // Prelude code providing some basic functions directly to the Lua VM
+    setup_prelude(&lua, global_tab.clone())?;
 
     // Override require function for plugin support and increased security
     lua.globals().set(
@@ -191,34 +244,6 @@ pub(super) fn configure_lua_vm(
 
     scheduler.attach();
 
-    // Prelude code providing some basic functions directly to the Lua VM
-    lua.load(
-        r#"
-        -- Override print function with function that appends to stdout table
-        -- We do this by executing a lua script
-        _G.print = function(...)
-            local args = {...}
-
-            if not _G.stdout then
-                _G.stdout = {}
-            end
-
-            if #args == 0 then
-                table.insert(_G.stdout, "nil")
-            end
-
-            local str = ""
-            for i = 1, #args do
-                str = str .. tostring(args[i])
-            end
-            table.insert(_G.stdout, str)
-        end
-    "#,
-    )
-    .set_name("prelude")
-    .set_environment(global_tab.clone())
-    .exec()?;
-
     // Patch coroutine and enable task
     let scheduler_lib = mlua_scheduler::userdata::scheduler_lib(&lua)?;
 
@@ -238,9 +263,10 @@ pub(super) fn configure_lua_vm(
     lua.globals().set_readonly(true);
 
     let broken_ref = broken.clone();
+    let last_execution_time_ref = last_execution_time.clone();
     // Create an interrupt to limit the execution time of a template
     lua.set_interrupt(move |_| {
-        if last_execution_time
+        if last_execution_time_ref
             .load(std::sync::atomic::Ordering::Acquire)
             .elapsed()
             >= MAX_TEMPLATES_EXECUTION_TIME
@@ -258,6 +284,7 @@ pub(super) fn configure_lua_vm(
     Ok(ArLuaThreadInnerState {
         lua,
         bytecode_cache,
+        last_execution_time,
         broken,
         global_table: global_tab,
         scheduler,
@@ -338,7 +365,7 @@ pub(crate) async fn get_lua_vm(
         return Ok(vm);
     };
 
-    if vm.broken.load(std::sync::atomic::Ordering::Acquire) {
+    if vm.broken() {
         let new_vm = match CMD_ARGS.vm_distribution_strategy {
             VmDistributionStrategy::ThreadPool => {
                 create_lua_vm_threadpool(guild_id, pool, serenity_context, reqwest_client).await?

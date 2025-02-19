@@ -1,7 +1,8 @@
 use super::core::{
-    configure_lua_vm, create_guild_state, ArLua, BytecodeCache, LuaVmAction, LuaVmResult,
+    configure_lua_vm, create_guild_state, ArLuaHandle, BytecodeCache, LuaVmAction, LuaVmResult,
 };
 use super::handler::handle_event;
+use super::{ArLua, AtomicInstant};
 use crate::templatingrt::MAX_VM_THREAD_STACK_SIZE;
 use serenity::all::GuildId;
 use std::rc::Rc;
@@ -88,9 +89,49 @@ pub async fn create_lua_vm(
             });
         })?;
 
-    Ok(ArLua {
+    Ok(ArLua::ThreadPerGuild(PerThreadLuaHandle {
         last_execution_time,
         handle: tx,
         broken,
-    })
+    }))
+}
+
+#[derive(Clone)]
+pub struct PerThreadLuaHandle {
+    /// The last execution time of the Lua VM
+    pub last_execution_time: Arc<AtomicInstant>,
+
+    /// The thread handle for the Lua VM
+    pub handle: tokio::sync::mpsc::UnboundedSender<(
+        LuaVmAction,
+        tokio::sync::oneshot::Sender<LuaVmResult>,
+    )>,
+
+    /// Is the VM broken/needs to be remade
+    pub broken: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl ArLuaHandle for PerThreadLuaHandle {
+    fn broken(&self) -> bool {
+        self.broken.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn set_broken(&self) {
+        self.broken
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    fn last_execution_time(&self) -> std::time::Instant {
+        self.last_execution_time
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn send_action(
+        &self,
+        action: LuaVmAction,
+        callback: tokio::sync::oneshot::Sender<LuaVmResult>,
+    ) -> Result<(), khronos_runtime::Error> {
+        self.handle.send((action, callback))?;
+        Ok(())
+    }
 }
