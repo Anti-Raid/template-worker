@@ -31,17 +31,12 @@ pub struct CmdArgs {
     pub max_db_connections: u32,
 
     /// Distribution strategy for VMs
-    #[clap(long, default_value = "thread_pool")]
+    #[clap(long, default_value = "thread-pool")]
     pub vm_distribution_strategy: VmDistributionStrategy,
 }
 
 /// Global internal config object
-pub static CMD_ARGS: LazyLock<CmdArgs> = LazyLock::new(|| {
-    let mut env_args = std::env::args().collect::<Vec<String>>();
-    env_args.remove(1);
-
-    CmdArgs::parse_from(env_args)
-});
+pub static CMD_ARGS: LazyLock<CmdArgs> = LazyLock::new(CmdArgs::parse);
 
 /// Global config object
 pub static CONFIG: LazyLock<Config> =
