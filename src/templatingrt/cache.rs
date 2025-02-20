@@ -19,6 +19,11 @@ pub fn get_all_guilds() -> Vec<GuildId> {
     templates
 }
 
+/// Returns if a guild has any templates
+pub fn has_templates(guild_id: GuildId) -> bool {
+    TEMPLATES_CACHE.contains_key(&guild_id)
+}
+
 /// Gets all templates for a guild
 #[allow(dead_code)]
 pub async fn get_all_guild_templates(guild_id: GuildId) -> Option<Arc<Vec<Arc<Template>>>> {

@@ -1,21 +1,20 @@
-use super::threadperguild_strategy::PerThreadLuaHandle;
-use super::threadpool_strategy::ThreadPoolLuaHandle;
+use super::client::LuaVmResult;
 use super::AtomicInstant;
-use crate::config::VmDistributionStrategy;
-use crate::config::CMD_ARGS;
 use crate::templatingrt::primitives::ctxprovider::TemplateContextProvider;
 use crate::templatingrt::state::GuildState;
 use crate::templatingrt::state::Ratelimits;
 use crate::templatingrt::template::Template;
 use crate::templatingrt::MAX_TEMPLATES_EXECUTION_TIME;
 use crate::templatingrt::MAX_TEMPLATE_MEMORY_USAGE;
-use khronos_runtime::primitives::event::CreateEvent;
+use khronos_runtime::primitives::event::Event;
 use khronos_runtime::utils::pluginholder::PluginSet;
 use khronos_runtime::utils::prelude::setup_prelude;
 use khronos_runtime::utils::proxyglobal::proxy_global;
+use khronos_runtime::TemplateContext;
 use mlua::prelude::*;
 use mlua_scheduler::TaskManager;
 use mlua_scheduler_ext::feedbacks::ThreadTracker;
+use mlua_scheduler_ext::traits::IntoLuaThread;
 use mlua_scheduler_ext::Scheduler;
 use serenity::all::GuildId;
 use silverpelt::templates::LuaKVConstraints;
@@ -26,43 +25,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::time::Duration;
-use std::time::Instant;
 
 pub static PLUGIN_SET: LazyLock<PluginSet> = LazyLock::new(|| {
     let mut plugins = PluginSet::new();
     plugins.add_default_plugins::<TemplateContextProvider>();
     plugins
 });
-
-// Vm creation strategies
-use super::threadperguild_strategy::create_lua_vm as create_lua_vm_threadperguild;
-use super::threadpool_strategy::create_lua_vm as create_lua_vm_threadpool;
-
-/// VM cache
-static VMS: LazyLock<scc::HashMap<GuildId, ArLua>> = LazyLock::new(scc::HashMap::new);
-
-#[derive(serde::Serialize, serde::Deserialize)]
-#[allow(dead_code)]
-pub enum LuaVmAction {
-    /// Execute a template
-    Exec {
-        template: Arc<Template>,
-        event: CreateEvent,
-    },
-    /// Stop the Lua VM entirely
-    Stop {},
-    /// Returns the memory usage of the Lua VM
-    GetMemoryUsage {},
-    /// Set the memory limit of the Lua VM
-    SetMemoryLimit { limit: usize },
-}
-
-#[derive(Debug)]
-pub enum LuaVmResult {
-    Ok { result_val: serde_json::Value },
-    LuaError { err: String },
-    VmBroken {},
-}
 
 /// Map of template name to bytecode
 ///
@@ -82,68 +50,6 @@ impl Deref for BytecodeCache {
     fn deref(&self) -> &Self::Target {
         &self.0
     }
-}
-
-#[derive(Clone)]
-pub enum ArLua {
-    ThreadPool(ThreadPoolLuaHandle),
-    ThreadPerGuild(PerThreadLuaHandle),
-}
-
-impl ArLuaHandle for ArLua {
-    fn last_execution_time(&self) -> Instant {
-        match self {
-            ArLua::ThreadPool(handle) => handle.last_execution_time(),
-            ArLua::ThreadPerGuild(handle) => handle.last_execution_time(),
-        }
-    }
-
-    fn send_action(
-        &self,
-        action: LuaVmAction,
-        callback: tokio::sync::oneshot::Sender<LuaVmResult>,
-    ) -> Result<(), khronos_runtime::Error> {
-        match self {
-            ArLua::ThreadPool(handle) => handle.send_action(action, callback),
-            ArLua::ThreadPerGuild(handle) => handle.send_action(action, callback),
-        }
-    }
-
-    fn broken(&self) -> bool {
-        match self {
-            ArLua::ThreadPool(handle) => handle.broken(),
-            ArLua::ThreadPerGuild(handle) => handle.broken(),
-        }
-    }
-
-    fn set_broken(&self) {
-        match self {
-            ArLua::ThreadPool(handle) => handle.set_broken(),
-            ArLua::ThreadPerGuild(handle) => handle.set_broken(),
-        }
-    }
-}
-
-/// ArLuaHandle provides a handle to a Lua VM
-///
-/// Note that the Lua VM is not directly exposed both due to thread safety issues
-/// and to allow for multiple VM-thread allocation strategies in vm_manager
-pub trait ArLuaHandle: Clone + Send + Sync {
-    /// Returns the last execution time of the Lua VM
-    fn last_execution_time(&self) -> Instant;
-
-    /// Returns the thread handle for the Lua VM
-    fn send_action(
-        &self,
-        action: LuaVmAction,
-        callback: tokio::sync::oneshot::Sender<LuaVmResult>,
-    ) -> Result<(), khronos_runtime::Error>;
-
-    /// Returns if the VM is broken
-    fn broken(&self) -> bool;
-
-    /// Sets the VM to be broken
-    fn set_broken(&self);
 }
 
 pub(super) struct ArLuaThreadInnerState {
@@ -340,45 +246,123 @@ pub(crate) async fn resolve_template_to_bytecode(
     Ok(bytecode)
 }
 
-/// Get a Lua VM for a guild
-///
-/// This function will either return an existing Lua VM for the guild or create a new one if it does not exist
-pub(crate) async fn get_lua_vm(
-    guild_id: GuildId,
-    pool: sqlx::PgPool,
-    serenity_context: serenity::all::Context,
-    reqwest_client: reqwest::Client,
-) -> Result<ArLua, silverpelt::Error> {
-    let Some(mut vm) = VMS.get(&guild_id) else {
-        let vm = match CMD_ARGS.vm_distribution_strategy {
-            VmDistributionStrategy::ThreadPool => {
-                create_lua_vm_threadpool(guild_id, pool, serenity_context, reqwest_client).await?
-            }
-            VmDistributionStrategy::ThreadPerGuild => {
-                create_lua_vm_threadperguild(guild_id, pool, serenity_context, reqwest_client)
-                    .await?
+/// Helper method to dispatch an event to a template
+pub(super) async fn dispatch_event_to_template(
+    template: Arc<Template>,
+    event: Event,
+    tis_ref: &ArLuaThreadInnerState,
+    guild_state: Rc<GuildState>,
+) -> LuaVmResult {
+    if tis_ref.broken.load(std::sync::atomic::Ordering::Acquire) {
+        return LuaVmResult::VmBroken {};
+    }
+
+    tis_ref.last_execution_time.store(
+        std::time::Instant::now(),
+        std::sync::atomic::Ordering::Release,
+    );
+
+    // Check bytecode cache first, compile template if not found
+    let template_bytecode =
+        match resolve_template_to_bytecode(&template, &tis_ref.bytecode_cache).await {
+            Ok(bytecode) => bytecode,
+            Err(e) => {
+                return LuaVmResult::LuaError { err: e.to_string() };
             }
         };
-        if let Err((_, alt_vm)) = VMS.insert_async(guild_id, vm.clone()).await {
-            return Ok(alt_vm);
+
+    let thread = match tis_ref
+        .lua
+        .load(&template_bytecode)
+        .set_name(&template.name)
+        .set_mode(mlua::ChunkMode::Binary) // Ensure auto-detection never selects binary mode
+        .set_environment(tis_ref.global_table.clone())
+        .into_lua_thread(&tis_ref.lua)
+    {
+        Ok(f) => f,
+        Err(e) => {
+            // Mark memory error'd VMs as broken automatically to avoid user grief/pain
+            if let LuaError::MemoryError(_) = e {
+                // Mark VM as broken
+                tis_ref
+                    .broken
+                    .store(true, std::sync::atomic::Ordering::Release);
+            }
+
+            return LuaVmResult::LuaError { err: e.to_string() };
         }
-        return Ok(vm);
     };
 
-    if vm.broken() {
-        let new_vm = match CMD_ARGS.vm_distribution_strategy {
-            VmDistributionStrategy::ThreadPool => {
-                create_lua_vm_threadpool(guild_id, pool, serenity_context, reqwest_client).await?
-            }
-            VmDistributionStrategy::ThreadPerGuild => {
-                create_lua_vm_threadperguild(guild_id, pool, serenity_context, reqwest_client)
-                    .await?
-            }
-        };
+    // Now, create the template context that should be passed to the template
+    let provider = TemplateContextProvider {
+        guild_state,
+        template_data: template,
+        global_table: tis_ref.global_table.clone(),
+    };
 
-        *vm = new_vm.clone();
-        Ok(new_vm)
+    let template_context = TemplateContext::new(provider);
+
+    let scheduler = tis_ref
+        .lua
+        .app_data_ref::<mlua_scheduler_ext::Scheduler>()
+        .unwrap();
+
+    let args = match (event, template_context).into_lua_multi(&tis_ref.lua) {
+        Ok(f) => f,
+        Err(e) => {
+            // Mark memory error'd VMs as broken automatically to avoid user grief/pain
+            if let LuaError::MemoryError(_) = e {
+                // Mark VM as broken
+                tis_ref
+                    .broken
+                    .store(true, std::sync::atomic::Ordering::Release);
+            }
+
+            return LuaVmResult::LuaError { err: e.to_string() };
+        }
+    };
+
+    let Ok(value) = scheduler.spawn_thread_and_wait("Exec", thread, args).await else {
+        return LuaVmResult::LuaError {
+            err: "Failed to spawn thread".to_string(),
+        };
+    };
+
+    let json_value = if let Some(Ok(values)) = value {
+        match values.len() {
+            0 => serde_json::Value::Null,
+            1 => {
+                let value = values.into_iter().next().unwrap();
+
+                match tis_ref.lua.from_value::<serde_json::Value>(value) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        return LuaVmResult::LuaError { err: e.to_string() };
+                    }
+                }
+            }
+            _ => {
+                let mut arr = Vec::with_capacity(values.len());
+
+                for v in values {
+                    match tis_ref.lua.from_value::<serde_json::Value>(v) {
+                        Ok(v) => arr.push(v),
+                        Err(e) => {
+                            return LuaVmResult::LuaError { err: e.to_string() };
+                        }
+                    }
+                }
+
+                serde_json::Value::Array(arr)
+            }
+        }
+    } else if let Some(Err(e)) = value {
+        return LuaVmResult::LuaError { err: e.to_string() };
     } else {
-        Ok(vm.clone())
+        serde_json::Value::String("No response".to_string())
+    };
+
+    LuaVmResult::Ok {
+        result_val: json_value,
     }
 }

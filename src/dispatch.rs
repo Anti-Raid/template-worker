@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use crate::templatingrt::cache::get_all_guild_templates;
-use crate::templatingrt::{dispatch_error, execute, ParseCompileState};
+use crate::templatingrt::cache::has_templates;
+use crate::templatingrt::{execute, LuaVmAction, ParseCompileState};
 use antiraid_types::ar_event::AntiraidEvent;
 use khronos_runtime::primitives::event::CreateEvent;
 use serenity::all::{Context, FullEvent, GuildId, Interaction};
@@ -119,45 +119,31 @@ pub async fn dispatch(
     event: CreateEvent,
     guild_id: GuildId,
 ) -> Result<(), silverpelt::Error> {
-    let Some(templates) = get_all_guild_templates(guild_id).await else {
+    if !has_templates(guild_id) {
         return Ok(());
     };
 
-    for template in templates.iter().filter(|template| {
-        template.events.contains(&event.name().to_string())
-            || template.events.contains(&event.base_name().to_string())
-    }) {
-        log::info!("Dispatching event: {} to {}", event.name(), template.name);
+    let res = execute(
+        ParseCompileState {
+            serenity_context: ctx.clone(),
+            pool: data.pool.clone(),
+            reqwest_client: data.reqwest.clone(),
+            guild_id,
+        },
+        LuaVmAction::DispatchEvent { event },
+    )
+    .await?;
 
-        match execute(
-            event.clone(),
-            ParseCompileState {
-                serenity_context: ctx.clone(),
-                pool: data.pool.clone(),
-                reqwest_client: data.reqwest.clone(),
-                guild_id,
-            },
-            template.clone(),
-        )
-        .await
-        {
-            Ok(handle) => {
-                let template_name = template.name.clone();
-                let serenity_context = ctx.clone();
-                tokio::task::spawn(async move {
-                    handle
-                        .wait_and_log_error(&template_name, guild_id, &serenity_context)
-                        .await
-                        .map_err(|e| {
-                            log::error!("Error while waiting for template: {}", e);
-                        })
-                });
-            }
-            Err(e) => {
-                dispatch_error(ctx, &e.to_string(), guild_id, template).await?;
-            }
-        }
-    }
+    let serenity_context = ctx.clone();
+
+    tokio::task::spawn(async move {
+        res.wait_and_log_error(guild_id, &serenity_context)
+            .await
+            .map_err(|e| {
+                log::error!("Error while waiting for template: {}", e);
+            })
+    });
+
     Ok(())
 }
 
@@ -169,69 +155,38 @@ pub async fn dispatch_and_wait(
     guild_id: GuildId,
     wait_timeout: std::time::Duration,
 ) -> Result<HashMap<String, serde_json::Value>, silverpelt::Error> {
-    let Some(templates) = get_all_guild_templates(guild_id).await else {
+    if !has_templates(guild_id) {
         return Ok(HashMap::new());
     };
 
-    let mut local_set = tokio::task::JoinSet::new();
-    for template in templates.iter().filter(|template| {
-        template.events.contains(&event.name().to_string())
-            || template.events.contains(&event.base_name().to_string())
-    }) {
-        log::info!("Dispatching event: {} to {}", event.name(), template.name);
+    let handle = execute(
+        ParseCompileState {
+            serenity_context: ctx.clone(),
+            pool: data.pool.clone(),
+            reqwest_client: data.reqwest.clone(),
+            guild_id,
+        },
+        LuaVmAction::DispatchEvent { event },
+    )
+    .await?;
 
-        match execute(
-            event.clone(),
-            ParseCompileState {
-                serenity_context: ctx.clone(),
-                pool: data.pool.clone(),
-                reqwest_client: data.reqwest.clone(),
-                guild_id,
-            },
-            template.clone(),
-        )
-        .await
-        {
-            Ok(handle) => {
-                let template = template.name.clone();
-                local_set.spawn(async move {
-                    match handle.wait_timeout(wait_timeout).await {
-                        Ok(Some(action)) => action
-                            .into_response::<serde_json::Value>()
-                            .map(|r| (r, template.clone()))
-                            .map_err(|e| (e, template)),
-                        Ok(None) => Err(("Timed out while waiting for response".into(), template)),
-                        Err(e) => Err((e.to_string().into(), template)),
-                    }
-                });
-            }
-            Err(e) => return Err(e),
+    let result_handle = match handle.wait_timeout(wait_timeout).await {
+        Ok(Some(action)) => action,
+        Ok(None) => return Err("Timed out while waiting for response".into()),
+        Err(e) => return Err(e.to_string().into()),
+    };
+
+    let mut results = HashMap::with_capacity(result_handle.results.len());
+
+    for result in result_handle.results {
+        if let Err(e) = result.log_error(guild_id, ctx).await {
+            log::error!("Error while waiting for template: {}", e);
+            continue;
         }
-    }
 
-    let mut results = HashMap::with_capacity(local_set.len());
-
-    while let Some(result) = local_set.join_next().await {
-        let result = result?;
-        match result {
-            Ok((r, template)) => {
-                results.insert(template, r);
-            }
-            Err((e, template_name)) => {
-                local_set.abort_all();
-
-                while (local_set.join_next().await).is_some() {
-                    // Drain the rest of the results
-                }
-
-                let template = templates.iter().find(|t| t.name == template_name).unwrap();
-
-                if let Err(e) = dispatch_error(ctx, &e.to_string(), guild_id, template).await {
-                    log::error!("Error while dispatching error: {}", e);
-                };
-
-                return Err(e);
-            }
+        let name = result.template_name.clone();
+        if let Ok(value) = result.into_response::<serde_json::Value>() {
+            results.insert(name, value);
         }
     }
 

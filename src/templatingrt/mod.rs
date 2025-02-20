@@ -4,13 +4,14 @@ pub mod state;
 pub mod template;
 mod vm_manager;
 
+pub use vm_manager::{LuaVmAction, LuaVmResult};
+
 use crate::templatingrt::vm_manager::ArLuaHandle;
 use khronos_runtime::primitives::event::CreateEvent;
 use primitives::sandwich_config;
 use serenity::all::GuildId;
-use std::sync::Arc;
 use template::Template;
-use vm_manager::{get_lua_vm, LuaVmAction, LuaVmResult};
+use vm_manager::get_lua_vm;
 
 use crate::config::CONFIG;
 
@@ -20,13 +21,12 @@ pub const MAX_TEMPLATES_EXECUTION_TIME: std::time::Duration =
     std::time::Duration::from_secs(60 * 5); // 5 minute maximum execution time
 pub const MAX_TEMPLATES_RETURN_WAIT_TIME: std::time::Duration = std::time::Duration::from_secs(10); // 10 seconds maximum execution time
 
-/// Render a template given an event, state and template
+/// Dispatches an event to all templates associated to a server
 ///
 /// Pre-conditions: the serenity context's shard matches the guild itself
 pub async fn execute(
-    event: CreateEvent,
     state: ParseCompileState,
-    template: Arc<Template>,
+    action: LuaVmAction,
 ) -> Result<RenderTemplateHandle, silverpelt::Error> {
     let lua = get_lua_vm(
         state.guild_id,
@@ -38,14 +38,32 @@ pub async fn execute(
 
     let (tx, rx) = tokio::sync::oneshot::channel();
 
-    lua.send_action(LuaVmAction::Exec { template, event }, tx)
-        .map_err(|e| format!("Could not send data to Lua thread: {}", e))?;
+    lua.send_action(action, tx)
+        .map_err(|e| format!("Could not send event to Lua thread: {}", e))?;
 
     Ok(RenderTemplateHandle { rx })
 }
 
+pub struct MultiLuaVmResultHandle {
+    pub results: Vec<LuaVmResultHandle>,
+}
+
+impl MultiLuaVmResultHandle {
+    /// Converts the first result to a response if possible, returning an error if the result is an error
+    pub fn into_response_first<T: serde::de::DeserializeOwned>(
+        self,
+    ) -> Result<T, silverpelt::Error> {
+        if self.results.is_empty() {
+            return Err("No results".into());
+        }
+        let result = self.results.into_iter().next().unwrap();
+        result.into_response::<T>()
+    }
+}
+
 pub struct LuaVmResultHandle {
-    result: LuaVmResult,
+    pub result: LuaVmResult,
+    pub template_name: String,
 }
 
 impl LuaVmResultHandle {
@@ -88,25 +106,30 @@ impl LuaVmResultHandle {
     /// Logs an error in the case of a error lua vm result
     pub async fn log_error(
         &self,
-        template_name: &str,
         guild_id: serenity::all::GuildId,
         serenity_context: &serenity::all::Context,
     ) -> Result<(), silverpelt::Error> {
         match self.result {
             LuaVmResult::VmBroken {} => {
-                log::error!("Lua VM is broken in template {}", template_name);
+                log::error!("Lua VM is broken in template {}", &self.template_name);
                 log_error(
                     guild_id,
                     serenity_context,
-                    template_name,
+                    &self.template_name,
                     "Lua VM has been marked as broken".to_string(),
                 )
                 .await?;
             }
             LuaVmResult::LuaError { ref err } => {
-                log::error!("Lua error in template {}: {}", template_name, err);
+                log::error!("Lua error in template {}: {}", &self.template_name, err);
 
-                log_error(guild_id, serenity_context, template_name, err.to_string()).await?;
+                log_error(
+                    guild_id,
+                    serenity_context,
+                    &self.template_name,
+                    err.to_string(),
+                )
+                .await?;
             }
             _ => {}
         }
@@ -117,30 +140,36 @@ impl LuaVmResultHandle {
 
 /// A handle to allow waiting for a template to render
 pub struct RenderTemplateHandle {
-    rx: tokio::sync::oneshot::Receiver<LuaVmResult>,
+    rx: tokio::sync::oneshot::Receiver<Vec<(String, LuaVmResult)>>,
 }
 
 impl RenderTemplateHandle {
     /// Wait for the template to render
-    pub async fn wait(self) -> Result<LuaVmResultHandle, silverpelt::Error> {
-        let res = self
-            .rx
-            .await
-            .map_err(|e| format!("Could not receive data from Lua thread: {}", e))?;
+    pub async fn wait(self) -> Result<MultiLuaVmResultHandle, silverpelt::Error> {
+        let res = self.rx.await?;
+        let res = res
+            .into_iter()
+            .map(|(name, result)| LuaVmResultHandle {
+                result,
+                template_name: name,
+            })
+            .collect::<Vec<_>>();
 
-        Ok(LuaVmResultHandle { result: res })
+        Ok(MultiLuaVmResultHandle { results: res })
     }
 
     /// Waits for the template to render, then logs an error if the result is an error
     pub async fn wait_and_log_error(
         self,
-        template_name: &str,
         guild_id: serenity::all::GuildId,
         serenity_context: &serenity::all::Context,
-    ) -> Result<LuaVmResultHandle, silverpelt::Error> {
+    ) -> Result<MultiLuaVmResultHandle, silverpelt::Error> {
         let res = self.wait().await?;
-        res.log_error(template_name, guild_id, serenity_context)
-            .await?;
+        for result in &res.results {
+            if result.is_error() {
+                result.log_error(guild_id, serenity_context).await?;
+            }
+        }
         Ok(res)
     }
 
@@ -148,9 +177,18 @@ impl RenderTemplateHandle {
     pub async fn wait_timeout(
         self,
         timeout: std::time::Duration,
-    ) -> Result<Option<LuaVmResultHandle>, silverpelt::Error> {
+    ) -> Result<Option<MultiLuaVmResultHandle>, silverpelt::Error> {
         match tokio::time::timeout(timeout, self.rx).await {
-            Ok(Ok(res)) => Ok(Some(LuaVmResultHandle { result: res })),
+            Ok(Ok(res)) => {
+                let res = res
+                    .into_iter()
+                    .map(|(name, result)| LuaVmResultHandle {
+                        result,
+                        template_name: name,
+                    })
+                    .collect::<Vec<_>>();
+                Ok(Some(MultiLuaVmResultHandle { results: res }))
+            }
             Ok(Err(e)) => Err(format!("Could not receive data from Lua thread: {}", e).into()),
             Err(_) => Ok(None),
         }
@@ -277,25 +315,27 @@ pub async fn benchmark_vm(
     let reqwest_client_a = reqwest_client.clone();
 
     let start = std::time::Instant::now();
-    let n: i32 = execute(
-        CreateEvent::new(
-            "Benchmark".to_string(),
-            "Benchmark".to_string(),
-            serde_json::Value::Null,
-            None,
-        ),
+    let n = execute(
         ParseCompileState {
             serenity_context: serenity_context_a,
             reqwest_client: reqwest_client_a,
             guild_id: guild_id_a,
             pool: pool_a,
         },
-        pt.into(),
+        LuaVmAction::DispatchInlineEvent {
+            event: CreateEvent::new(
+                "Benchmark".to_string(),
+                "Benchmark".to_string(),
+                serde_json::Value::Null,
+                None,
+            ),
+            template: pt.into(),
+        },
     )
     .await?
     .wait()
     .await?
-    .into_response()?;
+    .into_response_first::<i32>()?;
 
     let exec_simple = start.elapsed().as_micros();
 
@@ -316,21 +356,24 @@ pub async fn benchmark_vm(
 
     let start = std::time::Instant::now();
     execute(
-        CreateEvent::new(
-            "Benchmark".to_string(),
-            "Benchmark".to_string(),
-            serde_json::Value::Null,
-            None,
-        ),
         ParseCompileState {
             serenity_context: serenity_context_a,
             reqwest_client: reqwest_client_a,
             guild_id: guild_id_a,
             pool: pool_a,
         },
-        pt.into(),
+        LuaVmAction::DispatchInlineEvent {
+            event: CreateEvent::new(
+                "Benchmark".to_string(),
+                "Benchmark".to_string(),
+                serde_json::Value::Null,
+                None,
+            ),
+            template: pt.into(),
+        },
     )
     .await?;
+
     let exec_no_wait = start.elapsed().as_micros();
 
     // Exec simple with wait
@@ -346,26 +389,31 @@ pub async fn benchmark_vm(
 
     let start = std::time::Instant::now();
     let err = execute(
-        CreateEvent::new(
-            "Benchmark".to_string(),
-            "Benchmark".to_string(),
-            serde_json::Value::Null,
-            None,
-        ),
         ParseCompileState {
             serenity_context: serenity_context_a,
             reqwest_client: reqwest_client_a,
             guild_id: guild_id_a,
             pool: pool_a,
         },
-        pt.into(),
+        LuaVmAction::DispatchInlineEvent {
+            event: CreateEvent::new(
+                "Benchmark".to_string(),
+                "Benchmark".to_string(),
+                serde_json::Value::Null,
+                None,
+            ),
+            template: pt.into(),
+        },
     )
     .await?
     .wait()
     .await?;
+
     let exec_error = start.elapsed().as_micros();
 
-    let Some(err) = err.lua_error() else {
+    let first = err.results.into_iter().next().ok_or("No results")?;
+
+    let Some(err) = first.lua_error() else {
         return Err("Expected error, got success".into());
     };
 

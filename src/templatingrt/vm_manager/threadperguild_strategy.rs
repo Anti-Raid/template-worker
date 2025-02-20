@@ -1,9 +1,11 @@
-use super::core::{
-    configure_lua_vm, create_guild_state, ArLuaHandle, BytecodeCache, LuaVmAction, LuaVmResult,
-};
-use super::handler::handle_event;
-use super::{ArLua, AtomicInstant};
-use crate::templatingrt::MAX_VM_THREAD_STACK_SIZE;
+use super::client::{ArLuaHandle, LuaVmResult};
+use super::core::{configure_lua_vm, create_guild_state, BytecodeCache};
+use super::{client::ArLua, AtomicInstant};
+use crate::templatingrt::cache::get_all_guild_templates;
+use crate::templatingrt::vm_manager::client::LuaVmAction;
+use crate::templatingrt::vm_manager::core::dispatch_event_to_template;
+use crate::templatingrt::{MAX_TEMPLATES_RETURN_WAIT_TIME, MAX_VM_THREAD_STACK_SIZE};
+use khronos_runtime::primitives::event::Event;
 use serenity::all::GuildId;
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
@@ -21,7 +23,7 @@ pub async fn create_lua_vm(
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(
         LuaVmAction,
-        tokio::sync::oneshot::Sender<LuaVmResult>,
+        tokio::sync::oneshot::Sender<Vec<(String, LuaVmResult)>>,
     )>();
 
     let broken_ref = broken.clone();
@@ -81,9 +83,100 @@ pub async fn create_lua_vm(
                 while let Some((action, callback)) = rx.recv().await {
                     let tis_ref = tis_ref.clone();
                     let gs = gs.clone();
+
                     local.spawn_local(async move {
-                        let result = handle_event(action, &tis_ref, gs).await;
-                        let _ = callback.send(result);
+                        match action {
+                            LuaVmAction::DispatchEvent { event } => {
+                                let Some(templates) = get_all_guild_templates(guild_id).await
+                                else {
+                                    return;
+                                };
+
+                                let mut set = tokio::task::JoinSet::new();
+                                for template in
+                                    templates.iter().filter(|t| t.should_dispatch(&event))
+                                {
+                                    let template = template.clone();
+                                    let tis_ref = tis_ref.clone();
+                                    let gs = gs.clone();
+                                    let event = Event::from_create_event(&event);
+                                    set.spawn_local(async move {
+                                        let name = template.name.clone();
+                                        let result = dispatch_event_to_template(
+                                            template, event, &tis_ref, gs,
+                                        )
+                                        .await;
+
+                                        (name, result)
+                                    });
+                                }
+
+                                let mut results = Vec::new();
+                                while let Ok(Some(result)) = tokio::time::timeout(
+                                    MAX_TEMPLATES_RETURN_WAIT_TIME,
+                                    set.join_next(),
+                                )
+                                .await
+                                {
+                                    match result {
+                                        Ok((name, result)) => {
+                                            results.push((name, result));
+                                        }
+                                        Err(e) => {
+                                            log::error!(
+                                                "Failed to dispatch event to template: {}",
+                                                e
+                                            );
+                                        }
+                                    }
+                                }
+
+                                // Send back to the caller
+                                let _ = callback.send(results);
+                            }
+                            LuaVmAction::DispatchInlineEvent { event, template } => {
+                                let event = Event::from_create_event(&event);
+                                let name = template.name.clone();
+                                let result =
+                                    dispatch_event_to_template(template, event, &tis_ref, gs).await;
+
+                                // Send back to the caller
+                                let _ = callback.send(vec![(name, result)]);
+                            }
+                            LuaVmAction::Stop {} => {
+                                // Mark VM as broken
+                                tis_ref
+                                    .broken
+                                    .store(true, std::sync::atomic::Ordering::Release);
+
+                                let _ = callback.send(vec![(
+                                    "_".to_string(),
+                                    LuaVmResult::Ok {
+                                        result_val: serde_json::Value::Null,
+                                    },
+                                )]);
+                            }
+                            LuaVmAction::GetMemoryUsage {} => {
+                                let used = tis_ref.lua.used_memory();
+
+                                let _ = callback.send(vec![(
+                                    "_".to_string(),
+                                    LuaVmResult::Ok {
+                                        result_val: serde_json::Value::Number(used.into()),
+                                    },
+                                )]);
+                            }
+                            LuaVmAction::SetMemoryLimit { limit } => {
+                                let result = match tis_ref.lua.set_memory_limit(limit) {
+                                    Ok(limit) => LuaVmResult::Ok {
+                                        result_val: serde_json::Value::Number(limit.into()),
+                                    },
+                                    Err(e) => LuaVmResult::LuaError { err: e.to_string() },
+                                };
+
+                                let _ = callback.send(vec![("_".to_string(), result)]);
+                            }
+                        };
                     });
                 }
             });
@@ -101,10 +194,11 @@ pub struct PerThreadLuaHandle {
     /// The last execution time of the Lua VM
     pub last_execution_time: Arc<AtomicInstant>,
 
+    #[allow(clippy::type_complexity)]
     /// The thread handle for the Lua VM
     pub handle: tokio::sync::mpsc::UnboundedSender<(
         LuaVmAction,
-        tokio::sync::oneshot::Sender<LuaVmResult>,
+        tokio::sync::oneshot::Sender<Vec<(String, LuaVmResult)>>,
     )>,
 
     /// Is the VM broken/needs to be remade
@@ -129,7 +223,7 @@ impl ArLuaHandle for PerThreadLuaHandle {
     fn send_action(
         &self,
         action: LuaVmAction,
-        callback: tokio::sync::oneshot::Sender<LuaVmResult>,
+        callback: tokio::sync::oneshot::Sender<Vec<(String, LuaVmResult)>>,
     ) -> Result<(), khronos_runtime::Error> {
         self.handle.send((action, callback))?;
         Ok(())

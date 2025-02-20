@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use khronos_runtime::primitives::event::CreateEvent;
 use silverpelt::templates::parse_shop_template;
 use silverpelt::Error;
 
@@ -62,6 +63,12 @@ pub struct Template {
 }
 
 impl Template {
+    /// Returns true if the event should be dispatched to the template
+    pub fn should_dispatch(&self, event: &CreateEvent) -> bool {
+        self.events.contains(&event.name().to_string())
+            || self.events.contains(&event.base_name().to_string())
+    }
+
     /// Returns all templates for a guild
     pub async fn guild(
         guild_id: serenity::all::GuildId,
