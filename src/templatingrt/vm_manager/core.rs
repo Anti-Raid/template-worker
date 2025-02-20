@@ -5,7 +5,9 @@ use crate::templatingrt::state::GuildState;
 use crate::templatingrt::state::Ratelimits;
 use crate::templatingrt::template::Template;
 use crate::templatingrt::MAX_TEMPLATES_EXECUTION_TIME;
+use crate::templatingrt::MAX_TEMPLATES_RETURN_WAIT_TIME;
 use crate::templatingrt::MAX_TEMPLATE_MEMORY_USAGE;
+use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::primitives::event::Event;
 use khronos_runtime::utils::pluginholder::PluginSet;
 use khronos_runtime::utils::prelude::setup_prelude;
@@ -365,4 +367,41 @@ pub(super) async fn dispatch_event_to_template(
     LuaVmResult::Ok {
         result_val: json_value,
     }
+}
+
+pub(super) async fn dispatch_event_to_multiple_templates(
+    templates: Arc<Vec<Arc<Template>>>,
+    event: CreateEvent,
+    tis_ref: Rc<ArLuaThreadInnerState>,
+    guild_state: Rc<GuildState>,
+) -> Vec<(String, LuaVmResult)> {
+    let mut set = tokio::task::JoinSet::new();
+    for template in templates.iter().filter(|t| t.should_dispatch(&event)) {
+        let template = template.clone();
+        let tis_ref = tis_ref.clone();
+        let gs = guild_state.clone();
+        let event = Event::from_create_event(&event);
+        set.spawn_local(async move {
+            let name = template.name.clone();
+            let result = dispatch_event_to_template(template, event, &tis_ref, gs).await;
+
+            (name, result)
+        });
+    }
+
+    let mut results = Vec::new();
+    while let Ok(Some(result)) =
+        tokio::time::timeout(MAX_TEMPLATES_RETURN_WAIT_TIME, set.join_next()).await
+    {
+        match result {
+            Ok((name, result)) => {
+                results.push((name, result));
+            }
+            Err(e) => {
+                log::error!("Failed to dispatch event to template: {}", e);
+            }
+        }
+    }
+
+    results
 }

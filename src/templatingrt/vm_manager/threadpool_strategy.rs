@@ -7,11 +7,13 @@ use std::sync::{Arc, LazyLock};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::RwLock;
 
-use super::core::{create_guild_state, BytecodeCache};
+use super::core::{
+    configure_lua_vm, create_guild_state, dispatch_event_to_multiple_templates,
+    dispatch_event_to_template, BytecodeCache,
+};
 use super::{client::ArLua, ArLuaHandle, AtomicInstant, LuaVmAction, LuaVmResult};
 use crate::templatingrt::cache::get_all_guild_templates;
-use crate::templatingrt::vm_manager::core::{configure_lua_vm, dispatch_event_to_template};
-use crate::templatingrt::{MAX_TEMPLATES_RETURN_WAIT_TIME, MAX_VM_THREAD_STACK_SIZE};
+use crate::templatingrt::MAX_VM_THREAD_STACK_SIZE;
 
 pub const DEFAULT_MAX_THREADS: usize = 100; // Maximum number of threads in the pool
 
@@ -182,59 +184,27 @@ impl ThreadEntry {
                                                 return;
                                             };
 
-                                            let mut set = tokio::task::JoinSet::new();
-                                            for template in templates
-                                                .iter()
-                                                .filter(|t| t.should_dispatch(&event))
-                                            {
-                                                let template = template.clone();
-                                                let event = Event::from_create_event(&event);
-                                                let tis_ref = tis_ref.clone();
-                                                let gs = gs.clone();
-
-                                                set.spawn_local(async move {
-                                                    let name = template.name.clone();
-                                                    let result = dispatch_event_to_template(
-                                                        template, event, &tis_ref, gs,
-                                                    )
-                                                    .await;
-
-                                                    (name, result)
-                                                });
-                                            }
-
-                                            let mut results = Vec::new();
-                                            while let Ok(Some(result)) = tokio::time::timeout(
-                                                MAX_TEMPLATES_RETURN_WAIT_TIME,
-                                                set.join_next(),
-                                            )
-                                            .await
-                                            {
-                                                match result {
-                                                    Ok((name, result)) => {
-                                                        results.push((name, result));
-                                                    }
-                                                    Err(e) => {
-                                                        log::error!(
-                                                            "Failed to dispatch event to template: {}",
-                                                            e
-                                                        );
-                                                    }
-                                                }
-                                            }
-
-                                            // Send back to the caller
-                                            let _ = callback.send(results);
+                                            let _ = callback.send(
+                                                dispatch_event_to_multiple_templates(
+                                                    templates,
+                                                    event,
+                                                    tis_ref,
+                                                    gs.clone(),
+                                                )
+                                                .await,
+                                            );
                                         }
                                         LuaVmAction::DispatchInlineEvent { event, template } => {
                                             let event = Event::from_create_event(&event);
                                             let name = template.name.clone();
-                                            let result =
-                                                dispatch_event_to_template(template, event, &tis_ref, gs).await;
-            
+                                            let result = dispatch_event_to_template(
+                                                template, event, &tis_ref, gs,
+                                            )
+                                            .await;
+
                                             // Send back to the caller
                                             let _ = callback.send(vec![(name, result)]);
-                                        }            
+                                        }
                                         LuaVmAction::Stop {} => {
                                             // Mark VM as broken
                                             tis_ref
