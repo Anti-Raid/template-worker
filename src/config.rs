@@ -105,7 +105,6 @@ impl ObjectStorage {
 #[derive(Serialize, Deserialize, Default)]
 pub struct Meta {
     pub postgres_url: String,
-    pub redis_url: String,
     pub proxy: String,
     pub support_server_invite: String,
     pub sandwich_http_api: String,
