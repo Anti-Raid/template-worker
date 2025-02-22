@@ -1,0 +1,95 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, src, stings, reason, void_reason, guild_id, creator, target, state, sting_data, created_at, duration, handle_log FROM stings WHERE id = $1 AND guild_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "src",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "stings",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "void_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "guild_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "creator",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "target",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "sting_data",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "duration",
+        "type_info": "Interval"
+      },
+      {
+        "ordinal": 12,
+        "name": "handle_log",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "eeca78159e68491cb07008571f5336708816332d1a7c0f05a0c9b3a206f3e8e9"
+}

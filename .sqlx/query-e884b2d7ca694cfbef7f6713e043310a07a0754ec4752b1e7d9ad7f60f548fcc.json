@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM lockdown__guild_lockdowns WHERE guild_id = $1 AND id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e884b2d7ca694cfbef7f6713e043310a07a0754ec4752b1e7d9ad7f60f548fcc"
+}

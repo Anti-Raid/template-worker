@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE stings SET state = 'handled', handle_log = $2 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "59e7a224ac9d6715927bdbbb61dc6516b841f10bd9e1fd3530749e5beb112ba6"
+}
