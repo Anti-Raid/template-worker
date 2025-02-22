@@ -25,15 +25,17 @@ async fn main() {
 
     let mut env_builder = env_logger::builder();
 
-    env_builder.format(move |buf, record| {
-        writeln!(
-            buf,
-            "({}) {} - {}",
-            record.target(),
-            record.level(),
-            record.args()
-        )
-    });
+    env_builder
+        .format(move |buf, record| {
+            writeln!(
+                buf,
+                "({}) {} - {}",
+                record.target(),
+                record.level(),
+                record.args()
+            )
+        })
+        .filter(None, log::LevelFilter::Info);
 
     env_builder.init();
 
