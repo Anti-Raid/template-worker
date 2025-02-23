@@ -44,6 +44,7 @@ pub fn create(
             "/dispatch-event/:guild_id/@wait",
             post(dispatch_event_and_wait),
         )
+        .route("/healthcheck", post(|| async { Json(()) }))
         .route("/benchmark-vm/:guild_id", post(benchmark_vm))
         .route("/pages/:guild_id", post(get_pages_for_guild))
         .route(
