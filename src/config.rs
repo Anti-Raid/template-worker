@@ -130,6 +130,7 @@ pub struct BasePorts {
     pub jobserver_bind_addr: String,
     pub bot_base_addr: String,
     pub bot_bind_addr: String,
+    pub template_worker_bind_addr: String,
     pub template_worker_addr: String,
     pub template_worker_port: u16,
 }
@@ -157,18 +158,6 @@ impl Config {
             Ok(file) => {
                 // Parse config.yaml
                 let mut cfg: Config = serde_yaml::from_reader(file)?;
-
-                if let Ok(e) = std::env::var("PROXY_URL") {
-                    cfg.meta.proxy = e;
-                }
-
-                if let Ok(pg_url) = std::env::var("POSTGRES_URL") {
-                    cfg.meta.postgres_url = pg_url;
-                }
-
-                if let Ok(sandwich_url) = std::env::var("SANDWICH_URL") {
-                    cfg.meta.sandwich_http_api = sandwich_url;
-                }
 
                 cfg.start_time = chrono::Utc::now().timestamp();
 

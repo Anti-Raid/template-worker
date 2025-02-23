@@ -33,7 +33,7 @@ impl Framework for EventFramework {
                     let opts = rust_rpc_server::CreateRpcServerOptions {
                         bind: rust_rpc_server::CreateRpcServerBind::Address(format!(
                             "{}:{}",
-                            CONFIG.base_ports.template_worker_addr,
+                            CONFIG.base_ports.template_worker_bind_addr,
                             CONFIG.base_ports.template_worker_port
                         )),
                     };
