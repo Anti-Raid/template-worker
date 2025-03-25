@@ -17,7 +17,6 @@ use serenity::all::InteractionId;
 use silverpelt::lockdowns::LockdownData;
 use silverpelt::stings::{StingAggregateOperations, StingCreateOperations, StingOperations};
 use silverpelt::userinfo::{NoMember, UserInfoOperations};
-use std::num::TryFromIntError;
 use std::sync::LazyLock;
 use std::{rc::Rc, sync::Arc};
 
@@ -217,21 +216,20 @@ impl KVProvider for ArKVProvider {
 
         let mut tx = self.guild_state.pool.begin().await?;
 
-        let rec = sqlx::query!(
+        let rec: i64 = sqlx::query!(
             "SELECT COUNT(*) FROM guild_templates_kv WHERE guild_id = $1",
             self.guild_id.to_string(),
         )
         .fetch_one(&mut *tx)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+        .count
+        .unwrap_or_default();
 
-        if rec.count.unwrap_or(0)
-            >= self
-                .guild_state
-                .kv_constraints
-                .max_keys
-                .try_into()
-                .map_err(|e: TryFromIntError| e.to_string())?
+        if rec
+            >= TryInto::<i64>::try_into(
+                silverpelt::templates::LuaKVConstraints::default().max_keys,
+            )?
         {
             return Err("Max keys limit reached".into());
         }
@@ -509,6 +507,60 @@ impl DiscordProvider for ArDiscordProvider {
             .map_err(|e| format!("Failed to edit channel permissions: {}", e).into())
     }
 
+    async fn add_guild_member_role(
+        &self,
+        user_id: serenity::all::UserId,
+        role_id: serenity::all::RoleId,
+        audit_log_reason: Option<&str>,
+    ) -> Result<(), khronos_runtime::Error> {
+        self.guild_state
+            .serenity_context
+            .http
+            .add_member_role(self.guild_id, user_id, role_id, audit_log_reason)
+            .await
+            .map_err(|e| format!("Failed to add role to member: {}", e).into())
+    }
+
+    async fn remove_guild_member_role(
+        &self,
+        user_id: serenity::all::UserId,
+        role_id: serenity::all::RoleId,
+        audit_log_reason: Option<&str>,
+    ) -> Result<(), khronos_runtime::Error> {
+        self.guild_state
+            .serenity_context
+            .http
+            .remove_member_role(self.guild_id, user_id, role_id, audit_log_reason)
+            .await
+            .map_err(|e| format!("Failed to remove role from member: {}", e).into())
+    }
+
+    async fn remove_guild_member(
+        &self,
+        user_id: serenity::all::UserId,
+        audit_log_reason: Option<&str>,
+    ) -> Result<(), khronos_runtime::Error> {
+        self.guild_state
+            .serenity_context
+            .http
+            .kick_member(self.guild_id, user_id, audit_log_reason)
+            .await
+            .map_err(|e| format!("Failed to remove member: {}", e).into())
+    }
+
+    async fn get_guild_bans(
+        &self,
+        target: Option<serenity::all::UserPagination>,
+        limit: Option<serenity::nonmax::NonMaxU16>,
+    ) -> Result<Vec<serenity::all::Ban>, khronos_runtime::Error> {
+        self.guild_state
+            .serenity_context
+            .http
+            .get_bans(self.guild_id, target, limit)
+            .await
+            .map_err(|e| format!("Failed to get guild bans: {}", e).into())
+    }
+
     async fn edit_channel(
         &self,
         channel_id: serenity::all::ChannelId,
@@ -672,6 +724,18 @@ impl DiscordProvider for ArDiscordProvider {
             .map_err(|e| format!("Failed to get guild command: {}", e).into())
     }
 
+    async fn get_guild_roles(
+        &self,
+    ) -> Result<botox::ExtractMap<serenity::all::RoleId, serenity::all::Role>, khronos_runtime::Error>
+    {
+        self.guild_state
+            .serenity_context
+            .http
+            .get_guild_roles(self.guild_id)
+            .await
+            .map_err(|e| format!("Failed to get guild roles: {}", e).into())
+    }
+
     async fn create_guild_command(
         &self,
         map: impl serde::Serialize,
@@ -723,7 +787,7 @@ impl ArLockdownProvider {
         &self,
         lockdown_type: Box<dyn LockdownMode>,
         reason: String,
-    ) -> Result<sqlx::types::uuid::Uuid, silverpelt::Error> {
+    ) -> Result<uuid::Uuid, silverpelt::Error> {
         let mut lockdowns = lockdowns::LockdownSet::guild(
             self.guild_id,
             LockdownData::new(

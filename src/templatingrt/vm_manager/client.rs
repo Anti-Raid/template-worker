@@ -1,9 +1,6 @@
 //! Client side abstraction for the inner Lua VM
 
-use std::{
-    sync::{Arc, LazyLock},
-    time::Instant,
-};
+use std::sync::{Arc, LazyLock};
 
 use khronos_runtime::primitives::event::CreateEvent;
 use serenity::all::GuildId;
@@ -52,13 +49,6 @@ pub enum ArLua {
 }
 
 impl ArLuaHandle for ArLua {
-    fn last_execution_time(&self) -> Instant {
-        match self {
-            ArLua::ThreadPool(handle) => handle.last_execution_time(),
-            ArLua::ThreadPerGuild(handle) => handle.last_execution_time(),
-        }
-    }
-
     fn send_action(
         &self,
         action: LuaVmAction,
@@ -69,20 +59,6 @@ impl ArLuaHandle for ArLua {
             ArLua::ThreadPerGuild(handle) => handle.send_action(action, callback),
         }
     }
-
-    fn broken(&self) -> bool {
-        match self {
-            ArLua::ThreadPool(handle) => handle.broken(),
-            ArLua::ThreadPerGuild(handle) => handle.broken(),
-        }
-    }
-
-    fn set_broken(&self) {
-        match self {
-            ArLua::ThreadPool(handle) => handle.set_broken(),
-            ArLua::ThreadPerGuild(handle) => handle.set_broken(),
-        }
-    }
 }
 
 /// ArLuaHandle provides a handle to a Lua VM
@@ -90,21 +66,12 @@ impl ArLuaHandle for ArLua {
 /// Note that the Lua VM is not directly exposed both due to thread safety issues
 /// and to allow for multiple VM-thread allocation strategies in vm_manager
 pub trait ArLuaHandle: Clone + Send + Sync {
-    /// Returns the last execution time of the Lua VM
-    fn last_execution_time(&self) -> Instant;
-
     /// Returns the thread handle for the Lua VM
     fn send_action(
         &self,
         action: LuaVmAction,
         callback: tokio::sync::oneshot::Sender<Vec<(String, LuaVmResult)>>,
     ) -> Result<(), khronos_runtime::Error>;
-
-    /// Returns if the VM is broken
-    fn broken(&self) -> bool;
-
-    /// Sets the VM to be broken
-    fn set_broken(&self);
 }
 
 /// Get a Lua VM for a guild
@@ -116,7 +83,7 @@ pub async fn get_lua_vm(
     serenity_context: serenity::all::Context,
     reqwest_client: reqwest::Client,
 ) -> Result<ArLua, silverpelt::Error> {
-    let Some(mut vm) = VMS.get(&guild_id) else {
+    let Some(vm) = VMS.get(&guild_id) else {
         let vm = match CMD_ARGS.vm_distribution_strategy {
             VmDistributionStrategy::ThreadPool => {
                 create_lua_vm_threadpool(guild_id, pool, serenity_context, reqwest_client).await?
@@ -132,20 +99,5 @@ pub async fn get_lua_vm(
         return Ok(vm);
     };
 
-    if vm.broken() {
-        let new_vm = match CMD_ARGS.vm_distribution_strategy {
-            VmDistributionStrategy::ThreadPool => {
-                create_lua_vm_threadpool(guild_id, pool, serenity_context, reqwest_client).await?
-            }
-            VmDistributionStrategy::ThreadPerGuild => {
-                create_lua_vm_threadperguild(guild_id, pool, serenity_context, reqwest_client)
-                    .await?
-            }
-        };
-
-        *vm = new_vm.clone();
-        Ok(new_vm)
-    } else {
-        Ok(vm.clone())
-    }
+    Ok(vm.clone())
 }

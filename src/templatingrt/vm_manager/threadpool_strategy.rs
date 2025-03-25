@@ -1,17 +1,17 @@
 use khronos_runtime::primitives::event::Event;
 use serenity::all::GuildId;
-use std::panic::PanicHookInfo;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, LazyLock};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::RwLock;
 
+use super::client::VMS;
 use super::core::{
-    configure_lua_vm, create_guild_state, dispatch_event_to_multiple_templates,
-    dispatch_event_to_template, BytecodeCache,
+    configure_runtime_manager, create_guild_state, dispatch_event_to_multiple_templates,
+    dispatch_event_to_template,
 };
-use super::{client::ArLua, ArLuaHandle, AtomicInstant, LuaVmAction, LuaVmResult};
+use super::{client::ArLua, ArLuaHandle, LuaVmAction, LuaVmResult};
 use crate::templatingrt::cache::get_all_guild_templates;
 use crate::templatingrt::MAX_VM_THREAD_STACK_SIZE;
 
@@ -98,7 +98,6 @@ impl ThreadEntry {
     ) -> Result<(), silverpelt::Error> {
         let mut rx = rx; // Take mutable ownership to receiver
         let broken_ref = self.broken.clone();
-        let id = self.id;
         std::thread::Builder::new()
             .name(format!("lua-vm-threadpool-{}", self.id))
             .stack_size(MAX_VM_THREAD_STACK_SIZE)
@@ -111,20 +110,6 @@ impl ThreadEntry {
 
                 let local = tokio::task::LocalSet::new();
                 local.block_on(&rt, async {
-                    // Catch panics
-                    fn panic_catcher(
-                        id: u64,
-                        broken_ref: Arc<AtomicBool>,
-                    ) -> Box<dyn Fn(&PanicHookInfo<'_>) + 'static + Sync + Send>
-                    {
-                        Box::new(move |pi| {
-                            log::error!("Lua thread panicked: {} ({})", id, pi);
-                            broken_ref.store(true, Ordering::Release);
-                        })
-                    }
-
-                    super::perthreadpanichook::set_hook(panic_catcher(id, broken_ref.clone()));
-
                     // Keep waiting for new guild creation requests
                     while let Some(send) = rx.recv().await {
                         let worker_broken = broken_ref.clone();
@@ -134,14 +119,9 @@ impl ThreadEntry {
                             continue;
                         }
 
-                        let broken = Arc::new(AtomicBool::new(false));
-                        let last_execution_time =
-                            Arc::new(super::AtomicInstant::new(std::time::Instant::now()));
-
                         // Create Lua VM
                         let gs = Rc::new(
                             create_guild_state(
-                                last_execution_time.clone(),
                                 send.guild_id,
                                 pool.clone(),
                                 serenity_context.clone(),
@@ -150,21 +130,17 @@ impl ThreadEntry {
                             .expect("Failed to create Lua VM userdata"),
                         );
 
-                        let bytecode_cache = BytecodeCache::new();
+                        let tis_ref = match configure_runtime_manager() {
+                            Ok(tis) => tis,
+                            Err(e) => {
+                                log::error!("Failed to configure Lua VM: {}", e);
+                                panic!("Failed to configure Lua VM");
+                            }
+                        };
 
-                        let tis_ref = Rc::new(
-                            match configure_lua_vm(
-                                broken.clone(),
-                                last_execution_time.clone(),
-                                bytecode_cache,
-                            ) {
-                                Ok(tis) => tis,
-                                Err(e) => {
-                                    log::error!("Failed to configure Lua VM: {}", e);
-                                    panic!("Failed to configure Lua VM");
-                                }
-                            },
-                        );
+                        tis_ref.set_on_broken(Box::new(move |_lua| {
+                            VMS.remove(&send.guild_id);
+                        }));
 
                         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(
                             LuaVmAction,
@@ -188,7 +164,7 @@ impl ThreadEntry {
                                                 dispatch_event_to_multiple_templates(
                                                     templates,
                                                     event,
-                                                    tis_ref,
+                                                    &tis_ref,
                                                     gs.clone(),
                                                 )
                                                 .await,
@@ -207,9 +183,7 @@ impl ThreadEntry {
                                         }
                                         LuaVmAction::Stop {} => {
                                             // Mark VM as broken
-                                            tis_ref
-                                                .broken
-                                                .store(true, std::sync::atomic::Ordering::Release);
+                                            tis_ref.runtime().mark_broken(true);
 
                                             let _ = callback.send(vec![(
                                                 "_".to_string(),
@@ -219,7 +193,7 @@ impl ThreadEntry {
                                             )]);
                                         }
                                         LuaVmAction::GetMemoryUsage {} => {
-                                            let used = tis_ref.lua.used_memory();
+                                            let used = tis_ref.runtime().lua().used_memory();
 
                                             let _ = callback.send(vec![(
                                                 "_".to_string(),
@@ -231,7 +205,11 @@ impl ThreadEntry {
                                             )]);
                                         }
                                         LuaVmAction::SetMemoryLimit { limit } => {
-                                            let result = match tis_ref.lua.set_memory_limit(limit) {
+                                            let result = match tis_ref
+                                                .runtime()
+                                                .lua()
+                                                .set_memory_limit(limit)
+                                            {
                                                 Ok(limit) => LuaVmResult::Ok {
                                                     result_val: serde_json::Value::Number(
                                                         limit.into(),
@@ -249,12 +227,7 @@ impl ThreadEntry {
                             }
                         });
 
-                        if let Err(e) = send.tx.send(ThreadPoolLuaHandle {
-                            last_execution_time,
-                            handle: tx,
-                            broken,
-                            worker_broken,
-                        }) {
+                        if let Err(e) = send.tx.send(ThreadPoolLuaHandle { handle: tx }) {
                             log::error!("Failed to send new guild handle: {}", e);
                         }
                     }
@@ -389,41 +362,15 @@ pub async fn create_lua_vm(
 
 #[derive(Clone)]
 pub struct ThreadPoolLuaHandle {
-    /// The last execution time of the Lua VM
-    pub last_execution_time: Arc<AtomicInstant>,
-
     #[allow(clippy::type_complexity)]
     /// The thread handle for the Lua VM
     pub handle: tokio::sync::mpsc::UnboundedSender<(
         LuaVmAction,
         tokio::sync::oneshot::Sender<Vec<(String, LuaVmResult)>>,
     )>,
-
-    /// Is the VM broken/needs to be remade
-    pub broken: Arc<std::sync::atomic::AtomicBool>,
-
-    /// Is the worker itself marked as broken
-    pub worker_broken: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl ArLuaHandle for ThreadPoolLuaHandle {
-    fn broken(&self) -> bool {
-        self.broken.load(std::sync::atomic::Ordering::Acquire)
-            || self
-                .worker_broken
-                .load(std::sync::atomic::Ordering::Acquire)
-    }
-
-    fn set_broken(&self) {
-        self.broken
-            .store(true, std::sync::atomic::Ordering::Release);
-    }
-
-    fn last_execution_time(&self) -> std::time::Instant {
-        self.last_execution_time
-            .load(std::sync::atomic::Ordering::Acquire)
-    }
-
     fn send_action(
         &self,
         action: LuaVmAction,

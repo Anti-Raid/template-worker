@@ -1,5 +1,6 @@
 use crate::config::CONFIG;
 
+pub mod assetmanager;
 pub mod ctxprovider;
 
 /// Provides the config data involving kittycat permissions

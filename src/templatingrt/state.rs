@@ -3,10 +3,7 @@ use khronos_runtime::utils::ratelimits::LuaRatelimits;
 pub use silverpelt::templates::LuaKVConstraints;
 use std::num::NonZeroU32;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Duration;
-
-use super::vm_manager::AtomicInstant;
 
 impl Ratelimits {
     fn new_discord_rl() -> Result<LuaRatelimits, silverpelt::Error> {
@@ -208,7 +205,6 @@ impl Ratelimits {
 
 #[allow(dead_code)]
 pub struct GuildState {
-    pub last_execution_time: Arc<AtomicInstant>,
     pub pool: sqlx::PgPool,
     pub guild_id: serenity::all::GuildId,
     pub serenity_context: serenity::all::Context,
