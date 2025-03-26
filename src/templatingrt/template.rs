@@ -63,6 +63,35 @@ pub struct Template {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// Internal representation of a template in postgres
+#[derive(sqlx::FromRow)]
+struct TemplateData {
+    name: String,
+    content: String,
+    language: String,
+    allowed_caps: Vec<String>,
+    events: Vec<String>,
+    error_channel: Option<String>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    created_by: String,
+    last_updated_at: chrono::DateTime<chrono::Utc>,
+    last_updated_by: String,
+}
+
+/// Internal representation of a template in the shop in postgres
+#[derive(sqlx::FromRow)]
+struct TemplateShopData {
+    // owner_guild, name, description, content, created_at, created_by, last_updated_at, last_updated_by
+    owner_guild: String,
+    name: String,
+    description: String,
+    content: String,
+    created_at: chrono::DateTime<chrono::Utc>,
+    created_by: String,
+    last_updated_at: chrono::DateTime<chrono::Utc>,
+    last_updated_by: String,
+}
+
 impl Template {
     /// Returns true if the event should be dispatched to the template
     pub fn should_dispatch(&self, event: &CreateEvent) -> bool {
@@ -75,10 +104,10 @@ impl Template {
         guild_id: serenity::all::GuildId,
         pool: &sqlx::PgPool,
     ) -> Result<Vec<Self>, Error> {
-        let templates = sqlx::query!(
+        let templates: Vec<TemplateData> = sqlx::query_as(
             "SELECT name, content, language, allowed_caps, events, error_channel, created_at, created_by, last_updated_at, last_updated_by FROM guild_templates WHERE guild_id = $1 AND paused = false",
-            guild_id.to_string(),
         )
+        .bind(guild_id.to_string())
         .fetch_all(pool)
         .await?;
 
@@ -88,20 +117,11 @@ impl Template {
             if template.name.starts_with("$shop/") {
                 let (shop_tname, shop_tversion) = parse_shop_template(&template.name)?;
 
-                let (
-                    st_owner_guild,
-                    st_name,
-                    st_description,
-                    st_content,
-                    st_created_at,
-                    st_created_by,
-                    st_last_updated_at,
-                    st_last_updated_by,
-                ) = if shop_tversion == "latest" {
-                    let rec = sqlx::query!(
+                let shop_data = if shop_tversion == "latest" {
+                    let rec: Option<TemplateShopData> = sqlx::query_as(
                         "SELECT owner_guild, name, description, content, created_at, created_by, last_updated_at, last_updated_by FROM template_shop WHERE name = $1 ORDER BY version DESC LIMIT 1",
-                        shop_tname
                     )
+                    .bind(shop_tname)
                     .fetch_optional(pool)
                     .await?;
 
@@ -109,22 +129,13 @@ impl Template {
                         continue;
                     };
 
-                    (
-                        rec.owner_guild,
-                        rec.name,
-                        rec.description,
-                        Arc::new(rec.content),
-                        rec.created_at,
-                        rec.created_by,
-                        rec.last_updated_at,
-                        rec.last_updated_by,
-                    )
+                    rec
                 } else {
-                    let rec = sqlx::query!(
+                    let rec: Option<TemplateShopData> = sqlx::query_as(
                         "SELECT owner_guild, name, description, content, created_at, created_by, last_updated_at, last_updated_by FROM template_shop WHERE name = $1 AND version = $2",
-                        shop_tname,
-                        shop_tversion
                     )
+                    .bind(shop_tname)
+                    .bind(shop_tversion)
                     .fetch_optional(pool)
                     .await?;
 
@@ -132,24 +143,15 @@ impl Template {
                         continue;
                     };
 
-                    (
-                        rec.owner_guild,
-                        rec.name,
-                        rec.description,
-                        Arc::new(rec.content),
-                        rec.created_at,
-                        rec.created_by,
-                        rec.last_updated_at,
-                        rec.last_updated_by,
-                    )
+                    rec
                 };
 
                 result.push(Self {
                     guild_id,
                     name: template.name,
-                    description: Some(st_description),
-                    shop_name: Some(st_name),
-                    shop_owner: Some(st_owner_guild.parse()?),
+                    description: Some(shop_data.description),
+                    shop_name: Some(shop_data.name),
+                    shop_owner: Some(shop_data.owner_guild.parse()?),
                     events: template.events,
                     error_channel: match template.error_channel {
                         Some(channel_id) => Some(channel_id.parse()?),
@@ -158,11 +160,11 @@ impl Template {
                     lang: TemplateLanguage::from_str(&template.language)
                         .map_err(|_| "Invalid language")?,
                     allowed_caps: template.allowed_caps,
-                    content: st_content,
-                    created_by: st_created_by,
-                    created_at: st_created_at,
-                    updated_by: st_last_updated_by,
-                    updated_at: st_last_updated_at,
+                    content: Arc::new(shop_data.content),
+                    created_by: shop_data.created_by,
+                    created_at: shop_data.created_at,
+                    updated_by: shop_data.last_updated_by,
+                    updated_at: shop_data.last_updated_at,
                 });
             } else {
                 result.push(Self {

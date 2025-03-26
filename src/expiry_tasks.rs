@@ -63,23 +63,21 @@ pub async fn punishment_expiry_task(
             match event_listener(guild_id, &data, event, &ctx).await {
                 Ok(()) => {
                     // Mark the punishment as handled
-                    let _ = sqlx::query!(
-                        "UPDATE punishments SET state = 'handled' WHERE id = $1",
-                        punishment_id
-                    )
-                    .execute(&data.pool)
-                    .await;
+                    let _ = sqlx::query("UPDATE punishments SET state = 'handled' WHERE id = $1")
+                        .bind(punishment_id)
+                        .execute(&data.pool)
+                        .await;
                 }
                 Err(e) => {
                     log::error!("Error in punishment_expiry_task: {:?}", e);
                     // Mark the punishment as handled
-                    let _ = sqlx::query!(
+                    let _ = sqlx::query(
                         "UPDATE punishments SET state = 'handled', handle_log = $2 WHERE id = $1",
-                        punishment_id,
-                        serde_json::json!({
-                            "error": format!("{:?}", e),
-                        })
                     )
+                    .bind(punishment_id)
+                    .bind(serde_json::json!({
+                        "error": format!("{:?}", e),
+                    }))
                     .execute(&data.pool)
                     .await;
                 }
@@ -146,23 +144,21 @@ pub async fn stings_expiry_task(
             match event_listener(guild_id, &data, event, &ctx).await {
                 Ok(()) => {
                     // Mark the punishment as handled
-                    let _ = sqlx::query!(
-                        "UPDATE stings SET state = 'handled' WHERE id = $1",
-                        sting_id
-                    )
-                    .execute(&data.pool)
-                    .await;
+                    let _ = sqlx::query("UPDATE stings SET state = 'handled' WHERE id = $1")
+                        .bind(sting_id)
+                        .execute(&data.pool)
+                        .await;
                 }
                 Err(e) => {
                     log::error!("Error in stings_expiry_task: {:?}", e);
                     // Mark the punishment as handled
-                    let _ = sqlx::query!(
+                    let _ = sqlx::query(
                         "UPDATE stings SET state = 'handled', handle_log = $2 WHERE id = $1",
-                        sting_id,
-                        serde_json::json!({
-                            "error": format!("{:?}", e),
-                        })
                     )
+                    .bind(sting_id)
+                    .bind(serde_json::json!({
+                        "error": format!("{:?}", e),
+                    }))
                     .execute(&data.pool)
                     .await;
                 }

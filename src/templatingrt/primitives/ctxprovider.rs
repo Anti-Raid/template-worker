@@ -17,6 +17,7 @@ use serenity::all::InteractionId;
 use silverpelt::lockdowns::LockdownData;
 use silverpelt::stings::{StingAggregateOperations, StingCreateOperations, StingOperations};
 use silverpelt::userinfo::{NoMember, UserInfoOperations};
+use sqlx::Row;
 use std::sync::LazyLock;
 use std::{rc::Rc, sync::Arc};
 
@@ -181,11 +182,11 @@ impl KVProvider for ArKVProvider {
             return Err("Key length too long".into());
         }
 
-        let rec = sqlx::query!(
+        let rec = sqlx::query(
             "SELECT value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2",
-            self.guild_id.to_string(),
-            key
         )
+        .bind(self.guild_id.to_string())
+        .bind(&key)
         .fetch_optional(&self.guild_state.pool)
         .await?;
 
@@ -195,9 +196,11 @@ impl KVProvider for ArKVProvider {
 
         Ok(Some(KvRecord {
             key,
-            value: rec.value.unwrap_or(serde_json::Value::Null),
-            created_at: Some(rec.created_at),
-            last_updated_at: Some(rec.last_updated_at),
+            value: rec
+                .try_get::<Option<serde_json::Value>, _>("value")?
+                .unwrap_or(serde_json::Value::Null),
+            created_at: Some(rec.try_get("created_at")?),
+            last_updated_at: Some(rec.try_get("last_updated_at")?),
         }))
     }
 
@@ -216,15 +219,13 @@ impl KVProvider for ArKVProvider {
 
         let mut tx = self.guild_state.pool.begin().await?;
 
-        let rec: i64 = sqlx::query!(
-            "SELECT COUNT(*) FROM guild_templates_kv WHERE guild_id = $1",
-            self.guild_id.to_string(),
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|e| e.to_string())?
-        .count
-        .unwrap_or_default();
+        let rec: i64 = sqlx::query("SELECT COUNT(*) FROM guild_templates_kv WHERE guild_id = $1")
+            .bind(self.guild_id.to_string())
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?
+            .try_get::<Option<i64>, _>("count")?
+            .unwrap_or_default();
 
         if rec
             >= TryInto::<i64>::try_into(
@@ -234,12 +235,12 @@ impl KVProvider for ArKVProvider {
             return Err("Max keys limit reached".into());
         }
 
-        sqlx::query!(
+        sqlx::query(
             "INSERT INTO guild_templates_kv (guild_id, key, value) VALUES ($1, $2, $3) ON CONFLICT (guild_id, key) DO UPDATE SET value = $3, last_updated_at = NOW()",
-            self.guild_id.to_string(),
-            key,
-            data,
         )
+        .bind(self.guild_id.to_string())
+        .bind(key)
+        .bind(data)
         .execute(&mut *tx)
         .await?;
 
@@ -254,13 +255,11 @@ impl KVProvider for ArKVProvider {
             return Err("Key length too long".into());
         }
 
-        sqlx::query!(
-            "DELETE FROM guild_templates_kv WHERE guild_id = $1 AND key = $2",
-            self.guild_id.to_string(),
-            key,
-        )
-        .execute(&self.guild_state.pool)
-        .await?;
+        sqlx::query("DELETE FROM guild_templates_kv WHERE guild_id = $1 AND key = $2")
+            .bind(self.guild_id.to_string())
+            .bind(key)
+            .execute(&self.guild_state.pool)
+            .await?;
 
         Ok(())
     }
@@ -271,11 +270,11 @@ impl KVProvider for ArKVProvider {
             return Err("Query length too long".into());
         }
 
-        let rec = sqlx::query!(
+        let rec = sqlx::query(
             "SELECT key, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key ILIKE $2",
-            self.guild_id.to_string(),
-            query
         )
+        .bind(self.guild_id.to_string())
+        .bind(query)
         .fetch_all(&self.guild_state.pool)
         .await?;
 
@@ -283,10 +282,12 @@ impl KVProvider for ArKVProvider {
 
         for rec in rec {
             let record = KvRecord {
-                key: rec.key,
-                value: rec.value.unwrap_or(serde_json::Value::Null),
-                created_at: Some(rec.created_at),
-                last_updated_at: Some(rec.last_updated_at),
+                key: rec.try_get("key")?,
+                value: rec
+                    .try_get::<Option<serde_json::Value>, _>("value")?
+                    .unwrap_or(serde_json::Value::Null),
+                created_at: Some(rec.try_get("created_at")?),
+                last_updated_at: Some(rec.try_get("last_updated_at")?),
             };
 
             records.push(record);
@@ -301,29 +302,28 @@ impl KVProvider for ArKVProvider {
             return Err("Key length too long".into());
         }
 
-        let rec = sqlx::query!(
-            "SELECT COUNT(*) FROM guild_templates_kv WHERE guild_id = $1 AND key = $2",
-            self.guild_id.to_string(),
-            key
-        )
-        .fetch_one(&self.guild_state.pool)
-        .await?;
+        let rec =
+            sqlx::query("SELECT COUNT(*) FROM guild_templates_kv WHERE guild_id = $1 AND key = $2")
+                .bind(self.guild_id.to_string())
+                .bind(key)
+                .fetch_one(&self.guild_state.pool)
+                .await?
+                .try_get::<Option<i64>, _>("count")?
+                .unwrap_or_default();
 
-        Ok(rec.count.unwrap_or(0) > 0)
+        Ok(rec > 0)
     }
 
     async fn keys(&self) -> Result<Vec<String>, silverpelt::Error> {
-        let rec = sqlx::query!(
-            "SELECT key FROM guild_templates_kv WHERE guild_id = $1",
-            self.guild_id.to_string(),
-        )
-        .fetch_all(&self.guild_state.pool)
-        .await?;
+        let rec = sqlx::query("SELECT key FROM guild_templates_kv WHERE guild_id = $1")
+            .bind(self.guild_id.to_string())
+            .fetch_all(&self.guild_state.pool)
+            .await?;
 
         let mut keys = vec![];
 
         for rec in rec {
-            keys.push(rec.key);
+            keys.push(rec.try_get("key")?);
         }
 
         Ok(keys)

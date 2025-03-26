@@ -88,9 +88,15 @@ pub async fn regenerate_cache(
 }
 
 async fn get_all_templates_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt::Error> {
-    let partials = sqlx::query!("SELECT guild_id FROM guild_templates GROUP BY guild_id")
-        .fetch_all(pool)
-        .await?;
+    #[derive(sqlx::FromRow)]
+    struct GuildTemplatePartial {
+        guild_id: String,
+    }
+
+    let partials: Vec<GuildTemplatePartial> =
+        sqlx::query_as("SELECT guild_id FROM guild_templates GROUP BY guild_id")
+            .fetch_all(pool)
+            .await?;
 
     let mut templates: HashMap<serenity::all::GuildId, Vec<Arc<Template>>> = HashMap::new();
 
