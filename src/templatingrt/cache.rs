@@ -1,4 +1,6 @@
 use super::template::Template;
+use super::vm_manager::{get_lua_vm_if_exists, ArLuaHandle};
+use super::{LuaVmAction, RenderTemplateHandle, MAX_TEMPLATES_RETURN_WAIT_TIME};
 use moka::future::Cache;
 use serenity::all::GuildId;
 use std::collections::HashMap;
@@ -51,10 +53,38 @@ pub async fn setup(pool: &sqlx::PgPool) -> Result<(), silverpelt::Error> {
 
 /// Clears the template cache for a guild. This refetches the templates
 /// into cache
-pub async fn regenerate_cache(guild_id: GuildId, pool: &sqlx::PgPool) {
+pub async fn regenerate_cache(
+    guild_id: GuildId,
+    pool: &sqlx::PgPool,
+) -> Result<(), silverpelt::Error> {
+    println!("Clearing cache for guild {}", guild_id);
+
     TEMPLATES_CACHE.remove(&guild_id).await;
 
-    let _ = get_all_guild_templates_from_db(guild_id, pool).await;
+    // NOTE: if this call fails, bail out early and don't clear the cache to ensure old code at least runs
+    get_all_guild_templates_from_db(guild_id, pool).await?;
+
+    println!("Resyncing VMs");
+
+    // Send a message to clear the cache in the VMs
+    if let Some(vm) = get_lua_vm_if_exists(guild_id) {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        vm.send_action(LuaVmAction::ClearCache {}, tx)?;
+        let handle = RenderTemplateHandle { rx };
+        let Some(mvmr) = handle.wait_timeout(MAX_TEMPLATES_RETURN_WAIT_TIME).await? else {
+            return Err("Timed out waiting for templates to clear from VMs".into());
+        };
+
+        for result in mvmr.results {
+            if result.is_error() {
+                return Err(format!("Failed to clear cache in VM: {:?}", result.result).into());
+            }
+        }
+    } else {
+        println!("No VMs to resync");
+    }
+
+    Ok(())
 }
 
 async fn get_all_templates_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt::Error> {

@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::sync::Arc;
 
 use khronos_runtime::primitives::event::CreateEvent;
 use silverpelt::templates::parse_shop_template;
@@ -47,7 +48,7 @@ pub struct Template {
     /// The channel to send errors to
     pub error_channel: Option<serenity::all::ChannelId>,
     /// The content of the template
-    pub content: String,
+    pub content: Arc<String>,
     /// The language of the template
     pub lang: TemplateLanguage,
     /// The allowed capabilities the template has access to
@@ -112,7 +113,7 @@ impl Template {
                         rec.owner_guild,
                         rec.name,
                         rec.description,
-                        rec.content,
+                        Arc::new(rec.content),
                         rec.created_at,
                         rec.created_by,
                         rec.last_updated_at,
@@ -135,7 +136,7 @@ impl Template {
                         rec.owner_guild,
                         rec.name,
                         rec.description,
-                        rec.content,
+                        Arc::new(rec.content),
                         rec.created_at,
                         rec.created_by,
                         rec.last_updated_at,
@@ -175,7 +176,7 @@ impl Template {
                         Some(channel_id) => Some(channel_id.parse()?),
                         None => None,
                     },
-                    content: template.content,
+                    content: Arc::new(template.content),
                     lang: TemplateLanguage::from_str(&template.language)
                         .map_err(|_| "Invalid language")?,
                     allowed_caps: template.allowed_caps,

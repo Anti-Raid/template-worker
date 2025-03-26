@@ -67,7 +67,9 @@ async fn dispatch_event(
 ) -> Response<()> {
     // Regenerate cache for guild if event is OnStartup
     if let AntiraidEvent::OnStartup(_) = event {
-        regenerate_cache(guild_id, &data.pool).await;
+        regenerate_cache(guild_id, &data.pool)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     }
 
     let event = parse_event(&event).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
@@ -99,7 +101,9 @@ async fn dispatch_event_and_wait(
 ) -> Response<HashMap<String, serde_json::Value>> {
     // Regenerate cache for guild if event is OnStartup
     if let AntiraidEvent::OnStartup(_) = event {
-        regenerate_cache(guild_id, &data.pool).await;
+        regenerate_cache(guild_id, &data.pool)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     }
 
     let event = parse_event(&event).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;

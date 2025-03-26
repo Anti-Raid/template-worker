@@ -33,6 +33,8 @@ pub enum LuaVmAction {
     GetMemoryUsage {},
     /// Set the memory limit of the Lua VM
     SetMemoryLimit { limit: usize },
+    /// Clear the cache of all subisolates
+    ClearCache {},
 }
 
 #[derive(Debug)]
@@ -100,4 +102,10 @@ pub async fn get_lua_vm(
     };
 
     Ok(vm.clone())
+}
+
+pub fn get_lua_vm_if_exists(guild_id: GuildId) -> Option<ArLua> {
+    let vm = VMS.get(&guild_id)?;
+
+    Some(vm.clone())
 }

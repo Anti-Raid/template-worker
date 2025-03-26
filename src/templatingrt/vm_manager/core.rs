@@ -1,4 +1,5 @@
 use super::client::LuaVmResult;
+use crate::templatingrt::cache::get_all_guild_templates;
 use crate::templatingrt::primitives::assetmanager::TemplateAssetManager;
 use crate::templatingrt::primitives::ctxprovider::TemplateContextProvider;
 use crate::templatingrt::state::GuildState;
@@ -85,9 +86,7 @@ pub(super) async fn dispatch_event_to_template(
     } else {
         let sub_isolate = match KhronosIsolate::new_subisolate(
             manager.runtime().clone(),
-            TemplateAssetManager {
-                template: template.clone(),
-            },
+            TemplateAssetManager::new(template.clone()),
             {
                 let mut pset = PluginSet::new();
                 pset.add_default_plugins::<TemplateContextProvider>();
@@ -117,14 +116,12 @@ pub(super) async fn dispatch_event_to_template(
     let template_context = TemplateContext::new(provider);
 
     let spawn_result = match sub_isolate
-        .spawn_asset(&template.name, &template.name, template_context, event)
+        .spawn_asset("init.luau", "init.luau", template_context, event)
         .await
     {
         Ok(sr) => sr,
         Err(e) => {
-            return LuaVmResult::LuaError {
-                err: format!("Failed to spawn asset: {}", e),
-            };
+            return LuaVmResult::LuaError { err: e.to_string() };
         }
     };
 
@@ -177,4 +174,17 @@ pub(super) async fn dispatch_event_to_multiple_templates(
     }
 
     results
+}
+
+pub(super) async fn reset_vm_cache(
+    guild_id: GuildId,
+    runtime: &KhronosRuntimeManager<TemplateAssetManager>,
+) {
+    if let Some(templates) = get_all_guild_templates(guild_id).await {
+        for template in templates.iter() {
+            if let Some(vm) = runtime.get_sub_isolate(&template.name) {
+                vm.asset_manager().set_template(template.clone());
+            }
+        }
+    }
 }

@@ -174,6 +174,8 @@ impl RenderTemplateHandle {
     }
 
     /// Wait for the template to render with a timeout
+    ///
+    /// Returns `None` if the timeout is reached
     pub async fn wait_timeout(
         self,
         timeout: std::time::Duration,
@@ -305,7 +307,8 @@ pub async fn benchmark_vm(
     // Exec simple with wait
 
     let pt = Template {
-        content: "return 1".to_string(),
+        content: "return 1".to_string().into(),
+        name: "benchmark1".to_string(),
         ..Default::default()
     };
 
@@ -345,7 +348,8 @@ pub async fn benchmark_vm(
 
     // Exec simple with no wait
     let pt = Template {
-        content: "return 1".to_string(),
+        content: "return 1".to_string().into(),
+        name: "benchmark2".to_string(),
         ..Default::default()
     };
 
@@ -378,7 +382,8 @@ pub async fn benchmark_vm(
 
     // Exec simple with wait
     let pt = Template {
-        content: "error('MyError')\nreturn 1".to_string(),
+        content: "error('MyError')\nreturn 1".to_string().into(),
+        name: "benchmark3".to_string(),
         ..Default::default()
     };
 
