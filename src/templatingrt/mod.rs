@@ -4,6 +4,8 @@ pub mod state;
 pub mod template;
 mod vm_manager;
 
+use std::sync::Arc;
+
 pub use vm_manager::{LuaVmAction, LuaVmResult};
 
 use crate::templatingrt::vm_manager::ArLuaHandle;
@@ -305,9 +307,14 @@ pub async fn benchmark_vm(
     let hashmap_insert_time = start.elapsed().as_micros();
 
     // Exec simple with wait
+    fn str_to_map(s: &str) -> std::collections::HashMap<String, Arc<String>> {
+        let mut map = std::collections::HashMap::new();
+        map.insert("init.luau".to_string(), Arc::new(s.to_string()));
+        map
+    }
 
     let pt = Template {
-        content: "return 1".to_string().into(),
+        content: str_to_map("return 1"),
         name: "benchmark1".to_string(),
         ..Default::default()
     };
@@ -348,7 +355,7 @@ pub async fn benchmark_vm(
 
     // Exec simple with no wait
     let pt = Template {
-        content: "return 1".to_string().into(),
+        content: str_to_map("return 1"),
         name: "benchmark2".to_string(),
         ..Default::default()
     };
@@ -382,7 +389,7 @@ pub async fn benchmark_vm(
 
     // Exec simple with wait
     let pt = Template {
-        content: "error('MyError')\nreturn 1".to_string().into(),
+        content: str_to_map("error('MyError')\nreturn 1"),
         name: "benchmark3".to_string(),
         ..Default::default()
     };

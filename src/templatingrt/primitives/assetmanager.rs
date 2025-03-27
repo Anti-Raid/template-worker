@@ -34,11 +34,12 @@ impl TemplateAssetManager {
 
 impl AssetManager for TemplateAssetManager {
     fn get_file(&self, path: &str) -> Result<impl AsRef<String>, khronos_runtime::Error> {
-        if path == "init.luau" {
-            let template = self.template.borrow();
-            return Ok(template.content.clone());
+        let template = self.template.borrow();
+
+        if let Some(content) = template.content.get(path) {
+            return Ok(content.clone());
         }
 
-        Err("multifile scripts not supported yet".into())
+        Err(format!("module '{}' not found", path).into())
     }
 }

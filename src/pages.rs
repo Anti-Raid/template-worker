@@ -365,7 +365,10 @@ fn create_setting(
                 ar_settings::types::InnerColumnType::Boolean {}
             }
             khronos_runtime::traits::ir::InnerColumnType::Json { max_bytes } => {
-                ar_settings::types::InnerColumnType::Json { max_bytes }
+                ar_settings::types::InnerColumnType::Json {
+                    max_bytes,
+                    kind: "template-json".to_string(), // TODO: Maybe expose some types in the IR?
+                }
             }
         }
     }
@@ -512,7 +515,7 @@ fn unravel_setting(
             ar_settings::types::InnerColumnType::Boolean {} => {
                 khronos_runtime::traits::ir::InnerColumnType::Boolean {}
             }
-            ar_settings::types::InnerColumnType::Json { max_bytes } => {
+            ar_settings::types::InnerColumnType::Json { max_bytes, .. } => {
                 khronos_runtime::traits::ir::InnerColumnType::Json { max_bytes }
             }
         }

@@ -48,7 +48,7 @@ pub struct Template {
     /// The channel to send errors to
     pub error_channel: Option<serenity::all::ChannelId>,
     /// The content of the template
-    pub content: Arc<String>,
+    pub content: std::collections::HashMap<String, Arc<String>>,
     /// The language of the template
     pub lang: TemplateLanguage,
     /// The allowed capabilities the template has access to
@@ -67,7 +67,7 @@ pub struct Template {
 #[derive(sqlx::FromRow)]
 struct TemplateData {
     name: String,
-    content: String,
+    content: serde_json::Value,
     language: String,
     allowed_caps: Vec<String>,
     events: Vec<String>,
@@ -85,7 +85,7 @@ struct TemplateShopData {
     owner_guild: String,
     name: String,
     description: String,
-    content: String,
+    content: serde_json::Value,
     created_at: chrono::DateTime<chrono::Utc>,
     created_by: String,
     last_updated_at: chrono::DateTime<chrono::Utc>,
@@ -160,7 +160,7 @@ impl Template {
                     lang: TemplateLanguage::from_str(&template.language)
                         .map_err(|_| "Invalid language")?,
                     allowed_caps: template.allowed_caps,
-                    content: Arc::new(shop_data.content),
+                    content: serde_json::from_value(shop_data.content)?,
                     created_by: shop_data.created_by,
                     created_at: shop_data.created_at,
                     updated_by: shop_data.last_updated_by,
@@ -178,7 +178,7 @@ impl Template {
                         Some(channel_id) => Some(channel_id.parse()?),
                         None => None,
                     },
-                    content: Arc::new(template.content),
+                    content: serde_json::from_value(template.content)?,
                     lang: TemplateLanguage::from_str(&template.language)
                         .map_err(|_| "Invalid language")?,
                     allowed_caps: template.allowed_caps,
