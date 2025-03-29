@@ -55,10 +55,10 @@ impl MultiLuaVmResultHandle {
     pub fn into_response_first<T: serde::de::DeserializeOwned>(
         self,
     ) -> Result<T, silverpelt::Error> {
-        if self.results.is_empty() {
+        let Some(result) = self.results.into_iter().next() else {
             return Err("No results".into());
-        }
-        let result = self.results.into_iter().next().unwrap();
+        };
+
         result.into_response::<T>()
     }
 }

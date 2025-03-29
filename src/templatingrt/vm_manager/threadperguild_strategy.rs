@@ -35,7 +35,7 @@ pub async fn create_lua_vm(
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .unwrap();
+                .expect("Failed to create tokio runtime");
 
             let local = tokio::task::LocalSet::new();
 

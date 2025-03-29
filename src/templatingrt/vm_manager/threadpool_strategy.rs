@@ -102,11 +102,10 @@ impl ThreadEntry {
             .name(format!("lua-vm-threadpool-{}", self.id))
             .stack_size(MAX_VM_THREAD_STACK_SIZE)
             .spawn(move || {
-                // TODO: Implement handling code here
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
-                    .unwrap();
+                    .expect("Failed to create tokio runtime");
 
                 let local = tokio::task::LocalSet::new();
                 local.block_on(&rt, async {
@@ -225,7 +224,8 @@ impl ThreadEntry {
                                         LuaVmAction::ClearCache {} => {
                                             println!("Clearing cache in VM");
                                             tis_ref.clear_bytecode_cache();
-                                            super::core::reset_vm_cache(gs.guild_id, &tis_ref).await;
+                                            super::core::reset_vm_cache(gs.guild_id, &tis_ref)
+                                                .await;
                                             let _ = callback.send(vec![(
                                                 "_".to_string(),
                                                 LuaVmResult::Ok {

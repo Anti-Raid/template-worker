@@ -100,7 +100,7 @@ async fn main() {
         if let Some(ref shards) = CMD_ARGS.shards {
             let shard_range = std::ops::Range {
                 start: shards[0],
-                end: *shards.last().unwrap(),
+                end: *shards.last().expect("Shards should not be empty"),
             };
 
             info!("Starting shard range: {:?}", shard_range);
