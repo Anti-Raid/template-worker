@@ -15,11 +15,20 @@ pub static TEMPLATING_TYPES: std::sync::LazyLock<HashMap<String, Arc<String>>> =
 
         let mut contents = HashMap::new();
 
-        for file in file_contents.files() {
-            let path = file.path().to_str().unwrap();
-            let content = String::from_utf8_lossy(file.contents()).to_string();
-            contents.insert(path.to_string(), Arc::new(content));
+        fn extract_all_paths(map: &mut HashMap<String, Arc<String>>, dir: &include_dir::Dir) {
+            for entry in dir.entries() {
+                if let Some(dir) = entry.as_dir() {
+                    extract_all_paths(map, dir);
+                } else {
+                    let path = entry.path().to_str().unwrap();
+                    let file = entry.as_file().unwrap();
+                    let content = String::from_utf8_lossy(file.contents()).to_string();
+                    map.insert(path.to_string(), Arc::new(content));
+                }
+            }
         }
+
+        extract_all_paths(&mut contents, &file_contents);
 
         contents
     });
