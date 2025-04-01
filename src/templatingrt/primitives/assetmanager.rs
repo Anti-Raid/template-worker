@@ -63,11 +63,13 @@ impl AssetManager for TemplateAssetManager {
     fn get_file(&self, path: &str) -> Result<impl AsRef<String>, khronos_runtime::Error> {
         let template = self.template.borrow();
 
+        println!("Loading asset: {}", path);
         if path.starts_with("templating-types/")
             && template
                 .allowed_caps
                 .contains(&"assetmanager:use_bundled_templating_types".to_string())
         {
+            println!("Loading templating-types from bundle: {}", path);
             if let Some(content) = TEMPLATING_TYPES.get(path) {
                 return Ok(content.clone());
             }
