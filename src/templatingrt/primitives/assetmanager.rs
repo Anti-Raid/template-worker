@@ -70,7 +70,9 @@ impl AssetManager for TemplateAssetManager {
                 .contains(&"assetmanager:use_bundled_templating_types".to_string())
         {
             println!("Loading templating-types from bundle: {}", path);
-            if let Some(content) = TEMPLATING_TYPES.get(path) {
+            if let Some(content) =
+                TEMPLATING_TYPES.get(path.trim_start_matches("templating-types/"))
+            {
                 return Ok(content.clone());
             }
         }
