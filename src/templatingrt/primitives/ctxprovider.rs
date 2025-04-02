@@ -38,7 +38,7 @@ pub struct TemplateContextProvider {
     pub template_data: Arc<Template>,
 
     /// The isolate being used
-    pub isolate: khronos_runtime::rt::KhronosIsolate<TemplateAssetManager>
+    pub runtime_shareable_data: khronos_runtime::rt::RuntimeShareableData
 }
 
 impl KhronosContext for TemplateContextProvider {
@@ -50,7 +50,6 @@ impl KhronosContext for TemplateContextProvider {
     type UserInfoProvider = ArUserInfoProvider;
     type StingProvider = ArStingProvider;
     type PageProvider = ArPageProvider;
-    type AssetManager = TemplateAssetManager;
 
     fn data(&self) -> Self::Data {
         self.template_data.clone()
@@ -149,8 +148,8 @@ impl KhronosContext for TemplateContextProvider {
         })
     }
 
-    fn isolate(&self) -> khronos_runtime::rt::KhronosIsolate<TemplateAssetManager> {
-        self.isolate.clone()
+    fn runtime_shareable_data(&self) -> khronos_runtime::rt::KhronosIsolate<TemplateAssetManager> {
+        self.runtime_shareable_data.clone()
     }
 
     fn page_provider(&self, scope: ExecutorScope) -> Option<Self::PageProvider> {

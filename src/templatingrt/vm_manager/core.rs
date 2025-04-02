@@ -111,7 +111,7 @@ pub(super) async fn dispatch_event_to_template(
     let provider = TemplateContextProvider {
         guild_state,
         template_data: template.clone(),
-        isolate: sub_isolate.clone(),
+        runtime_shareable_data: sub_isolate.runtime_shareable_data(),
     };
 
     let template_context = TemplateContext::new(provider);
