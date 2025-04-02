@@ -44,7 +44,7 @@ pub(super) fn configure_runtime_manager() -> LuaResult<KhronosRuntimeManager<Tem
 
             Ok(LuaVmState::Continue)
         }),
-        //None,
+        None::<fn(&Lua, LuaValue) -> Result<(), mlua::Error>>,
     )?;
 
     rt.lua().set_memory_limit(MAX_TEMPLATE_MEMORY_USAGE)?;

@@ -19,7 +19,6 @@ use silverpelt::userinfo::{NoMember, UserInfoOperations};
 use sqlx::Row;
 use std::sync::LazyLock;
 use std::{rc::Rc, sync::Arc};
-use crate::templatingrt::primitives::assetmanager::TemplateAssetManager;
 use super::{kittycat_permission_config_data, sandwich_config};
 
 /// Internal short-lived channel cache
@@ -148,7 +147,7 @@ impl KhronosContext for TemplateContextProvider {
         })
     }
 
-    fn runtime_shareable_data(&self) -> khronos_runtime::rt::KhronosIsolate<TemplateAssetManager> {
+    fn runtime_shareable_data(&self) -> khronos_runtime::rt::RuntimeShareableData {
         self.runtime_shareable_data.clone()
     }
 
