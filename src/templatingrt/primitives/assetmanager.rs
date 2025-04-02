@@ -78,7 +78,7 @@ impl AssetManager for TemplateAssetManager {
         }
 
         if let Some(content) = template.content.get(path) {
-            println!("{}", content);
+            log::debug!("{}", content);
             return Ok(content.clone());
         }
 
