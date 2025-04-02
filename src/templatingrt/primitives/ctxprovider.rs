@@ -149,8 +149,8 @@ impl KhronosContext for TemplateContextProvider {
         })
     }
 
-    fn isolate(&self) -> &khronos_runtime::rt::KhronosIsolate<TemplateAssetManager> {
-        &self.isolate
+    fn isolate(&self) -> khronos_runtime::rt::KhronosIsolate<TemplateAssetManager> {
+        self.isolate.clone()
     }
 
     fn page_provider(&self, scope: ExecutorScope) -> Option<Self::PageProvider> {
