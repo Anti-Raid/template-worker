@@ -26,8 +26,8 @@ moka = { version = "0.12", features = ["future", "futures-util", "sync"] }
 indexmap = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 mlua = { git = "https://github.com/mlua-rs/mlua", features = ["luau", "serialize", "macros"] }
-mlua_scheduler = { git = "https://github.com/anti-raid/mlua_scheduler", rev = "d2a39e1a373107f8b7a3363f1006c217fcd5c23d"}
-mlua_scheduler_ext = { git = "https://github.com/anti-raid/mlua_scheduler", rev = "d2a39e1a373107f8b7a3363f1006c217fcd5c23d"}
+mlua_scheduler = { git = "https://github.com/anti-raid/mlua_scheduler", rev = "e32983962320290f7f286ad3ab826f96c9d21558"}
+mlua_scheduler_ext = { git = "https://github.com/anti-raid/mlua_scheduler", rev = "e32983962320290f7f286ad3ab826f96c9d21558"}
 antiraid-types = { git = "https://github.com/anti-raid/antiraid-types" }
 ar_settings = { git = "https://github.com/anti-raid/settings" }
 khronos_runtime = { git = "https://github.com/anti-raid/khronos" }
