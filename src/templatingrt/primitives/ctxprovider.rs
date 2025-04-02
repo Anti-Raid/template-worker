@@ -45,8 +45,8 @@ impl KhronosContext for TemplateContextProvider {
     type Data = Arc<Template>;
     type KVProvider = ArKVProvider;
     type DiscordProvider = ArDiscordProvider;
-    type LockdownDataStore = LockdownData;
-    type LockdownProvider = ArLockdownProvider;
+    //type LockdownDataStore = LockdownData;
+    //type LockdownProvider = ArLockdownProvider;
     type UserInfoProvider = ArUserInfoProvider;
     type StingProvider = ArStingProvider;
     type PageProvider = ArPageProvider;
@@ -108,7 +108,7 @@ impl KhronosContext for TemplateContextProvider {
         })
     }
 
-    fn lockdown_provider(&self, _scope: ExecutorScope) -> Option<Self::LockdownProvider> {
+    /*fn lockdown_provider(&self, _scope: ExecutorScope) -> Option<Self::LockdownProvider> {
         Some(ArLockdownProvider {
             guild_state: self.guild_state.clone(),
             lockdown_data: Rc::new(
@@ -121,7 +121,7 @@ impl KhronosContext for TemplateContextProvider {
                 )
             )
         })
-    }
+    }*/
 
     fn userinfo_provider(&self, scope: ExecutorScope) -> Option<Self::UserInfoProvider> {
         Some(ArUserInfoProvider {
