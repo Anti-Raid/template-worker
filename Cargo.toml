@@ -25,7 +25,7 @@ dashmap = { version = "6", features = ["serde", "inline", "rayon"]  }
 moka = { version = "0.12", features = ["future", "futures-util", "sync"] }
 indexmap = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["serde", "v4"] }
-mlua = { git = "https://github.com/mlua-rs/mlua", features = ["luau", "serialize", "macros"] }
+mlua = { git = "https://github.com/mlua-rs/mlua", features = ["luau", "serialize", "macros"], rev = "87fa663ac11a857ab69723949a7895da3fe6dfb5" }
 mlua_scheduler = { git = "https://github.com/anti-raid/mlua_scheduler"}
 mlua_scheduler_ext = { git = "https://github.com/anti-raid/mlua_scheduler"}
 antiraid-types = { git = "https://github.com/anti-raid/antiraid-types" }
