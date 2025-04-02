@@ -4,14 +4,13 @@ use antiraid_types::stings::{Sting, StingAggregate};
 use antiraid_types::userinfo::UserInfo;
 use khronos_runtime::traits::context::KhronosContext;
 use khronos_runtime::traits::discordprovider::DiscordProvider;
-use khronos_runtime::traits::ir::{kv::KvRecord, Lockdown};
+use khronos_runtime::traits::ir::kv::KvRecord;
 use khronos_runtime::traits::kvprovider::KVProvider;
 use khronos_runtime::traits::lockdownprovider::LockdownProvider;
 use khronos_runtime::traits::pageprovider::PageProvider;
 use khronos_runtime::traits::stingprovider::StingProvider;
 use khronos_runtime::traits::userinfoprovider::UserInfoProvider;
 use khronos_runtime::utils::executorscope::ExecutorScope;
-use lockdowns::LockdownMode;
 use moka::future::Cache;
 use serenity::all::InteractionId;
 use silverpelt::lockdowns::LockdownData;
@@ -20,7 +19,7 @@ use silverpelt::userinfo::{NoMember, UserInfoOperations};
 use sqlx::Row;
 use std::sync::LazyLock;
 use std::{rc::Rc, sync::Arc};
-
+use crate::templatingrt::primitives::assetmanager::TemplateAssetManager;
 use super::{kittycat_permission_config_data, sandwich_config};
 
 /// Internal short-lived channel cache
@@ -38,18 +37,20 @@ pub struct TemplateContextProvider {
     /// The template data
     pub template_data: Arc<Template>,
 
-    /// The global table used
-    pub global_table: mlua::Table,
+    /// The isolate being used
+    pub isolate: khronos_runtime::rt::KhronosIsolate<TemplateAssetManager>
 }
 
 impl KhronosContext for TemplateContextProvider {
     type Data = Arc<Template>;
     type KVProvider = ArKVProvider;
     type DiscordProvider = ArDiscordProvider;
+    type LockdownDataStore = LockdownData;
     type LockdownProvider = ArLockdownProvider;
     type UserInfoProvider = ArUserInfoProvider;
     type StingProvider = ArStingProvider;
     type PageProvider = ArPageProvider;
+    type AssetManager = TemplateAssetManager;
 
     fn data(&self) -> Self::Data {
         self.template_data.clone()
@@ -107,16 +108,18 @@ impl KhronosContext for TemplateContextProvider {
         })
     }
 
-    fn lockdown_provider(&self, scope: ExecutorScope) -> Option<Self::LockdownProvider> {
+    fn lockdown_provider(&self, _scope: ExecutorScope) -> Option<Self::LockdownProvider> {
         Some(ArLockdownProvider {
-            guild_id: match scope {
-                ExecutorScope::ThisGuild => self.guild_state.guild_id,
-                ExecutorScope::OwnerGuild => self
-                    .template_data
-                    .shop_owner
-                    .unwrap_or(self.guild_state.guild_id), // TODO: consider if we should support ownerguild scope here
-            },
             guild_state: self.guild_state.clone(),
+            lockdown_data: Rc::new(
+                LockdownData::new(
+                    self.guild_state.serenity_context.cache.clone(),
+                    self.guild_state.serenity_context.http.clone(),
+                    self.guild_state.pool.clone(),
+                    self.guild_state.reqwest_client.clone(),
+                    sandwich_config(),
+                )
+            )
         })
     }
 
@@ -146,8 +149,8 @@ impl KhronosContext for TemplateContextProvider {
         })
     }
 
-    fn global_table(&self) -> mlua::Table {
-        self.global_table.clone()
+    fn isolate(&self) -> &khronos_runtime::rt::KhronosIsolate<TemplateAssetManager> {
+        &self.isolate
     }
 
     fn page_provider(&self, scope: ExecutorScope) -> Option<Self::PageProvider> {
@@ -778,127 +781,23 @@ impl DiscordProvider for ArDiscordProvider {
 
 #[derive(Clone)]
 pub struct ArLockdownProvider {
-    guild_id: serenity::all::GuildId,
     guild_state: Rc<GuildState>,
+    lockdown_data: Rc<LockdownData>,
 }
 
-impl ArLockdownProvider {
-    async fn init_lockdown(
-        &self,
-        lockdown_type: Box<dyn LockdownMode>,
-        reason: String,
-    ) -> Result<uuid::Uuid, silverpelt::Error> {
-        let mut lockdowns = lockdowns::LockdownSet::guild(
-            self.guild_id,
-            LockdownData::new(
-                &self.guild_state.serenity_context.cache,
-                &self.guild_state.serenity_context.http,
-                self.guild_state.pool.clone(),
-                self.guild_state.reqwest_client.clone(),
-                sandwich_config(),
-            ),
-        )
-        .await
-        .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
-
-        // Create the lockdown
-        let id = lockdowns
-            .easy_apply(lockdown_type, &reason)
-            .await
-            .map_err(|e| format!("Error while applying lockdown: {}", e))?;
-
-        Ok(id)
-    }
-}
-
-impl LockdownProvider for ArLockdownProvider {
+impl LockdownProvider<LockdownData> for ArLockdownProvider {
     fn attempt_action(&self, bucket: &str) -> serenity::Result<(), silverpelt::Error> {
         self.guild_state.ratelimits.lockdowns.check(bucket)
     }
 
-    async fn list(&self) -> Result<Vec<Lockdown>, silverpelt::Error> {
-        let lockdowns = lockdowns::LockdownSet::guild(
-            self.guild_id,
-            LockdownData::new(
-                &self.guild_state.serenity_context.cache,
-                &self.guild_state.serenity_context.http,
-                self.guild_state.pool.clone(),
-                self.guild_state.reqwest_client.clone(),
-                sandwich_config(),
-            ),
-        )
-        .await
-        .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
-
-        let mut result = vec![];
-
-        for lockdown in lockdowns.lockdowns {
-            result.push(Lockdown {
-                id: lockdown.id,
-                reason: lockdown.reason,
-                r#type: lockdown.r#type.string_form(),
-                data: lockdown.data,
-                created_at: lockdown.created_at,
-            });
-        }
-
-        Ok(result)
+    /// Returns a lockdown data store to be used with the lockdown library
+    fn lockdown_data_store(&self) -> &LockdownData {
+        &self.lockdown_data
     }
 
-    async fn qsl(&self, reason: String) -> Result<sqlx::types::uuid::Uuid, silverpelt::Error> {
-        self.init_lockdown(Box::new(lockdowns::qsl::QuickServerLockdown {}), reason)
-            .await
-    }
-
-    async fn tsl(&self, reason: String) -> Result<sqlx::types::uuid::Uuid, silverpelt::Error> {
-        self.init_lockdown(
-            Box::new(lockdowns::tsl::TraditionalServerLockdown {}),
-            reason,
-        )
-        .await
-    }
-
-    async fn scl(
-        &self,
-        channel_id: serenity::all::ChannelId,
-        reason: String,
-    ) -> Result<sqlx::types::uuid::Uuid, silverpelt::Error> {
-        self.init_lockdown(
-            Box::new(lockdowns::scl::SingleChannelLockdown(channel_id)),
-            reason,
-        )
-        .await
-    }
-
-    async fn role(
-        &self,
-        role_id: serenity::all::RoleId,
-        reason: String,
-    ) -> Result<sqlx::types::uuid::Uuid, silverpelt::Error> {
-        self.init_lockdown(Box::new(lockdowns::role::RoleLockdown(role_id)), reason)
-            .await
-    }
-
-    async fn remove(&self, id: sqlx::types::uuid::Uuid) -> Result<(), silverpelt::Error> {
-        let mut lockdowns = lockdowns::LockdownSet::guild(
-            self.guild_id,
-            LockdownData::new(
-                &self.guild_state.serenity_context.cache,
-                &self.guild_state.serenity_context.http,
-                self.guild_state.pool.clone(),
-                self.guild_state.reqwest_client.clone(),
-                sandwich_config(),
-            ),
-        )
-        .await
-        .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
-
-        lockdowns
-            .easy_remove(id)
-            .await
-            .map_err(|e| format!("Error while applying lockdown: {}", e))?;
-
-        Ok(())
+    /// Serenity HTTP client
+    fn serenity_http(&self) -> &serenity::http::Http {
+        &self.guild_state.serenity_context.http
     }
 }
 
