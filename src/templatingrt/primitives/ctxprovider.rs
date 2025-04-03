@@ -12,7 +12,6 @@ use khronos_runtime::traits::stingprovider::StingProvider;
 use khronos_runtime::traits::userinfoprovider::UserInfoProvider;
 use khronos_runtime::utils::executorscope::ExecutorScope;
 use moka::future::Cache;
-use serenity::all::InteractionId;
 use silverpelt::lockdowns::LockdownData;
 use silverpelt::stings::{StingAggregateOperations, StingCreateOperations, StingOperations};
 use silverpelt::userinfo::{NoMember, UserInfoOperations};
@@ -415,82 +414,12 @@ impl DiscordProvider for ArDiscordProvider {
         Ok(guild_channel)
     }
 
-    async fn get_audit_logs(
-        &self,
-        action_type: Option<serenity::all::audit_log::Action>,
-        user_id: Option<serenity::model::prelude::UserId>,
-        before: Option<serenity::model::prelude::AuditLogEntryId>,
-        limit: Option<serenity::nonmax::NonMaxU8>,
-    ) -> Result<serenity::model::prelude::AuditLogs, silverpelt::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .get_audit_logs(self.guild_id, action_type, user_id, before, limit)
-            .await
-            .map_err(|e| format!("Failed to fetch audit logs: {}", e).into())
+    fn guild_id(&self) -> serenity::all::GuildId {
+        self.guild_id
     }
 
-    async fn list_auto_moderation_rules(
-        &self,
-    ) -> Result<Vec<serenity::model::guild::automod::Rule>, khronos_runtime::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .get_automod_rules(self.guild_id)
-            .await
-            .map_err(|e| format!("Failed to fetch automod rules: {}", e).into())
-    }
-
-    async fn get_auto_moderation_rule(
-        &self,
-        rule_id: serenity::all::RuleId,
-    ) -> Result<serenity::model::guild::automod::Rule, khronos_runtime::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .get_automod_rule(self.guild_id, rule_id)
-            .await
-            .map_err(|e| format!("Failed to fetch automod rule: {}", e).into())
-    }
-
-    async fn create_auto_moderation_rule(
-        &self,
-        map: impl serde::Serialize,
-        audit_log_reason: Option<&str>,
-    ) -> Result<serenity::model::guild::automod::Rule, khronos_runtime::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .create_automod_rule(self.guild_id, &map, audit_log_reason)
-            .await
-            .map_err(|e| format!("Failed to create automod rule: {}", e).into())
-    }
-
-    async fn edit_auto_moderation_rule(
-        &self,
-        rule_id: serenity::all::RuleId,
-        map: impl serde::Serialize,
-        audit_log_reason: Option<&str>,
-    ) -> Result<serenity::model::guild::automod::Rule, khronos_runtime::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .edit_automod_rule(self.guild_id, rule_id, &map, audit_log_reason)
-            .await
-            .map_err(|e| format!("Failed to edit automod rule: {}", e).into())
-    }
-
-    async fn delete_auto_moderation_rule(
-        &self,
-        rule_id: serenity::all::RuleId,
-        audit_log_reason: Option<&str>,
-    ) -> Result<(), khronos_runtime::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .delete_automod_rule(self.guild_id, rule_id, audit_log_reason)
-            .await
-            .map_err(|e| format!("Failed to delete automod rule: {}", e).into())
+    fn serenity_http(&self) -> &serenity::http::Http {
+        &self.guild_state.serenity_context.http
     }
 
     async fn edit_channel_permissions(
@@ -505,61 +434,12 @@ impl DiscordProvider for ArDiscordProvider {
             .http
             .create_permission(channel_id, target_id, &data, audit_log_reason)
             .await
-            .map_err(|e| format!("Failed to edit channel permissions: {}", e).into())
-    }
+            .map_err(|e| format!("Failed to edit channel permissions: {}", e))?;
 
-    async fn add_guild_member_role(
-        &self,
-        user_id: serenity::all::UserId,
-        role_id: serenity::all::RoleId,
-        audit_log_reason: Option<&str>,
-    ) -> Result<(), khronos_runtime::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .add_member_role(self.guild_id, user_id, role_id, audit_log_reason)
-            .await
-            .map_err(|e| format!("Failed to add role to member: {}", e).into())
-    }
+        // Update cache
+        CHANNEL_CACHE.remove(&channel_id).await;
 
-    async fn remove_guild_member_role(
-        &self,
-        user_id: serenity::all::UserId,
-        role_id: serenity::all::RoleId,
-        audit_log_reason: Option<&str>,
-    ) -> Result<(), khronos_runtime::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .remove_member_role(self.guild_id, user_id, role_id, audit_log_reason)
-            .await
-            .map_err(|e| format!("Failed to remove role from member: {}", e).into())
-    }
-
-    async fn remove_guild_member(
-        &self,
-        user_id: serenity::all::UserId,
-        audit_log_reason: Option<&str>,
-    ) -> Result<(), khronos_runtime::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .kick_member(self.guild_id, user_id, audit_log_reason)
-            .await
-            .map_err(|e| format!("Failed to remove member: {}", e).into())
-    }
-
-    async fn get_guild_bans(
-        &self,
-        target: Option<serenity::all::UserPagination>,
-        limit: Option<serenity::nonmax::NonMaxU16>,
-    ) -> Result<Vec<serenity::all::Ban>, khronos_runtime::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .get_bans(self.guild_id, target, limit)
-            .await
-            .map_err(|e| format!("Failed to get guild bans: {}", e).into())
+        Ok(())
     }
 
     async fn edit_channel(
@@ -599,181 +479,6 @@ impl DiscordProvider for ArDiscordProvider {
         CHANNEL_CACHE.remove(&channel_id).await;
 
         Ok(chan)
-    }
-
-    async fn create_member_ban(
-        &self,
-        user_id: serenity::all::UserId,
-        delete_message_seconds: u32,
-        reason: Option<&str>,
-    ) -> Result<(), silverpelt::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .ban_user(
-                self.guild_id,
-                user_id,
-                (delete_message_seconds / 86400)
-                    .try_into()
-                    .map_err(|e| format!("Failed to convert ban duration to days: {}", e))?,
-                reason,
-            )
-            .await
-            .map_err(|e| format!("Failed to ban user: {}", e).into())
-    }
-
-    async fn kick_member(
-        &self,
-        user_id: serenity::all::UserId,
-        reason: Option<&str>,
-    ) -> Result<(), silverpelt::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .kick_member(self.guild_id, user_id, reason)
-            .await
-            .map_err(|e| format!("Failed to kick user: {}", e).into())
-    }
-
-    async fn edit_member(
-        &self,
-        user_id: serenity::all::UserId,
-        map: impl serde::Serialize,
-        audit_log_reason: Option<&str>,
-    ) -> Result<serenity::all::Member, silverpelt::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .edit_member(self.guild_id, user_id, &map, audit_log_reason)
-            .await
-            .map_err(|e| format!("Failed to edit member: {}", e).into())
-    }
-
-    async fn create_message(
-        &self,
-        channel_id: serenity::all::ChannelId,
-        files: Vec<serenity::all::CreateAttachment<'_>>,
-        data: impl serde::Serialize,
-    ) -> Result<serenity::model::channel::Message, silverpelt::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .send_message(channel_id, files, &data)
-            .await
-            .map_err(|e| format!("Failed to send message: {}", e).into())
-    }
-
-    async fn create_interaction_response(
-        &self,
-        interaction_id: InteractionId,
-        interaction_token: &str,
-        response: impl serde::Serialize,
-        files: Vec<serenity::all::CreateAttachment<'_>>,
-    ) -> Result<(), silverpelt::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .create_interaction_response(interaction_id, interaction_token, &response, files)
-            .await
-            .map_err(|e| format!("Failed to create interaction response: {}", e).into())
-    }
-
-    async fn create_followup_message(
-        &self,
-        interaction_token: &str,
-        response: impl serde::Serialize,
-        files: Vec<serenity::all::CreateAttachment<'_>>,
-    ) -> Result<serenity::all::Message, silverpelt::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .create_followup_message(interaction_token, &response, files)
-            .await
-            .map_err(|e| format!("Failed to create interaction followup: {}", e).into())
-    }
-
-    async fn get_original_interaction_response(
-        &self,
-        interaction_token: &str,
-    ) -> Result<serenity::model::channel::Message, silverpelt::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .get_original_interaction_response(interaction_token)
-            .await
-            .map_err(|e| format!("Failed to get original interaction response: {}", e).into())
-    }
-
-    async fn get_guild_commands(&self) -> Result<Vec<serenity::all::Command>, silverpelt::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .get_guild_commands(self.guild_id)
-            .await
-            .map_err(|e| format!("Failed to get guild commands: {}", e).into())
-    }
-
-    async fn get_guild_command(
-        &self,
-        command_id: serenity::all::CommandId,
-    ) -> Result<serenity::all::Command, silverpelt::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .get_guild_command(self.guild_id, command_id)
-            .await
-            .map_err(|e| format!("Failed to get guild command: {}", e).into())
-    }
-
-    async fn get_guild_roles(
-        &self,
-    ) -> Result<botox::ExtractMap<serenity::all::RoleId, serenity::all::Role>, khronos_runtime::Error>
-    {
-        self.guild_state
-            .serenity_context
-            .http
-            .get_guild_roles(self.guild_id)
-            .await
-            .map_err(|e| format!("Failed to get guild roles: {}", e).into())
-    }
-
-    async fn create_guild_command(
-        &self,
-        map: impl serde::Serialize,
-    ) -> Result<serenity::all::Command, silverpelt::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .create_guild_command(self.guild_id, &map)
-            .await
-            .map_err(|e| format!("Failed to create guild command: {}", e).into())
-    }
-
-    async fn get_messages(
-        &self,
-        channel_id: serenity::all::ChannelId,
-        target: Option<serenity::all::MessagePagination>,
-        limit: Option<serenity::nonmax::NonMaxU8>,
-    ) -> Result<Vec<serenity::all::Message>, silverpelt::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .get_messages(channel_id, target, limit)
-            .await
-            .map_err(|e| format!("Failed to get messages: {}", e).into())
-    }
-
-    async fn get_message(
-        &self,
-        channel_id: serenity::all::ChannelId,
-        message_id: serenity::all::MessageId,
-    ) -> Result<serenity::all::Message, silverpelt::Error> {
-        self.guild_state
-            .serenity_context
-            .http
-            .get_message(channel_id, message_id)
-            .await
-            .map_err(|e| format!("Failed to get message: {}", e).into())
     }
 }
 
