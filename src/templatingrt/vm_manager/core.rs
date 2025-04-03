@@ -184,6 +184,7 @@ pub(super) async fn reset_vm_cache(
     if let Some(templates) = get_all_guild_templates(guild_id).await {
         for template in templates.iter() {
             if let Some(vm) = runtime.get_sub_isolate(&template.name) {
+                vm.clear_require_cache();
                 vm.asset_manager().set_template(template.clone());
             }
         }
