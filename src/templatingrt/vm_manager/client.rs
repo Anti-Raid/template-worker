@@ -22,6 +22,11 @@ pub(super) static VMS: LazyLock<scc::HashMap<GuildId, ArLua>> = LazyLock::new(sc
 pub enum LuaVmAction {
     /// Dispatch a template event
     DispatchEvent { event: CreateEvent },
+    /// Dispatch a template event to a specific template
+    DispatchTemplateEvent {
+        event: CreateEvent,
+        template_name: String,
+    },
     /// Dispatch a template event to an inline template
     DispatchInlineEvent {
         event: CreateEvent,

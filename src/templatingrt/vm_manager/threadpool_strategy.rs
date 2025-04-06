@@ -12,7 +12,7 @@ use super::core::{
     dispatch_event_to_template,
 };
 use super::{client::ArLua, ArLuaHandle, LuaVmAction, LuaVmResult};
-use crate::templatingrt::cache::get_all_guild_templates;
+use crate::templatingrt::cache::{get_guild_template, get_all_guild_templates};
 use crate::templatingrt::MAX_VM_THREAD_STACK_SIZE;
 
 pub const DEFAULT_MAX_THREADS: usize = 100; // Maximum number of threads in the pool
@@ -169,6 +169,24 @@ impl ThreadEntry {
                                                 .await,
                                             );
                                         }
+                                        LuaVmAction::DispatchTemplateEvent { event, template_name } => {
+                                            let event = Event::from_create_event(&event);
+                                            let Some(template) = get_guild_template(gs.guild_id, &template_name).await else {
+                                                let _ = callback.send(vec![(
+                                                    template_name.clone(),
+                                                    LuaVmResult::LuaError {
+                                                        err: format!("Template {} not found", template_name),
+                                                    },
+                                                )]);
+                                                return;
+                                            };
+            
+                                            let result =
+                                                dispatch_event_to_template(template, event, &tis_ref, gs).await;
+            
+                                            // Send back to the caller
+                                            let _ = callback.send(vec![(template_name, result)]);
+                                        }            
                                         LuaVmAction::DispatchInlineEvent { event, template } => {
                                             let event = Event::from_create_event(&event);
                                             let name = template.name.clone();

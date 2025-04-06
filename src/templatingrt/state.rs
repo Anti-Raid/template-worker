@@ -172,6 +172,23 @@ impl Ratelimits {
             clock,
         })
     }
+
+    fn new_scheduled_execs_rl() -> Result<LuaRatelimits, silverpelt::Error> {
+        // Create the global limit
+        let global_quota =
+            LuaRatelimits::create_quota(create_nonmax_u32(50)?, Duration::from_secs(1))?;
+        let global1 = DefaultKeyedRateLimiter::keyed(global_quota);
+        let global = vec![global1];
+
+        // Create the clock
+        let clock = QuantaClock::default();
+
+        Ok(LuaRatelimits {
+            global,
+            per_bucket: indexmap::indexmap!(),
+            clock,
+        })
+    }
 }
 
 pub struct Ratelimits {
@@ -192,6 +209,9 @@ pub struct Ratelimits {
 
     /// Stores the lua page ratelimiters
     pub page: LuaRatelimits,
+
+    /// Stores the lua scheduled execution ratelimiters
+    pub scheduled_execs: LuaRatelimits,
 }
 
 impl Ratelimits {
@@ -203,6 +223,7 @@ impl Ratelimits {
             lockdowns: Ratelimits::new_lockdowns_rl()?,
             userinfo: Ratelimits::new_userinfo_rl()?,
             page: Ratelimits::new_page_rl()?,
+            scheduled_execs: Ratelimits::new_scheduled_execs_rl()?,
         })
     }
 }

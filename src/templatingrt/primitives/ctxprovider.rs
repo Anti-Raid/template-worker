@@ -10,6 +10,8 @@ use khronos_runtime::traits::lockdownprovider::LockdownProvider;
 use khronos_runtime::traits::pageprovider::PageProvider;
 use khronos_runtime::traits::stingprovider::StingProvider;
 use khronos_runtime::traits::userinfoprovider::UserInfoProvider;
+use khronos_runtime::traits::scheduledexecprovider::ScheduledExecProvider;
+use khronos_runtime::traits::ir::ScheduledExecution;
 use khronos_runtime::utils::executorscope::ExecutorScope;
 use moka::future::Cache;
 use silverpelt::lockdowns::LockdownData;
@@ -48,6 +50,7 @@ impl KhronosContext for TemplateContextProvider {
     type UserInfoProvider = ArUserInfoProvider;
     type StingProvider = ArStingProvider;
     type PageProvider = ArPageProvider;
+    type ScheduledExecProvider = ArScheduledExecProvider;
 
     fn data(&self) -> Self::Data {
         self.template_data.clone()
@@ -161,6 +164,12 @@ impl KhronosContext for TemplateContextProvider {
             },
             guild_state: self.guild_state.clone(),
             template_id: self.template_data.name.clone(),
+        })
+    }
+
+    fn scheduled_exec_provider(&self) -> Option<Self::ScheduledExecProvider> {
+        Some(ArScheduledExecProvider {
+            guild_state: self.guild_state.clone(),
         })
     }
 }
@@ -665,6 +674,91 @@ impl PageProvider for ArPageProvider {
 
     async fn delete_page(&self) -> Result<(), khronos_runtime::Error> {
         crate::pages::remove_page(self.guild_id, &self.template_id).await;
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct ArScheduledExecProvider {
+    guild_state: Rc<GuildState>,
+}
+
+impl ScheduledExecProvider for ArScheduledExecProvider {
+    fn attempt_action(&self, bucket: &str) -> Result<(), silverpelt::Error> {
+        self.guild_state.ratelimits.scheduled_execs.check(bucket)
+    }
+
+    /// Lists all scheduled executions
+    async fn list(
+        &self,
+    ) -> Result<Vec<ScheduledExecution>, silverpelt::Error> {
+        #[derive(sqlx::FromRow)]
+        struct ScheduledExecutionRow {
+            exec_id: String,
+            template_name: String,
+            data: serde_json::Value,
+            run_at: chrono::DateTime<chrono::Utc>,
+        }
+
+        let scheduled_execs: Vec<ScheduledExecutionRow> = sqlx::query_as(
+            "SELECT exec_id, template_name, data, run_at FROM scheduled_executions WHERE guild_id = $1",
+        )
+        .bind(self.guild_state.guild_id.to_string())
+        .fetch_all(&self.guild_state.pool)
+        .await?;
+
+        let mut executions = vec![];
+
+        for rec in scheduled_execs {
+            let execution = ScheduledExecution {
+                id: rec.exec_id,
+                template_name: rec.template_name,
+                data: rec.data,
+                run_at: rec.run_at,
+            };
+
+            executions.push(execution);
+        }
+
+        Ok(executions)
+    } 
+
+    /// Adds a new scheduled execution
+    async fn add(
+        &self,
+        exec: ScheduledExecution
+    ) -> Result<(), silverpelt::Error> {
+        sqlx::query(
+            "INSERT INTO scheduled_executions (guild_id, exec_id, template_name, data, run_at) VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(self.guild_state.guild_id.to_string())
+        .bind(exec.id)
+        .bind(exec.template_name)
+        .bind(exec.data)
+        .bind(exec.run_at)
+        .execute(&self.guild_state.pool)
+        .await?;
+
+        // Regenerate the cache
+        crate::templatingrt::cache::get_all_guild_scheduled_executions_from_db(
+            self.guild_state.guild_id, 
+            &self.guild_state.pool
+        ).await?;
+
+        Ok(())
+    }
+
+    /// Removes a scheduled execution
+    async fn remove(
+        &self,
+        exec_id: String
+    ) -> Result<(), silverpelt::Error> {
+        crate::templatingrt::cache::remove_scheduled_execution(
+            self.guild_state.guild_id, 
+            &exec_id,
+            &self.guild_state.pool, 
+        ).await?;
+
         Ok(())
     }
 }

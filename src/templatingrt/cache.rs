@@ -7,18 +7,29 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct ScheduledExecution {
+    pub template_name: String,
+    pub id: String,
+    pub data: serde_json::Value,
+    pub run_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub static SCHEDULED_EXECUTIONS: LazyLock<Cache<GuildId, Arc<Vec<Arc<ScheduledExecution>>>>> =
+    LazyLock::new(|| Cache::builder().build());
+
 pub static TEMPLATES_CACHE: LazyLock<Cache<GuildId, Arc<Vec<Arc<Template>>>>> =
     LazyLock::new(|| Cache::builder().build());
 
 /// Gets all guilds with templates
-pub fn get_all_guilds() -> Vec<GuildId> {
-    let mut templates = Vec::new();
+pub fn get_all_guilds_with_templates() -> Vec<GuildId> {
+    let mut guild_ids = Vec::new();
 
     for (guild_id, _) in TEMPLATES_CACHE.iter() {
-        templates.push(*guild_id);
+        guild_ids.push(*guild_id);
     }
 
-    templates
+    guild_ids
 }
 
 /// Returns if a guild has any templates
@@ -30,6 +41,22 @@ pub fn has_templates(guild_id: GuildId) -> bool {
 #[allow(dead_code)]
 pub async fn get_all_guild_templates(guild_id: GuildId) -> Option<Arc<Vec<Arc<Template>>>> {
     TEMPLATES_CACHE.get(&guild_id).await
+}
+
+/// Gets all expired scheduled executions across all guilds
+pub fn get_all_expired_scheduled_executions() -> Vec<(serenity::all::GuildId, Arc<ScheduledExecution>)> {
+    let mut expired = Vec::new();
+
+    let now = chrono::Utc::now();
+    for (guild_id, executions) in SCHEDULED_EXECUTIONS.iter() {
+        for execution in executions.iter() {
+            if execution.run_at <= now {
+                expired.push((*guild_id, execution.clone()));
+            }
+        }
+    }
+
+    expired
 }
 
 /// Gets a guild template by name
@@ -45,9 +72,10 @@ pub async fn get_guild_template(guild_id: GuildId, name: &str) -> Option<Arc<Tem
     None
 }
 
-/// Sets up the initial template cache
+/// Sets up the initial template and scheduled execution cache
 pub async fn setup(pool: &sqlx::PgPool) -> Result<(), silverpelt::Error> {
     get_all_templates_from_db(pool).await?;
+    get_all_scheduled_executions_from_db(pool).await?;
     Ok(())
 }
 
@@ -60,9 +88,11 @@ pub async fn regenerate_cache(
     println!("Clearing cache for guild {}", guild_id);
 
     TEMPLATES_CACHE.remove(&guild_id).await;
+    SCHEDULED_EXECUTIONS.remove(&guild_id).await;
 
     // NOTE: if this call fails, bail out early and don't clear the cache to ensure old code at least runs
     get_all_guild_templates_from_db(guild_id, pool).await?;
+    get_all_guild_scheduled_executions_from_db(guild_id, pool).await?;
 
     println!("Resyncing VMs");
 
@@ -118,6 +148,49 @@ async fn get_all_templates_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt
     Ok(())
 }
 
+async fn get_all_scheduled_executions_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt::Error> {
+    #[derive(sqlx::FromRow)]
+    struct ScheduledExecutionPartial {
+        guild_id: String,
+        template_name: String,
+        exec_id: String,
+        data: serde_json::Value,
+        run_at: chrono::DateTime<chrono::Utc>,
+    }
+
+    let partials: Vec<ScheduledExecutionPartial> =
+        sqlx::query_as("SELECT guild_id, exec_id, data, run_at FROM scheduled_executions")
+            .fetch_all(pool)
+            .await?;
+
+    let mut executions: HashMap<serenity::all::GuildId, Vec<Arc<ScheduledExecution>>> =
+        HashMap::new();
+
+    for partial in partials {
+        let guild_id = partial.guild_id.parse()?;
+
+        let execution = Arc::new(ScheduledExecution {
+            id: partial.exec_id,
+            template_name: partial.template_name,
+            data: partial.data,
+            run_at: partial.run_at,
+        });
+
+        if let Some(executions_vec) = executions.get_mut(&guild_id) {
+            executions_vec.push(execution);
+        } else {
+            executions.insert(guild_id, vec![execution]);
+        }
+    }
+
+    // Store the executions in the cache
+    for (guild_id, executions) in executions {
+        SCHEDULED_EXECUTIONS.insert(guild_id, executions.into()).await;
+    }
+
+    Ok(())
+}
+
 async fn get_all_guild_templates_from_db(
     guild_id: GuildId,
     pool: &sqlx::PgPool,
@@ -132,4 +205,57 @@ async fn get_all_guild_templates_from_db(
     let templates = Arc::new(templates_vec);
     TEMPLATES_CACHE.insert(guild_id, templates.clone()).await;
     Ok(())
+}
+
+pub async fn get_all_guild_scheduled_executions_from_db(
+    guild_id: GuildId,
+    pool: &sqlx::PgPool,
+) -> Result<(), silverpelt::Error> {
+    #[derive(sqlx::FromRow)]
+    struct ScheduledExecutionPartial {
+        exec_id: String,
+        template_name: String,
+        data: serde_json::Value,
+        run_at: chrono::DateTime<chrono::Utc>,
+    }
+
+    let executions_vec: Vec<ScheduledExecutionPartial> = sqlx::query_as(
+        "SELECT exec_id, template_name, data, run_at FROM scheduled_executions WHERE guild_id = $1",
+    )
+    .bind(guild_id.to_string())
+    .fetch_all(pool)
+    .await?;
+
+    let executions_vec = executions_vec
+        .into_iter()
+        .map(|partial| Arc::new(ScheduledExecution {
+            id: partial.exec_id,
+            template_name: partial.template_name,
+            data: partial.data,
+            run_at: partial.run_at,
+        }))
+        .collect::<Vec<_>>();
+
+    // Store the executions in the cache
+    SCHEDULED_EXECUTIONS.insert(guild_id, executions_vec.into()).await;
+    Ok(())
+}
+
+pub async fn remove_scheduled_execution(
+    guild_id: serenity::all::GuildId,
+    id: &str,
+    pool: &sqlx::PgPool,
+) -> Result<(), silverpelt::Error> {
+    sqlx::query(
+        "DELETE FROM scheduled_executions WHERE guild_id = $1 AND exec_id = $2",
+    )
+    .bind(guild_id.to_string())
+    .bind(id)
+    .execute(pool)
+    .await?;
+
+    // Reset gse cache for this guild
+    get_all_guild_scheduled_executions_from_db(guild_id, pool).await?;
+
+     Ok(())
 }

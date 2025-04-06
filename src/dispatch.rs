@@ -147,6 +147,41 @@ pub async fn dispatch(
     Ok(())
 }
 
+pub async fn dispatch_to_template(
+    ctx: &Context,
+    data: &Data,
+    event: CreateEvent,
+    guild_id: GuildId,
+    template_name: String,
+) -> Result<(), silverpelt::Error> {
+    if !has_templates(guild_id) {
+        return Ok(());
+    };
+
+    let res = execute(
+        ParseCompileState {
+            serenity_context: ctx.clone(),
+            pool: data.pool.clone(),
+            reqwest_client: data.reqwest.clone(),
+            guild_id,
+        },
+        LuaVmAction::DispatchTemplateEvent { event, template_name },
+    )
+    .await?;
+
+    let serenity_context = ctx.clone();
+
+    tokio::task::spawn(async move {
+        res.wait_and_log_error(guild_id, &serenity_context)
+            .await
+            .map_err(|e| {
+                log::error!("Error while waiting for template [template event]: {}", e);
+            })
+    });
+
+    Ok(())
+}
+
 /// Dispatches a template event to all templates, waiting for the response and returning it
 pub async fn dispatch_and_wait(
     ctx: &Context,
@@ -167,6 +202,54 @@ pub async fn dispatch_and_wait(
             guild_id,
         },
         LuaVmAction::DispatchEvent { event },
+    )
+    .await?;
+
+    let result_handle = match handle.wait_timeout(wait_timeout).await {
+        Ok(Some(action)) => action,
+        Ok(None) => return Err("Timed out while waiting for response".into()),
+        Err(e) => return Err(e.to_string().into()),
+    };
+
+    let mut results = HashMap::with_capacity(result_handle.results.len());
+
+    for result in result_handle.results {
+        if let Err(e) = result.log_error(guild_id, ctx).await {
+            log::error!("Error while waiting for template: {}", e);
+            continue;
+        }
+
+        let name = result.template_name.clone();
+        if let Ok(value) = result.into_response::<serde_json::Value>() {
+            results.insert(name, value);
+        }
+    }
+
+    Ok(results)
+}
+
+#[allow(dead_code)]
+/// Dispatches a template event to all templates, waiting for the response and returning it
+pub async fn dispatch_to_template_and_wait(
+    ctx: &Context,
+    data: &Data,
+    event: CreateEvent,
+    guild_id: GuildId,
+    template_name: String,
+    wait_timeout: std::time::Duration,
+) -> Result<HashMap<String, serde_json::Value>, silverpelt::Error> {
+    if !has_templates(guild_id) {
+        return Ok(HashMap::new());
+    };
+
+    let handle = execute(
+        ParseCompileState {
+            serenity_context: ctx.clone(),
+            pool: data.pool.clone(),
+            reqwest_client: data.reqwest.clone(),
+            guild_id,
+        },
+        LuaVmAction::DispatchTemplateEvent { event, template_name },
     )
     .await?;
 

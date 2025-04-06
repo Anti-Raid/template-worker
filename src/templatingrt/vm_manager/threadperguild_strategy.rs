@@ -3,7 +3,7 @@ use super::client::{ArLuaHandle, LuaVmResult, VMS};
 use super::core::{
     create_guild_state, dispatch_event_to_multiple_templates, dispatch_event_to_template,
 };
-use crate::templatingrt::cache::get_all_guild_templates;
+use crate::templatingrt::cache::{get_guild_template, get_all_guild_templates};
 use crate::templatingrt::vm_manager::client::LuaVmAction;
 use crate::templatingrt::vm_manager::core::configure_runtime_manager;
 use crate::templatingrt::MAX_VM_THREAD_STACK_SIZE;
@@ -73,6 +73,24 @@ pub async fn create_lua_vm(
                                     )
                                     .await,
                                 );
+                            }
+                            LuaVmAction::DispatchTemplateEvent { event, template_name } => {
+                                let event = Event::from_create_event(&event);
+                                let Some(template) = get_guild_template(guild_id, &template_name).await else {
+                                    let _ = callback.send(vec![(
+                                        template_name.clone(),
+                                        LuaVmResult::LuaError {
+                                            err: format!("Template {} not found", template_name),
+                                        },
+                                    )]);
+                                    return;
+                                };
+
+                                let result =
+                                    dispatch_event_to_template(template, event, &tis_ref, gs).await;
+
+                                // Send back to the caller
+                                let _ = callback.send(vec![(template_name, result)]);
                             }
                             LuaVmAction::DispatchInlineEvent { event, template } => {
                                 let event = Event::from_create_event(&event);

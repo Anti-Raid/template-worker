@@ -1,7 +1,7 @@
 use crate::config::CONFIG;
 use crate::dispatch::{discord_event_dispatch, dispatch, parse_event};
 use crate::expiry_tasks::tasks;
-use crate::templatingrt::cache::{get_all_guild_templates, get_all_guilds};
+use crate::templatingrt::cache::{get_all_guild_templates, get_all_guilds_with_templates};
 use antiraid_types::ar_event::AntiraidEvent;
 use async_trait::async_trait;
 use serenity::all::Framework;
@@ -55,7 +55,7 @@ impl Framework for EventFramework {
                 tokio::task::spawn(async move {
                     log::info!("Firing OnStartup event to all templates");
 
-                    for guild in get_all_guilds() {
+                    for guild in get_all_guilds_with_templates() {
                         let ctx = ctx3.clone();
                         let data = ctx.data::<silverpelt::data::Data>();
                         tokio::task::spawn(async move {
@@ -80,6 +80,12 @@ impl Framework for EventFramework {
                             }
                         });
                     }
+                });
+
+                // Start up the scheduled executions task
+                let ctx4 = ctx.clone();
+                tokio::task::spawn(async move {
+                    crate::expiry_tasks::scheduled_executions_task(ctx4).await;
                 });
             });
         }
