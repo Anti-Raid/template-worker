@@ -15,6 +15,7 @@ pub struct ScheduledExecution {
     pub run_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// This should be in descending order of run_at
 pub static SCHEDULED_EXECUTIONS: LazyLock<Cache<GuildId, Arc<Vec<Arc<ScheduledExecution>>>>> =
     LazyLock::new(|| Cache::builder().build());
 
@@ -159,7 +160,7 @@ async fn get_all_scheduled_executions_from_db(pool: &sqlx::PgPool) -> Result<(),
     }
 
     let partials: Vec<ScheduledExecutionPartial> =
-        sqlx::query_as("SELECT guild_id, exec_id, data, run_at FROM scheduled_executions")
+        sqlx::query_as("SELECT guild_id, exec_id, data, run_at FROM scheduled_executions ORDER BY run_at DESC")
             .fetch_all(pool)
             .await?;
 
@@ -220,7 +221,7 @@ pub async fn get_all_guild_scheduled_executions_from_db(
     }
 
     let executions_vec: Vec<ScheduledExecutionPartial> = sqlx::query_as(
-        "SELECT exec_id, template_name, data, run_at FROM scheduled_executions WHERE guild_id = $1",
+        "SELECT exec_id, template_name, data, run_at FROM scheduled_executions WHERE guild_id = $1 ORDER BY run_at DESC",
     )
     .bind(guild_id.to_string())
     .fetch_all(pool)
@@ -241,6 +242,7 @@ pub async fn get_all_guild_scheduled_executions_from_db(
     Ok(())
 }
 
+/// Removes all scheduled execution with the given ID
 pub async fn remove_scheduled_execution(
     guild_id: serenity::all::GuildId,
     id: &str,
