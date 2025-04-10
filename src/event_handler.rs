@@ -12,14 +12,8 @@ pub struct EventFramework {}
 
 #[async_trait]
 impl Framework for EventFramework {
-    async fn init(&mut self, client: &serenity::all::Client) {
-        // Set up the shard messenger
-        crate::serenitystore::setup_shard_messenger(client).await;
-    }
-
     async fn dispatch(&self, ctx: &Context, event: &serenity::all::FullEvent) {
         if let serenity::all::FullEvent::Ready { .. } = event {
-            crate::serenitystore::update_shard_messengers().await;
             ONCE.call_once(|| {
                 let ctx1 = ctx.clone();
                 let data1 = ctx.data::<silverpelt::data::Data>();

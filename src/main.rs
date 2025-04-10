@@ -4,7 +4,6 @@ mod event_handler;
 mod expiry_tasks;
 mod http;
 mod pages;
-mod serenitystore;
 mod templatingrt;
 
 use crate::config::{CMD_ARGS, CONFIG};

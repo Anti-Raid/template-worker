@@ -258,7 +258,7 @@ impl KVProvider for ArKVProvider {
         }
 
         sqlx::query(
-            "INSERT INTO guild_templates_kv (guild_id, key, value, scope) VALUES ($1, $2, $3, $4) ON CONFLICT (guild_id, key) DO UPDATE SET value = $3, last_updated_at = NOW()",
+            "INSERT INTO guild_templates_kv (guild_id, key, value, scope) VALUES ($1, $2, $3, $4) ON CONFLICT (guild_id, key, scope) DO UPDATE SET value = $3, last_updated_at = NOW()",
         )
         .bind(self.guild_id.to_string())
         .bind(key)
