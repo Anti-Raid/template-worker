@@ -10,6 +10,7 @@ struct ShardMessengerCache {
 
 static SHARD_MESSENGERS: OnceLock<ShardMessengerCache> = OnceLock::new();
 
+#[allow(unused_code)]
 /// Returns the total number of shards
 pub fn shard_count() -> Result<std::num::NonZeroU16, silverpelt::Error> {
     let cache = SHARD_MESSENGERS
@@ -21,6 +22,7 @@ pub fn shard_count() -> Result<std::num::NonZeroU16, silverpelt::Error> {
     Ok(shard_count)
 }
 
+#[allow(unused_code)]
 /// Returns the shard ids available
 pub fn shard_ids() -> Result<Vec<serenity::all::ShardId>, silverpelt::Error> {
     let cache = SHARD_MESSENGERS

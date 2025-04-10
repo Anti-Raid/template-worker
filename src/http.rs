@@ -247,16 +247,10 @@ pub(crate) async fn settings_operation(
             }
         }
         OperationType::Delete => {
-            let Some(pkey) = req.fields.get(&setting.primary_key) else {
-                return Json(CanonicalSettingsResult::Err {
-                    error: format!("Missing or invalid field: `{}`", setting.primary_key),
-                });
-            };
-
             match ar_settings::cfg::settings_delete(
                 setting,
                 &crate::pages::SettingExecutionData::new(data.clone(), serenity_context, user_id),
-                pkey.clone(),
+                req.fields,
             )
             .await
             {

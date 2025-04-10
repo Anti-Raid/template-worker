@@ -56,8 +56,15 @@ impl KhronosContext for TemplateContextProvider {
         self.template_data.allowed_caps.as_ref()
     }
 
+    /// Returns if the current context has a specific capability
     fn has_cap(&self, cap: &str) -> bool {
-        self.template_data.allowed_caps.contains(&cap.to_string())
+        for allowed_cap in self.template_data.allowed_caps.iter() {
+            if allowed_cap == cap || (allowed_cap == "*" && cap != "assetmanager:use_bundled_templating_types") {
+                return true;
+            }
+        }
+
+        false
     }
 
     fn guild_id(&self) -> Option<serenity::all::GuildId> {
@@ -361,7 +368,7 @@ impl DiscordProvider for ArDiscordProvider {
         self.guild_state.ratelimits.discord.check(bucket)
     }
 
-    async fn guild(
+    async fn get_guild(
         &self,
     ) -> serenity::Result<serenity::model::prelude::PartialGuild, silverpelt::Error> {
         Ok(sandwich_driver::guild(
@@ -375,7 +382,7 @@ impl DiscordProvider for ArDiscordProvider {
         .map_err(|e| format!("Failed to fetch guild information from sandwich: {}", e))?)
     }
 
-    async fn member(
+    async fn get_guild_member(
         &self,
         user_id: serenity::all::UserId,
     ) -> serenity::Result<Option<serenity::all::Member>, silverpelt::Error> {
@@ -391,7 +398,7 @@ impl DiscordProvider for ArDiscordProvider {
         .map_err(|e| format!("Failed to fetch member information from sandwich: {}", e))?)
     }
 
-    async fn guild_channel(
+    async fn get_channel(
         &self,
         channel_id: serenity::all::ChannelId,
     ) -> serenity::Result<serenity::all::GuildChannel, silverpelt::Error> {

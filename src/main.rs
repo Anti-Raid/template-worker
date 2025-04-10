@@ -6,7 +6,6 @@ mod http;
 mod pages;
 mod serenitystore;
 mod templatingrt;
-mod temporary_punishments;
 
 use crate::config::{CMD_ARGS, CONFIG};
 use crate::event_handler::EventFramework;

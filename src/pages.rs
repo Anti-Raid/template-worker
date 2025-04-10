@@ -246,13 +246,13 @@ impl SettingDeleter<SettingExecutionData> for TemplateSettingExecutor {
     async fn delete<'a>(
         &self,
         context: &SettingExecutionData,
-        primary_key: Value,
+        fields: indexmap::IndexMap<String, Value>,
     ) -> Result<(), Error> {
         let correlation_id = uuid::Uuid::new_v4();
         let event = AntiraidEvent::TemplateSettingExecute(TemplateSettingExecuteEventData {
             template_id: self.template_id.clone(),
             setting_id: self.setting_id.clone(),
-            action: TemplateSettingExecuteEventDataAction::Delete { primary_key },
+            action: TemplateSettingExecuteEventDataAction::Delete { fields },
             author: context.author,
             correlation_id,
         });
@@ -364,10 +364,10 @@ fn create_setting(
             khronos_runtime::traits::ir::InnerColumnType::Boolean {} => {
                 ar_settings::types::InnerColumnType::Boolean {}
             }
-            khronos_runtime::traits::ir::InnerColumnType::Json { max_bytes } => {
+            khronos_runtime::traits::ir::InnerColumnType::Json { kind, max_bytes } => {
                 ar_settings::types::InnerColumnType::Json {
                     max_bytes,
-                    kind: "template-json".to_string(), // TODO: Maybe expose some types in the IR?
+                    kind, // TODO: Maybe expose some types in the IR?
                 }
             }
         }
@@ -402,6 +402,7 @@ fn create_setting(
                         }
                     }
                 },
+                primary_key: column.primary_key,
                 nullable: column.nullable,
                 suggestions,
                 secret: column.secret,
@@ -478,7 +479,6 @@ fn create_setting(
         id: setting.id,
         name: setting.name,
         description: setting.description,
-        primary_key: setting.primary_key,
         title_template: setting.title_template,
         columns: Arc::new(columns),
         operations,
@@ -515,8 +515,8 @@ fn unravel_setting(
             ar_settings::types::InnerColumnType::Boolean {} => {
                 khronos_runtime::traits::ir::InnerColumnType::Boolean {}
             }
-            ar_settings::types::InnerColumnType::Json { max_bytes, .. } => {
-                khronos_runtime::traits::ir::InnerColumnType::Json { max_bytes }
+            ar_settings::types::InnerColumnType::Json { max_bytes, kind } => {
+                khronos_runtime::traits::ir::InnerColumnType::Json { max_bytes, kind }
             }
         }
     }
@@ -552,6 +552,7 @@ fn unravel_setting(
                         }
                     }
                 },
+                primary_key: column.primary_key,
                 nullable: column.nullable,
                 suggestions,
                 secret: column.secret,
@@ -588,7 +589,6 @@ fn unravel_setting(
         id: setting.id.clone(),
         name: setting.name.clone(),
         description: setting.description.clone(),
-        primary_key: setting.primary_key.clone(),
         title_template: setting.title_template.clone(),
         columns,
         supported_operations,

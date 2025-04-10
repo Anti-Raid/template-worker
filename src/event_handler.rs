@@ -1,6 +1,5 @@
 use crate::config::CONFIG;
 use crate::dispatch::{discord_event_dispatch, dispatch, parse_event};
-use crate::expiry_tasks::tasks;
 use crate::templatingrt::cache::{get_all_guild_templates, get_all_guilds_with_templates};
 use antiraid_types::ar_event::AntiraidEvent;
 use async_trait::async_trait;
@@ -41,22 +40,13 @@ impl Framework for EventFramework {
                     rust_rpc_server::start_rpc_server(opts, rpc_server).await;
                 });
 
-                let ctx2 = ctx.clone();
-                tokio::task::spawn(async move {
-                    log::info!("Starting up tasks");
-
-                    tokio::task::spawn(async move {
-                        botox::taskman::start_all_tasks(tasks(), ctx2).await;
-                    });
-                });
-
                 // Fire OnStartup event to all templates
-                let ctx3 = ctx.clone();
+                let ctx2 = ctx.clone();
                 tokio::task::spawn(async move {
                     log::info!("Firing OnStartup event to all templates");
 
                     for guild in get_all_guilds_with_templates() {
-                        let ctx = ctx3.clone();
+                        let ctx = ctx2.clone();
                         let data = ctx.data::<silverpelt::data::Data>();
                         tokio::task::spawn(async move {
                             let Some(templates) = get_all_guild_templates(guild).await else {
@@ -83,9 +73,9 @@ impl Framework for EventFramework {
                 });
 
                 // Start up the scheduled executions task
-                let ctx4 = ctx.clone();
+                let ctx3 = ctx.clone();
                 tokio::task::spawn(async move {
-                    crate::expiry_tasks::scheduled_executions_task(ctx4).await;
+                    crate::expiry_tasks::scheduled_executions_task(ctx3).await;
                 });
             });
         }
