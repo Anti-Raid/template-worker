@@ -1,6 +1,6 @@
 //! Temporary until templating supports multifile scripts in full
 
-use std::{cell::RefCell, collections::HashMap, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, sync::Arc, rc::Rc};
 
 use khronos_runtime::utils::assets::AssetManager;
 
@@ -39,6 +39,11 @@ pub static TEMPLATING_TYPES: std::sync::LazyLock<HashMap<String, Arc<String>>> =
 #[derive(Clone)]
 pub struct TemplateAssetManager {
     template: RefCell<Arc<Template>>,
+}
+
+#[derive(Clone)]
+struct TemplatingTypeAssetData {
+    cached_contents: Rc<RefCell<HashMap<String, mlua::MultiValue>>>,
 }
 
 impl TemplateAssetManager {
@@ -83,5 +88,51 @@ impl AssetManager for TemplateAssetManager {
         }
 
         Err(format!("module '{}' not found", path).into())
+    }
+
+    /// (optional) Gets a cached LuaValue, can be used to avoid repeated parsing of common things (like templating-types)
+    fn get_cached_lua_value(&self, lua: &mlua::Lua, path: &str) -> Option<mlua::MultiValue> {
+        let template = self.template.borrow();
+        if path.starts_with("templating-types/")
+            && template
+                .allowed_caps
+                .contains(&"assetmanager:use_bundled_templating_types".to_string())
+        {
+            if TEMPLATING_TYPES.contains_key(path.trim_start_matches("templating-types/"))
+            {
+                // Try getting the multivalue from lua app_data
+                if let Ok(Some(app_data)) = lua.try_app_data_mut::<TemplatingTypeAssetData>() {
+                    if let Some(cached) = app_data.cached_contents.borrow_mut().get(path) {
+                        return Some(cached.clone());
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// (optional) Called when a lua value is to be cached
+    fn on_cache_lua_value(&self, lua: &mlua::Lua, path: &str, value: &mlua::MultiValue) {
+        let template = self.template.borrow();
+        if path.starts_with("templating-types/")
+        && template
+            .allowed_caps
+            .contains(&"assetmanager:use_bundled_templating_types".to_string())
+        {
+            if TEMPLATING_TYPES.contains_key(path.trim_start_matches("templating-types/")) {
+                if let Ok(Some(app_data)) = lua.try_app_data_mut::<TemplatingTypeAssetData>() {
+                    app_data.cached_contents.borrow_mut().insert(path.to_string(), value.clone());
+                    return;
+                }
+    
+                let new_app_data = TemplatingTypeAssetData {
+                    cached_contents: Rc::new(RefCell::new(HashMap::new())),
+                };
+    
+                new_app_data.cached_contents.borrow_mut().insert(path.to_string(), value.clone());
+                lua.set_app_data(new_app_data);    
+            }
+        }
     }
 }
