@@ -160,7 +160,7 @@ async fn get_all_scheduled_executions_from_db(pool: &sqlx::PgPool) -> Result<(),
     }
 
     let partials: Vec<ScheduledExecutionPartial> =
-        sqlx::query_as("SELECT guild_id, exec_id, data, run_at FROM scheduled_executions ORDER BY run_at DESC")
+        sqlx::query_as("SELECT guild_id, exec_id, data, run_at, template_name FROM scheduled_executions ORDER BY run_at DESC")
             .fetch_all(pool)
             .await?;
 
