@@ -98,6 +98,10 @@ impl AssetManager for TemplateAssetManager {
                 .allowed_caps
                 .contains(&"assetmanager:use_bundled_templating_types".to_string())
         {
+            if !path.contains("discord-luau-corrections/") {
+                return None; // only discord-luau code can be globally cached
+            }
+
             if TEMPLATING_TYPES.contains_key(path.trim_start_matches("templating-types/"))
             {
                 // Try getting the multivalue from lua app_data
@@ -121,6 +125,10 @@ impl AssetManager for TemplateAssetManager {
             .contains(&"assetmanager:use_bundled_templating_types".to_string())
         {
             if TEMPLATING_TYPES.contains_key(path.trim_start_matches("templating-types/")) {
+                if !path.contains("discord-luau-corrections/") {
+                    return None; // only discord-luau code can be globally cached
+                }     
+
                 if let Ok(Some(app_data)) = lua.try_app_data_mut::<TemplatingTypeAssetData>() {
                     app_data.cached_contents.borrow_mut().insert(path.to_string(), value.clone());
                     return;
