@@ -126,7 +126,7 @@ impl AssetManager for TemplateAssetManager {
         {
             if TEMPLATING_TYPES.contains_key(path.trim_start_matches("templating-types/")) {
                 if !path.contains("discord-luau-corrections/") {
-                    return None; // only discord-luau code can be globally cached
+                    return; // only discord-luau code can be globally cached
                 }     
 
                 if let Ok(Some(app_data)) = lua.try_app_data_mut::<TemplatingTypeAssetData>() {
