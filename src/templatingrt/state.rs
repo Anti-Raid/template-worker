@@ -96,23 +96,6 @@ impl Ratelimits {
         })
     }
 
-    fn new_stings_rl() -> Result<LuaRatelimits, silverpelt::Error> {
-        // Create the global limit
-        let global_quota =
-            LuaRatelimits::create_quota(create_nonmax_u32(100)?, Duration::from_secs(3))?;
-        let global1 = DefaultKeyedRateLimiter::keyed(global_quota);
-        let global = vec![global1];
-
-        // Create the clock
-        let clock = QuantaClock::default();
-
-        Ok(LuaRatelimits {
-            global,
-            per_bucket: indexmap::indexmap!(),
-            clock,
-        })
-    }
-
     fn new_lockdowns_rl() -> Result<LuaRatelimits, silverpelt::Error> {
         // Create the global limit
         let global_quota =
@@ -189,6 +172,23 @@ impl Ratelimits {
             clock,
         })
     }
+
+    fn new_data_stores_rl() -> Result<LuaRatelimits, silverpelt::Error> {
+        // Create the global limit
+        let global_quota =
+            LuaRatelimits::create_quota(create_nonmax_u32(75)?, Duration::from_secs(1))?;
+        let global1 = DefaultKeyedRateLimiter::keyed(global_quota);
+        let global = vec![global1];
+
+        // Create the clock
+        let clock = QuantaClock::default();
+
+        Ok(LuaRatelimits {
+            global,
+            per_bucket: indexmap::indexmap!(),
+            clock,
+        })
+    }
 }
 
 pub struct Ratelimits {
@@ -197,9 +197,6 @@ pub struct Ratelimits {
 
     /// Stores the lua kv ratelimiters
     pub kv: LuaRatelimits,
-
-    /// Stores the lua sting ratelimiters
-    pub stings: LuaRatelimits,
 
     /// Stores the lua lockdown ratelimiters
     pub lockdowns: LuaRatelimits,
@@ -212,6 +209,9 @@ pub struct Ratelimits {
 
     /// Stores the lua scheduled execution ratelimiters
     pub scheduled_execs: LuaRatelimits,
+
+    /// Stores the data store ratelimiters
+    pub data_stores: LuaRatelimits,
 }
 
 impl Ratelimits {
@@ -219,11 +219,11 @@ impl Ratelimits {
         Ok(Ratelimits {
             discord: Ratelimits::new_discord_rl()?,
             kv: Ratelimits::new_kv_rl()?,
-            stings: Ratelimits::new_stings_rl()?,
             lockdowns: Ratelimits::new_lockdowns_rl()?,
             userinfo: Ratelimits::new_userinfo_rl()?,
             page: Ratelimits::new_page_rl()?,
             scheduled_execs: Ratelimits::new_scheduled_execs_rl()?,
+            data_stores: Ratelimits::new_data_stores_rl()?,
         })
     }
 }

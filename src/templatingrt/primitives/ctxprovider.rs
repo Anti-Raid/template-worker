@@ -9,6 +9,7 @@ use khronos_runtime::traits::lockdownprovider::LockdownProvider;
 use khronos_runtime::traits::pageprovider::PageProvider;
 use khronos_runtime::traits::userinfoprovider::UserInfoProvider;
 use khronos_runtime::traits::scheduledexecprovider::ScheduledExecProvider;
+use khronos_runtime::traits::datastoreprovider::{DataStoreProvider, DataStoreImpl};
 use khronos_runtime::traits::ir::ScheduledExecution;
 use khronos_runtime::utils::executorscope::ExecutorScope;
 use moka::future::Cache;
@@ -47,6 +48,7 @@ impl KhronosContext for TemplateContextProvider {
     type UserInfoProvider = ArUserInfoProvider;
     type PageProvider = ArPageProvider;
     type ScheduledExecProvider = ArScheduledExecProvider;
+    type DataStoreProvider = ArDataStoreProvider;
 
     fn data(&self) -> Self::Data {
         self.template_data.clone()
@@ -164,6 +166,19 @@ impl KhronosContext for TemplateContextProvider {
 
     fn scheduled_exec_provider(&self) -> Option<Self::ScheduledExecProvider> {
         Some(ArScheduledExecProvider {
+            guild_state: self.guild_state.clone(),
+        })
+    }
+
+    fn datastore_provider(&self, scope: ExecutorScope) -> Option<Self::DataStoreProvider> {
+        Some(ArDataStoreProvider {
+            guild_id: match scope {
+                ExecutorScope::ThisGuild => self.guild_state.guild_id,
+                ExecutorScope::OwnerGuild => self
+                    .template_data
+                    .shop_owner
+                    .unwrap_or(self.guild_state.guild_id),
+            },
             guild_state: self.guild_state.clone(),
         })
     }
@@ -691,5 +706,28 @@ impl ScheduledExecProvider for ArScheduledExecProvider {
         ).await?;
 
         Ok(())
+    }
+}
+
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct ArDataStoreProvider {
+    guild_id: serenity::all::GuildId,
+    guild_state: Rc<GuildState>,
+}
+
+impl DataStoreProvider for ArDataStoreProvider {
+    fn attempt_action(&self, bucket: &str) -> Result<(), khronos_runtime::Error> {
+        self.guild_state.ratelimits.data_stores.check(bucket)
+    }
+
+    /// Returns a builtin data store given its name
+    fn get_builtin_data_store(&self, _name: &str) -> Option<Rc<dyn DataStoreImpl>> {
+        None // TODO, add some builtin data stores
+    }
+
+    /// Returns all public builtin data stores
+    fn public_builtin_data_stores(&self) -> Vec<String> {
+        vec![] // TODO, add some builtin data stores
     }
 }
