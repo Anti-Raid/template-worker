@@ -85,20 +85,38 @@ pub(super) async fn dispatch_event_to_template(
     let sub_isolate = if let Some(sub_isolate) = manager.get_sub_isolate(&template.name) {
         sub_isolate
     } else {
-        let sub_isolate = match KhronosIsolate::new_subisolate(
-            manager.runtime().clone(),
-            TemplateAssetManager::new(template.clone()),
-            {
-                let mut pset = PluginSet::new();
-                pset.add_default_plugins::<TemplateContextProvider>();
-                pset
-            },
-        ) {
-            Ok(sub_isolate) => sub_isolate,
-            Err(e) => {
-                return LuaVmResult::LuaError {
-                    err: format!("Failed to create subisolate: {}", e),
-                };
+        let mut attempts = 0;
+        let sub_isolate = loop {
+            // It may take a few attempts to create a subisolate successfully
+            // due to ongoing Lua VM operations
+            match KhronosIsolate::new_subisolate(
+                manager.runtime().clone(),
+                TemplateAssetManager::new(template.clone()),
+                {
+                    let mut pset = PluginSet::new();
+                    pset.add_default_plugins::<TemplateContextProvider>();
+                    pset
+                },
+            ) {
+                Ok(isolate) => {
+                    break isolate;
+                }
+                Err(e) => {
+                    log::error!("Failed to create subisolate: {}", e);
+                    attempts += 1;
+                    if attempts >= 20 {
+                        return LuaVmResult::LuaError {
+                            err: format!("Failed to create subisolate: {}", e),
+                        };
+                    }
+
+                    // Wait a bit before retrying
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    // Check if the runtime is broken
+                    if manager.runtime().is_broken() {
+                        return LuaVmResult::VmBroken {};
+                    }
+                }
             }
         };
 
