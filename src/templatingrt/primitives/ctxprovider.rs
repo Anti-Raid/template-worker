@@ -30,13 +30,38 @@ pub static CHANNEL_CACHE: LazyLock<Cache<serenity::all::ChannelId, serenity::all
 
 #[derive(Clone)]
 pub struct TemplateContextProvider {
-    pub guild_state: Rc<GuildState>,
+    guild_state: Rc<GuildState>,
 
     /// The template data
-    pub template_data: Arc<Template>,
+    template_data: Arc<Template>,
 
     /// The isolate being used
-    pub runtime_shareable_data: khronos_runtime::rt::RuntimeShareableData
+    runtime_shareable_data: khronos_runtime::rt::RuntimeShareableData,
+
+    /// The datastores to expose
+    datastores: Vec<Rc<dyn DataStoreImpl>>,
+}
+
+impl TemplateContextProvider {
+    fn datastores(guild_state: Rc<GuildState>, _template_data: Arc<Template>) -> Vec<Rc<dyn DataStoreImpl>> {
+        vec![
+            Rc::new(
+                super::datastores::StatsStore {
+                    guild_state: guild_state.clone(),
+                }
+            )
+        ]
+    }
+
+    /// Creates a new `TemplateContextProvider` with the given template data
+    pub fn new(guild_state: Rc<GuildState>, template_data: Arc<Template>, runtime_shareable_data: khronos_runtime::rt::RuntimeShareableData) -> Self {
+        Self {
+            datastores: Self::datastores(guild_state.clone(), template_data.clone()),
+            guild_state,
+            template_data,
+            runtime_shareable_data,
+        }
+    }
 }
 
 impl KhronosContext for TemplateContextProvider {
@@ -180,6 +205,7 @@ impl KhronosContext for TemplateContextProvider {
                     .unwrap_or(self.guild_state.guild_id),
             },
             guild_state: self.guild_state.clone(),
+            datastores: self.datastores.clone(),
         })
     }
 }
@@ -714,6 +740,7 @@ impl ScheduledExecProvider for ArScheduledExecProvider {
 pub struct ArDataStoreProvider {
     guild_id: serenity::all::GuildId,
     guild_state: Rc<GuildState>,
+    datastores: Vec<Rc<dyn DataStoreImpl>>,
 }
 
 impl DataStoreProvider for ArDataStoreProvider {
@@ -722,12 +749,18 @@ impl DataStoreProvider for ArDataStoreProvider {
     }
 
     /// Returns a builtin data store given its name
-    fn get_builtin_data_store(&self, _name: &str) -> Option<Rc<dyn DataStoreImpl>> {
-        None // TODO, add some builtin data stores
+    fn get_builtin_data_store(&self, name: &str) -> Option<Rc<dyn DataStoreImpl>> {
+        for ds in self.datastores.iter() {
+            if ds.name() == name {
+                return Some(ds.clone());
+            }
+        }
+
+        None
     }
 
     /// Returns all public builtin data stores
     fn public_builtin_data_stores(&self) -> Vec<String> {
-        vec![] // TODO, add some builtin data stores
+        self.datastores.iter().map(|ds| ds.name()).collect()
     }
 }

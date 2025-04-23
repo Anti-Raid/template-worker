@@ -2,6 +2,7 @@ use crate::config::CONFIG;
 
 pub mod assetmanager;
 pub mod ctxprovider;
+pub mod datastores;
 
 /// Provides the config data involving kittycat permissions
 pub(crate) fn kittycat_permission_config_data(

@@ -108,11 +108,11 @@ pub(super) async fn dispatch_event_to_template(
     };
 
     // Now, create the template context that should be passed to the template
-    let provider = TemplateContextProvider {
+    let provider = TemplateContextProvider::new(
         guild_state,
-        template_data: template.clone(),
-        runtime_shareable_data: sub_isolate.runtime_shareable_data(),
-    };
+        template.clone(),
+        sub_isolate.runtime_shareable_data(),
+    );
 
     let template_context = TemplateContext::new(provider);
 
