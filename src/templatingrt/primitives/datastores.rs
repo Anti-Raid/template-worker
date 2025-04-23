@@ -73,3 +73,33 @@ impl DataStoreImpl for StatsStore {
         }
     }
 }
+
+/// A data store to expose Anti-Raid's core links
+pub struct LinksStore {}
+
+#[async_trait(?Send)]
+impl DataStoreImpl for LinksStore {
+    fn name(&self) -> String {
+        "LinksStore".to_string()
+    }
+
+    fn need_caps(&self, _method: &str) -> bool {
+        false
+    }
+
+    fn methods(&self) -> Vec<String> {
+        vec!["links".to_string()]
+    }
+
+    fn get_method(&self, key: String) -> Option<DataStoreMethod> {
+        match key.as_str() {
+            "links" => Some(DataStoreMethod::Sync(Rc::new(move |_v| {
+                let support_server = crate::CONFIG.meta.support_server_invite.clone();
+                Ok(value!(
+                    "support_server".to_string() => support_server
+                ))
+            }))),
+            _ => None,
+        }
+    }
+}
