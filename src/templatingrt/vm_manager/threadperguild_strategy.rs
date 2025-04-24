@@ -87,7 +87,7 @@ pub async fn create_lua_vm(
                                 };
 
                                 let result =
-                                    dispatch_event_to_template(template, event, &tis_ref, gs).await;
+                                    dispatch_event_to_template(template, event, tis_ref, gs).await;
 
                                 // Send back to the caller
                                 let _ = callback.send(vec![(template_name, result)]);
@@ -96,7 +96,7 @@ pub async fn create_lua_vm(
                                 let event = Event::from_create_event(&event);
                                 let name = template.name.clone();
                                 let result =
-                                    dispatch_event_to_template(template, event, &tis_ref, gs).await;
+                                    dispatch_event_to_template(template, event, tis_ref, gs).await;
 
                                 // Send back to the caller
                                 let _ = callback.send(vec![(name, result)]);

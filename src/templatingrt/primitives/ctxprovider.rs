@@ -19,6 +19,7 @@ use sqlx::Row;
 use std::sync::LazyLock;
 use std::{rc::Rc, sync::Arc};
 use super::{kittycat_permission_config_data, sandwich_config};
+use crate::templatingrt::primitives::assetmanager::TemplateAssetManager;
 
 /// Internal short-lived channel cache
 pub static CHANNEL_CACHE: LazyLock<Cache<serenity::all::ChannelId, serenity::all::GuildChannel>> =
@@ -35,7 +36,7 @@ pub struct TemplateContextProvider {
     /// The template data
     template_data: Arc<Template>,
 
-    /// The isolate being used
+    /// The isolate data being used
     runtime_shareable_data: khronos_runtime::rt::RuntimeShareableData,
 
     /// The datastores to expose
@@ -43,7 +44,7 @@ pub struct TemplateContextProvider {
 }
 
 impl TemplateContextProvider {
-    fn datastores(guild_state: Rc<GuildState>, _template_data: Arc<Template>) -> Vec<Rc<dyn DataStoreImpl>> {
+    fn datastores(guild_state: Rc<GuildState>, _template_data: Arc<Template>, manager: khronos_runtime::rt::KhronosRuntimeManager<TemplateAssetManager>) -> Vec<Rc<dyn DataStoreImpl>> {
         vec![
             Rc::new(
                 super::datastores::StatsStore {
@@ -55,14 +56,25 @@ impl TemplateContextProvider {
             ),
             Rc::new(
                 khronos_runtime::traits::ir::datastores::CopyDataStore {}
+            ),
+            Rc::new(
+                super::datastores::TriggerStore {
+                    guild_state: guild_state.clone(),
+                    manager,
+                }
             )
         ]
     }
 
     /// Creates a new `TemplateContextProvider` with the given template data
-    pub fn new(guild_state: Rc<GuildState>, template_data: Arc<Template>, runtime_shareable_data: khronos_runtime::rt::RuntimeShareableData) -> Self {
+    pub fn new(
+        guild_state: Rc<GuildState>, 
+        template_data: Arc<Template>, 
+        runtime_shareable_data: khronos_runtime::rt::RuntimeShareableData,
+        manager: khronos_runtime::rt::KhronosRuntimeManager<TemplateAssetManager>
+    ) -> Self {
         Self {
-            datastores: Self::datastores(guild_state.clone(), template_data.clone()),
+            datastores: Self::datastores(guild_state.clone(), template_data.clone(), manager),
             guild_state,
             template_data,
             runtime_shareable_data,
@@ -750,8 +762,8 @@ pub struct ArDataStoreProvider {
 }
 
 impl DataStoreProvider for ArDataStoreProvider {
-    fn attempt_action(&self, bucket: &str) -> Result<(), khronos_runtime::Error> {
-        self.guild_state.ratelimits.data_stores.check(bucket)
+    fn attempt_action(&self, method: &str, bucket: &str) -> Result<(), khronos_runtime::Error> {
+        self.guild_state.ratelimits.data_stores.check(&format!("{}:{}", method, bucket))
     }
 
     /// Returns a builtin data store given its name

@@ -44,7 +44,7 @@ pub(super) fn configure_runtime_manager() -> LuaResult<KhronosRuntimeManager<Tem
 
             Ok(LuaVmState::Continue)
         }),
-        None::<fn(&Lua, LuaValue) -> Result<(), mlua::Error>>,
+        None::<(fn(&Lua, LuaThread) -> Result<(), mlua::Error>, fn() -> ())>
     )?;
 
     rt.lua().set_memory_limit(MAX_TEMPLATE_MEMORY_USAGE)?;
@@ -71,10 +71,10 @@ pub(super) fn create_guild_state(
 }
 
 /// Helper method to dispatch an event to a template
-pub(super) async fn dispatch_event_to_template(
+pub async fn dispatch_event_to_template(
     template: Arc<Template>,
     event: Event,
-    manager: &KhronosRuntimeManager<TemplateAssetManager>,
+    manager: KhronosRuntimeManager<TemplateAssetManager>,
     guild_state: Rc<GuildState>,
 ) -> LuaVmResult {
     if manager.runtime().is_broken() {
@@ -102,11 +102,11 @@ pub(super) async fn dispatch_event_to_template(
                     break isolate;
                 }
                 Err(e) => {
-                    log::error!("Failed to create subisolate: {}", e);
+                    log::error!("Failed to create subisolate: {}. This is an internal bug that should not happen", e);
                     attempts += 1;
                     if attempts >= 20 {
                         return LuaVmResult::LuaError {
-                            err: format!("Failed to create subisolate: {}", e),
+                            err: format!("Failed to create subisolate: {}. This is an internal bug that should not happen", e),
                         };
                     }
 
@@ -130,6 +130,7 @@ pub(super) async fn dispatch_event_to_template(
         guild_state,
         template.clone(),
         sub_isolate.runtime_shareable_data(),
+        manager
     );
 
     let template_context = TemplateContext::new(provider);
@@ -158,7 +159,7 @@ pub(super) async fn dispatch_event_to_template(
     }
 }
 
-pub(super) async fn dispatch_event_to_multiple_templates(
+pub async fn dispatch_event_to_multiple_templates(
     templates: Arc<Vec<Arc<Template>>>,
     event: CreateEvent,
     manager: &KhronosRuntimeManager<TemplateAssetManager>,
@@ -172,7 +173,7 @@ pub(super) async fn dispatch_event_to_multiple_templates(
         let event = Event::from_create_event(&event);
         set.spawn_local(async move {
             let name = template.name.clone();
-            let result = dispatch_event_to_template(template, event, &manager_ref, gs).await;
+            let result = dispatch_event_to_template(template, event, manager_ref, gs).await;
 
             (name, result)
         });
