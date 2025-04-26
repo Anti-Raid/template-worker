@@ -165,6 +165,8 @@ pub async fn dispatch_event_to_multiple_templates(
     manager: &KhronosRuntimeManager<TemplateAssetManager>,
     guild_state: Rc<GuildState>,
 ) -> Vec<(String, LuaVmResult)> {
+    log::debug!("Dispatching event to {} templates", templates.len());
+
     let mut set = tokio::task::JoinSet::new();
     for template in templates.iter().filter(|t| t.should_dispatch(&event)) {
         let template = template.clone();
