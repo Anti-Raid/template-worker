@@ -50,7 +50,7 @@ pub async fn discord_event_dispatch(
 
                     // Inject in type
                     if let serde_json::Value::Object(ref mut map) = value {
-                        let typ: u8 = serenity::all::InteractionType::Command.0;
+                        let typ: u8 = interaction.kind().0;
                         map.insert("type".to_string(), serde_json::Value::Number(typ.into()));
                     }
 

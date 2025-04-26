@@ -82,7 +82,7 @@ impl Ratelimits {
     fn new_kv_rl() -> Result<LuaRatelimits, silverpelt::Error> {
         // Create the global limit
         let global_quota =
-            LuaRatelimits::create_quota(create_nonmax_u32(100)?, Duration::from_secs(1))?;
+            LuaRatelimits::create_quota(create_nonmax_u32(500)?, Duration::from_millis(100))?;
         let global1 = DefaultKeyedRateLimiter::keyed(global_quota);
         let global = vec![global1];
 
