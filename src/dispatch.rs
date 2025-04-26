@@ -40,12 +40,6 @@ pub async fn discord_event_dispatch(
             match interaction {
                 Interaction::Ping(_) => return Ok(()),
                 Interaction::Command(i) | Interaction::Autocomplete(i) => {
-                    if limits::command_name_limits::RESERVED_COMMAND_NAMES
-                        .contains(&i.data.name.as_str())
-                    {
-                        return Ok(());
-                    }
-
                     let mut value = serde_json::to_value(interaction)?;
 
                     // Inject in type
