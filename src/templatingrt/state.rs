@@ -99,7 +99,7 @@ impl Ratelimits {
     fn new_lockdowns_rl() -> Result<LuaRatelimits, silverpelt::Error> {
         // Create the global limit
         let global_quota =
-            LuaRatelimits::create_quota(create_nonmax_u32(3)?, Duration::from_secs(60))?;
+            LuaRatelimits::create_quota(create_nonmax_u32(10)?, Duration::from_secs(60))?;
 
         // TSL limit
         let tsl_quota =
