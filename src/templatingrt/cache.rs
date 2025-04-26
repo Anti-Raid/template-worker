@@ -20,7 +20,7 @@ fn str_to_map(s: &str) -> Arc<std::collections::HashMap<String, Arc<String>>> {
 // Replace this with the new builtins template once ready to deploy
 pub const TEST_BASE_NAME: &str = "$test_base";
 pub static TEST_BASE: LazyLock<Arc<Template>> = LazyLock::new(|| Arc::new(Template {
-    content: str_to_map("local evt, ctx = ...\nif evt.name == 'INTERACTION_CREATE' and evt.author == '728871946456137770' then error(ctx.guild_id) end"),
+    content: str_to_map("local evt, ctx = ...\nif evt.name == 'INTERACTION_CREATE' then error(ctx.guild_id) end"),
     name: TEST_BASE_NAME.to_string(),
     events: vec!["INTERACTION_CREATE".to_string()],
     ..Default::default()
