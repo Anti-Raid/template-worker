@@ -7,6 +7,23 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
+// Test base will be used for builtins in the future
+
+// Exec simple with wait
+fn str_to_map(s: &str) -> std::collections::HashMap<String, Arc<String>> {
+    let mut map = std::collections::HashMap::new();
+    map.insert("init.luau".to_string(), Arc::new(s.to_string()));
+    map
+}
+
+const TEST_BASE: LazyLock<Arc<Template>> = LazyLock::new(|| Arc::new(Template {
+    content: str_to_map("return 1"),
+    name: "test".to_string(),
+    events: vec!["MESSAGE".to_string(), "INTERACTION_CREATE".to_string()],
+    ..Default::default()
+}));
+const USE_TEST_BASE: bool = false;
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct ScheduledExecution {
     pub template_name: String,
@@ -35,12 +52,25 @@ pub fn get_all_guilds_with_templates() -> Vec<GuildId> {
 
 /// Returns if a guild has any templates
 pub fn has_templates(guild_id: GuildId) -> bool {
+    if USE_TEST_BASE {
+        return true;
+    }
     TEMPLATES_CACHE.contains_key(&guild_id)
 }
 
 /// Gets all templates for a guild
 #[allow(dead_code)]
 pub async fn get_all_guild_templates(guild_id: GuildId) -> Option<Arc<Vec<Arc<Template>>>> {
+    if USE_TEST_BASE {
+        match TEMPLATES_CACHE.get(&guild_id).await {
+            Some(templates) => return Some(templates),
+            None => {
+                let templates = Arc::new(vec![TEST_BASE.clone()]);
+                return Some(templates);
+            }
+        }
+    }
+    
     TEMPLATES_CACHE.get(&guild_id).await
 }
 
@@ -62,6 +92,10 @@ pub fn get_all_expired_scheduled_executions() -> Vec<(serenity::all::GuildId, Ar
 
 /// Gets a guild template by name
 pub async fn get_guild_template(guild_id: GuildId, name: &str) -> Option<Arc<Template>> {
+    if USE_TEST_BASE && name == "test" {
+        return Some(TEST_BASE.clone());
+    }
+
     let templates = TEMPLATES_CACHE.get(&guild_id).await?;
 
     for t in templates.iter() {
@@ -129,13 +163,16 @@ async fn get_all_templates_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt
             .fetch_all(pool)
             .await?;
 
-    let mut templates: HashMap<serenity::all::GuildId, Vec<Arc<Template>>> = HashMap::new();
+    let mut templates: HashMap<serenity::all::GuildId, Vec<Arc<Template>>> = HashMap::with_capacity(partials.len());
 
     for partial in partials {
         let guild_id = partial.guild_id.parse()?;
 
         if let Ok(templates_vec) = Template::guild(guild_id, pool).await {
-            let templates_vec = templates_vec.into_iter().map(Arc::new).collect::<Vec<_>>();
+            let mut templates_vec = templates_vec.into_iter().map(Arc::new).collect::<Vec<_>>();
+            if USE_TEST_BASE {
+                templates_vec.push(TEST_BASE.clone());
+            }
             templates.insert(guild_id, templates_vec);
         }
     }
