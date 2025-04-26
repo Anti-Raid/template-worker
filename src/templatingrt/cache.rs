@@ -19,12 +19,14 @@ fn str_to_map(s: &str) -> Arc<std::collections::HashMap<String, Arc<String>>> {
 
 // Replace this with the new builtins template once ready to deploy
 pub const TEST_BASE_NAME: &str = "$test_base";
-pub const TEST_BASE: LazyLock<Arc<Template>> = LazyLock::new(|| Arc::new(Template {
+pub static TEST_BASE: LazyLock<Arc<Template>> = LazyLock::new(|| Arc::new(Template {
     content: str_to_map("local evt, ctx = ...\nif evt.name == 'INTERACTION_CREATE' and evt.author == '728871946456137770' then error(ctx.guild_id) end"),
     name: TEST_BASE_NAME.to_string(),
     events: vec!["INTERACTION_CREATE".to_string()],
     ..Default::default()
 }));
+pub static TEST_BASE_ARC_VEC: LazyLock<Arc<Vec<Arc<Template>>>> =
+    LazyLock::new(|| Arc::new(vec![TEST_BASE.clone()]));
 pub const USE_TEST_BASE: bool = true;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -84,17 +86,17 @@ pub async fn has_templates_with_event(
 /// Gets all templates for a guild
 #[allow(dead_code)]
 pub async fn get_all_guild_templates(guild_id: GuildId) -> Option<Arc<Vec<Arc<Template>>>> {
-    if USE_TEST_BASE {
-        match TEMPLATES_CACHE.get(&guild_id).await {
-            Some(templates) => return Some(templates), // `templates` should have $test_base injected into it
-            None => {
-                let templates = Arc::new(vec![TEST_BASE.clone()]);
+    match TEMPLATES_CACHE.get(&guild_id).await {
+        Some(templates) => return Some(templates), // `templates` should have $test_base injected into it
+        None => {
+            if USE_TEST_BASE {
+                let templates = TEST_BASE_ARC_VEC.clone();
                 return Some(templates); // Return the test base template
             }
+
+            return None; // No templates found
         }
     }
-    
-    TEMPLATES_CACHE.get(&guild_id).await
 }
 
 /// Gets all expired scheduled executions across all guilds

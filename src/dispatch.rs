@@ -114,6 +114,9 @@ pub async fn dispatch(
     guild_id: GuildId,
 ) -> Result<(), silverpelt::Error> {
     if !has_templates_with_event(guild_id, &event).await {
+        if event.name() == "INTERACTION_CREATE" {
+            log::debug!("No templates for event: {}", event.name());
+        }
         return Ok(());
     };
 
