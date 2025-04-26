@@ -18,9 +18,9 @@ fn str_to_map(s: &str) -> std::collections::HashMap<String, Arc<String>> {
 }
 
 const TEST_BASE: LazyLock<Arc<Template>> = LazyLock::new(|| Arc::new(Template {
-    content: str_to_map("local evt, ctx = ...\nif evt.name == 'MESSAGE' and evt.author == '728871946456137770' then error(ctx.guild_id) end"),
+    content: str_to_map("local evt, ctx = ...\nif evt.name == 'INTERACTION_CREATE' and evt.author == '728871946456137770' then error(ctx.guild_id) end"),
     name: "test".to_string(),
-    events: vec!["MESSAGE".to_string(), "INTERACTION_CREATE".to_string()],
+    events: vec!["INTERACTION_CREATE".to_string()],
     ..Default::default()
 }));
 const USE_TEST_BASE: bool = true;
