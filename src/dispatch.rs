@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::templatingrt::cache::has_templates;
+use crate::templatingrt::cache::{has_templates, has_templates_with_event};
 use crate::templatingrt::{execute, LuaVmAction, ParseCompileState};
 use antiraid_types::ar_event::AntiraidEvent;
 use khronos_runtime::primitives::event::CreateEvent;
@@ -119,7 +119,7 @@ pub async fn dispatch(
     event: CreateEvent,
     guild_id: GuildId,
 ) -> Result<(), silverpelt::Error> {
-    if !has_templates(guild_id) {
+    if !has_templates_with_event(guild_id, &event).await {
         return Ok(());
     };
 

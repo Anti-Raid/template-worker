@@ -6,6 +6,7 @@ use serenity::all::GuildId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
+use khronos_runtime::primitives::event::CreateEvent;
 
 // Test base will be used for builtins in the future
 
@@ -22,7 +23,7 @@ const TEST_BASE: LazyLock<Arc<Template>> = LazyLock::new(|| Arc::new(Template {
     events: vec!["MESSAGE".to_string(), "INTERACTION_CREATE".to_string()],
     ..Default::default()
 }));
-const USE_TEST_BASE: bool = false;
+const USE_TEST_BASE: bool = true;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct ScheduledExecution {
@@ -56,6 +57,25 @@ pub fn has_templates(guild_id: GuildId) -> bool {
         return true;
     }
     TEMPLATES_CACHE.contains_key(&guild_id)
+}
+
+pub async fn has_templates_with_event(
+    guild_id: GuildId,
+    event: &CreateEvent,
+) -> bool {
+    if let Some(templates) = TEMPLATES_CACHE.get(&guild_id).await {
+        for template in templates.iter() {
+            if template.should_dispatch(event) {
+                return true;
+            }
+        }
+    }
+
+    if USE_TEST_BASE {
+        return TEST_BASE.should_dispatch(event);
+    }
+
+    false
 }
 
 /// Gets all templates for a guild
