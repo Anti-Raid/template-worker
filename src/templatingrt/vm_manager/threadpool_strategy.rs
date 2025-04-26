@@ -373,7 +373,7 @@ impl ThreadPool {
 }
 
 /// The default thread pool that ``create_lua_vm`` uses
-static DEFAULT_THREAD_POOL: LazyLock<ThreadPool> = LazyLock::new(ThreadPool::new);
+pub static DEFAULT_THREAD_POOL: LazyLock<ThreadPool> = LazyLock::new(ThreadPool::new);
 
 #[allow(dead_code)]
 pub async fn create_lua_vm(

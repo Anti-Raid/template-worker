@@ -6,7 +6,7 @@ mod vm_manager;
 
 use std::sync::Arc;
 
-pub use vm_manager::{LuaVmAction, LuaVmResult};
+pub use vm_manager::{LuaVmAction, LuaVmResult, DEFAULT_THREAD_POOL};
 
 use crate::templatingrt::vm_manager::ArLuaHandle;
 use khronos_runtime::primitives::event::CreateEvent;

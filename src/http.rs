@@ -50,7 +50,8 @@ pub fn create(
         .route(
             "/page-settings-operation/:guild_id/:user_id",
             post(settings_operation),
-        );
+        )
+        .route("/threads-count", post(get_threads_count));
     let router: Router<()> = router.with_state(AppData::new(data, ctx));
     router.into_make_service()
 }
@@ -118,6 +119,15 @@ async fn dispatch_event_and_wait(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(results))
+}
+
+/// Returns the number of threads running
+async fn get_threads_count(
+    State(AppData { .. }): State<AppData>,
+) -> Response<usize> {
+    let count = crate::templatingrt::DEFAULT_THREAD_POOL.threads_len().await;
+
+    Ok(Json(count))
 }
 
 /// Benchmarks a VM
