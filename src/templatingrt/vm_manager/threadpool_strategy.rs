@@ -156,6 +156,9 @@ impl ThreadEntry {
                                             let Some(templates) =
                                                 get_all_guild_templates(gs.guild_id).await
                                             else {
+                                                if event.name() == "INTERACTION_CREATE" {
+                                                    log::debug!("No templates for event: {}", event.name());
+                                                }                                        
                                                 return;
                                             };
 
