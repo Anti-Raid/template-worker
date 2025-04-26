@@ -307,10 +307,10 @@ pub async fn benchmark_vm(
     let hashmap_insert_time = start.elapsed().as_micros();
 
     // Exec simple with wait
-    fn str_to_map(s: &str) -> std::collections::HashMap<String, Arc<String>> {
+    fn str_to_map(s: &str) -> Arc<std::collections::HashMap<String, Arc<String>>> {
         let mut map = std::collections::HashMap::new();
         map.insert("init.luau".to_string(), Arc::new(s.to_string()));
-        map
+        Arc::new(map)
     }
 
     let pt = Template {

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use khronos_runtime::primitives::event::CreateEvent;
 use silverpelt::templates::parse_shop_template;
 use silverpelt::Error;
+use super::cache::{TEST_BASE_NAME, TEST_BASE, USE_TEST_BASE};
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, Default, Debug)]
 pub enum TemplateLanguage {
@@ -48,7 +49,7 @@ pub struct Template {
     /// The channel to send errors to
     pub error_channel: Option<serenity::all::ChannelId>,
     /// The content of the template
-    pub content: std::collections::HashMap<String, Arc<String>>,
+    pub content: Arc<std::collections::HashMap<String, Arc<String>>>,
     /// The language of the template
     pub lang: TemplateLanguage,
     /// The allowed capabilities the template has access to
@@ -167,6 +168,12 @@ impl Template {
                     updated_at: shop_data.last_updated_at,
                 });
             } else {
+                let content = if USE_TEST_BASE && template.name == TEST_BASE_NAME {
+                    TEST_BASE.content.clone()
+                } else {
+                    serde_json::from_value(template.content)?
+                };
+
                 result.push(Self {
                     guild_id,
                     name: template.name.to_string(),
@@ -178,7 +185,7 @@ impl Template {
                         Some(channel_id) => Some(channel_id.parse()?),
                         None => None,
                     },
-                    content: serde_json::from_value(template.content)?,
+                    content,
                     lang: TemplateLanguage::from_str(&template.language)
                         .map_err(|_| "Invalid language")?,
                     allowed_caps: template.allowed_caps,

@@ -39,7 +39,7 @@ pub async fn discord_event_dispatch(
         FullEvent::InteractionCreate { interaction } => {
             match interaction {
                 Interaction::Ping(_) => return Ok(()),
-                Interaction::Command(i) | Interaction::Autocomplete(i) => {
+                Interaction::Command(_) | Interaction::Autocomplete(_) => {
                     let mut value = serde_json::to_value(interaction)?;
 
                     // Inject in type

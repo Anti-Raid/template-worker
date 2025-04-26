@@ -11,19 +11,21 @@ use khronos_runtime::primitives::event::CreateEvent;
 // Test base will be used for builtins in the future
 
 // Exec simple with wait
-fn str_to_map(s: &str) -> std::collections::HashMap<String, Arc<String>> {
+fn str_to_map(s: &str) -> Arc<std::collections::HashMap<String, Arc<String>>> {
     let mut map = std::collections::HashMap::new();
     map.insert("init.luau".to_string(), Arc::new(s.to_string()));
-    map
+    Arc::new(map)
 }
 
-const TEST_BASE: LazyLock<Arc<Template>> = LazyLock::new(|| Arc::new(Template {
+// Replace this with the new builtins template once ready to deploy
+pub const TEST_BASE_NAME: &str = "$test_base";
+pub const TEST_BASE: LazyLock<Arc<Template>> = LazyLock::new(|| Arc::new(Template {
     content: str_to_map("local evt, ctx = ...\nif evt.name == 'INTERACTION_CREATE' and evt.author == '728871946456137770' then error(ctx.guild_id) end"),
-    name: "test".to_string(),
+    name: TEST_BASE_NAME.to_string(),
     events: vec!["INTERACTION_CREATE".to_string()],
     ..Default::default()
 }));
-const USE_TEST_BASE: bool = true;
+pub const USE_TEST_BASE: bool = true;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct ScheduledExecution {
@@ -54,7 +56,7 @@ pub fn get_all_guilds_with_templates() -> Vec<GuildId> {
 /// Returns if a guild has any templates
 pub fn has_templates(guild_id: GuildId) -> bool {
     if USE_TEST_BASE {
-        return true;
+        return true; // The quick answer here is: yes
     }
     TEMPLATES_CACHE.contains_key(&guild_id)
 }
@@ -64,18 +66,19 @@ pub async fn has_templates_with_event(
     event: &CreateEvent,
 ) -> bool {
     if let Some(templates) = TEMPLATES_CACHE.get(&guild_id).await {
+        // `templates` should have $test_base injected into it, so this is a simple for loop
         for template in templates.iter() {
             if template.should_dispatch(event) {
                 return true;
             }
         }
+        return false;
+    } else {
+        if USE_TEST_BASE {
+            return TEST_BASE.should_dispatch(event);
+        }    
+        return false;
     }
-
-    if USE_TEST_BASE {
-        return TEST_BASE.should_dispatch(event);
-    }
-
-    false
 }
 
 /// Gets all templates for a guild
@@ -83,10 +86,10 @@ pub async fn has_templates_with_event(
 pub async fn get_all_guild_templates(guild_id: GuildId) -> Option<Arc<Vec<Arc<Template>>>> {
     if USE_TEST_BASE {
         match TEMPLATES_CACHE.get(&guild_id).await {
-            Some(templates) => return Some(templates),
+            Some(templates) => return Some(templates), // `templates` should have $test_base injected into it
             None => {
                 let templates = Arc::new(vec![TEST_BASE.clone()]);
-                return Some(templates);
+                return Some(templates); // Return the test base template
             }
         }
     }
@@ -112,19 +115,26 @@ pub fn get_all_expired_scheduled_executions() -> Vec<(serenity::all::GuildId, Ar
 
 /// Gets a guild template by name
 pub async fn get_guild_template(guild_id: GuildId, name: &str) -> Option<Arc<Template>> {
-    if USE_TEST_BASE && name == "test" {
-        return Some(TEST_BASE.clone());
-    }
+    match TEMPLATES_CACHE.get(&guild_id).await {
+        Some(templates) => {
+            // The `templates` variable should anyways have $test_base injected into it
+            for t in templates.iter() {
+                if t.name == name {
+                    return Some(t.clone());
+                }
+            }
 
-    let templates = TEMPLATES_CACHE.get(&guild_id).await?;
+            return None;
+        }
+        None => {
+            // The server always has the test base template so ensure we return it
+            if USE_TEST_BASE && name == TEST_BASE_NAME {
+                return Some(TEST_BASE.clone());
+            }
 
-    for t in templates.iter() {
-        if t.name == name {
-            return Some(t.clone());
+            return None;
         }
     }
-
-    None
 }
 
 /// Sets up the initial template and scheduled execution cache
@@ -189,10 +199,24 @@ async fn get_all_templates_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt
         let guild_id = partial.guild_id.parse()?;
 
         if let Ok(templates_vec) = Template::guild(guild_id, pool).await {
-            let mut templates_vec = templates_vec.into_iter().map(Arc::new).collect::<Vec<_>>();
-            if USE_TEST_BASE {
-                templates_vec.push(TEST_BASE.clone());
-            }
+            let templates_vec = {
+                let mut templates_found = Vec::with_capacity(templates_vec.len());
+                let mut found_base = false;
+                for template in templates_vec.into_iter() {
+                    if template.name == TEST_BASE_NAME {
+                        found_base = true; // Mark that we have found the base template already
+                    }
+
+                    templates_found.push(Arc::new(template));
+                }
+
+                if !found_base && USE_TEST_BASE {
+                    templates_found.push(TEST_BASE.clone()); // Add default test base template if not found
+                }
+
+                templates_found
+            };
+
             templates.insert(guild_id, templates_vec);
         }
     }
