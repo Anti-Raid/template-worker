@@ -90,6 +90,7 @@ pub async fn get_all_guild_templates(guild_id: GuildId) -> Option<Arc<Vec<Arc<Te
         Some(templates) => return Some(templates), // `templates` should have $test_base injected into it
         None => {
             if USE_TEST_BASE {
+                log::debug!("Called get_all_guild_templates with USE_TEST_BASE");
                 let templates = TEST_BASE_ARC_VEC.clone();
                 return Some(templates); // Return the test base template
             }
