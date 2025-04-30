@@ -1,10 +1,14 @@
 use khronos_runtime::primitives::event::Event;
+use khronos_runtime::rt::KhronosRuntimeManager;
 use serenity::all::GuildId;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::atomic::AtomicUsize;
+use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot::Sender;
 use tokio::sync::RwLock;
+use std::cell::RefCell;
 
 use super::client::VMS;
 use super::core::{
@@ -14,12 +18,19 @@ use super::core::{
 use super::{client::ArLua, ArLuaHandle, LuaVmAction, LuaVmResult};
 use crate::templatingrt::cache::{get_guild_template, get_all_guild_templates};
 use crate::templatingrt::MAX_VM_THREAD_STACK_SIZE;
+use crate::templatingrt::state::GuildState;
 
 pub const DEFAULT_MAX_THREADS: usize = 100; // Maximum number of threads in the pool
 
-struct ThreadEntrySend {
-    guild_id: GuildId,
-    tx: UnboundedSender<ThreadPoolLuaHandle>,
+enum ThreadRequest {
+    Dispatch {
+        guild_id: GuildId,
+        action: LuaVmAction,
+        callback: Sender<Vec<(String, LuaVmResult)>>,
+    },
+    Ping {
+        tx: Sender<()>,
+    }
 }
 
 /// A thread entry in the pool (worker thread)
@@ -29,14 +40,12 @@ struct ThreadEntry {
     /// Number of guilds in the pool
     count: Arc<AtomicUsize>,
     /// A sender to create a new guild handle
-    tx: UnboundedSender<ThreadEntrySend>,
-    /// Is the thread pool itself broken
-    broken: Arc<AtomicBool>,
+    tx: UnboundedSender<ThreadRequest>,
 }
 
 impl ThreadEntry {
     /// Creates a new thread entry
-    fn new(tx: UnboundedSender<ThreadEntrySend>) -> Self {
+    fn new(tx: UnboundedSender<ThreadRequest>) -> Self {
         Self {
             id: {
                 // Generate a random id
@@ -46,7 +55,6 @@ impl ThreadEntry {
             },
             count: Arc::new(AtomicUsize::new(0)),
             tx,
-            broken: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -56,7 +64,7 @@ impl ThreadEntry {
         serenity_context: serenity::all::Context,
         reqwest_client: reqwest::Client,
     ) -> Result<Self, silverpelt::Error> {
-        let (tx, rx) = unbounded_channel::<ThreadEntrySend>();
+        let (tx, rx) = unbounded_channel::<ThreadRequest>();
 
         let entry = Self::new(tx);
 
@@ -70,34 +78,15 @@ impl ThreadEntry {
         self.count.load(std::sync::atomic::Ordering::Acquire)
     }
 
-    /// Add a guild to the pool with a given shard messenger
-    async fn add_guild(&self, guild: GuildId) -> Result<ThreadPoolLuaHandle, silverpelt::Error> {
-        let (tx, mut rx) = unbounded_channel::<ThreadPoolLuaHandle>();
-
-        self.tx
-            .send(ThreadEntrySend {
-                guild_id: guild,
-                tx,
-            })
-            .map_err(|_| "Failed to add guild to VM pool [send fail]")?;
-
-        if let Some(lua) = rx.recv().await {
-            Ok(lua)
-        } else {
-            Err("Failed to add guild to VM pool [no response]".into())
-        }
-    }
-
     /// Start the thread up
     fn start(
         &self,
         pool: sqlx::PgPool,
         serenity_context: serenity::all::Context,
         reqwest_client: reqwest::Client,
-        rx: UnboundedReceiver<ThreadEntrySend>,
+        rx: UnboundedReceiver<ThreadRequest>,
     ) -> Result<(), silverpelt::Error> {
         let mut rx = rx; // Take mutable ownership to receiver
-        let broken_ref = self.broken.clone();
         let count_ref = self.count.clone();
         std::thread::Builder::new()
             .name(format!("lua-vm-threadpool-{}", self.id))
@@ -110,55 +99,75 @@ impl ThreadEntry {
 
                 let local = tokio::task::LocalSet::new();
                 local.block_on(&rt, async {
-                    // Keep waiting for new guild creation requests
+                    // Keep waiting for new events
+                    struct VmData {
+                        guild_state: Rc<GuildState>,
+                        tis_ref: KhronosRuntimeManager,
+                    }
+
+                    let thread_vms: RefCell<HashMap<GuildId, Rc<VmData>>> = HashMap::new().into();
                     while let Some(send) = rx.recv().await {
-                        let worker_broken = broken_ref.clone();
-
-                        if worker_broken.load(std::sync::atomic::Ordering::Acquire) {
-                            log::error!("Worker thread is broken, skipping guild creation");
-                            continue;
-                        }
-
-                        // Create Lua VM
-                        let gs = Rc::new(
-                            match create_guild_state(
-                                send.guild_id,
-                                pool.clone(),
-                                serenity_context.clone(),
-                                reqwest_client.clone(),
-                            ) {
-                                Ok(gs) => gs,
-                                Err(e) => {
-                                    log::error!("Failed to create guild state: {}", e);
-                                    continue;
-                                }
+                        match send {
+                            ThreadRequest::Ping { tx }=> {
+                                // Send a pong
+                                let _ = tx.send(());
                             }
-                        );
+                            ThreadRequest::Dispatch { guild_id, action, callback } => {
+                                let vm = {
+                                    let mut vms = thread_vms.borrow_mut();
 
-                        let tis_ref = match configure_runtime_manager() {
-                            Ok(tis) => tis,
-                            Err(e) => {
-                                log::error!("Failed to configure Lua VM: {}", e);
-                                continue;
-                            }
-                        };
+                                    // Create server if not found, otherwise return existing
+                                    match vms.get(&guild_id) {
+                                        Some(vm) => vm.clone(),
+                                        None => {
+                                            // Create Lua VM
+                                            let gs = Rc::new(
+                                                match create_guild_state(
+                                                    guild_id,
+                                                    pool.clone(),
+                                                    serenity_context.clone(),
+                                                    reqwest_client.clone(),
+                                                ) {
+                                                    Ok(gs) => gs,
+                                                    Err(e) => {
+                                                        log::error!("Failed to create guild state: {}", e);
+                                                        continue;
+                                                    }
+                                                }
+                                            );
+    
+                                            let tis_ref = match configure_runtime_manager() {
+                                                Ok(tis) => tis,
+                                                Err(e) => {
+                                                    log::error!("Failed to configure Lua VM: {}", e);
+                                                    continue;
+                                                }
+                                            };
+    
+                                            count_ref.fetch_add(1, std::sync::atomic::Ordering::Release);
+    
+                                            tis_ref.set_on_broken(Box::new(move |_lua| {
+                                                VMS.remove(&guild_id);
+                                            }));
+    
+                                            // Store into the thread
+                                            let vmd = Rc::new(VmData {
+                                                guild_state: gs,
+                                                tis_ref: tis_ref,
+                                            });
+                                            vms.insert(
+                                                guild_id,
+                                                vmd.clone(),
+                                            );
+    
+                                            vmd
+                                        }
+                                    }    
+                                };
 
-                        count_ref.fetch_add(1, std::sync::atomic::Ordering::Release);
-
-                        tis_ref.set_on_broken(Box::new(move |_lua| {
-                            VMS.remove(&send.guild_id);
-                        }));
-
-                        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(
-                            LuaVmAction,
-                            tokio::sync::oneshot::Sender<Vec<(String, LuaVmResult)>>,
-                        )>();
-
-                        tokio::task::spawn_local(async move {
-                            while let Some((action, callback)) = rx.recv().await {
-                                let tis_ref = tis_ref.clone();
-                                let gs = gs.clone();
                                 tokio::task::spawn_local(async move {
+                                    let tis_ref = vm.tis_ref.clone();
+                                    let gs = vm.guild_state.clone();
                                     match action {
                                         LuaVmAction::DispatchEvent { event } => {
                                             let Some(templates) =
@@ -179,7 +188,7 @@ impl ThreadEntry {
                                                     templates,
                                                     event,
                                                     &tis_ref,
-                                                    gs.clone(),
+                                                    gs
                                                 )
                                                 .await,
                                             );
@@ -268,10 +277,6 @@ impl ThreadEntry {
                                     };
                                 });
                             }
-                        });
-
-                        if let Err(e) = send.tx.send(ThreadPoolLuaHandle { handle: tx }) {
-                            log::error!("Failed to send new guild handle: {}", e);
                         }
                     }
                 })
@@ -325,7 +330,30 @@ impl ThreadPool {
     pub async fn remove_broken_threads(&self) {
         let mut threads = self.threads.write().await;
 
-        threads.retain(|thread| !thread.broken.load(std::sync::atomic::Ordering::Acquire));
+        let mut good_threads = Vec::with_capacity(threads.len());   
+        let old_threads = std::mem::take(&mut *threads);
+        for thread in old_threads {
+            // Send Ping to thread
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let _ = thread.tx.send(ThreadRequest::Ping { tx });
+            tokio::select! {
+                resp = rx => {
+                    // If we get a response, the thread is alive
+                    if let Ok(_) = resp {
+                        good_threads.push(thread);
+                        continue;
+                    }
+                }
+                _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
+                    // Timeout
+                }
+            };
+
+            // Delete the thread by doing nothing
+            log::warn!("Thread {} is broken, removing it from the pool", thread.id);
+        }
+
+        *threads = good_threads;
     }
 
     /// Adds a new thread to the pool
@@ -378,11 +406,14 @@ impl ThreadPool {
             }
         }
 
-        if let Some(thread) = min_thread {
-            thread.add_guild(guild).await
-        } else {
-            Err("Failed to add guild to VM pool [no threads]".into())
-        }
+        let Some(thread) = min_thread else {
+            return Err("Failed to add guild to VM pool [no threads]".into());
+        };
+
+        return Ok(ThreadPoolLuaHandle {
+            guild_id: guild,
+            handle: thread.tx.clone(),
+        });
     }
 }
 
@@ -405,21 +436,25 @@ pub async fn create_lua_vm(
 
 #[derive(Clone)]
 pub struct ThreadPoolLuaHandle {
-    #[allow(clippy::type_complexity)]
-    /// The thread handle for the Lua VM
-    pub handle: tokio::sync::mpsc::UnboundedSender<(
-        LuaVmAction,
-        tokio::sync::oneshot::Sender<Vec<(String, LuaVmResult)>>,
-    )>,
+    /// The guild id
+    guild_id: GuildId,
+    /// The thread handle
+    handle: tokio::sync::mpsc::UnboundedSender<ThreadRequest>,
 }
 
 impl ArLuaHandle for ThreadPoolLuaHandle {
     fn send_action(
         &self,
         action: LuaVmAction,
-        callback: tokio::sync::oneshot::Sender<Vec<(String, LuaVmResult)>>,
+        callback: Sender<Vec<(String, LuaVmResult)>>,
     ) -> Result<(), khronos_runtime::Error> {
-        self.handle.send((action, callback))?;
+        self.handle.send(
+            ThreadRequest::Dispatch {
+                guild_id: self.guild_id,
+                action,
+                callback,
+            }
+        )?;
         Ok(())
     }
 }
