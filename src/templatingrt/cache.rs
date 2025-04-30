@@ -23,12 +23,18 @@ fn str_to_fs(s: &str) -> vfs::MemoryFS {
 
 // Replace this with the new builtins template once ready to deploy
 pub const TEST_BASE_NAME: &str = "$test_base";
-pub static TEST_BASE: LazyLock<Arc<Template>> = LazyLock::new(|| Arc::new(Template {
-    content: str_to_fs("local evt, ctx = ...\nif evt.name == 'INTERACTION_CREATE' then error(ctx.guild_id) end"),
-    name: TEST_BASE_NAME.to_string(),
-    events: vec!["INTERACTION_CREATE".to_string()],
-    ..Default::default()
-}));
+pub static TEST_BASE: LazyLock<Arc<Template>> = LazyLock::new(|| {
+    let mut templ = Template {
+        content: str_to_fs("local evt, ctx = ...\nif evt.name == 'INTERACTION_CREATE' then error(ctx.guild_id) end"),
+        name: TEST_BASE_NAME.to_string(),
+        events: vec!["INTERACTION_CREATE".to_string()],
+        ..Default::default()
+    };
+
+    templ.prepare_ready_fs();
+
+    Arc::new(templ)
+});
 pub static TEST_BASE_ARC_VEC: LazyLock<Arc<Vec<Arc<Template>>>> =
     LazyLock::new(|| Arc::new(vec![TEST_BASE.clone()]));
 pub const USE_TEST_BASE: bool = true;
@@ -159,11 +165,14 @@ pub async fn regenerate_cache(
 ) -> Result<(), silverpelt::Error> {
     println!("Clearing cache for guild {}", guild_id);
 
-    TEMPLATES_CACHE.remove(&guild_id).await;
     SCHEDULED_EXECUTIONS.remove(&guild_id).await;
 
     // NOTE: if this call fails, bail out early and don't clear the cache to ensure old code at least runs
-    get_all_guild_templates_from_db(guild_id, pool).await?;
+    get_all_guild_templates_from_db(
+        guild_id, 
+        pool, 
+        TEMPLATES_CACHE.remove(&guild_id).await
+    ).await?;
     get_all_guild_scheduled_executions_from_db(guild_id, pool).await?;
 
     println!("Resyncing VMs");
@@ -301,12 +310,50 @@ async fn get_all_scheduled_executions_from_db(pool: &sqlx::PgPool) -> Result<(),
 async fn get_all_guild_templates_from_db(
     guild_id: GuildId,
     pool: &sqlx::PgPool,
+    old: Option<Arc<Vec<Arc<Template>>>>,
 ) -> Result<(), silverpelt::Error> {
-    let templates_vec = Template::guild(guild_id, pool)
+    let mut templates_vec = Template::guild(guild_id, pool)
         .await?
         .into_iter()
-        .map(Arc::new)
         .collect::<Vec<_>>();
+
+    // If we have old templates, we need to copy over the filesystem
+    if let Some(old_templates) = old {
+        for template in templates_vec.iter_mut() {
+            for old_template in old_templates.iter() {
+                if template.name == old_template.name {
+                    // Copy over filesystem ref and make them point to the same thing
+                    old_template.content.take_from_filesystem(&template.content)?;
+                    template.content = old_template.content.clone();
+                    break;
+                }
+            }
+        }
+    }
+
+    // Prepare the ready filesystem
+    let mut templates_vec = templates_vec
+        .into_iter()
+        .map(|template| {
+            let mut template = template;
+            template.prepare_ready_fs();
+            Arc::new(template)
+        })
+        .collect::<Vec<_>>();
+
+    if USE_TEST_BASE {
+        let mut found_base = false;
+        for template in templates_vec.iter() {
+            if template.name == TEST_BASE_NAME {
+                found_base = true;
+                break;
+            }
+        }
+
+        if !found_base {
+            templates_vec.push(TEST_BASE.clone());
+        }
+    }
 
     // Store the templates in the cache
     let templates = Arc::new(templates_vec);
