@@ -150,7 +150,7 @@ pub async fn dispatch_event_to_template(
     let template_context = TemplateContext::new(provider);
 
     let spawn_result = match sub_isolate
-        .spawn_asset("/init.luau", "/init", template_context, event)
+        .spawn_asset("/init", "/init.luau", template_context, event)
         .await
     {
         Ok(sr) => sr,
