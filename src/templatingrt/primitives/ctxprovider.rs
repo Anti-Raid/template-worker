@@ -12,6 +12,7 @@ use khronos_runtime::traits::scheduledexecprovider::ScheduledExecProvider;
 use khronos_runtime::traits::datastoreprovider::{DataStoreProvider, DataStoreImpl};
 use khronos_runtime::traits::ir::ScheduledExecution;
 use khronos_runtime::utils::executorscope::ExecutorScope;
+use khronos_runtime::utils::khronos_value::KhronosValue;
 use moka::future::Cache;
 use silverpelt::lockdowns::LockdownData;
 use silverpelt::userinfo::{NoMember, UserInfoOperations};
@@ -260,9 +261,14 @@ impl KVProvider for ArKVProvider {
 
         Ok(Some(KvRecord {
             key,
-            value: rec
+            value: {
+                let value = rec
                 .try_get::<Option<serde_json::Value>, _>("value")?
-                .unwrap_or(serde_json::Value::Null),
+                .unwrap_or(serde_json::Value::Null);
+
+                serde_json::from_value(value)
+                    .map_err(|e| format!("Failed to deserialize value: {}", e))?
+            },
             created_at: Some(rec.try_get("created_at")?),
             last_updated_at: Some(rec.try_get("last_updated_at")?),
         }))
@@ -283,7 +289,7 @@ impl KVProvider for ArKVProvider {
         Ok(scopes)
     }
 
-    async fn set(&self, key: String, data: serde_json::Value) -> Result<(), silverpelt::Error> {
+    async fn set(&self, key: String, data: KhronosValue) -> Result<(), silverpelt::Error> {
         // Check key length
         if key.len() > self.guild_state.kv_constraints.max_key_length {
             return Err("Key length too long".into());
@@ -320,7 +326,7 @@ impl KVProvider for ArKVProvider {
         )
         .bind(self.guild_id.to_string())
         .bind(key)
-        .bind(data)
+        .bind(serde_json::to_value(data)?)
         .bind(&self.kv_scope)
         .execute(&mut *tx)
         .await?;
@@ -366,9 +372,14 @@ impl KVProvider for ArKVProvider {
         for rec in rec {
             let record = KvRecord {
                 key: rec.try_get("key")?,
-                value: rec
+                value: {
+                    let rec = rec
                     .try_get::<Option<serde_json::Value>, _>("value")?
-                    .unwrap_or(serde_json::Value::Null),
+                    .unwrap_or(serde_json::Value::Null);
+
+                    serde_json::from_value(rec)
+                        .map_err(|e| format!("Failed to deserialize value: {}", e))?
+                },
                 created_at: Some(rec.try_get("created_at")?),
                 last_updated_at: Some(rec.try_get("last_updated_at")?),
             };
