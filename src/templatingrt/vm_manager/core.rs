@@ -1,10 +1,8 @@
 use super::client::LuaVmResult;
-use crate::templatingrt::cache::get_all_guild_templates;
-use crate::templatingrt::primitives::assetmanager::TemplateAssetManager;
 use crate::templatingrt::primitives::ctxprovider::TemplateContextProvider;
 use crate::templatingrt::state::GuildState;
 use crate::templatingrt::state::Ratelimits;
-use crate::templatingrt::template::Template;
+use crate::templatingrt::template::{ConstructedFS, Template};
 use crate::templatingrt::MAX_TEMPLATES_EXECUTION_TIME;
 use crate::templatingrt::MAX_TEMPLATES_RETURN_WAIT_TIME;
 use crate::templatingrt::MAX_TEMPLATE_MEMORY_USAGE;
@@ -17,6 +15,7 @@ use khronos_runtime::rt::KhronosRuntimeManager;
 use khronos_runtime::rt::RuntimeCreateOpts;
 use khronos_runtime::utils::pluginholder::PluginSet;
 use khronos_runtime::utils::threadlimitmw::ThreadLimiter;
+use khronos_runtime::utils::require_v2::FilesystemWrapper;
 use khronos_runtime::TemplateContext;
 use mlua::prelude::*;
 use serenity::all::GuildId;
@@ -25,7 +24,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 /// Configures the khronos runtime.
-pub(super) fn configure_runtime_manager() -> LuaResult<KhronosRuntimeManager<TemplateAssetManager>>
+pub(super) fn configure_runtime_manager() -> LuaResult<KhronosRuntimeManager>
 {
     let mut rt = KhronosRuntime::new(
         ThreadLimiter::new(10000),
@@ -46,6 +45,12 @@ pub(super) fn configure_runtime_manager() -> LuaResult<KhronosRuntimeManager<Tem
         }),
         None::<(fn(&Lua, LuaThread) -> Result<(), mlua::Error>, fn() -> ())>
     )?;
+
+    rt.load_plugins({
+        let mut pset = PluginSet::new();
+        pset.add_default_plugins::<TemplateContextProvider>();
+        pset
+    })?;
 
     rt.lua().set_memory_limit(MAX_TEMPLATE_MEMORY_USAGE)?;
 
@@ -74,7 +79,7 @@ pub(super) fn create_guild_state(
 pub async fn dispatch_event_to_template(
     template: Arc<Template>,
     event: Event,
-    manager: KhronosRuntimeManager<TemplateAssetManager>,
+    manager: KhronosRuntimeManager,
     guild_state: Rc<GuildState>,
 ) -> LuaVmResult {
     if manager.runtime().is_broken() {
@@ -91,11 +96,20 @@ pub async fn dispatch_event_to_template(
             // due to ongoing Lua VM operations
             match KhronosIsolate::new_subisolate(
                 manager.runtime().clone(),
-                TemplateAssetManager::new(template.clone()),
                 {
-                    let mut pset = PluginSet::new();
-                    pset.add_default_plugins::<TemplateContextProvider>();
-                    pset
+                    match template.ready_fs {
+                        Some(ConstructedFS::Memory(ref fs)) => {
+                            FilesystemWrapper::new(fs.clone())
+                        },
+                        Some(ConstructedFS::Overlay(ref fs)) => {
+                            FilesystemWrapper::new(fs.clone())
+                        },
+                        None => {
+                            return LuaVmResult::LuaError {
+                                err: format!("Template {} does not have a ready filesystem", template.name),
+                            };
+                        }
+                    }
                 },
             ) {
                 Ok(isolate) => {
@@ -162,7 +176,7 @@ pub async fn dispatch_event_to_template(
 pub async fn dispatch_event_to_multiple_templates(
     templates: Arc<Vec<Arc<Template>>>,
     event: CreateEvent,
-    manager: &KhronosRuntimeManager<TemplateAssetManager>,
+    manager: &KhronosRuntimeManager,
     guild_state: Rc<GuildState>,
 ) -> Vec<(String, LuaVmResult)> {
     log::debug!("Dispatching event to {} templates", templates.len());
@@ -196,18 +210,4 @@ pub async fn dispatch_event_to_multiple_templates(
     }
 
     results
-}
-
-pub(super) async fn reset_vm_cache(
-    guild_id: GuildId,
-    runtime: &KhronosRuntimeManager<TemplateAssetManager>,
-) {
-    if let Some(templates) = get_all_guild_templates(guild_id).await {
-        for template in templates.iter() {
-            if let Some(vm) = runtime.get_sub_isolate(&template.name) {
-                vm.clear_require_cache();
-                vm.asset_manager().set_template(template.clone());
-            }
-        }
-    }
 }

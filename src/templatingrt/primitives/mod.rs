@@ -1,6 +1,5 @@
 use crate::config::CONFIG;
 
-pub mod assetmanager;
 pub mod ctxprovider;
 pub mod datastores;
 

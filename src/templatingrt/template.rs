@@ -1,10 +1,15 @@
 use std::str::FromStr;
-use std::sync::Arc;
 
 use khronos_runtime::primitives::event::CreateEvent;
 use silverpelt::templates::parse_shop_template;
 use silverpelt::Error;
 use super::cache::{TEST_BASE_NAME, TEST_BASE, USE_TEST_BASE};
+use rust_embed::Embed;
+
+/// To make uploads not need to upload all of ``templating-types`` and keep them up to date:
+#[derive(Embed, Debug)]
+#[folder = "$CARGO_MANIFEST_DIR/../../infra/templating-types"]
+struct TemplatingTypes;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, Default, Debug)]
 pub enum TemplateLanguage {
@@ -32,6 +37,13 @@ impl std::fmt::Display for TemplateLanguage {
     }
 }
 
+#[derive(Clone, Debug)]
+/// The constructed filesystem for the template
+pub enum ConstructedFS {
+    Memory(vfs::MemoryFS),
+    Overlay(vfs::OverlayFS),
+}
+
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default)]
 pub struct Template {
     /// The guild id the template is in
@@ -49,7 +61,11 @@ pub struct Template {
     /// The channel to send errors to
     pub error_channel: Option<serenity::all::ChannelId>,
     /// The content of the template
-    pub content: Arc<std::collections::HashMap<String, Arc<String>>>,
+    #[serde(skip)]
+    pub content: vfs::MemoryFS,
+    /// The constructed filesystem
+    #[serde(skip)]
+    pub ready_fs: Option<ConstructedFS>,
     /// The language of the template
     pub lang: TemplateLanguage,
     /// The allowed capabilities the template has access to
@@ -161,7 +177,16 @@ impl Template {
                     lang: TemplateLanguage::from_str(&template.language)
                         .map_err(|_| "Invalid language")?,
                     allowed_caps: template.allowed_caps,
-                    content: serde_json::from_value(shop_data.content)?,
+                    content: {
+                        let content: std::collections::HashMap<String, String> =
+                            serde_json::from_value(shop_data.content)?;
+                        
+                            khronos_runtime::utils::memoryvfs::create_memory_vfs_from_map(content)
+                            .map_err(|e| {
+                                Error::from(format!("Failed to create vfs from map: {e}"))
+                            })?
+                    },
+                    ready_fs: None,
                     created_by: shop_data.created_by,
                     created_at: shop_data.created_at,
                     updated_by: shop_data.last_updated_by,
@@ -171,7 +196,13 @@ impl Template {
                 let content = if USE_TEST_BASE && template.name == TEST_BASE_NAME {
                     TEST_BASE.content.clone()
                 } else {
-                    serde_json::from_value(template.content)?
+                    let content: std::collections::HashMap<String, String> =
+                    serde_json::from_value(template.content)?;
+                
+                    khronos_runtime::utils::memoryvfs::create_memory_vfs_from_map(content)
+                        .map_err(|e| {
+                            Error::from(format!("Failed to create vfs from map: {e}"))
+                        })?
                 };
 
                 result.push(Self {
@@ -186,6 +217,7 @@ impl Template {
                         None => None,
                     },
                     content,
+                    ready_fs: None,
                     lang: TemplateLanguage::from_str(&template.language)
                         .map_err(|_| "Invalid language")?,
                     allowed_caps: template.allowed_caps,
@@ -198,5 +230,18 @@ impl Template {
         }
 
         Ok(result)
+    }
+
+    pub fn prepare_ready_fs(&mut self) {
+        let prepped_fs = if self.allowed_caps.contains(&"assetmanager:use_bundled_templating_types".to_string()) {
+            ConstructedFS::Overlay(vfs::OverlayFS::new(&vec![
+                self.content.clone().into(),
+                vfs::EmbeddedFS::<TemplatingTypes>::new().into()
+            ]))  
+        } else {
+            ConstructedFS::Memory(self.content.clone())
+        };
+
+        self.ready_fs = Some(prepped_fs);
     }
 }

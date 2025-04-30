@@ -7,20 +7,24 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use khronos_runtime::primitives::event::CreateEvent;
+use vfs::FileSystem;
 
 // Test base will be used for builtins in the future
 
 // Exec simple with wait
-fn str_to_map(s: &str) -> Arc<std::collections::HashMap<String, Arc<String>>> {
-    let mut map = std::collections::HashMap::new();
-    map.insert("init.luau".to_string(), Arc::new(s.to_string()));
-    Arc::new(map)
+fn str_to_fs(s: &str) -> vfs::MemoryFS {
+    let fs = vfs::MemoryFS::new();
+    fs.create_file("/init.luau")
+        .unwrap()
+        .write_all(s.as_bytes())
+        .unwrap();
+    fs
 }
 
 // Replace this with the new builtins template once ready to deploy
 pub const TEST_BASE_NAME: &str = "$test_base";
 pub static TEST_BASE: LazyLock<Arc<Template>> = LazyLock::new(|| Arc::new(Template {
-    content: str_to_map("local evt, ctx = ...\nif evt.name == 'INTERACTION_CREATE' then error(ctx.guild_id) end"),
+    content: str_to_fs("local evt, ctx = ...\nif evt.name == 'INTERACTION_CREATE' then error(ctx.guild_id) end"),
     name: TEST_BASE_NAME.to_string(),
     events: vec!["INTERACTION_CREATE".to_string()],
     ..Default::default()
@@ -201,13 +205,30 @@ async fn get_all_templates_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt
     for partial in partials {
         let guild_id = partial.guild_id.parse()?;
 
+        let old_templates = TEMPLATES_CACHE.get(&guild_id).await;
+
         if let Ok(templates_vec) = Template::guild(guild_id, pool).await {
             let templates_vec = {
                 let mut templates_found = Vec::with_capacity(templates_vec.len());
                 let mut found_base = false;
                 for template in templates_vec.into_iter() {
+                    let mut template = template; // Make sure we mutably own 
                     if template.name == TEST_BASE_NAME {
                         found_base = true; // Mark that we have found the base template already
+                    }
+
+                    // Get the content of old template 
+                    // TODO: Optimize this logic maybe?
+                    if let Some(ref old_templates) = old_templates {
+                        for old_template in old_templates.iter() {
+                            if template.name == old_template.name {
+                                // Copy over filesystem ref and make them point to the same thing
+                                old_template.content.take_from_filesystem(&template.content)?; // Propogate error upwards as this should never happen outside of poisoned RwLock
+                                template.content = old_template.content.clone();
+                                template.prepare_ready_fs();
+                                break;
+                            }
+                        }
                     }
 
                     templates_found.push(Arc::new(template));

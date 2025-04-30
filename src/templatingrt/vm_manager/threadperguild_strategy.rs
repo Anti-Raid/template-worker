@@ -136,8 +136,6 @@ pub async fn create_lua_vm(
                                 println!("Clearing cache in VM");
                                 tis_ref.clear_bytecode_cache();
 
-                                super::core::reset_vm_cache(guild_id, &tis_ref).await;
-
                                 let _ = callback.send(vec![(
                                     "_".to_string(),
                                     LuaVmResult::Ok {

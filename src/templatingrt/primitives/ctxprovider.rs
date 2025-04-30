@@ -19,7 +19,6 @@ use sqlx::Row;
 use std::sync::LazyLock;
 use std::{rc::Rc, sync::Arc};
 use super::{kittycat_permission_config_data, sandwich_config};
-use crate::templatingrt::primitives::assetmanager::TemplateAssetManager;
 
 /// Internal short-lived channel cache
 pub static CHANNEL_CACHE: LazyLock<Cache<serenity::all::ChannelId, serenity::all::GuildChannel>> =
@@ -44,7 +43,7 @@ pub struct TemplateContextProvider {
 }
 
 impl TemplateContextProvider {
-    fn datastores(guild_state: Rc<GuildState>, _template_data: Arc<Template>, manager: khronos_runtime::rt::KhronosRuntimeManager<TemplateAssetManager>) -> Vec<Rc<dyn DataStoreImpl>> {
+    fn datastores(guild_state: Rc<GuildState>, _template_data: Arc<Template>, manager: khronos_runtime::rt::KhronosRuntimeManager) -> Vec<Rc<dyn DataStoreImpl>> {
         vec![
             Rc::new(
                 super::datastores::StatsStore {
@@ -71,7 +70,7 @@ impl TemplateContextProvider {
         guild_state: Rc<GuildState>, 
         template_data: Arc<Template>, 
         runtime_shareable_data: khronos_runtime::rt::RuntimeShareableData,
-        manager: khronos_runtime::rt::KhronosRuntimeManager<TemplateAssetManager>
+        manager: khronos_runtime::rt::KhronosRuntimeManager
     ) -> Self {
         Self {
             datastores: Self::datastores(guild_state.clone(), template_data.clone(), manager),

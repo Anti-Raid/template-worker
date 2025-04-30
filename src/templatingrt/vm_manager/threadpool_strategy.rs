@@ -65,7 +65,7 @@ impl ThreadEntry {
         Ok(entry)
     }
 
-    /// Returns the number of threads in the pool
+    /// Returns the number of servers in the pool
     fn thread_count(&self) -> usize {
         self.count.load(std::sync::atomic::Ordering::Acquire)
     }
@@ -98,6 +98,7 @@ impl ThreadEntry {
     ) -> Result<(), silverpelt::Error> {
         let mut rx = rx; // Take mutable ownership to receiver
         let broken_ref = self.broken.clone();
+        let count_ref = self.count.clone();
         std::thread::Builder::new()
             .name(format!("lua-vm-threadpool-{}", self.id))
             .stack_size(MAX_VM_THREAD_STACK_SIZE)
@@ -120,22 +121,29 @@ impl ThreadEntry {
 
                         // Create Lua VM
                         let gs = Rc::new(
-                            create_guild_state(
+                            match create_guild_state(
                                 send.guild_id,
                                 pool.clone(),
                                 serenity_context.clone(),
                                 reqwest_client.clone(),
-                            )
-                            .expect("Failed to create Lua VM userdata"),
+                            ) {
+                                Ok(gs) => gs,
+                                Err(e) => {
+                                    log::error!("Failed to create guild state: {}", e);
+                                    continue;
+                                }
+                            }
                         );
 
                         let tis_ref = match configure_runtime_manager() {
                             Ok(tis) => tis,
                             Err(e) => {
                                 log::error!("Failed to configure Lua VM: {}", e);
-                                panic!("Failed to configure Lua VM");
+                                continue;
                             }
                         };
+
+                        count_ref.fetch_add(1, std::sync::atomic::Ordering::Release);
 
                         tis_ref.set_on_broken(Box::new(move |_lua| {
                             VMS.remove(&send.guild_id);
@@ -249,8 +257,7 @@ impl ThreadEntry {
                                         LuaVmAction::ClearCache {} => {
                                             println!("Clearing cache in VM");
                                             tis_ref.clear_bytecode_cache();
-                                            super::core::reset_vm_cache(gs.guild_id, &tis_ref)
-                                                .await;
+
                                             let _ = callback.send(vec![(
                                                 "_".to_string(),
                                                 LuaVmResult::Ok {

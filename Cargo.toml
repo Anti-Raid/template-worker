@@ -33,6 +33,8 @@ ar_settings = { git = "https://github.com/anti-raid/settings" }
 khronos_runtime = { git = "https://github.com/anti-raid/khronos" }
 lockdowns = { git = "https://github.com/Anti-Raid/lockdowns" }
 gwevent = { git = "https://github.com/Anti-Raid/gwevent" }
+vfs = { git = "https://github.com/Anti-Raid/rust-vfs", features = ["embedded-fs"] }
+rust-embed = { version = "8.7.0", features = ["debug-embed", "interpolate-folder-path"] }
 include_dir = "0.7"
 
 silverpelt = { git = "https://github.com/Anti-Raid/corelib_rs" }

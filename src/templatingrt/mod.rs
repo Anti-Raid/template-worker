@@ -4,8 +4,6 @@ pub mod state;
 pub mod template;
 mod vm_manager;
 
-use std::sync::Arc;
-
 pub use vm_manager::{LuaVmAction, LuaVmResult, DEFAULT_THREAD_POOL};
 
 use crate::templatingrt::vm_manager::ArLuaHandle;
@@ -14,6 +12,7 @@ use primitives::sandwich_config;
 use serenity::all::GuildId;
 use template::Template;
 use vm_manager::get_lua_vm;
+use vfs::FileSystem;
 
 use crate::config::CONFIG;
 
@@ -307,11 +306,14 @@ pub async fn benchmark_vm(
     let hashmap_insert_time = start.elapsed().as_micros();
 
     // Exec simple with wait
-    fn str_to_map(s: &str) -> Arc<std::collections::HashMap<String, Arc<String>>> {
-        let mut map = std::collections::HashMap::new();
-        map.insert("init.luau".to_string(), Arc::new(s.to_string()));
-        Arc::new(map)
-    }
+    fn str_to_map(s: &str) -> vfs::MemoryFS {
+        let fs = vfs::MemoryFS::new();
+        fs.create_file("/init.luau")
+            .unwrap()
+            .write_all(s.as_bytes())
+            .unwrap();
+        fs
+    }    
 
     let pt = Template {
         content: str_to_map("return 1"),
