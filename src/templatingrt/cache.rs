@@ -225,11 +225,12 @@ async fn get_all_templates_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt
                                 // Copy over filesystem ref and make them point to the same thing
                                 old_template.content.take_from_filesystem(&template.content)?; // Propogate error upwards as this should never happen outside of poisoned RwLock
                                 template.content = old_template.content.clone();
-                                template.prepare_ready_fs();
                                 break;
                             }
                         }
                     }
+
+                    template.prepare_ready_fs();
 
                     templates_found.push(Arc::new(template));
                 }
