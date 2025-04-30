@@ -243,7 +243,7 @@ impl Template {
             ConstructedFS::Memory(self.content.clone())
         };
 
-        log::info!("Prepared ready fs for template {}: {:?}", self.name, prepped_fs);
+        log::trace!("Prepared ready fs for template {}: {:?}", self.name, prepped_fs);
         self.ready_fs = Some(prepped_fs);
     }
 }
