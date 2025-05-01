@@ -67,7 +67,8 @@ impl DataStoreImpl for StatsStore {
                     Ok(value!(
                         "total_cached_guilds".to_string() => total_cached_guilds,
                         "total_guilds".to_string() => total_guilds,
-                        "total_users".to_string() => total_users
+                        "total_users".to_string() => total_users,
+                        "last_started_at".to_string() => crate::CONFIG.start_time
                     ))
                 })
             })))

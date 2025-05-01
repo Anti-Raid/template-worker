@@ -146,7 +146,7 @@ pub struct Config {
 
     #[serde(skip)]
     /// Setup by load() for statistics
-    pub start_time: i64,
+    pub start_time: chrono::DateTime<chrono::Utc>,
 }
 
 impl Config {
@@ -159,7 +159,7 @@ impl Config {
                 // Parse config.yaml
                 let mut cfg: Config = serde_yaml::from_reader(file)?;
 
-                cfg.start_time = chrono::Utc::now().timestamp();
+                cfg.start_time = chrono::Utc::now();
 
                 // Return config
                 Ok(cfg)
