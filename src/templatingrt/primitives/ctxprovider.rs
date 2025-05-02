@@ -36,9 +36,6 @@ pub struct TemplateContextProvider {
     /// The template data
     template_data: Arc<Template>,
 
-    /// The isolate data being used
-    runtime_shareable_data: khronos_runtime::rt::RuntimeShareableData,
-
     /// The datastores to expose
     datastores: Vec<Rc<dyn DataStoreImpl>>,
 }
@@ -70,14 +67,12 @@ impl TemplateContextProvider {
     pub fn new(
         guild_state: Rc<GuildState>, 
         template_data: Arc<Template>, 
-        runtime_shareable_data: khronos_runtime::rt::RuntimeShareableData,
         manager: khronos_runtime::rt::KhronosRuntimeManager
     ) -> Self {
         Self {
             datastores: Self::datastores(guild_state.clone(), template_data.clone(), manager),
             guild_state,
             template_data,
-            runtime_shareable_data,
         }
     }
 }
@@ -187,10 +182,6 @@ impl KhronosContext for TemplateContextProvider {
             },
             guild_state: self.guild_state.clone(),
         })
-    }
-
-    fn runtime_shareable_data(&self) -> khronos_runtime::rt::RuntimeShareableData {
-        self.runtime_shareable_data.clone()
     }
 
     fn page_provider(&self, scope: ExecutorScope) -> Option<Self::PageProvider> {

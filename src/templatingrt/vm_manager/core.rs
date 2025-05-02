@@ -143,8 +143,7 @@ pub async fn dispatch_event_to_template(
     // Now, create the template context that should be passed to the template
     let provider = TemplateContextProvider::new(
         guild_state,
-        template.clone(),
-        sub_isolate.runtime_shareable_data(),
+        template,
         manager
     );
 
