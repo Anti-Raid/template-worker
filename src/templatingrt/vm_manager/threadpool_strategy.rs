@@ -146,7 +146,7 @@ impl ThreadEntry {
     
                                             count_ref.fetch_add(1, std::sync::atomic::Ordering::Release);
     
-                                            tis_ref.set_on_broken(Box::new(move |_lua| {
+                                            tis_ref.set_on_broken(Box::new(move || {
                                                 VMS.remove(&guild_id);
                                             }));
     
@@ -224,7 +224,9 @@ impl ThreadEntry {
                                         }
                                         LuaVmAction::Stop {} => {
                                             // Mark VM as broken
-                                            tis_ref.runtime().mark_broken(true);
+                                            if let Err(e) = tis_ref.runtime().mark_broken(true) {
+                                                log::error!("Failed to mark VM as broken: {}", e);
+                                            }
 
                                             let _ = callback.send(vec![(
                                                 "_".to_string(),
@@ -234,7 +236,7 @@ impl ThreadEntry {
                                             )]);
                                         }
                                         LuaVmAction::GetMemoryUsage {} => {
-                                            let used = tis_ref.runtime().lua().used_memory();
+                                            let used = tis_ref.runtime().memory_usage();
 
                                             let _ = callback.send(vec![(
                                                 "_".to_string(),
@@ -248,7 +250,6 @@ impl ThreadEntry {
                                         LuaVmAction::SetMemoryLimit { limit } => {
                                             let result = match tis_ref
                                                 .runtime()
-                                                .lua()
                                                 .set_memory_limit(limit)
                                             {
                                                 Ok(limit) => LuaVmResult::Ok {

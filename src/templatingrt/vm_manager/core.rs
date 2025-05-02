@@ -52,7 +52,7 @@ pub(super) fn configure_runtime_manager() -> LuaResult<KhronosRuntimeManager>
         pset
     })?;
 
-    rt.lua().set_memory_limit(MAX_TEMPLATE_MEMORY_USAGE)?;
+    rt.set_memory_limit(MAX_TEMPLATE_MEMORY_USAGE)?;
 
     rt.sandbox()?;
 

@@ -48,7 +48,7 @@ pub async fn create_lua_vm(
                     }
                 };
 
-                tis_ref.set_on_broken(Box::new(move |_lua| {
+                tis_ref.set_on_broken(Box::new(move || {
                     VMS.remove(&guild_id);
                 }));
 
@@ -103,7 +103,9 @@ pub async fn create_lua_vm(
                             }
                             LuaVmAction::Stop {} => {
                                 // Mark VM as broken
-                                tis_ref.runtime().mark_broken(true);
+                                if let Err(e) = tis_ref.runtime().mark_broken(true) {
+                                    log::error!("Failed to mark VM as broken: {}", e);
+                                }
 
                                 let _ = callback.send(vec![(
                                     "_".to_string(),
@@ -113,7 +115,7 @@ pub async fn create_lua_vm(
                                 )]);
                             }
                             LuaVmAction::GetMemoryUsage {} => {
-                                let used = tis_ref.runtime().lua().used_memory();
+                                let used = tis_ref.runtime().memory_usage();
 
                                 let _ = callback.send(vec![(
                                     "_".to_string(),
@@ -123,7 +125,7 @@ pub async fn create_lua_vm(
                                 )]);
                             }
                             LuaVmAction::SetMemoryLimit { limit } => {
-                                let result = match tis_ref.runtime().lua().set_memory_limit(limit) {
+                                let result = match tis_ref.runtime().set_memory_limit(limit) {
                                     Ok(limit) => LuaVmResult::Ok {
                                         result_val: serde_json::Value::Number(limit.into()),
                                     },
