@@ -7,7 +7,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use khronos_runtime::primitives::event::CreateEvent;
+use antiraid_types::ar_event::AntiraidEvent;
+use crate::dispatch::parse_event;
 use vfs::FileSystem;
+use silverpelt::data::Data;
 
 // Test base will be used for builtins in the future
 
@@ -160,27 +163,29 @@ pub async fn setup(pool: &sqlx::PgPool) -> Result<(), silverpelt::Error> {
 /// Clears the template cache for a guild. This refetches the templates
 /// into cache
 pub async fn regenerate_cache(
+    context: &serenity::all::Context,
+    data: &Data,
     guild_id: GuildId,
-    pool: &sqlx::PgPool,
 ) -> Result<(), silverpelt::Error> {
     println!("Clearing cache for guild {}", guild_id);
 
     SCHEDULED_EXECUTIONS.remove(&guild_id).await;
 
     // NOTE: if this call fails, bail out early and don't clear the cache to ensure old code at least runs
-    get_all_guild_templates_from_db(
+    let templates = get_all_guild_templates_from_db(
         guild_id, 
-        pool, 
+        &data.pool, 
         TEMPLATES_CACHE.remove(&guild_id).await
     ).await?;
-    get_all_guild_scheduled_executions_from_db(guild_id, pool).await?;
+    get_all_guild_scheduled_executions_from_db(guild_id, &data.pool).await?;
 
     println!("Resyncing VMs");
 
-    // Send a message to clear the cache in the VMs
+    // Send a message to stop VMs running potentially outdated code
+    let mut resync = false;
     if let Some(vm) = get_lua_vm_if_exists(guild_id) {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        vm.send_action(LuaVmAction::ClearCache {}, tx)?;
+        vm.send_action(LuaVmAction::Stop {}, tx)?;
         let handle = RenderTemplateHandle { rx };
         let Some(mvmr) = handle.wait_timeout(MAX_TEMPLATES_RETURN_WAIT_TIME).await? else {
             return Err("Timed out waiting for templates to clear from VMs".into());
@@ -191,8 +196,31 @@ pub async fn regenerate_cache(
                 return Err(format!("Failed to clear cache in VM: {:?}", result.result).into());
             }
         }
+
+        resync = true;
     } else {
         println!("No VMs to resync");
+    }
+
+    if resync {
+        // Dispatch OnStartup events to all templates
+        let templates = templates.iter().map(|t| t.name.clone()).collect();
+        let create_event =
+            match parse_event(&AntiraidEvent::OnStartup(templates)) {
+                Ok(e) => e,
+                Err(e) => {
+                    log::error!("Error parsing event: {:?}", e);
+                    return Ok(());
+                }
+            };
+
+        crate::dispatch::dispatch(
+            context,
+            data,
+            create_event,
+            guild_id,
+        )
+        .await?;
     }
 
     Ok(())
@@ -311,7 +339,7 @@ async fn get_all_guild_templates_from_db(
     guild_id: GuildId,
     pool: &sqlx::PgPool,
     old: Option<Arc<Vec<Arc<Template>>>>,
-) -> Result<(), silverpelt::Error> {
+) -> Result<Arc<Vec<Arc<Template>>>, silverpelt::Error> {
     let mut templates_vec = Template::guild(guild_id, pool)
         .await?
         .into_iter()
@@ -358,7 +386,7 @@ async fn get_all_guild_templates_from_db(
     // Store the templates in the cache
     let templates = Arc::new(templates_vec);
     TEMPLATES_CACHE.insert(guild_id, templates.clone()).await;
-    Ok(())
+    Ok(templates)
 }
 
 pub async fn get_all_guild_scheduled_executions_from_db(
