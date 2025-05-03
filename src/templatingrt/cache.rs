@@ -31,8 +31,9 @@ pub static TEST_BASE: LazyLock<Arc<Template>> = LazyLock::new(|| {
         content: str_to_fs("local evt, ctx = ...\nif evt.name == 'INTERACTION_CREATE' then error(ctx.guild_id) end"),
         name: TEST_BASE_NAME.to_string(),
         events: vec!["INTERACTION_CREATE".to_string()],
+
         ..Default::default()
-    };
+    }
 
     templ.prepare_ready_fs();
 
@@ -40,7 +41,7 @@ pub static TEST_BASE: LazyLock<Arc<Template>> = LazyLock::new(|| {
 });
 pub static TEST_BASE_ARC_VEC: LazyLock<Arc<Vec<Arc<Template>>>> =
     LazyLock::new(|| Arc::new(vec![TEST_BASE.clone()]));
-pub const USE_TEST_BASE: bool = true;
+pub const USE_TEST_BASE: bool = false;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct ScheduledExecution {
