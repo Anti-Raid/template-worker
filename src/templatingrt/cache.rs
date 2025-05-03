@@ -33,7 +33,7 @@ pub static TEST_BASE: LazyLock<Arc<Template>> = LazyLock::new(|| {
         events: vec!["INTERACTION_CREATE".to_string()],
 
         ..Default::default()
-    }
+    };
 
     templ.prepare_ready_fs();
 
