@@ -38,13 +38,13 @@ pub(super) fn configure_runtime_manager() -> LuaResult<KhronosRuntimeManager>
             disable_task_lib: false,
         },
         Some(|_a: &Lua, b: &KhronosRuntimeInterruptData| {
-            let Some(last_execution_time) = b.last_execution_time else {
+            /*let Some(last_execution_time) = b.last_execution_time else {
                 return Ok(LuaVmState::Continue);
             };
 
             if last_execution_time.elapsed() >= MAX_TEMPLATES_EXECUTION_TIME {
                 return Ok(LuaVmState::Yield);
-            }
+            }*/
 
             Ok(LuaVmState::Continue)
         }),
@@ -141,6 +141,7 @@ pub async fn dispatch_event_to_template(
 
     // Restart thread if it finished or error'd or is not yet existing
     if sub_isolate.last_thread_status().is_none() || (sub_isolate.last_thread_status().unwrap() != mlua::ThreadStatus::Resumable && sub_isolate.last_thread_status().unwrap() != mlua::ThreadStatus::Running) {        
+        log::debug!("Starting subisolate for template {}", template.name);
         let provider = TemplateContextProvider::new(
             guild_state.clone(),
             template,
