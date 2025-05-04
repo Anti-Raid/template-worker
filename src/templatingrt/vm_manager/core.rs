@@ -92,9 +92,9 @@ pub async fn dispatch_event_to_template(
     }
 
     // Get or create a subisolate
-    let (sub_isolate, event_channel) = if let Some(sub_isolate_data) = manager.get_sub_isolate(&template.name) {
+    let (sub_isolate, event_channel, existing) = if let Some(sub_isolate_data) = manager.get_sub_isolate(&template.name) {
         sub_isolate_data.event_channel.0.send_async(event).await;
-        (sub_isolate_data.isolate.clone(), sub_isolate_data.event_channel.1.clone())
+        (sub_isolate_data.isolate.clone(), sub_isolate_data.event_channel.clone(), true)
     } else {
         let sub_isolate = KhronosIsolate::new_subisolate(
             manager.runtime().clone(),
@@ -136,25 +136,23 @@ pub async fn dispatch_event_to_template(
             return LuaVmResult::LuaError { err: e.to_string() };
         }
 
-        (sub_isolate, event_channel.1.clone())
+        (sub_isolate, event_channel.clone(), false)
     };
 
     // Restart thread if it finished or error'd or is not yet existing
-    if sub_isolate.last_thread_status().is_none() || (sub_isolate.last_thread_status().unwrap() != mlua::ThreadStatus::Resumable && sub_isolate.last_thread_status().unwrap() != mlua::ThreadStatus::Running) {
+    if sub_isolate.last_thread_status().is_none() || (sub_isolate.last_thread_status().unwrap() != mlua::ThreadStatus::Resumable && sub_isolate.last_thread_status().unwrap() != mlua::ThreadStatus::Running) {        
         let provider = TemplateContextProvider::new(
             guild_state.clone(),
             template,
             manager,
-            event_channel,
+            event_channel.1,
         );
 
         let template_context = TemplateContext::new(provider);
 
-        tokio::task::spawn_local(async move {
-            if let Err(e) = sub_isolate.spawn("/init.luau", None, template_context).await {
-                log::error!("Failed to spawn subisolate: {}", e);
-            }
-        });
+        if let Err(e) = sub_isolate.resume("/init.luau", None, template_context) {
+            log::error!("Failed to spawn subisolate: {}", e);
+        }
     }
 
     // Templates are long lived and as such do not have result_vals
