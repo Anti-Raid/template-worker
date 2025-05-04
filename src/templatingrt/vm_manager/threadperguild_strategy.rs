@@ -136,7 +136,6 @@ pub async fn create_lua_vm(
                             }
                             LuaVmAction::ClearCache {} => {
                                 println!("Clearing cache in VM");
-                                tis_ref.clear_bytecode_cache();
 
                                 let _ = callback.send(vec![(
                                     "_".to_string(),

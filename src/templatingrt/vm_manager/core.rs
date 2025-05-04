@@ -22,6 +22,11 @@ use serenity::all::GuildId;
 use silverpelt::templates::LuaKVConstraints;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use crate::templatingrt::log_error;
+use khronos_runtime::rt::manager::IsolateData;
+use serde_json::json;
 
 /// Configures the khronos runtime.
 pub(super) fn configure_runtime_manager() -> LuaResult<KhronosRuntimeManager>
@@ -87,89 +92,89 @@ pub async fn dispatch_event_to_template(
     }
 
     // Get or create a subisolate
-    let sub_isolate = if let Some(sub_isolate) = manager.get_sub_isolate(&template.name) {
-        sub_isolate
+    if let Some(sub_isolate_data) = manager.get_sub_isolate(&template.name) {
+        sub_isolate_data.event_channel.0.send_async(event).await;
     } else {
-        let mut attempts = 0;
-        let sub_isolate = loop {
-            // It may take a few attempts to create a subisolate successfully
-            // due to ongoing Lua VM operations
-            match KhronosIsolate::new_subisolate(
-                manager.runtime().clone(),
-                {
-                    match template.ready_fs {
-                        Some(ConstructedFS::Memory(ref fs)) => {
-                            FilesystemWrapper::new(fs.clone())
-                        },
-                        Some(ConstructedFS::Overlay(ref fs)) => {
-                            FilesystemWrapper::new(fs.clone())
-                        },
-                        None => {
-                            return LuaVmResult::LuaError {
-                                err: format!("Template {} does not have a ready filesystem", template.name),
-                            };
-                        }
-                    }
-                },
-            ) {
-                Ok(isolate) => {
-                    break isolate;
-                }
-                Err(e) => {
-                    log::error!("Failed to create subisolate: {}. This is an internal bug that should not happen", e);
-                    attempts += 1;
-                    if attempts >= 20 {
+        let sub_isolate = KhronosIsolate::new_subisolate(
+            manager.runtime().clone(),
+            {
+                match template.ready_fs {
+                    Some(ConstructedFS::Memory(ref fs)) => {
+                        FilesystemWrapper::new(fs.clone())
+                    },
+                    Some(ConstructedFS::Overlay(ref fs)) => {
+                        FilesystemWrapper::new(fs.clone())
+                    },
+                    None => {
                         return LuaVmResult::LuaError {
-                            err: format!("Failed to create subisolate: {}. This is an internal bug that should not happen", e),
+                            err: format!("Template {} does not have a ready filesystem", template.name),
                         };
                     }
-
-                    // Wait a bit before retrying
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    // Check if the runtime is broken
-                    if manager.runtime().is_broken() {
-                        return LuaVmResult::VmBroken {};
-                    }
                 }
+            },
+        );
+
+        let sub_isolate = match sub_isolate {
+            Ok(isolate) => isolate,
+            Err(e) => {
+                log::error!("Failed to create subisolate: {}", e);
+                return LuaVmResult::LuaError { err: e.to_string() };
             }
         };
 
         log::info!("Created subisolate for template {}", template.name);
-        manager.add_sub_isolate(template.name.clone(), sub_isolate.clone());
+        let event_channel = flume::unbounded();
+        manager.add_sub_isolate(template.name.clone(), IsolateData {
+            isolate: sub_isolate.clone(),
+            event_channel: event_channel.clone(),
+        });
 
-        sub_isolate
-    };
+        // Now, create the template context that should be passed to the template
+        let template_name = template.name.to_string();
 
-    // Now, create the template context that should be passed to the template
-    let provider = TemplateContextProvider::new(
-        guild_state,
-        template,
-        manager
-    );
+        let provider = TemplateContextProvider::new(
+            guild_state.clone(),
+            template,
+            manager,
+            event_channel.1.clone()
+        );
 
-    let template_context = TemplateContext::new(provider);
+        let template_context = TemplateContext::new(provider);
 
-    let spawn_result = match sub_isolate
-        .spawn_asset("/init.luau", "/init.luau", template_context, event)
-        .await
-    {
-        Ok(sr) => sr,
-        Err(e) => {
+        // Start the sub-isolate in a spawn loop
+        let guild_state_ref = guild_state.clone();
+        if let Err(e) = sub_isolate.spawn_loop("/init.luau".to_string(), None, template_context, move |_, e| {
+            let template_name = template_name.clone();
+            let guild_state_ref = guild_state_ref.clone();
+            async move {
+                if let Err(e) = log_error(
+                    guild_state_ref.guild_id,
+                    &guild_state_ref.serenity_context,
+                    &template_name,
+                    e.to_string()
+                )
+                .await {
+                    log::error!("Failed to log error: {}", e);
+                }
+
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+                Ok(())
+            }
+        })
+        .await {
+            log::error!("Failed to spawn subisolate: {}", e);
+            return LuaVmResult::LuaError { err: e.to_string() };
+        }
+        if let Err(e) = event_channel.0.send_async(event).await {
+            log::error!("Failed to send event to subisolate: {}", e);
             return LuaVmResult::LuaError { err: e.to_string() };
         }
     };
 
-    let json_value = match spawn_result.into_serde_json_value(&sub_isolate) {
-        Ok(v) => v,
-        Err(e) => {
-            return LuaVmResult::LuaError {
-                err: format!("Failed to convert result to JSON: {}", e),
-            };
-        }
-    };
-
+    // Templates are long lived and as such do not have result_vals
     LuaVmResult::Ok {
-        result_val: json_value,
+        result_val: json!({}),
     }
 }
 

@@ -11,10 +11,10 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{collections::HashMap, sync::Arc};
 
-use crate::dispatch::{dispatch, dispatch_and_wait, parse_event};
+use crate::dispatch::{dispatch, parse_event};
 
 #[derive(Clone)]
 pub struct AppData {
@@ -46,11 +46,11 @@ pub fn create(
         )
         .route("/healthcheck", post(|| async { Json(()) }))
         .route("/benchmark-vm/:guild_id", post(benchmark_vm))
-        .route("/pages/:guild_id", post(get_pages_for_guild))
-        .route(
+        //.route("/pages/:guild_id", post(get_pages_for_guild))
+        /*.route(
             "/page-settings-operation/:guild_id/:user_id",
             post(settings_operation),
-        )
+        )*/
         .route("/threads-count", post(get_threads_count));
     let router: Router<()> = router.with_state(AppData::new(data, ctx));
     router.into_make_service()
@@ -89,7 +89,8 @@ pub struct DispatchEventAndWaitQuery {
     pub wait_timeout: Option<u64>,
 }
 
-/// Dispatches a new event and waits for a response
+/// This endpoint is deprecated and does the same as dispatch_event now
+/// except it returns a empty list
 async fn dispatch_event_and_wait(
     State(AppData {
         data,
@@ -109,16 +110,11 @@ async fn dispatch_event_and_wait(
 
     let event = parse_event(&event).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
-    let wait_timeout = match query.wait_timeout {
-        Some(timeout) => std::time::Duration::from_millis(timeout),
-        None => MAX_TEMPLATES_RETURN_WAIT_TIME,
-    };
-
-    let results = dispatch_and_wait(&serenity_context, &data, event, guild_id, wait_timeout)
+    dispatch(&serenity_context, &data, event, guild_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(Json(results))
+    Ok(Json(HashMap::new()))
 }
 
 /// Returns the number of threads running
@@ -169,6 +165,7 @@ pub enum CanonicalSettingsResult {
     },
 }
 
+/*
 /// Gets the pages for a guild
 pub(crate) async fn get_pages_for_guild(
     State(AppData { .. }): State<AppData>,
@@ -272,3 +269,4 @@ pub(crate) async fn settings_operation(
         }
     }
 }
+*/
