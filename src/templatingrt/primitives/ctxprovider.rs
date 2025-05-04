@@ -138,7 +138,6 @@ impl KhronosContext for TemplateContextProvider {
 
     fn event_provider(&self) -> Self::EventProvider {
         ArEventProvider {
-            guild_state: self.guild_state.clone(),
             event_reciever: self.event_reciever.clone(),
         }
     }
@@ -802,7 +801,6 @@ impl DataStoreProvider for ArDataStoreProvider {
 
 #[derive(Clone)]
 pub struct ArEventProvider {
-    guild_state: Rc<GuildState>,
     event_reciever: flume::Receiver<khronos_runtime::primitives::event::Event>,
 }
 
