@@ -108,6 +108,7 @@ impl DataStoreImpl for LinksStore {
     }
 }
 
+/*
 /// A data store to trigger an OnStartup/ExternalKeyUpdate event in another template
 pub struct TriggerStore {
     pub guild_state: Rc<GuildState>,
@@ -264,4 +265,4 @@ impl DataStoreImpl for TriggerStore {
             _ => None,
         }
     }
-}
+}*/

@@ -58,12 +58,12 @@ impl TemplateContextProvider {
             Rc::new(
                 khronos_runtime::traits::ir::datastores::CopyDataStore {}
             ),
-            Rc::new(
+            /*Rc::new(
                 super::datastores::TriggerStore {
                     guild_state: guild_state.clone(),
                     manager,
                 }
-            )
+            )*/
         ]
     }
 
