@@ -16,8 +16,8 @@ use vfs::FileSystem;
 
 use crate::config::CONFIG;
 
-pub const MAX_TEMPLATE_MEMORY_USAGE: usize = 1024 * 1024 * 10; // 10MB maximum memory
-pub const MAX_VM_THREAD_STACK_SIZE: usize = 1024 * 1024 * 10; // 10MB maximum memory
+pub const MAX_TEMPLATE_MEMORY_USAGE: usize = 1024 * 1024 * 20; // 20MB maximum memory
+pub const MAX_VM_THREAD_STACK_SIZE: usize = 1024 * 1024 * 20; // 20MB maximum memory
 pub const MAX_TEMPLATES_EXECUTION_TIME: std::time::Duration =
     std::time::Duration::from_secs(60 * 5); // 5 minute maximum execution time
 pub const MAX_TEMPLATES_RETURN_WAIT_TIME: std::time::Duration = std::time::Duration::from_secs(10); // 10 seconds maximum execution time

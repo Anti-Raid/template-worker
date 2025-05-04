@@ -10,7 +10,6 @@ use khronos_runtime::traits::pageprovider::PageProvider;
 use khronos_runtime::traits::userinfoprovider::UserInfoProvider;
 use khronos_runtime::traits::scheduledexecprovider::ScheduledExecProvider;
 use khronos_runtime::traits::datastoreprovider::{DataStoreProvider, DataStoreImpl};
-use khronos_runtime::traits::eventprovider::EventProvider;
 use khronos_runtime::traits::ir::ScheduledExecution;
 use khronos_runtime::utils::executorscope::ExecutorScope;
 use khronos_runtime::utils::khronos_value::KhronosValue;
@@ -36,9 +35,6 @@ pub struct TemplateContextProvider {
 
     /// The template data
     template_data: Arc<Template>,
-
-    /// The event reciever
-    event_reciever: flume::Receiver<khronos_runtime::primitives::event::Event>,
 
     /// The datastores to expose
     datastores: Vec<Rc<dyn DataStoreImpl>>,
@@ -72,13 +68,11 @@ impl TemplateContextProvider {
         guild_state: Rc<GuildState>, 
         template_data: Arc<Template>, 
         manager: khronos_runtime::rt::KhronosRuntimeManager,
-        event_reciever: flume::Receiver<khronos_runtime::primitives::event::Event>,
     ) -> Self {
         Self {
             datastores: Self::datastores(guild_state.clone(), template_data.clone(), manager),
             guild_state,
             template_data,
-            event_reciever,
         }
     }
 }
@@ -93,7 +87,6 @@ impl KhronosContext for TemplateContextProvider {
     type PageProvider = ArPageProvider;
     type ScheduledExecProvider = ArScheduledExecProvider;
     type DataStoreProvider = ArDataStoreProvider;
-    type EventProvider = ArEventProvider;
 
     fn data(&self) -> Self::Data {
         self.template_data.clone()
@@ -134,12 +127,6 @@ impl KhronosContext for TemplateContextProvider {
                 .current_user()
                 .clone(),
         )
-    }
-
-    fn event_provider(&self) -> Self::EventProvider {
-        ArEventProvider {
-            event_reciever: self.event_reciever.clone(),
-        }
     }
 
     fn kv_provider(&self, scope: ExecutorScope, kv_scope: &str) -> Option<Self::KVProvider> {
@@ -198,7 +185,7 @@ impl KhronosContext for TemplateContextProvider {
     }
 
     fn page_provider(&self, scope: ExecutorScope) -> Option<Self::PageProvider> {
-        /*Some(ArPageProvider {
+        Some(ArPageProvider {
             guild_id: match scope {
                 ExecutorScope::ThisGuild => self.guild_state.guild_id,
                 ExecutorScope::OwnerGuild => self
@@ -208,8 +195,7 @@ impl KhronosContext for TemplateContextProvider {
             },
             guild_state: self.guild_state.clone(),
             template_id: self.template_data.name.clone(),
-        })*/
-        None
+        })
     }
 
     fn scheduled_exec_provider(&self) -> Option<Self::ScheduledExecProvider> {
@@ -647,28 +633,27 @@ impl PageProvider for ArPageProvider {
     }
 
     async fn get_page(&self) -> Option<khronos_runtime::traits::ir::Page> {
-        None
-        /*crate::pages::get_page_by_id(self.guild_id, &self.template_id)
+        crate::pages::get_page_by_id(self.guild_id, &self.template_id)
             .await
-            .map(crate::pages::unravel_page)*/
+            .map(crate::pages::unravel_page)
     }
 
     async fn set_page(
         &self,
         page: khronos_runtime::traits::ir::Page,
     ) -> Result<(), khronos_runtime::Error> {
-        /*crate::pages::set_page(
+        crate::pages::set_page(
             self.guild_id,
             self.template_id.clone(),
             crate::pages::create_page(page, self.guild_id, self.template_id.clone()),
         )
-        .await;*/
+        .await;
 
         Ok(())
     }
 
     async fn delete_page(&self) -> Result<(), khronos_runtime::Error> {
-        /*crate::pages::remove_page(self.guild_id, &self.template_id).await;*/
+        crate::pages::remove_page(self.guild_id, &self.template_id).await;
         Ok(())
     }
 }
@@ -796,17 +781,5 @@ impl DataStoreProvider for ArDataStoreProvider {
     /// Returns all public builtin data stores
     fn public_builtin_data_stores(&self) -> Vec<String> {
         self.datastores.iter().map(|ds| ds.name()).collect()
-    }
-}
-
-#[derive(Clone)]
-pub struct ArEventProvider {
-    event_reciever: flume::Receiver<khronos_runtime::primitives::event::Event>,
-}
-
-impl EventProvider for ArEventProvider {
-    async fn recv_next_event(&self) -> Result<khronos_runtime::primitives::event::Event, khronos_runtime::Error> {
-        self.event_reciever.recv_async().await
-        .map_err(|e| format!("Failed to receive event: {}", e).into())
     }
 }

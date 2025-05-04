@@ -1,7 +1,4 @@
-/*
-TODO: Redo once events v2 etc are fully stable
-
-use crate::dispatch::parse_event;
+use crate::dispatch::{dispatch_and_wait, parse_event};
 use crate::templatingrt::MAX_TEMPLATES_RETURN_WAIT_TIME;
 use antiraid_types::ar_event::{
     AntiraidEvent, TemplateSettingExecuteEventData, TemplateSettingExecuteEventDataAction,
@@ -632,4 +629,3 @@ pub fn unravel_page(page: Arc<Page>) -> khronos_runtime::traits::ir::Page {
         settings,
     }
 }
-*/
