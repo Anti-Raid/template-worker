@@ -143,10 +143,19 @@ pub async fn dispatch_event_to_template(
 
         // Start the sub-isolate in a spawn loop
         let guild_state_ref = guild_state.clone();
+        let mut logged_error = Rc::new(std::cell::Cell::new(false));
         if let Err(e) = sub_isolate.spawn_loop("/init.luau".to_string(), None, template_context, move |_, e| {
             let template_name = template_name.clone();
             let guild_state_ref = guild_state_ref.clone();
+            let logged_error = logged_error.clone();
+
             async move {
+                if logged_error.get() {
+                    return Ok(());
+                }
+    
+                logged_error.set(true);    
+
                 if let Err(e) = log_error(
                     guild_state_ref.guild_id,
                     &guild_state_ref.serenity_context,
