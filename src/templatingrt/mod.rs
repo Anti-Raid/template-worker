@@ -13,6 +13,7 @@ use serenity::all::GuildId;
 use template::Template;
 use vm_manager::get_lua_vm;
 use vfs::FileSystem;
+use std::sync::Arc;
 
 use crate::config::CONFIG;
 
@@ -34,6 +35,7 @@ pub async fn execute(
         state.pool,
         state.serenity_context,
         state.reqwest_client,
+        state.object_store,
     )
     .await?;
 
@@ -289,15 +291,17 @@ pub async fn benchmark_vm(
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
     reqwest_client: reqwest::Client,
+    object_store: Arc<silverpelt::objectstore::ObjectStore>
 ) -> Result<FireBenchmark, silverpelt::Error> {
     // Get_lua_vm
     let pool_a = pool.clone();
     let guild_id_a = guild_id;
     let serenity_context_a = serenity_context.clone();
     let reqwest_client_a = reqwest_client.clone();
+    let object_store_a = object_store.clone();
 
     let start = std::time::Instant::now();
-    let _ = get_lua_vm(guild_id_a, pool_a, serenity_context_a, reqwest_client_a).await?;
+    let _ = get_lua_vm(guild_id_a, pool_a, serenity_context_a, reqwest_client_a, object_store_a).await?;
     let get_lua_vm = start.elapsed().as_micros();
 
     let new_map = scc::HashMap::new();
@@ -325,12 +329,14 @@ pub async fn benchmark_vm(
     let guild_id_a = guild_id;
     let serenity_context_a = serenity_context.clone();
     let reqwest_client_a = reqwest_client.clone();
+    let object_store_a = object_store.clone();
 
     let start = std::time::Instant::now();
     let n = execute(
         ParseCompileState {
             serenity_context: serenity_context_a,
             reqwest_client: reqwest_client_a,
+            object_store: object_store_a,
             guild_id: guild_id_a,
             pool: pool_a,
         },
@@ -366,6 +372,7 @@ pub async fn benchmark_vm(
     let guild_id_a = guild_id;
     let serenity_context_a = serenity_context.clone();
     let reqwest_client_a = reqwest_client.clone();
+    let object_store_a = object_store.clone();
 
     let start = std::time::Instant::now();
     execute(
@@ -374,6 +381,7 @@ pub async fn benchmark_vm(
             reqwest_client: reqwest_client_a,
             guild_id: guild_id_a,
             pool: pool_a,
+            object_store: object_store_a,
         },
         LuaVmAction::DispatchInlineEvent {
             event: CreateEvent::new(
@@ -400,6 +408,7 @@ pub async fn benchmark_vm(
     let guild_id_a = guild_id;
     let serenity_context_a = serenity_context.clone();
     let reqwest_client_a = reqwest_client.clone();
+    let object_store_a = object_store.clone();
 
     let start = std::time::Instant::now();
     let err = execute(
@@ -408,6 +417,7 @@ pub async fn benchmark_vm(
             reqwest_client: reqwest_client_a,
             guild_id: guild_id_a,
             pool: pool_a,
+            object_store: object_store_a
         },
         LuaVmAction::DispatchInlineEvent {
             event: CreateEvent::new(
@@ -448,6 +458,7 @@ pub async fn benchmark_vm(
 pub struct ParseCompileState {
     pub serenity_context: serenity::all::Context,
     pub reqwest_client: reqwest::Client,
+    pub object_store: Arc<silverpelt::objectstore::ObjectStore>,
     pub guild_id: GuildId,
     pub pool: sqlx::PgPool,
 }

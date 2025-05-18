@@ -72,11 +72,11 @@ pub struct Template {
     /// The allowed capabilities the template has access to
     pub allowed_caps: Vec<String>,
     /// The user who created the template
-    pub created_by: String,
+    pub created_by: serenity::all::UserId,
     /// The time the template was created
     pub created_at: chrono::DateTime<chrono::Utc>,
     /// The user who last updated the template
-    pub updated_by: String,
+    pub updated_by: serenity::all::UserId,
     /// The time the template was last updated
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -188,9 +188,9 @@ impl Template {
                             })?
                     },
                     ready_fs: None,
-                    created_by: shop_data.created_by,
+                    created_by: shop_data.created_by.parse()?,
                     created_at: shop_data.created_at,
-                    updated_by: shop_data.last_updated_by,
+                    updated_by: shop_data.last_updated_by.parse()?,
                     updated_at: shop_data.last_updated_at,
                 });
             } else {
@@ -222,9 +222,9 @@ impl Template {
                     lang: TemplateLanguage::from_str(&template.language)
                         .map_err(|_| "Invalid language")?,
                     allowed_caps: template.allowed_caps,
-                    created_by: template.created_by,
+                    created_by: template.created_by.parse()?,
                     created_at: template.created_at,
-                    updated_by: template.last_updated_by,
+                    updated_by: template.last_updated_by.parse()?,
                     updated_at: template.last_updated_at,
                 });
             }

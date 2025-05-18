@@ -10,6 +10,7 @@ use crate::templatingrt::MAX_VM_THREAD_STACK_SIZE;
 use khronos_runtime::primitives::event::Event;
 use serenity::all::GuildId;
 use std::rc::Rc;
+use std::sync::Arc;
 
 #[allow(dead_code)]
 pub async fn create_lua_vm(
@@ -17,6 +18,7 @@ pub async fn create_lua_vm(
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
     reqwest_client: reqwest::Client,
+    object_store: Arc<silverpelt::objectstore::ObjectStore>
 ) -> Result<ArLua, silverpelt::Error> {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(
         LuaVmAction,
@@ -28,7 +30,7 @@ pub async fn create_lua_vm(
         .stack_size(MAX_VM_THREAD_STACK_SIZE)
         .spawn(move || {
             let gs = Rc::new(
-                create_guild_state(guild_id, pool, serenity_context, reqwest_client)
+                create_guild_state(guild_id, pool, serenity_context, reqwest_client, object_store)
                     .expect("Failed to create Lua VM userdata"),
             );
 

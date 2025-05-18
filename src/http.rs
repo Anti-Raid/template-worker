@@ -144,6 +144,7 @@ async fn benchmark_vm(
         data.pool.clone(),
         serenity_context,
         data.reqwest.clone(),
+        data.object_store.clone()
     )
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;

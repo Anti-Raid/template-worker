@@ -1,7 +1,7 @@
 use crate::templatingrt::state::GuildState;
 use crate::templatingrt::template::Template;
 use antiraid_types::userinfo::UserInfo;
-use khronos_runtime::traits::context::KhronosContext;
+use khronos_runtime::traits::context::{ScriptData, KhronosContext};
 use khronos_runtime::traits::discordprovider::DiscordProvider;
 use khronos_runtime::traits::ir::kv::KvRecord;
 use khronos_runtime::traits::kvprovider::KVProvider;
@@ -9,8 +9,9 @@ use khronos_runtime::traits::lockdownprovider::LockdownProvider;
 use khronos_runtime::traits::pageprovider::PageProvider;
 use khronos_runtime::traits::userinfoprovider::UserInfoProvider;
 use khronos_runtime::traits::scheduledexecprovider::ScheduledExecProvider;
+use khronos_runtime::traits::objectstorageprovider::ObjectStorageProvider;
 use khronos_runtime::traits::datastoreprovider::{DataStoreProvider, DataStoreImpl};
-use khronos_runtime::traits::ir::ScheduledExecution;
+use khronos_runtime::traits::ir::{ObjectMetadata, ScheduledExecution};
 use khronos_runtime::utils::executorscope::ExecutorScope;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use moka::future::Cache;
@@ -38,6 +39,9 @@ pub struct TemplateContextProvider {
 
     /// The datastores to expose
     datastores: Vec<Rc<dyn DataStoreImpl>>,
+
+    /// Script data
+    script_data: Arc<ScriptData>
 }
 
 impl TemplateContextProvider {
@@ -72,13 +76,29 @@ impl TemplateContextProvider {
         Self {
             datastores: Self::datastores(guild_state.clone(), template_data.clone(), manager),
             guild_state,
+            script_data: Arc::new(
+                ScriptData {
+                    guild_id: Some(template_data.guild_id),
+                    name: template_data.name.clone(),
+                    description: template_data.description.clone(),
+                    shop_name: template_data.shop_name.clone(),
+                    shop_owner: template_data.shop_owner,
+                    events: template_data.events.clone(),
+                    error_channel: template_data.error_channel,
+                    lang: template_data.lang.to_string(),
+                    allowed_caps: template_data.allowed_caps.clone(),
+                    created_by: Some(template_data.created_by),
+                    created_at: Some(template_data.created_at),
+                    updated_by: Some(template_data.updated_by),
+                    updated_at: Some(template_data.updated_at)
+                }
+            ),
             template_data,
         }
     }
 }
 
 impl KhronosContext for TemplateContextProvider {
-    type Data = Arc<Template>;
     type KVProvider = ArKVProvider;
     type DiscordProvider = ArDiscordProvider;
     type LockdownDataStore = LockdownData;
@@ -87,9 +107,10 @@ impl KhronosContext for TemplateContextProvider {
     type PageProvider = ArPageProvider;
     type ScheduledExecProvider = ArScheduledExecProvider;
     type DataStoreProvider = ArDataStoreProvider;
+    type ObjectStorageProvider = ArObjectStorageProvider;
 
-    fn data(&self) -> Self::Data {
-        self.template_data.clone()
+    fn data(&self) -> &ScriptData {
+        &self.script_data
     }
 
     fn allowed_caps(&self) -> &[String] {
@@ -215,6 +236,19 @@ impl KhronosContext for TemplateContextProvider {
             },
             guild_state: self.guild_state.clone(),
             datastores: self.datastores.clone(),
+        })
+    }
+
+    fn objectstorage_provider(&self, scope: ExecutorScope) -> Option<Self::ObjectStorageProvider> {
+        Some(ArObjectStorageProvider {
+            guild_id: match scope {
+                ExecutorScope::ThisGuild => self.guild_state.guild_id,
+                ExecutorScope::OwnerGuild => self
+                    .template_data
+                    .shop_owner
+                    .unwrap_or(self.guild_state.guild_id),
+            },
+            guild_state: self.guild_state.clone(),
         })
     }
 }
@@ -781,5 +815,89 @@ impl DataStoreProvider for ArDataStoreProvider {
     /// Returns all public builtin data stores
     fn public_builtin_data_stores(&self) -> Vec<String> {
         self.datastores.iter().map(|ds| ds.name()).collect()
+    }
+}
+
+#[derive(Clone)]
+pub struct ArObjectStorageProvider {
+    guild_id: serenity::all::GuildId,
+    guild_state: Rc<GuildState>,
+}
+
+impl ObjectStorageProvider for ArObjectStorageProvider {
+    fn attempt_action(&self, bucket: &str) -> Result<(), khronos_runtime::Error> {
+        self.guild_state.ratelimits.object_storage.check(bucket)
+    }
+
+    fn bucket_name(&self) -> String {
+        silverpelt::objectstore::guild_bucket(self.guild_id)
+    }
+
+    async fn list_files(&self, prefix: Option<String>) -> Result<Vec<ObjectMetadata>, khronos_runtime::Error> {
+        Ok(self.guild_state.object_store.list_files(
+            &silverpelt::objectstore::guild_bucket(self.guild_id),
+            prefix.as_ref().map(|x| x.as_str())
+        )
+        .await?
+        .into_iter()
+        .map(|x| ObjectMetadata {
+            key: x.key,
+            last_modified: x.last_modified,
+            size: x.size,
+            etag: x.etag
+        })
+        .collect::<Vec<_>>())
+    }
+
+    async fn file_exists(&self, key: String) -> Result<bool, khronos_runtime::Error> {
+        Ok(self.guild_state.object_store.exists(
+            &silverpelt::objectstore::guild_bucket(self.guild_id),
+            &key
+        )
+        .await?)
+    }
+
+    async fn download_file(&self, key: String) -> Result<Vec<u8>, khronos_runtime::Error> {
+        Ok(self.guild_state.object_store.download_file(
+            &silverpelt::objectstore::guild_bucket(self.guild_id),
+            &key
+        )
+        .await?)
+    }
+
+    async fn get_file_url(&self, key: String, expiry: std::time::Duration) -> Result<String, khronos_runtime::Error> {
+        Ok(self.guild_state.object_store.get_url(
+            &silverpelt::objectstore::guild_bucket(self.guild_id),
+            &key,
+            expiry
+        )
+        .await?)
+    }
+
+    async fn upload_file(&self, key: String, data: Vec<u8>) -> Result<(), khronos_runtime::Error> {
+        if key.len() > self.guild_state.kv_constraints.max_object_storage_path_length {
+            return Err("Path length too long".into());
+        }
+
+        if data.len() > self.guild_state.kv_constraints.max_object_storage_bytes {
+            return Err("Data too large".into());
+        }
+
+        self.guild_state.object_store.upload_file(
+            &silverpelt::objectstore::guild_bucket(self.guild_id),
+            &key,
+            data
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    async fn delete_file(&self, key: String) -> Result<(), khronos_runtime::Error> {
+        Ok(self.guild_state.object_store.delete(
+            &silverpelt::objectstore::guild_bucket(self.guild_id),
+            &key,
+        )
+        .await?)
     }
 }

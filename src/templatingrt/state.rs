@@ -1,8 +1,10 @@
 use governor::{clock::QuantaClock, DefaultKeyedRateLimiter};
 use khronos_runtime::utils::ratelimits::LuaRatelimits;
 pub use silverpelt::templates::LuaKVConstraints;
+use silverpelt::objectstore::ObjectStore;
 use std::num::NonZeroU32;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 pub fn create_nonmax_u32(value: u32) -> Result<NonZeroU32, silverpelt::Error> {
@@ -189,6 +191,23 @@ impl Ratelimits {
             clock,
         })
     }
+
+    fn new_object_storage_rl() -> Result<LuaRatelimits, silverpelt::Error> {
+        // Create the global limit
+        let global_quota =
+            LuaRatelimits::create_quota(create_nonmax_u32(75)?, Duration::from_secs(1))?;
+        let global1 = DefaultKeyedRateLimiter::keyed(global_quota);
+        let global = vec![global1];
+
+        // Create the clock
+        let clock = QuantaClock::default();
+
+        Ok(LuaRatelimits {
+            global,
+            per_bucket: indexmap::indexmap!(),
+            clock,
+        })
+    }
 }
 
 pub struct Ratelimits {
@@ -212,6 +231,9 @@ pub struct Ratelimits {
 
     /// Stores the data store ratelimiters
     pub data_stores: LuaRatelimits,
+
+    /// Stores the object storage ratelimiters
+    pub object_storage: LuaRatelimits
 }
 
 impl Ratelimits {
@@ -224,6 +246,7 @@ impl Ratelimits {
             page: Ratelimits::new_page_rl()?,
             scheduled_execs: Ratelimits::new_scheduled_execs_rl()?,
             data_stores: Ratelimits::new_data_stores_rl()?,
+            object_storage: Ratelimits::new_object_storage_rl()?,
         })
     }
 }
@@ -235,5 +258,6 @@ pub struct GuildState {
     pub serenity_context: serenity::all::Context,
     pub reqwest_client: reqwest::Client,
     pub kv_constraints: LuaKVConstraints,
+    pub object_store: Arc<ObjectStore>,
     pub ratelimits: Rc<Ratelimits>,
 }

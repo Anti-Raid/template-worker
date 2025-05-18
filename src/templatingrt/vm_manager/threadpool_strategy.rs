@@ -63,12 +63,13 @@ impl ThreadEntry {
         pool: sqlx::PgPool,
         serenity_context: serenity::all::Context,
         reqwest_client: reqwest::Client,
+        object_storage: Arc<silverpelt::objectstore::ObjectStore>
     ) -> Result<Self, silverpelt::Error> {
         let (tx, rx) = unbounded_channel::<ThreadRequest>();
 
         let entry = Self::new(tx);
 
-        entry.start(pool, serenity_context, reqwest_client, rx)?;
+        entry.start(pool, serenity_context, reqwest_client, object_storage, rx)?;
 
         Ok(entry)
     }
@@ -84,6 +85,7 @@ impl ThreadEntry {
         pool: sqlx::PgPool,
         serenity_context: serenity::all::Context,
         reqwest_client: reqwest::Client,
+        object_store: Arc<silverpelt::objectstore::ObjectStore>,
         rx: UnboundedReceiver<ThreadRequest>,
     ) -> Result<(), silverpelt::Error> {
         let mut rx = rx; // Take mutable ownership to receiver
@@ -127,6 +129,7 @@ impl ThreadEntry {
                                                     pool.clone(),
                                                     serenity_context.clone(),
                                                     reqwest_client.clone(),
+                                                    object_store.clone()
                                                 ) {
                                                     Ok(gs) => gs,
                                                     Err(e) => {
@@ -312,6 +315,7 @@ impl ThreadPool {
         pool: sqlx::PgPool,
         serenity_context: serenity::all::Context,
         reqwest_client: reqwest::Client,
+        object_storage: Arc<silverpelt::objectstore::ObjectStore>
     ) -> Result<(), silverpelt::Error> {
         let needed_threads = self.max_threads - self.threads_len().await;
         for _ in 0..needed_threads {
@@ -319,6 +323,7 @@ impl ThreadPool {
                 pool.clone(),
                 serenity_context.clone(),
                 reqwest_client.clone(),
+                object_storage.clone()
             )
             .await?;
         }
@@ -362,9 +367,10 @@ impl ThreadPool {
         pool: sqlx::PgPool,
         serenity_context: serenity::all::Context,
         reqwest_client: reqwest::Client,
+        object_storage: Arc<silverpelt::objectstore::ObjectStore>
     ) -> Result<(), silverpelt::Error> {
         let mut threads = self.threads.write().await;
-        threads.push(ThreadEntry::create(pool, serenity_context, reqwest_client)?);
+        threads.push(ThreadEntry::create(pool, serenity_context, reqwest_client, object_storage)?);
         Ok(())
     }
 
@@ -380,13 +386,14 @@ impl ThreadPool {
         pool: sqlx::PgPool,
         serenity_context: serenity::all::Context,
         reqwest_client: reqwest::Client,
+        object_storage: Arc<silverpelt::objectstore::ObjectStore>
     ) -> Result<ThreadPoolLuaHandle, silverpelt::Error> {
         // Flush out broken threads
         self.remove_broken_threads().await;
 
         if self.threads_len().await < self.max_threads {
             // Add a new thread to the pool
-            self.add_thread(pool, serenity_context, reqwest_client)
+            self.add_thread(pool, serenity_context, reqwest_client, object_storage)
                 .await?;
         }
 
@@ -426,9 +433,10 @@ pub async fn create_lua_vm(
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
     reqwest_client: reqwest::Client,
+    object_storage: Arc<silverpelt::objectstore::ObjectStore>
 ) -> Result<ArLua, silverpelt::Error> {
     let thread_pool_handle = DEFAULT_THREAD_POOL
-        .add_guild(guild_id, pool, serenity_context, reqwest_client)
+        .add_guild(guild_id, pool, serenity_context, reqwest_client, object_storage)
         .await?;
 
     Ok(ArLua::ThreadPool(thread_pool_handle))

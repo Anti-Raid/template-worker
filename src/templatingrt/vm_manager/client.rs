@@ -89,14 +89,15 @@ pub async fn get_lua_vm(
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
     reqwest_client: reqwest::Client,
+    object_store: Arc<silverpelt::objectstore::ObjectStore>
 ) -> Result<ArLua, silverpelt::Error> {
     let Some(vm) = VMS.get(&guild_id) else {
         let vm = match CMD_ARGS.vm_distribution_strategy {
             VmDistributionStrategy::ThreadPool => {
-                create_lua_vm_threadpool(guild_id, pool, serenity_context, reqwest_client).await?
+                create_lua_vm_threadpool(guild_id, pool, serenity_context, reqwest_client, object_store).await?
             }
             VmDistributionStrategy::ThreadPerGuild => {
-                create_lua_vm_threadperguild(guild_id, pool, serenity_context, reqwest_client)
+                create_lua_vm_threadperguild(guild_id, pool, serenity_context, reqwest_client, object_store)
                     .await?
             }
         };

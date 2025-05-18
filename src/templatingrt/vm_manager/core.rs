@@ -15,7 +15,7 @@ use khronos_runtime::rt::KhronosRuntimeManager;
 use khronos_runtime::rt::RuntimeCreateOpts;
 use khronos_runtime::utils::pluginholder::PluginSet;
 use khronos_runtime::utils::threadlimitmw::ThreadLimiter;
-use khronos_runtime::utils::require_v2::FilesystemWrapper;
+use khronos_runtime::require::FilesystemWrapper;
 use khronos_runtime::TemplateContext;
 use mlua::prelude::*;
 use serenity::all::GuildId;
@@ -64,12 +64,14 @@ pub(super) fn create_guild_state(
     pool: sqlx::PgPool,
     serenity_context: serenity::all::Context,
     reqwest_client: reqwest::Client,
+    object_store: Arc<silverpelt::objectstore::ObjectStore>
 ) -> Result<GuildState, silverpelt::Error> {
     Ok(GuildState {
         pool,
         guild_id,
         serenity_context,
         reqwest_client,
+        object_store,
         kv_constraints: LuaKVConstraints::default(),
         ratelimits: Rc::new(Ratelimits::new()?),
     })
