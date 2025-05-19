@@ -16,6 +16,8 @@ use sqlx::postgres::PgPoolOptions;
 use std::io::Write;
 use std::{sync::Arc, time::Duration};
 
+pub type Error = Box<dyn std::error::Error + Send + Sync>; // This is constant and should be copy pasted
+
 /// The main function is just a command handling function
 #[tokio::main]
 async fn main() {
