@@ -41,7 +41,7 @@ pub static TEST_BASE: LazyLock<Arc<Template>> = LazyLock::new(|| {
 });
 pub static TEST_BASE_ARC_VEC: LazyLock<Arc<Vec<Arc<Template>>>> =
     LazyLock::new(|| Arc::new(vec![TEST_BASE.clone()]));
-pub const USE_TEST_BASE: bool = false;
+pub const USE_TEST_BASE: bool = true;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct ScheduledExecution {

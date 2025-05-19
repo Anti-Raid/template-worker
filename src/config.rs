@@ -67,18 +67,19 @@ pub struct ObjectStorage {
     pub endpoint: Option<String>,
     pub secure: Option<bool>,
     pub cdn_secure: Option<bool>,
-    pub cdn_endpoint: String,
+    pub cdn_endpoint: Option<String>,
     pub access_key: Option<String>,
     pub secret_key: Option<String>,
 }
 
 impl ObjectStorage {
-    pub fn build(&self) -> Result<ObjectStore, silverpelt::Error> {
+    pub fn build(&self) -> Result<ObjectStore, crate::Error> {
         match self.object_storage_type {
             ObjectStorageType::S3Like => {
                 let access_key = self.access_key.as_ref().ok_or("Missing access key")?;
                 let secret_key = self.secret_key.as_ref().ok_or("Missing secret key")?;
                 let endpoint = self.endpoint.as_ref().ok_or("Missing endpoint")?;
+                let cdn_endpoint = self.cdn_endpoint.as_ref().ok_or("Missing cdn_endpoint")?;
 
                 let endpoint_url = format!(
                     "{}://{}",
@@ -90,9 +91,20 @@ impl ObjectStorage {
                     endpoint
                 );
 
+                let cdn_endpoint_url = format!(
+                    "{}://{}",
+                    if self.secure.unwrap_or(false) {
+                        "https"
+                    } else {
+                        "http"
+                    },
+                    cdn_endpoint
+                );
+
                 ObjectStore::new_s3(
                     "antiraid.rust".to_string(),
                     endpoint_url,
+                    cdn_endpoint_url,
                     access_key.to_string(),
                     secret_key.to_string(),
                 )
