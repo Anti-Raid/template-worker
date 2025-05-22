@@ -53,7 +53,8 @@ pub fn create(
             "/page-settings-operation/:guild_id/:user_id",
             post(settings_operation),
         )
-        .route("/threads-count", post(get_threads_count));
+        .route("/threads-count", post(get_threads_count))
+        .route("/clear-inactive-guilds", post(clear_inactive_guilds));
     let router: Router<()> = router.with_state(AppData::new(data, ctx));
     router.into_make_service()
 }
@@ -156,6 +157,39 @@ async fn benchmark_vm(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(bvm))
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct FlushedGuild {
+    thread_id: u64,
+    guild_id: serenity::all::GuildId,
+    error: Option<String>
+}
+
+/// Flush out inactive guilds
+async fn clear_inactive_guilds(
+    State(AppData {
+        ..
+    }): State<AppData>,
+) -> Response<Vec<FlushedGuild>> {
+    let Ok(hm) = crate::templatingrt::DEFAULT_THREAD_POOL.clear_inactive_guilds() else {
+        return Err((reqwest::StatusCode::INTERNAL_SERVER_ERROR, "Failed to start inactive guild clear".to_string()));
+    };
+
+    let mut results = Vec::new();
+
+    for (thread_id, rx) in hm {
+        let val = rx.await.map_err(|_| (reqwest::StatusCode::INTERNAL_SERVER_ERROR, "Failed to parse value".to_string()))?;
+        for (guild_id, error) in val {
+            results.push(FlushedGuild {
+                guild_id,
+                error,
+                thread_id
+            });
+        }
+    }
+
+    Ok(Json(results))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

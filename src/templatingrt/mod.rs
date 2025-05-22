@@ -21,6 +21,9 @@ pub const MAX_TEMPLATES_EXECUTION_TIME: std::time::Duration =
     std::time::Duration::from_secs(60 * 5); // 5 minute maximum execution time
 pub const MAX_TEMPLATES_RETURN_WAIT_TIME: std::time::Duration = std::time::Duration::from_secs(10); // 10 seconds maximum execution time
 
+pub const MAX_SERVER_INACTIVITY: std::time::Duration = std::time::Duration::from_secs(600); // 10 minutes till vm marked as inactive
+pub const MAX_SERVER_INACTIVITY_CHECK_TIME: std::time::Duration = std::time::Duration::from_secs(60 * 15); // Check for inactive servers every 15 minutes
+
 /// Dispatches an event to all templates associated to a server
 ///
 /// Pre-conditions: the serenity context's shard matches the guild itself

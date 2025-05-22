@@ -5,9 +5,9 @@ use std::sync::atomic::AtomicUsize;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::oneshot::Sender;
+use tokio::sync::oneshot::{Sender, Receiver};
 use std::sync::RwLock as StdRwLock;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use crate::templatingrt::state::CreateGuildState;
 
 use super::core::{
@@ -27,6 +27,9 @@ enum ThreadRequest {
     },
     Ping {
         tx: Sender<()>,
+    },
+    ClearInactiveGuilds {
+        tx: Sender< HashMap<GuildId, Option<String>> >,
     }
 }
 
@@ -103,9 +106,11 @@ impl ThreadEntry {
                     struct VmData {
                         guild_state: Rc<GuildState>,
                         tis_ref: KhronosRuntimeManager,
+                        count: Rc<Cell<usize>>
                     }
 
-                    let thread_vms: RefCell<HashMap<GuildId, Rc<VmData>>> = HashMap::new().into();
+                    let thread_vms: Rc<RefCell<HashMap<GuildId, Rc<VmData>>>> = Rc::new(HashMap::new().into());
+
                     while let Some(send) = rx.recv().await {
                         match send {
                             ThreadRequest::Ping { tx }=> {
@@ -142,15 +147,22 @@ impl ThreadEntry {
     
                                             count_ref.fetch_add(1, std::sync::atomic::Ordering::Release);
     
+                                            let thread_vms_ref = thread_vms.clone();
                                             tis_ref.set_on_broken(Box::new(move || {
                                                 super::remove_vm(guild_id);
+                                                {
+                                                    let mut vms = thread_vms_ref.borrow_mut();
+                                                    vms.remove(&guild_id);
+                                                }
                                             }));
     
                                             // Store into the thread
                                             let vmd = Rc::new(VmData {
                                                 guild_state: gs,
                                                 tis_ref: tis_ref,
+                                                count: Cell::new(0).into(),
                                             });
+
                                             vms.insert(
                                                 guild_id,
                                                 vmd.clone(),
@@ -161,11 +173,38 @@ impl ThreadEntry {
                                     }    
                                 };
 
+                                let count_ref = vm.count.clone();
                                 tokio::task::spawn_local(async move {
+                                    count_ref.set(count_ref.get() + 1);
                                     let tis_ref = vm.tis_ref.clone();
                                     let gs = vm.guild_state.clone();
-                                    action.handle(tis_ref, gs, callback).await
+                                    action.handle(tis_ref, gs, callback).await;
+                                    count_ref.set(count_ref.get() - 1);
                                 });
+                            },
+                            ThreadRequest::ClearInactiveGuilds { tx } => {
+                                let mut removed = vec![];
+
+                                {
+                                    let vms = thread_vms.borrow();
+                                    for (guild_id, vm) in vms.iter() {
+                                        if let Some(let_) = vm.tis_ref.runtime().last_execution_time() {
+                                            if std::time::Instant::now() - let_ > crate::templatingrt::MAX_SERVER_INACTIVITY {
+                                                removed.push((*guild_id, vm.tis_ref.clone()));
+                                            }
+                                        }
+                                    }
+                                }
+
+                                let mut close_errors = HashMap::new();
+                                for (guild_id, removed) in removed.into_iter() {
+                                    match removed.runtime().mark_broken(true) {
+                                        Ok(()) => close_errors.insert(guild_id, None),
+                                        Err(e) => close_errors.insert(guild_id, Some(e.to_string()))
+                                    };
+                                }
+
+                                let _ = tx.send(close_errors);
                             }
                         }
                     }
@@ -197,6 +236,25 @@ impl ThreadPool {
             guilds: StdRwLock::new(HashMap::new()),
             max_threads: DEFAULT_MAX_THREADS,
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn clear_inactive_guilds(
+        &self
+    ) -> Result<HashMap<u64, Receiver<HashMap<GuildId, Option<String>>>>, crate::Error> {
+        let threads = self.threads.try_read().map_err(|_| "Failed to read threads")?;
+        let mut res = HashMap::new();
+        for thread in threads.iter() {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            thread.tx.send(
+                ThreadRequest::ClearInactiveGuilds {
+                    tx
+                }
+            )?;
+            res.insert(thread.id, rx);
+        }
+
+        Ok(res)
     }
 
     #[allow(dead_code)]
