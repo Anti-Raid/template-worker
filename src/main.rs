@@ -5,6 +5,7 @@ mod expiry_tasks;
 mod http;
 mod pages;
 mod templatingrt;
+mod vmbench;
 
 use crate::config::{CMD_ARGS, CONFIG};
 use crate::event_handler::EventFramework;

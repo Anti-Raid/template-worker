@@ -261,3 +261,25 @@ pub struct GuildState {
     pub object_store: Arc<ObjectStore>,
     pub ratelimits: Rc<Ratelimits>,
 }
+
+#[derive(Clone)]
+pub struct CreateGuildState {
+    pub serenity_context: serenity::all::Context,
+    pub reqwest_client: reqwest::Client,
+    pub object_store: Arc<silverpelt::objectstore::ObjectStore>,
+    pub pool: sqlx::PgPool,
+}
+
+impl CreateGuildState {
+    pub fn to_guild_state(self, guild_id: serenity::all::GuildId) -> Result<GuildState, silverpelt::Error> {
+        Ok(GuildState {
+            pool: self.pool,
+            guild_id,
+            serenity_context: self.serenity_context,
+            reqwest_client: self.reqwest_client,
+            object_store: self.object_store,
+            kv_constraints: LuaKVConstraints::default(),
+            ratelimits: Rc::new(Ratelimits::new()?),
+        })
+    }
+}

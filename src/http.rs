@@ -1,7 +1,8 @@
 use crate::templatingrt::{
-    benchmark_vm as benchmark_vm_impl, cache::regenerate_cache, FireBenchmark,
+    cache::regenerate_cache,
     MAX_TEMPLATES_RETURN_WAIT_TIME,
 };
+use crate::vmbench::{benchmark_vm as benchmark_vm_impl, FireBenchmark};
 use antiraid_types::ar_event::AntiraidEvent;
 use ar_settings::types::OperationType;
 use axum::{
@@ -13,6 +14,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, sync::Arc};
+use crate::templatingrt::CreateGuildState;
 
 use crate::dispatch::{dispatch, dispatch_and_wait, parse_event};
 
@@ -125,7 +127,9 @@ async fn dispatch_event_and_wait(
 async fn get_threads_count(
     State(AppData { .. }): State<AppData>,
 ) -> Response<usize> {
-    let count = crate::templatingrt::DEFAULT_THREAD_POOL.threads_len().await;
+    let Ok(count) = crate::templatingrt::DEFAULT_THREAD_POOL.threads_len() else {
+        return Ok(Json(0));
+    };
 
     Ok(Json(count))
 }
@@ -141,10 +145,12 @@ async fn benchmark_vm(
 ) -> Response<FireBenchmark> {
     let bvm = benchmark_vm_impl(
         guild_id,
-        data.pool.clone(),
-        serenity_context,
-        data.reqwest.clone(),
-        data.object_store.clone()
+        CreateGuildState {
+            pool: data.pool.clone(),
+            serenity_context,
+            reqwest_client: data.reqwest.clone(),
+            object_store: data.object_store.clone()
+        }
     )
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;

@@ -1,4 +1,3 @@
-use khronos_runtime::primitives::event::Event;
 use khronos_runtime::rt::KhronosRuntimeManager;
 use serenity::all::GuildId;
 use std::rc::Rc;
@@ -7,16 +6,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
-use tokio::sync::RwLock;
+use std::sync::RwLock as StdRwLock;
 use std::cell::RefCell;
+use crate::templatingrt::state::CreateGuildState;
 
-use super::client::VMS;
 use super::core::{
-    configure_runtime_manager, create_guild_state, dispatch_event_to_multiple_templates,
-    dispatch_event_to_template,
+    configure_runtime_manager,
 };
 use super::{client::ArLua, ArLuaHandle, LuaVmAction, LuaVmResult};
-use crate::templatingrt::cache::{get_guild_template, get_all_guild_templates};
 use crate::templatingrt::MAX_VM_THREAD_STACK_SIZE;
 use crate::templatingrt::state::GuildState;
 
@@ -60,16 +57,13 @@ impl ThreadEntry {
 
     /// Initializes a new thread entry, starting it after creation
     fn create(
-        pool: sqlx::PgPool,
-        serenity_context: serenity::all::Context,
-        reqwest_client: reqwest::Client,
-        object_storage: Arc<silverpelt::objectstore::ObjectStore>
+        cgs: CreateGuildState,
     ) -> Result<Self, silverpelt::Error> {
         let (tx, rx) = unbounded_channel::<ThreadRequest>();
 
         let entry = Self::new(tx);
 
-        entry.start(pool, serenity_context, reqwest_client, object_storage, rx)?;
+        entry.start(cgs, rx)?;
 
         Ok(entry)
     }
@@ -82,18 +76,22 @@ impl ThreadEntry {
     /// Start the thread up
     fn start(
         &self,
-        pool: sqlx::PgPool,
-        serenity_context: serenity::all::Context,
-        reqwest_client: reqwest::Client,
-        object_store: Arc<silverpelt::objectstore::ObjectStore>,
+        cgs: CreateGuildState,
         rx: UnboundedReceiver<ThreadRequest>,
     ) -> Result<(), silverpelt::Error> {
         let mut rx = rx; // Take mutable ownership to receiver
         let count_ref = self.count.clone();
+        let tid = self.id;
         std::thread::Builder::new()
             .name(format!("lua-vm-threadpool-{}", self.id))
             .stack_size(MAX_VM_THREAD_STACK_SIZE)
             .spawn(move || {
+                super::perthreadpanichook::set_hook(Box::new(move |_| {
+                    if let Err(e) = DEFAULT_THREAD_POOL.remove_thread(tid) {
+                        log::error!("Error removing thread on panic: {:?}", e)
+                    }
+                }));
+
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -123,14 +121,9 @@ impl ThreadEntry {
                                         Some(vm) => vm.clone(),
                                         None => {
                                             // Create Lua VM
+                                            let cgs_ref = cgs.clone();
                                             let gs = Rc::new(
-                                                match create_guild_state(
-                                                    guild_id,
-                                                    pool.clone(),
-                                                    serenity_context.clone(),
-                                                    reqwest_client.clone(),
-                                                    object_store.clone()
-                                                ) {
+                                                match cgs_ref.to_guild_state(guild_id) {
                                                     Ok(gs) => gs,
                                                     Err(e) => {
                                                         log::error!("Failed to create guild state: {}", e);
@@ -150,7 +143,7 @@ impl ThreadEntry {
                                             count_ref.fetch_add(1, std::sync::atomic::Ordering::Release);
     
                                             tis_ref.set_on_broken(Box::new(move || {
-                                                VMS.remove(&guild_id);
+                                                super::remove_vm(guild_id);
                                             }));
     
                                             // Store into the thread
@@ -171,113 +164,7 @@ impl ThreadEntry {
                                 tokio::task::spawn_local(async move {
                                     let tis_ref = vm.tis_ref.clone();
                                     let gs = vm.guild_state.clone();
-                                    match action {
-                                        LuaVmAction::DispatchEvent { event } => {
-                                            let Some(templates) =
-                                                get_all_guild_templates(gs.guild_id).await
-                                            else {
-                                                if event.name() == "INTERACTION_CREATE" {
-                                                    log::info!("No templates for event: {}", event.name());
-                                                }    
-                                                return;
-                                            };
-
-                                            if event.name() == "INTERACTION_CREATE" {
-                                                log::info!("Found templates: {} {}", event.name(), templates.len());
-                                            }
-
-                                            let _ = callback.send(
-                                                dispatch_event_to_multiple_templates(
-                                                    templates,
-                                                    event,
-                                                    &tis_ref,
-                                                    gs
-                                                )
-                                                .await,
-                                            );
-                                        }
-                                        LuaVmAction::DispatchTemplateEvent { event, template_name } => {
-                                            let event = Event::from_create_event(&event);
-                                            let Some(template) = get_guild_template(gs.guild_id, &template_name).await else {
-                                                let _ = callback.send(vec![(
-                                                    template_name.clone(),
-                                                    LuaVmResult::LuaError {
-                                                        err: format!("Template {} not found", template_name),
-                                                    },
-                                                )]);
-                                                return;
-                                            };
-            
-                                            let result =
-                                                dispatch_event_to_template(template, event, tis_ref, gs).await;
-            
-                                            // Send back to the caller
-                                            let _ = callback.send(vec![(template_name, result)]);
-                                        }            
-                                        LuaVmAction::DispatchInlineEvent { event, template } => {
-                                            let event = Event::from_create_event(&event);
-                                            let name = template.name.clone();
-                                            let result = dispatch_event_to_template(
-                                                template, event, tis_ref, gs,
-                                            )
-                                            .await;
-
-                                            // Send back to the caller
-                                            let _ = callback.send(vec![(name, result)]);
-                                        }
-                                        LuaVmAction::Stop {} => {
-                                            // Mark VM as broken
-                                            if let Err(e) = tis_ref.runtime().mark_broken(true) {
-                                                log::error!("Failed to mark VM as broken: {}", e);
-                                            }
-
-                                            let _ = callback.send(vec![(
-                                                "_".to_string(),
-                                                LuaVmResult::Ok {
-                                                    result_val: serde_json::Value::Null,
-                                                },
-                                            )]);
-                                        }
-                                        LuaVmAction::GetMemoryUsage {} => {
-                                            let used = tis_ref.runtime().memory_usage();
-
-                                            let _ = callback.send(vec![(
-                                                "_".to_string(),
-                                                LuaVmResult::Ok {
-                                                    result_val: serde_json::Value::Number(
-                                                        used.into(),
-                                                    ),
-                                                },
-                                            )]);
-                                        }
-                                        LuaVmAction::SetMemoryLimit { limit } => {
-                                            let result = match tis_ref
-                                                .runtime()
-                                                .set_memory_limit(limit)
-                                            {
-                                                Ok(limit) => LuaVmResult::Ok {
-                                                    result_val: serde_json::Value::Number(
-                                                        limit.into(),
-                                                    ),
-                                                },
-                                                Err(e) => {
-                                                    LuaVmResult::LuaError { err: e.to_string() }
-                                                }
-                                            };
-
-                                            let _ = callback.send(vec![("_".to_string(), result)]);
-                                        }
-                                        LuaVmAction::ClearCache {} => {
-                                            println!("Clearing cache in VM");
-
-                                            let _ = callback.send(vec![(
-                                                "_".to_string(),
-                                                LuaVmResult::Ok {
-                                                    result_val: serde_json::Value::Null,
-                                                },
-                                            )]);
-                                        }
-                                    };
+                                    action.handle(tis_ref, gs, callback).await
                                 });
                             }
                         }
@@ -293,7 +180,10 @@ pub struct ThreadPool {
     /// The worker threads in the pool
     ///
     /// We can't use a binary heap here due to interior mutability of ordering [count]
-    threads: RwLock<Vec<ThreadEntry>>,
+    threads: StdRwLock<Vec<ThreadEntry>>,
+
+    /// A record mapping a guild id to the thread its currently on
+    guilds: StdRwLock<HashMap<GuildId, u64>>,
 
     /// The maximum number of threads in the pool
     max_threads: usize,
@@ -303,40 +193,37 @@ impl ThreadPool {
     /// Creates a new thread pool
     pub fn new() -> Self {
         Self {
-            threads: RwLock::new(Vec::new()),
+            threads: StdRwLock::new(Vec::new()),
+            guilds: StdRwLock::new(HashMap::new()),
             max_threads: DEFAULT_MAX_THREADS,
         }
     }
 
     #[allow(dead_code)]
     /// Fills the thread pool where needed
-    pub async fn fill(
+    pub fn fill(
         &self,
-        pool: sqlx::PgPool,
-        serenity_context: serenity::all::Context,
-        reqwest_client: reqwest::Client,
-        object_storage: Arc<silverpelt::objectstore::ObjectStore>
+        cgs: CreateGuildState
     ) -> Result<(), silverpelt::Error> {
-        let needed_threads = self.max_threads - self.threads_len().await;
+        let needed_threads = self.max_threads - self.threads_len()?;
         for _ in 0..needed_threads {
-            self.add_thread(
-                pool.clone(),
-                serenity_context.clone(),
-                reqwest_client.clone(),
-                object_storage.clone()
-            )
-            .await?;
+            self.add_thread(cgs.clone())?;
         }
 
         Ok(())
     }
 
     /// Remove broken threads from the pool
-    pub async fn remove_broken_threads(&self) {
-        let mut threads = self.threads.write().await;
+    pub async fn remove_broken_threads(&self) -> Result<(), silverpelt::Error> {
+        let (mut good_threads, old_threads) = {
+            let mut threads = self.threads.try_write().map_err(|_| "Failed to write lock threads")?;
 
-        let mut good_threads = Vec::with_capacity(threads.len());   
-        let old_threads = std::mem::take(&mut *threads);
+            let good_threads = Vec::with_capacity(threads.len());   
+            let old_threads = std::mem::take(&mut *threads);
+
+            (good_threads, old_threads)
+        };
+
         for thread in old_threads {
             // Send Ping to thread
             let (tx, rx) = tokio::sync::oneshot::channel();
@@ -358,43 +245,80 @@ impl ThreadPool {
             log::warn!("Thread {} is broken, removing it from the pool", thread.id);
         }
 
-        *threads = good_threads;
+        {
+            let mut threads = self.threads.try_write().map_err(|_| "Failed to write lock threads")?; 
+            *threads = good_threads;
+        }
+
+        Ok(())
     }
 
     /// Adds a new thread to the pool
-    pub async fn add_thread(
+    pub fn add_thread(
         &self,
-        pool: sqlx::PgPool,
-        serenity_context: serenity::all::Context,
-        reqwest_client: reqwest::Client,
-        object_storage: Arc<silverpelt::objectstore::ObjectStore>
+        cgs: CreateGuildState
     ) -> Result<(), silverpelt::Error> {
-        let mut threads = self.threads.write().await;
-        threads.push(ThreadEntry::create(pool, serenity_context, reqwest_client, object_storage)?);
+        let mut threads = self.threads.try_write().map_err(|_| "Failed to write lock threads")?;
+        threads.push(ThreadEntry::create(cgs)?);
+        Ok(())
+    }
+
+    /// Removes a thread from the pool. This also removes all guild vms attached to said thread as well
+    pub fn remove_thread(
+        &self,
+        id: u64,
+    ) -> Result<(), silverpelt::Error> {
+        let idx = {
+            let threads = self.threads.try_read().map_err(|_| "Failed to read lock threads")?;
+
+            let mut idx = None;
+            for (i, th) in threads.iter().enumerate() {
+                if th.id == id {
+                    idx = Some(i);
+                }
+            }
+
+            idx
+        };
+
+        let Some(idx) = idx else {
+            return Ok(());
+        };
+
+        {
+            let mut threads = self.threads.try_write().map_err(|_| "Failed to write lock threads")?;
+            threads.remove(idx);
+        }
+
+        {
+            let guilds_guard = self.guilds.try_read().map_err(|_| "Failed to read lock guilds")?;
+            for (guild_id, id_curr) in guilds_guard.iter() {
+                if *id_curr == id {
+                    super::remove_vm(*guild_id);
+                }
+            }
+        }
+
         Ok(())
     }
 
     /// Returns the number of threads in the pool
-    pub async fn threads_len(&self) -> usize {
-        self.threads.read().await.len()
+    pub fn threads_len(&self) -> Result<usize, silverpelt::Error> {
+        Ok(self.threads.try_read().map_err(|_| "Failed to read lock threads for threads_len")?.len())
     }
 
     /// Adds a guild to the pool
     pub async fn add_guild(
         &self,
         guild: GuildId,
-        pool: sqlx::PgPool,
-        serenity_context: serenity::all::Context,
-        reqwest_client: reqwest::Client,
-        object_storage: Arc<silverpelt::objectstore::ObjectStore>
+        cgs: CreateGuildState
     ) -> Result<ThreadPoolLuaHandle, silverpelt::Error> {
         // Flush out broken threads
-        self.remove_broken_threads().await;
+        self.remove_broken_threads().await?;
 
-        if self.threads_len().await < self.max_threads {
+        if self.threads_len()? < self.max_threads {
             // Add a new thread to the pool
-            self.add_thread(pool, serenity_context, reqwest_client, object_storage)
-                .await?;
+            self.add_thread(cgs)?;
         }
 
         // Find the thread with the least amount of guilds, then add guild to it
@@ -403,7 +327,7 @@ impl ThreadPool {
         let mut min_thread = None;
         let mut min_count = usize::MAX;
 
-        let threads = self.threads.read().await;
+        let threads = self.threads.try_read().map_err(|_| "Could not lock threads")?;
         for thread in threads.iter() {
             let count = thread.thread_count();
 
@@ -416,6 +340,11 @@ impl ThreadPool {
         let Some(thread) = min_thread else {
             return Err("Failed to add guild to VM pool [no threads]".into());
         };
+
+        {
+            let mut guilds_guard = self.guilds.try_write().map_err(|_| "Could not write lock guilds")?;
+            guilds_guard.insert(guild, thread.id);
+        }
 
         return Ok(ThreadPoolLuaHandle {
             guild_id: guild,
@@ -430,13 +359,10 @@ pub static DEFAULT_THREAD_POOL: LazyLock<ThreadPool> = LazyLock::new(ThreadPool:
 #[allow(dead_code)]
 pub async fn create_lua_vm(
     guild_id: GuildId,
-    pool: sqlx::PgPool,
-    serenity_context: serenity::all::Context,
-    reqwest_client: reqwest::Client,
-    object_storage: Arc<silverpelt::objectstore::ObjectStore>
+    cgs: CreateGuildState
 ) -> Result<ArLua, silverpelt::Error> {
     let thread_pool_handle = DEFAULT_THREAD_POOL
-        .add_guild(guild_id, pool, serenity_context, reqwest_client, object_storage)
+        .add_guild(guild_id, cgs)
         .await?;
 
     Ok(ArLua::ThreadPool(thread_pool_handle))

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::templatingrt::cache::{has_templates, has_templates_with_event};
-use crate::templatingrt::{execute, LuaVmAction, ParseCompileState};
+use crate::templatingrt::{execute, LuaVmAction, CreateGuildState};
 use antiraid_types::ar_event::AntiraidEvent;
 use khronos_runtime::primitives::event::CreateEvent;
 use serenity::all::{Context, FullEvent, GuildId, Interaction};
@@ -121,12 +121,12 @@ pub async fn dispatch(
     };
 
     let res = execute(
-        ParseCompileState {
+        guild_id,
+        CreateGuildState {
             serenity_context: ctx.clone(),
             pool: data.pool.clone(),
             reqwest_client: data.reqwest.clone(),
             object_store: data.object_store.clone(),
-            guild_id,
         },
         LuaVmAction::DispatchEvent { event },
     )
@@ -157,12 +157,12 @@ pub async fn dispatch_to_template(
     };
 
     let res = execute(
-        ParseCompileState {
+        guild_id,
+        CreateGuildState {
             serenity_context: ctx.clone(),
             pool: data.pool.clone(),
             reqwest_client: data.reqwest.clone(),
             object_store: data.object_store.clone(),
-            guild_id,
         },
         LuaVmAction::DispatchTemplateEvent { event, template_name },
     )
@@ -194,12 +194,12 @@ pub async fn dispatch_and_wait(
     };
 
     let handle = execute(
-        ParseCompileState {
+        guild_id,
+        CreateGuildState {
             serenity_context: ctx.clone(),
             pool: data.pool.clone(),
             reqwest_client: data.reqwest.clone(),
             object_store: data.object_store.clone(),
-            guild_id,
         },
         LuaVmAction::DispatchEvent { event },
     )
@@ -243,12 +243,12 @@ pub async fn dispatch_to_template_and_wait(
     };
 
     let handle = execute(
-        ParseCompileState {
+        guild_id,
+        CreateGuildState {
             serenity_context: ctx.clone(),
             pool: data.pool.clone(),
             reqwest_client: data.reqwest.clone(),
             object_store: data.object_store.clone(),
-            guild_id,
         },
         LuaVmAction::DispatchTemplateEvent { event, template_name },
     )

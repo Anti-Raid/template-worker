@@ -1,7 +1,6 @@
 use super::client::LuaVmResult;
 use crate::templatingrt::primitives::ctxprovider::TemplateContextProvider;
 use crate::templatingrt::state::GuildState;
-use crate::templatingrt::state::Ratelimits;
 use crate::templatingrt::template::{ConstructedFS, Template};
 use crate::templatingrt::MAX_TEMPLATES_EXECUTION_TIME;
 use crate::templatingrt::MAX_TEMPLATES_RETURN_WAIT_TIME;
@@ -18,10 +17,131 @@ use khronos_runtime::utils::threadlimitmw::ThreadLimiter;
 use khronos_runtime::require::FilesystemWrapper;
 use khronos_runtime::TemplateContext;
 use mlua::prelude::*;
-use serenity::all::GuildId;
-use silverpelt::templates::LuaKVConstraints;
 use std::rc::Rc;
 use std::sync::Arc;
+use super::client::LuaVmAction;
+use tokio::sync::oneshot::Sender;
+use crate::templatingrt::cache::{get_all_guild_templates, get_guild_template};
+
+impl LuaVmAction {
+    pub async fn handle(
+        self,
+        tis_ref: KhronosRuntimeManager,
+        gs: Rc<GuildState>,
+        callback: Sender<Vec<(String, LuaVmResult)>>,
+    ) {
+        match self {
+            LuaVmAction::DispatchEvent { event } => {
+                let Some(templates) =
+                    get_all_guild_templates(gs.guild_id).await
+                else {
+                    if event.name() == "INTERACTION_CREATE" {
+                        log::info!("No templates for event: {}", event.name());
+                    }    
+                    return;
+                };
+
+                if event.name() == "INTERACTION_CREATE" {
+                    log::info!("Found templates: {} {}", event.name(), templates.len());
+                }
+
+                let _ = callback.send(
+                    dispatch_event_to_multiple_templates(
+                        templates,
+                        event,
+                        &tis_ref,
+                        gs
+                    )
+                    .await,
+                );
+            }
+            LuaVmAction::DispatchTemplateEvent { event, template_name } => {
+                let event = Event::from_create_event(&event);
+                let Some(template) = get_guild_template(gs.guild_id, &template_name).await else {
+                    let _ = callback.send(vec![(
+                        template_name.clone(),
+                        LuaVmResult::LuaError {
+                            err: format!("Template {} not found", template_name),
+                        },
+                    )]);
+                    return;
+                };
+
+                let result =
+                    dispatch_event_to_template(template, event, tis_ref, gs).await;
+
+                // Send back to the caller
+                let _ = callback.send(vec![(template_name, result)]);
+            }            
+            LuaVmAction::DispatchInlineEvent { event, template } => {
+                let event = Event::from_create_event(&event);
+                let name = template.name.clone();
+                let result = dispatch_event_to_template(
+                    template, event, tis_ref, gs,
+                )
+                .await;
+
+                // Send back to the caller
+                let _ = callback.send(vec![(name, result)]);
+            }
+            LuaVmAction::Stop {} => {
+                // Mark VM as broken
+                if let Err(e) = tis_ref.runtime().mark_broken(true) {
+                    log::error!("Failed to mark VM as broken: {}", e);
+                }
+
+                let _ = callback.send(vec![(
+                    "_".to_string(),
+                    LuaVmResult::Ok {
+                        result_val: serde_json::Value::Null,
+                    },
+                )]);
+            }
+            LuaVmAction::GetMemoryUsage {} => {
+                let used = tis_ref.runtime().memory_usage();
+
+                let _ = callback.send(vec![(
+                    "_".to_string(),
+                    LuaVmResult::Ok {
+                        result_val: serde_json::Value::Number(
+                            used.into(),
+                        ),
+                    },
+                )]);
+            }
+            LuaVmAction::SetMemoryLimit { limit } => {
+                let result = match tis_ref
+                    .runtime()
+                    .set_memory_limit(limit)
+                {
+                    Ok(limit) => LuaVmResult::Ok {
+                        result_val: serde_json::Value::Number(
+                            limit.into(),
+                        ),
+                    },
+                    Err(e) => {
+                        LuaVmResult::LuaError { err: e.to_string() }
+                    }
+                };
+
+                let _ = callback.send(vec![("_".to_string(), result)]);
+            }
+            LuaVmAction::ClearCache {} => {
+                println!("Clearing cache in VM");
+
+                let _ = callback.send(vec![(
+                    "_".to_string(),
+                    LuaVmResult::Ok {
+                        result_val: serde_json::Value::Null,
+                    },
+                )]);
+            }
+            LuaVmAction::Panic {} => {
+                panic!("Panic() called");
+            }
+        };
+    }
+}
 
 /// Configures the khronos runtime.
 pub(super) fn configure_runtime_manager() -> LuaResult<KhronosRuntimeManager>
@@ -57,24 +177,6 @@ pub(super) fn configure_runtime_manager() -> LuaResult<KhronosRuntimeManager>
     rt.sandbox()?;
 
     Ok(KhronosRuntimeManager::new(rt))
-}
-
-pub(super) fn create_guild_state(
-    guild_id: GuildId,
-    pool: sqlx::PgPool,
-    serenity_context: serenity::all::Context,
-    reqwest_client: reqwest::Client,
-    object_store: Arc<silverpelt::objectstore::ObjectStore>
-) -> Result<GuildState, silverpelt::Error> {
-    Ok(GuildState {
-        pool,
-        guild_id,
-        serenity_context,
-        reqwest_client,
-        object_store,
-        kv_constraints: LuaKVConstraints::default(),
-        ratelimits: Rc::new(Ratelimits::new()?),
-    })
 }
 
 /// Helper method to dispatch an event to a template

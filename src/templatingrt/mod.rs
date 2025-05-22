@@ -4,16 +4,14 @@ pub mod state;
 pub mod template;
 mod vm_manager;
 
+pub use state::CreateGuildState;
 pub use vm_manager::{LuaVmAction, LuaVmResult, DEFAULT_THREAD_POOL};
 
-use crate::templatingrt::vm_manager::ArLuaHandle;
-use khronos_runtime::primitives::event::CreateEvent;
-use primitives::sandwich_config;
 use serenity::all::GuildId;
+use crate::templatingrt::vm_manager::ArLuaHandle;
+use primitives::sandwich_config;
 use template::Template;
-use vm_manager::get_lua_vm;
-use vfs::FileSystem;
-use std::sync::Arc;
+pub use vm_manager::get_lua_vm;
 
 use crate::config::CONFIG;
 
@@ -27,15 +25,13 @@ pub const MAX_TEMPLATES_RETURN_WAIT_TIME: std::time::Duration = std::time::Durat
 ///
 /// Pre-conditions: the serenity context's shard matches the guild itself
 pub async fn execute(
-    state: ParseCompileState,
+    guild_id: GuildId,
+    state: CreateGuildState,
     action: LuaVmAction,
 ) -> Result<RenderTemplateHandle, silverpelt::Error> {
     let lua = get_lua_vm(
-        state.guild_id,
-        state.pool,
-        state.serenity_context,
-        state.reqwest_client,
-        state.object_store,
+        guild_id,
+        state
     )
     .await?;
 
@@ -274,191 +270,4 @@ pub async fn dispatch_error(
     }
 
     Ok(())
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct FireBenchmark {
-    pub hashmap_insert_time: u128,
-    pub get_lua_vm: u128,
-    pub exec_simple: u128,
-    pub exec_no_wait: u128,
-    pub exec_error: u128,
-}
-
-/// Benchmark the Lua VM
-pub async fn benchmark_vm(
-    guild_id: GuildId,
-    pool: sqlx::PgPool,
-    serenity_context: serenity::all::Context,
-    reqwest_client: reqwest::Client,
-    object_store: Arc<silverpelt::objectstore::ObjectStore>
-) -> Result<FireBenchmark, silverpelt::Error> {
-    // Get_lua_vm
-    let pool_a = pool.clone();
-    let guild_id_a = guild_id;
-    let serenity_context_a = serenity_context.clone();
-    let reqwest_client_a = reqwest_client.clone();
-    let object_store_a = object_store.clone();
-
-    let start = std::time::Instant::now();
-    let _ = get_lua_vm(guild_id_a, pool_a, serenity_context_a, reqwest_client_a, object_store_a).await?;
-    let get_lua_vm = start.elapsed().as_micros();
-
-    let new_map = scc::HashMap::new();
-    let start = std::time::Instant::now();
-    let _ = new_map.insert_async(1, 1).await;
-    let hashmap_insert_time = start.elapsed().as_micros();
-
-    // Exec simple with wait
-    fn str_to_map(s: &str) -> vfs::MemoryFS {
-        let fs = vfs::MemoryFS::new();
-        fs.create_file("/init.luau")
-            .unwrap()
-            .write_all(s.as_bytes())
-            .unwrap();
-        fs
-    }    
-
-    let pt = Template {
-        content: str_to_map("return 1"),
-        name: "benchmark1".to_string(),
-        ..Default::default()
-    };
-
-    let pool_a = pool.clone();
-    let guild_id_a = guild_id;
-    let serenity_context_a = serenity_context.clone();
-    let reqwest_client_a = reqwest_client.clone();
-    let object_store_a = object_store.clone();
-
-    let start = std::time::Instant::now();
-    let n = execute(
-        ParseCompileState {
-            serenity_context: serenity_context_a,
-            reqwest_client: reqwest_client_a,
-            object_store: object_store_a,
-            guild_id: guild_id_a,
-            pool: pool_a,
-        },
-        LuaVmAction::DispatchInlineEvent {
-            event: CreateEvent::new(
-                "Benchmark".to_string(),
-                "Benchmark".to_string(),
-                serde_json::Value::Null,
-                None,
-            ),
-            template: pt.into(),
-        },
-    )
-    .await?
-    .wait()
-    .await?
-    .into_response_first::<i32>()?;
-
-    let exec_simple = start.elapsed().as_micros();
-
-    if n != 1 {
-        return Err(format!("Expected 1, got {}", n).into());
-    }
-
-    // Exec simple with no wait
-    let pt = Template {
-        content: str_to_map("return 1"),
-        name: "benchmark2".to_string(),
-        ..Default::default()
-    };
-
-    let pool_a = pool.clone();
-    let guild_id_a = guild_id;
-    let serenity_context_a = serenity_context.clone();
-    let reqwest_client_a = reqwest_client.clone();
-    let object_store_a = object_store.clone();
-
-    let start = std::time::Instant::now();
-    execute(
-        ParseCompileState {
-            serenity_context: serenity_context_a,
-            reqwest_client: reqwest_client_a,
-            guild_id: guild_id_a,
-            pool: pool_a,
-            object_store: object_store_a,
-        },
-        LuaVmAction::DispatchInlineEvent {
-            event: CreateEvent::new(
-                "Benchmark".to_string(),
-                "Benchmark".to_string(),
-                serde_json::Value::Null,
-                None,
-            ),
-            template: pt.into(),
-        },
-    )
-    .await?;
-
-    let exec_no_wait = start.elapsed().as_micros();
-
-    // Exec simple with wait
-    let pt = Template {
-        content: str_to_map("error('MyError')\nreturn 1"),
-        name: "benchmark3".to_string(),
-        ..Default::default()
-    };
-
-    let pool_a = pool.clone();
-    let guild_id_a = guild_id;
-    let serenity_context_a = serenity_context.clone();
-    let reqwest_client_a = reqwest_client.clone();
-    let object_store_a = object_store.clone();
-
-    let start = std::time::Instant::now();
-    let err = execute(
-        ParseCompileState {
-            serenity_context: serenity_context_a,
-            reqwest_client: reqwest_client_a,
-            guild_id: guild_id_a,
-            pool: pool_a,
-            object_store: object_store_a
-        },
-        LuaVmAction::DispatchInlineEvent {
-            event: CreateEvent::new(
-                "Benchmark".to_string(),
-                "Benchmark".to_string(),
-                serde_json::Value::Null,
-                None,
-            ),
-            template: pt.into(),
-        },
-    )
-    .await?
-    .wait()
-    .await?;
-
-    let exec_error = start.elapsed().as_micros();
-
-    let first = err.results.into_iter().next().ok_or("No results")?;
-
-    let Some(err) = first.lua_error() else {
-        return Err("Expected error, got success".into());
-    };
-
-    if !err.contains("MyError") {
-        return Err(format!("Expected MyError, got {}", err).into());
-    }
-
-    Ok(FireBenchmark {
-        get_lua_vm,
-        hashmap_insert_time,
-        exec_simple,
-        exec_no_wait,
-        exec_error,
-    })
-}
-
-#[derive(Clone)]
-pub struct ParseCompileState {
-    pub serenity_context: serenity::all::Context,
-    pub reqwest_client: reqwest::Client,
-    pub object_store: Arc<silverpelt::objectstore::ObjectStore>,
-    pub guild_id: GuildId,
-    pub pool: sqlx::PgPool,
 }
