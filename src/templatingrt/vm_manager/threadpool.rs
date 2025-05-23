@@ -304,9 +304,9 @@ impl ThreadPool {
             let _ = thread.tx.send(ThreadRequest::RemoveIfUnused { tx });
             tokio::select! {
                 resp = rx => {
-                    // If we get a response, the thread is alive
+                    // If we get a response of false, the thread is alive
                     if let Ok(res) = resp {
-                        if res {
+                        if !res {
                             good_threads.push(thread);
                         }
 
