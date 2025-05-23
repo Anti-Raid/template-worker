@@ -3,10 +3,7 @@ use serenity::all::GuildId;
 use super::client::ArLua;
 use crate::config::{VmDistributionStrategy, CMD_ARGS};
 use crate::templatingrt::state::CreateGuildState;
-use super::{
-    threadperguild_strategy::create_lua_vm as create_lua_vm_threadperguild,
-    threadpool_strategy::create_lua_vm as create_lua_vm_threadpool,
-};
+use super::threadpool::create_lua_vm as create_lua_vm_threadpool;
 
 /// VM cache
 static VMS: LazyLock<scc::HashMap<GuildId, ArLua>> = LazyLock::new(scc::HashMap::new);
@@ -20,12 +17,8 @@ pub async fn get_lua_vm(
 ) -> Result<ArLua, silverpelt::Error> {
     let Some(vm) = VMS.get(&guild_id) else {
         let vm = match CMD_ARGS.vm_distribution_strategy {
-            VmDistributionStrategy::ThreadPool => {
+            VmDistributionStrategy::ThreadPool | VmDistributionStrategy::ThreadPerGuild => {
                 create_lua_vm_threadpool(guild_id, cgs).await?
-            }
-            VmDistributionStrategy::ThreadPerGuild => {
-                create_lua_vm_threadperguild(guild_id, cgs)
-                    .await?
             }
         };
         if let Err((_, alt_vm)) = VMS.insert_async(guild_id, vm.clone()).await {

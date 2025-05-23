@@ -6,10 +6,7 @@ use khronos_runtime::primitives::event::CreateEvent;
 
 use crate::templatingrt::template::Template;
 
-use super::{
-    threadperguild_strategy::PerThreadLuaHandle,
-    threadpool_strategy::ThreadPoolLuaHandle,
-};
+use super::threadpool::ThreadPoolLuaHandle;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub enum LuaVmAction {
@@ -47,7 +44,6 @@ pub enum LuaVmResult {
 #[derive(Clone)]
 pub enum ArLua {
     ThreadPool(ThreadPoolLuaHandle),
-    ThreadPerGuild(PerThreadLuaHandle),
 }
 
 impl ArLuaHandle for ArLua {
@@ -58,7 +54,6 @@ impl ArLuaHandle for ArLua {
     ) -> Result<(), khronos_runtime::Error> {
         match self {
             ArLua::ThreadPool(handle) => handle.send_action(action, callback),
-            ArLua::ThreadPerGuild(handle) => handle.send_action(action, callback),
         }
     }
 }
