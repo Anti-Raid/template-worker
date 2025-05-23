@@ -12,6 +12,7 @@ use khronos_runtime::traits::scheduledexecprovider::ScheduledExecProvider;
 use khronos_runtime::traits::objectstorageprovider::ObjectStorageProvider;
 use khronos_runtime::traits::datastoreprovider::{DataStoreProvider, DataStoreImpl};
 use khronos_runtime::traits::ir::{ObjectMetadata, ScheduledExecution};
+use crate::templatingrt::vm_manager::KhronosRuntimeManager;
 use khronos_runtime::utils::executorscope::ExecutorScope;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use moka::future::Cache;
@@ -45,7 +46,7 @@ pub struct TemplateContextProvider {
 }
 
 impl TemplateContextProvider {
-    fn datastores(guild_state: Rc<GuildState>, _template_data: Arc<Template>, manager: khronos_runtime::rt::KhronosRuntimeManager) -> Vec<Rc<dyn DataStoreImpl>> {
+    fn datastores(guild_state: Rc<GuildState>, _template_data: Arc<Template>) -> Vec<Rc<dyn DataStoreImpl>> {
         vec![
             Rc::new(
                 super::datastores::StatsStore {
@@ -58,12 +59,6 @@ impl TemplateContextProvider {
             Rc::new(
                 khronos_runtime::traits::ir::datastores::CopyDataStore {}
             ),
-            Rc::new(
-                super::datastores::TriggerStore {
-                    guild_state: guild_state.clone(),
-                    manager,
-                }
-            )
         ]
     }
 
@@ -71,10 +66,9 @@ impl TemplateContextProvider {
     pub fn new(
         guild_state: Rc<GuildState>, 
         template_data: Arc<Template>, 
-        manager: khronos_runtime::rt::KhronosRuntimeManager,
     ) -> Self {
         Self {
-            datastores: Self::datastores(guild_state.clone(), template_data.clone(), manager),
+            datastores: Self::datastores(guild_state.clone(), template_data.clone()),
             guild_state,
             script_data: Arc::new(
                 ScriptData {

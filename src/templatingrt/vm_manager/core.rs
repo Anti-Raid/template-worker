@@ -10,7 +10,8 @@ use khronos_runtime::primitives::event::Event;
 use khronos_runtime::rt::KhronosIsolate;
 use khronos_runtime::rt::KhronosRuntime;
 use khronos_runtime::rt::KhronosRuntimeInterruptData;
-use khronos_runtime::rt::KhronosRuntimeManager;
+use khronos_runtime::rt::{KhronosRuntimeManager as Krm, IsolateData};
+use khronos_runtime::rt::CreatedKhronosContext;
 use khronos_runtime::rt::RuntimeCreateOpts;
 use khronos_runtime::utils::pluginholder::PluginSet;
 use khronos_runtime::utils::threadlimitmw::ThreadLimiter;
@@ -23,6 +24,8 @@ use super::client::{LuaVmAction, LuaVmResult};
 use tokio::sync::oneshot::Sender;
 use crate::templatingrt::sandwich_config;
 use crate::templatingrt::cache::{get_all_guild_templates, get_guild_template};
+
+pub type KhronosRuntimeManager = Krm<CreatedKhronosContext>;
 
 impl LuaVmAction {
     pub async fn handle(
@@ -257,8 +260,8 @@ pub async fn dispatch_event_to_template(
     }
 
     // Get or create a subisolate
-    let sub_isolate = if let Some(sub_isolate) = manager.get_sub_isolate(&template.name) {
-        sub_isolate
+    let (sub_isolate, created_context) = if let Some(sub_isolate) = manager.get_sub_isolate(&template.name) {
+        (sub_isolate.isolate, sub_isolate.data)
     } else {
         let mut attempts = 0;
         let sub_isolate = loop {
@@ -305,22 +308,31 @@ pub async fn dispatch_event_to_template(
         };
 
         log::info!("Created subisolate for template {}", template.name);
-        manager.add_sub_isolate(template.name.clone(), sub_isolate.clone());
 
-        sub_isolate
+        let provider = TemplateContextProvider::new(
+            guild_state.clone(),
+            template.clone(),
+        );
+
+        let template_context = TemplateContext::new(provider);
+
+        let created_context = match sub_isolate.create_context(template_context) {
+            Ok(ctx) => ctx,
+            Err(e) => return (LuaVmResult::LuaError { err: e.to_string() }).log_error_and_warn(&guild_state, &template).await
+        };
+
+        let iso_data = IsolateData {
+            isolate: sub_isolate.clone(),
+            data: created_context.clone()
+        };
+
+        manager.add_sub_isolate(template.name.clone(), iso_data);
+
+        (sub_isolate, created_context)
     };
 
-    // Now, create the template context that should be passed to the template
-    let provider = TemplateContextProvider::new(
-        guild_state.clone(),
-        template.clone(),
-        manager
-    );
-
-    let template_context = TemplateContext::new(provider);
-
     let spawn_result = match sub_isolate
-        .spawn_asset("/init.luau", "/init.luau", template_context, event)
+        .spawn_asset("/init.luau", "/init.luau", created_context, event)
         .await
     {
         Ok(sr) => sr,

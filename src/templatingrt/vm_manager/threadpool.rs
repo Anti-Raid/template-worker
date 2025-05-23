@@ -1,4 +1,4 @@
-use khronos_runtime::rt::KhronosRuntimeManager;
+use super::KhronosRuntimeManager;
 use serenity::all::GuildId;
 use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;

@@ -5,8 +5,6 @@ use khronos_runtime::utils::khronos_value::KhronosValue;
 use khronos_runtime::traits::ir::{DataStoreImpl, DataStoreMethod};
 use crate::templatingrt::state::GuildState;
 use super::sandwich_config;
-use crate::templatingrt::cache::{get_guild_template, get_all_guild_templates};
-use khronos_runtime::primitives::event::Event;
 
 /// A data store to expose Anti-Raid's statistics
 pub struct StatsStore {
@@ -108,7 +106,7 @@ impl DataStoreImpl for LinksStore {
     }
 }
 
-
+/*
 /// A data store to trigger an OnStartup/ExternalKeyUpdate event in another template
 pub struct TriggerStore {
     pub guild_state: Rc<GuildState>,
@@ -265,4 +263,4 @@ impl DataStoreImpl for TriggerStore {
             _ => None,
         }
     }
-}
+}*/
