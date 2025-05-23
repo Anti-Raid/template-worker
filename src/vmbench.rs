@@ -41,10 +41,16 @@ pub async fn benchmark_vm(
         fs
     }    
 
-    let pt = Template {
-        content: str_to_map("return 1"),
-        name: "benchmark1".to_string(),
-        ..Default::default()
+    let pt = {
+        let mut tmpl = Template {
+            content: str_to_map("return 1"),
+            name: "benchmark1".to_string(),
+            ..Default::default()
+        };
+
+        tmpl.prepare_ready_fs();
+
+        tmpl
     };
 
     let cgs_a = cgs.clone();
@@ -76,10 +82,16 @@ pub async fn benchmark_vm(
     }
 
     // Exec simple with no wait
-    let pt = Template {
-        content: str_to_map("return 1"),
-        name: "benchmark2".to_string(),
-        ..Default::default()
+    let pt = {
+        let mut tmpl = Template {
+            content: str_to_map("return 1"),
+            name: "benchmark2".to_string(),
+            ..Default::default()
+        };
+
+        tmpl.prepare_ready_fs();
+
+        tmpl
     };
 
     let cgs_a = cgs.clone();
@@ -104,10 +116,16 @@ pub async fn benchmark_vm(
     let exec_no_wait = start.elapsed().as_micros();
 
     // Exec simple with wait
-    let pt = Template {
-        content: str_to_map("error('MyError')\nreturn 1"),
-        name: "benchmark3".to_string(),
-        ..Default::default()
+    let pt = {
+        let mut tmpl = Template {
+            content: str_to_map("error('MyError')\nreturn 1"),
+            name: "benchmark3".to_string(),
+            ..Default::default()
+        };
+
+        tmpl.prepare_ready_fs();
+
+        tmpl
     };
 
     let cgs_a = cgs.clone();

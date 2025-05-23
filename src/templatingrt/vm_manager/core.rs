@@ -1,4 +1,4 @@
-use super::client::LuaVmResult;
+use crate::CONFIG;
 use crate::templatingrt::primitives::ctxprovider::TemplateContextProvider;
 use crate::templatingrt::state::GuildState;
 use crate::templatingrt::template::{ConstructedFS, Template};
@@ -19,8 +19,9 @@ use khronos_runtime::TemplateContext;
 use mlua::prelude::*;
 use std::rc::Rc;
 use std::sync::Arc;
-use super::client::LuaVmAction;
+use super::client::{LuaVmAction, LuaVmResult};
 use tokio::sync::oneshot::Sender;
+use crate::templatingrt::sandwich_config;
 use crate::templatingrt::cache::{get_all_guild_templates, get_guild_template};
 
 impl LuaVmAction {
@@ -143,6 +144,71 @@ impl LuaVmAction {
     }
 }
 
+impl LuaVmResult {
+    pub async fn log_error_and_warn(self, guild_state: &GuildState, template: &Template) -> Self {
+        match self.log_error(guild_state, template).await {
+            Ok(()) => self,
+            Err(e) => {
+                log::error!("Error logging error: {:?}", e);
+                self
+            }
+        }
+    }
+
+    pub async fn log_error(&self, guild_state: &GuildState, template: &Template) -> Result<(), crate::Error> {
+        let error = match self {
+            LuaVmResult::Ok { .. } => return Ok(()),
+            LuaVmResult::LuaError { err } => format!("```lua\n{}```", err.replace('`', "\\`")),
+            LuaVmResult::VmBroken {} => format!("VM marked as broken!")
+        };
+
+        if let Some(error_channel) = template.error_channel {
+            let Some(channel) = sandwich_driver::channel(
+                &guild_state.serenity_context.cache,
+                &guild_state.serenity_context.http,
+                &guild_state.reqwest_client,
+                Some(template.guild_id),
+                error_channel,
+                &sandwich_config(),
+            )
+            .await?
+            else {
+                return Ok(());
+            };
+
+            let Some(guild_channel) = channel.guild() else {
+                return Ok(());
+            };
+
+            if guild_channel.guild_id != template.guild_id {
+                return Ok(());
+            }
+
+            guild_channel
+                .send_message(
+                    &guild_state.serenity_context.http,
+                    serenity::all::CreateMessage::new()
+                        .embed(
+                            serenity::all::CreateEmbed::new()
+                                .title("Error executing template")
+                                .field("Error", error, false)
+                                .field("Template", template.name.clone(), false),
+                        )
+                        .components(vec![serenity::all::CreateActionRow::Buttons(
+                            vec![serenity::all::CreateButton::new_link(
+                                &CONFIG.meta.support_server_invite,
+                            )
+                            .label("Support Server")]
+                            .into(),
+                        )]),
+                )
+                .await?;
+        }
+
+        Ok(())
+    }
+}
+
 /// Configures the khronos runtime.
 pub(super) fn configure_runtime_manager() -> LuaResult<KhronosRuntimeManager>
 {
@@ -187,7 +253,7 @@ pub async fn dispatch_event_to_template(
     guild_state: Rc<GuildState>,
 ) -> LuaVmResult {
     if manager.runtime().is_broken() {
-        return LuaVmResult::VmBroken {};
+        return (LuaVmResult::VmBroken {}).log_error_and_warn(&guild_state, &template).await;
     }
 
     // Get or create a subisolate
@@ -232,7 +298,7 @@ pub async fn dispatch_event_to_template(
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     // Check if the runtime is broken
                     if manager.runtime().is_broken() {
-                        return LuaVmResult::VmBroken {};
+                        return (LuaVmResult::VmBroken {}).log_error_and_warn(&guild_state, &template).await;
                     }
                 }
             }
@@ -246,8 +312,8 @@ pub async fn dispatch_event_to_template(
 
     // Now, create the template context that should be passed to the template
     let provider = TemplateContextProvider::new(
-        guild_state,
-        template,
+        guild_state.clone(),
+        template.clone(),
         manager
     );
 
@@ -259,16 +325,16 @@ pub async fn dispatch_event_to_template(
     {
         Ok(sr) => sr,
         Err(e) => {
-            return LuaVmResult::LuaError { err: e.to_string() };
+            return (LuaVmResult::LuaError { err: e.to_string() }).log_error_and_warn(&guild_state, &template).await;
         }
     };
 
     let json_value = match spawn_result.into_serde_json_value(&sub_isolate) {
         Ok(v) => v,
         Err(e) => {
-            return LuaVmResult::LuaError {
+            return (LuaVmResult::LuaError {
                 err: format!("Failed to convert result to JSON: {}", e),
-            };
+            }).log_error_and_warn(&guild_state, &template).await;
         }
     };
 
@@ -299,7 +365,7 @@ pub async fn dispatch_event_to_multiple_templates(
         });
     }
 
-    let mut results = Vec::new();
+    let mut results = Vec::with_capacity(templates.len());
     while let Ok(Some(result)) =
         tokio::time::timeout(MAX_TEMPLATES_RETURN_WAIT_TIME, set.join_next()).await
     {

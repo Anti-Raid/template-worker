@@ -120,7 +120,7 @@ pub async fn dispatch(
         return Ok(());
     };
 
-    let res = execute(
+    execute(
         guild_id,
         CreateGuildState {
             serenity_context: ctx.clone(),
@@ -131,16 +131,6 @@ pub async fn dispatch(
         LuaVmAction::DispatchEvent { event },
     )
     .await?;
-
-    let serenity_context = ctx.clone();
-
-    tokio::task::spawn(async move {
-        res.wait_and_log_error(guild_id, &serenity_context)
-            .await
-            .map_err(|e| {
-                log::error!("Error while waiting for template: {}", e);
-            })
-    });
 
     Ok(())
 }
@@ -156,7 +146,7 @@ pub async fn dispatch_to_template(
         return Ok(());
     };
 
-    let res = execute(
+    execute(
         guild_id,
         CreateGuildState {
             serenity_context: ctx.clone(),
@@ -167,16 +157,6 @@ pub async fn dispatch_to_template(
         LuaVmAction::DispatchTemplateEvent { event, template_name },
     )
     .await?;
-
-    let serenity_context = ctx.clone();
-
-    tokio::task::spawn(async move {
-        res.wait_and_log_error(guild_id, &serenity_context)
-            .await
-            .map_err(|e| {
-                log::error!("Error while waiting for template [template event]: {}", e);
-            })
-    });
 
     Ok(())
 }
@@ -214,11 +194,6 @@ pub async fn dispatch_and_wait(
     let mut results = HashMap::with_capacity(result_handle.results.len());
 
     for result in result_handle.results {
-        if let Err(e) = result.log_error(guild_id, ctx).await {
-            log::error!("Error while waiting for template: {}", e);
-            continue;
-        }
-
         let name = result.template_name.clone();
         if let Ok(value) = result.into_response::<serde_json::Value>() {
             results.insert(name, value);
@@ -263,11 +238,6 @@ pub async fn dispatch_to_template_and_wait(
     let mut results = HashMap::with_capacity(result_handle.results.len());
 
     for result in result_handle.results {
-        if let Err(e) = result.log_error(guild_id, ctx).await {
-            log::error!("Error while waiting for template: {}", e);
-            continue;
-        }
-
         let name = result.template_name.clone();
         if let Ok(value) = result.into_response::<serde_json::Value>() {
             results.insert(name, value);

@@ -172,7 +172,7 @@ async fn clear_inactive_guilds(
         ..
     }): State<AppData>,
 ) -> Response<Vec<FlushedGuild>> {
-    let Ok(hm) = crate::templatingrt::DEFAULT_THREAD_POOL.clear_inactive_guilds() else {
+    let Ok(hm) = crate::templatingrt::DEFAULT_THREAD_POOL.clear_inactive_guilds().await else {
         return Err((reqwest::StatusCode::INTERNAL_SERVER_ERROR, "Failed to start inactive guild clear".to_string()));
     };
 

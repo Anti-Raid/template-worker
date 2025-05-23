@@ -9,7 +9,7 @@ use tokio::sync::oneshot::{Sender, Receiver};
 use std::sync::RwLock as StdRwLock;
 use std::cell::{Cell, RefCell};
 use crate::templatingrt::state::CreateGuildState;
-
+use crate::config::VmDistributionStrategy;
 use super::core::{
     configure_runtime_manager,
 };
@@ -17,7 +17,7 @@ use super::{client::ArLua, ArLuaHandle, LuaVmAction, LuaVmResult};
 use crate::templatingrt::MAX_VM_THREAD_STACK_SIZE;
 use crate::templatingrt::state::GuildState;
 
-pub const DEFAULT_MAX_THREADS: usize = 100; // Maximum number of threads in the pool
+pub const DEFAULT_MAX_THREADS: usize = 400; // Maximum number of threads in the pool
 
 enum ThreadRequest {
     Dispatch {
@@ -30,6 +30,12 @@ enum ThreadRequest {
     },
     ClearInactiveGuilds {
         tx: Sender< HashMap<GuildId, Option<String>> >,
+    },
+    RemoveIfUnused {
+        tx: Sender<bool>
+    },
+    CloseThread {
+        tx: Option<Sender<()>>
     }
 }
 
@@ -205,6 +211,24 @@ impl ThreadEntry {
                                 }
 
                                 let _ = tx.send(close_errors);
+                            },
+                            ThreadRequest::RemoveIfUnused { tx } => {
+                                let vms = thread_vms.borrow();
+                                if vms.is_empty() {
+                                    log::debug!("Clearing unused thread: {}", tid);
+                                    let _ = tx.send(true);
+                                    return;
+                                }
+
+                                let _ = tx.send(false);
+                            },
+                            ThreadRequest::CloseThread { tx } => {
+                                if let Some(tx) = tx {
+                                    let _ = tx.send(());
+                                }
+
+                                log::debug!("Closing thread: {}", tid);
+                                return;
                             }
                         }
                     }
@@ -239,33 +263,69 @@ impl ThreadPool {
     }
 
     #[allow(dead_code)]
-    pub fn clear_inactive_guilds(
+    pub async fn clear_inactive_guilds(
         &self
     ) -> Result<HashMap<u64, Receiver<HashMap<GuildId, Option<String>>>>, crate::Error> {
-        let threads = self.threads.try_read().map_err(|_| "Failed to read threads")?;
-        let mut res = HashMap::new();
-        for thread in threads.iter() {
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            thread.tx.send(
-                ThreadRequest::ClearInactiveGuilds {
-                    tx
-                }
-            )?;
-            res.insert(thread.id, rx);
-        }
+        let resp = {
+            let threads = self.threads.try_read().map_err(|_| "Failed to read threads")?;
+            let mut res = HashMap::new();
+            for thread in threads.iter() {
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                thread.tx.send(
+                    ThreadRequest::ClearInactiveGuilds {
+                        tx
+                    }
+                )?;
+                res.insert(thread.id, rx);
+            }
 
-        Ok(res)
+            res
+        };
+
+        self.remove_unused_threads().await?;
+
+        Ok(resp)
     }
 
-    #[allow(dead_code)]
-    /// Fills the thread pool where needed
-    pub fn fill(
-        &self,
-        cgs: CreateGuildState
-    ) -> Result<(), silverpelt::Error> {
-        let needed_threads = self.max_threads - self.threads_len()?;
-        for _ in 0..needed_threads {
-            self.add_thread(cgs.clone())?;
+    /// Remove broken threads from the pool
+    pub async fn remove_unused_threads(&self) -> Result<(), silverpelt::Error> {
+        let (mut good_threads, old_threads) = {
+            let mut threads = self.threads.try_write().map_err(|_| "Failed to write lock threads")?;
+
+            let good_threads = Vec::with_capacity(threads.len());   
+            let old_threads = std::mem::take(&mut *threads);
+
+            (good_threads, old_threads)
+        };
+
+        for thread in old_threads {
+            // Send Ping to thread
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let _ = thread.tx.send(ThreadRequest::RemoveIfUnused { tx });
+            tokio::select! {
+                resp = rx => {
+                    // If we get a response, the thread is alive
+                    if let Ok(res) = resp {
+                        if res {
+                            good_threads.push(thread);
+                        }
+
+                        // Not alive
+                        continue;
+                    }
+                }
+                _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
+                    // Timeout
+                }
+            };
+
+            // Delete the thread by doing nothing
+            log::warn!("Thread {} is unused, removing it from the pool", thread.id);
+        }
+
+        {
+            let mut threads = self.threads.try_write().map_err(|_| "Failed to write lock threads")?; 
+            *threads = good_threads;
         }
 
         Ok(())
@@ -299,8 +359,9 @@ impl ThreadPool {
                 }
             };
 
-            // Delete the thread by doing nothing
+            // Delete the thread
             log::warn!("Thread {} is broken, removing it from the pool", thread.id);
+            let _ = thread.tx.send(ThreadRequest::CloseThread { tx: None });
         }
 
         {
@@ -374,7 +435,7 @@ impl ThreadPool {
         // Flush out broken threads
         self.remove_broken_threads().await?;
 
-        if self.threads_len()? < self.max_threads {
+        if self.threads_len()? < self.max_threads || crate::CMD_ARGS.vm_distribution_strategy == VmDistributionStrategy::ThreadPerGuild {
             // Add a new thread to the pool
             self.add_thread(cgs)?;
         }

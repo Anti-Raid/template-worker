@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
-#[derive(Debug, ValueEnum, Clone, Copy)]
+#[derive(Debug, ValueEnum, Clone, Copy, PartialEq)]
 pub enum VmDistributionStrategy {
     /// Use a thread pool that each stores a set of VMs where each guild is assigned a VM on the threadpool
     ThreadPool,
