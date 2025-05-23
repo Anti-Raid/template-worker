@@ -179,13 +179,13 @@ impl ThreadEntry {
                                     }    
                                 };
 
-                                let count_ref = vm.count.clone();
+                                let gcount_ref = vm.count.clone();
                                 tokio::task::spawn_local(async move {
-                                    count_ref.set(count_ref.get() + 1);
+                                    gcount_ref.set(gcount_ref.get() + 1);
                                     let tis_ref = vm.tis_ref.clone();
                                     let gs = vm.guild_state.clone();
                                     action.handle(tis_ref, gs, callback).await;
-                                    count_ref.set(count_ref.get() - 1);
+                                    gcount_ref.set(gcount_ref.get() - 1);
                                 });
                             },
                             ThreadRequest::ClearInactiveGuilds { tx } => {
