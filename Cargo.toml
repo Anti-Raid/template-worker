@@ -42,6 +42,8 @@ silverpelt = { git = "https://github.com/Anti-Raid/corelib_rs" }
 sandwich_driver = { git = "https://github.com/Anti-Raid/corelib_rs" }
 rust_rpc_server = { git = "https://github.com/Anti-Raid/corelib_rs" }
 limits = { git = "https://github.com/Anti-Raid/corelib_rs" }
+jobserver = { git = "https://github.com/Anti-Raid/corelib_rs" }
+
 
 [dependencies.tokio]
 version = "1"

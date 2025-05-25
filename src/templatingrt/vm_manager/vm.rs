@@ -5,7 +5,7 @@ use crate::config::{VmDistributionStrategy, CMD_ARGS};
 use crate::templatingrt::state::CreateGuildState;
 use super::threadpool::create_lua_vm as create_lua_vm_threadpool;
 
-/// VM cache
+/// VM cache; lazylock is to allow a global variable to be shared across threads
 static VMS: LazyLock<scc::HashMap<GuildId, ArLua>> = LazyLock::new(scc::HashMap::new);
 
 /// Get a Lua VM for a guild

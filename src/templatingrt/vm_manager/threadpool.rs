@@ -21,8 +21,8 @@ pub const DEFAULT_MAX_THREADS: usize = 400; // Maximum number of threads in the 
 
 enum ThreadRequest {
     Dispatch {
-        guild_id: GuildId,
-        action: LuaVmAction,
+        guild_id: GuildId, // id of discord server
+        action: LuaVmAction, 
         callback: Sender<Vec<(String, LuaVmResult)>>,
     },
     Ping {
@@ -51,7 +51,7 @@ struct ThreadEntry {
 
 impl ThreadEntry {
     /// Creates a new thread entry
-    fn new(tx: UnboundedSender<ThreadRequest>) -> Self {
+    fn new(tx: UnboundedSender<ThreadRequest>) -> Self { // sending in and going out thread
         Self {
             id: {
                 // Generate a random id
@@ -66,7 +66,7 @@ impl ThreadEntry {
 
     /// Initializes a new thread entry, starting it after creation
     fn create(
-        cgs: CreateGuildState,
+        cgs: CreateGuildState, // all data needed by lua vm
     ) -> Result<Self, silverpelt::Error> {
         let (tx, rx) = unbounded_channel::<ThreadRequest>();
 
@@ -90,7 +90,7 @@ impl ThreadEntry {
     ) -> Result<(), silverpelt::Error> {
         let mut rx = rx; // Take mutable ownership to receiver
         let count_ref = self.count.clone();
-        let tid = self.id;
+        let tid = self.id; // thread id
         std::thread::Builder::new()
             .name(format!("lua-vm-threadpool-{}", self.id))
             .stack_size(MAX_VM_THREAD_STACK_SIZE)
@@ -115,8 +115,8 @@ impl ThreadEntry {
                         count: Rc<Cell<usize>>
                     }
 
+                    // it' a hashmap that can be mutably borrowed and is also reference counted
                     let thread_vms: Rc<RefCell<HashMap<GuildId, Rc<VmData>>>> = Rc::new(HashMap::new().into());
-
                     while let Some(send) = rx.recv().await {
                         match send {
                             ThreadRequest::Ping { tx }=> {
@@ -129,7 +129,7 @@ impl ThreadEntry {
 
                                     // Create server if not found, otherwise return existing
                                     match vms.get(&guild_id) {
-                                        Some(vm) => vm.clone(),
+                                        Some(vm) => vm.clone(), // not costly cause of Rc
                                         None => {
                                             // Create Lua VM
                                             let cgs_ref = cgs.clone();
@@ -262,7 +262,6 @@ impl ThreadPool {
         }
     }
 
-    #[allow(dead_code)]
     pub async fn clear_inactive_guilds(
         &self
     ) -> Result<HashMap<u64, Receiver<HashMap<GuildId, Option<String>>>>, crate::Error> {
@@ -475,7 +474,6 @@ impl ThreadPool {
 /// The default thread pool that ``create_lua_vm`` uses
 pub static DEFAULT_THREAD_POOL: LazyLock<ThreadPool> = LazyLock::new(ThreadPool::new);
 
-#[allow(dead_code)]
 pub async fn create_lua_vm(
     guild_id: GuildId,
     cgs: CreateGuildState
