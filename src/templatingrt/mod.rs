@@ -5,7 +5,7 @@ pub mod template;
 mod vm_manager;
 
 pub use state::CreateGuildState;
-pub use vm_manager::{LuaVmAction, LuaVmResult, DEFAULT_THREAD_POOL};
+pub use vm_manager::{LuaVmAction, LuaVmResult, DEFAULT_THREAD_POOL, ThreadMetrics, ThreadGuildVmMetrics};
 
 use serenity::all::GuildId;
 use crate::templatingrt::vm_manager::ArLuaHandle;

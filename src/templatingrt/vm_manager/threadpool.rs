@@ -5,7 +5,7 @@ use std::sync::atomic::AtomicUsize;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::oneshot::{Sender, Receiver};
+use tokio::sync::oneshot::{Sender, Receiver, channel};
 use std::sync::RwLock as StdRwLock;
 use std::cell::{Cell, RefCell};
 use crate::templatingrt::state::CreateGuildState;
@@ -13,11 +13,28 @@ use crate::config::VmDistributionStrategy;
 use super::core::{
     configure_runtime_manager,
 };
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
+use futures::FutureExt;
 use super::{client::ArLua, ArLuaHandle, LuaVmAction, LuaVmResult};
 use crate::templatingrt::MAX_VM_THREAD_STACK_SIZE;
 use crate::templatingrt::state::GuildState;
 
 pub const DEFAULT_MAX_THREADS: usize = 400; // Maximum number of threads in the pool
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct ThreadGuildVmMetrics {
+    pub used_memory: usize,
+    pub memory_limit: usize,
+    pub num_threads: i64,
+    pub max_threads: i64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct ThreadMetrics {
+    vm_metrics: HashMap<GuildId, ThreadGuildVmMetrics >,
+    tid: u64,
+}
 
 enum ThreadRequest {
     Dispatch {
@@ -33,6 +50,9 @@ enum ThreadRequest {
     },
     RemoveIfUnused {
         tx: Sender<bool>
+    },
+    GetVmMetrics {
+        tx: Sender < HashMap<GuildId, ThreadGuildVmMetrics > >,
     },
     CloseThread {
         tx: Option<Sender<()>>
@@ -226,6 +246,26 @@ impl ThreadEntry {
 
                                 log::debug!("Closing thread: {}", tid);
                                 return;
+                            },
+                            ThreadRequest::GetVmMetrics { tx } => {
+                                {
+                                    let guard = thread_vms.borrow();
+                                    
+                                    let mut metrics_map = HashMap::with_capacity(guard.len());
+
+                                    for (guild, vm) in guard.iter() {
+                                        let metrics = ThreadGuildVmMetrics {
+                                            used_memory: vm.tis_ref.runtime().memory_usage(),
+                                            memory_limit: crate::templatingrt::MAX_TEMPLATE_MEMORY_USAGE,
+                                            num_threads: vm.tis_ref.runtime().current_threads(),
+                                            max_threads: vm.tis_ref.runtime().max_threads(),
+                                        };
+
+                                        metrics_map.insert(*guild, metrics);
+                                    }
+
+                                    let _ = tx.send(metrics_map);
+                                }
                             }
                         }
                     }
@@ -325,6 +365,57 @@ impl ThreadPool {
         }
 
         Ok(())
+    }
+
+    /// Get VM metrics for all thread entries
+    pub async fn get_vm_metrics_for_all(&self) -> Result<Vec<ThreadMetrics>, crate::Error> {
+        let fu = FuturesUnordered::new();
+        {
+            let threads = self.threads.try_read().map_err(|_| "Failed to read lock thread")?;
+            for thread in threads.iter() {
+                let (tx, rx) = channel();
+                let _ = thread.tx.send(ThreadRequest::GetVmMetrics { tx });
+                let tid = thread.id;
+                fu.push(rx.map(move |x| {
+                    ThreadMetrics {
+                        tid,
+                        vm_metrics: x.unwrap_or_default()
+                    }
+                }));
+            }
+        }
+
+        Ok(fu.collect().await)
+    }
+
+    /// Get VM metrics by thread id
+    pub async fn get_vm_metrics_by_tid(&self, tid: u64) -> Result<ThreadMetrics, crate::Error> {
+        let mut chan = None;
+        {
+            let threads = self.threads.try_read().map_err(|_| "Failed to read lock thread")?;
+            for thread in threads.iter() {
+                if thread.id == tid {
+                    let (tx, rx) = channel();
+                    let _ = thread.tx.send(ThreadRequest::GetVmMetrics { tx });
+                    chan = Some(rx);
+                    break;
+                }
+            }
+        }
+
+        let Some(rx) = chan else {
+            return Ok(ThreadMetrics {
+                tid,
+                vm_metrics: HashMap::with_capacity(0),
+            });
+        };
+
+        let resp = rx.await?;
+
+        Ok(ThreadMetrics {
+            tid,
+            vm_metrics: resp
+        })
     }
 
     /// Remove broken threads from the pool

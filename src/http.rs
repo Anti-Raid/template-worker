@@ -8,7 +8,7 @@ use ar_settings::types::OperationType;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    routing::post,
+    routing::{get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -54,9 +54,11 @@ pub fn create(
             "/page-settings-operation/:guild_id/:user_id",
             post(settings_operation),
         )
-        .route("/threads-count", post(get_threads_count))
+        .route("/threads-count", get(get_threads_count))
         .route("/clear-inactive-guilds", post(clear_inactive_guilds))
-        .route("/execute-luavmaction/:guild_id", post(execute_lua_vm_action));
+        .route("/execute-luavmaction/:guild_id", post(execute_lua_vm_action))
+        .route("/get-vm-metrics-by-tid/:tid", get(get_vm_metrics_by_tid))
+        .route("/get-vm-metrics-for-all", get(get_vm_metrics_for_all));
     let router: Router<()> = router.with_state(AppData::new(data, ctx));
     router.into_make_service()
 }
@@ -231,6 +233,41 @@ async fn execute_lua_vm_action(
     };
 
     Ok(Json(result_handle))
+}
+
+/// Get thread pool metrics given tid
+#[axum::debug_handler]
+async fn get_vm_metrics_by_tid(
+    State(AppData {
+        data,
+        serenity_context,
+        ..
+    }): State<AppData>,
+    Path(tid): Path<u64>,
+) -> Response<crate::templatingrt::ThreadMetrics> {
+    let metrics = crate::templatingrt::DEFAULT_THREAD_POOL
+    .get_vm_metrics_by_tid(tid)
+    .await
+    .map_err(|e| (reqwest::StatusCode::INTERNAL_SERVER_ERROR, e.to_string().into()))?;
+
+    Ok(Json(metrics))
+}
+
+/// Get thread pool metrics given tid
+#[axum::debug_handler]
+async fn get_vm_metrics_for_all(
+    State(AppData {
+        data,
+        serenity_context,
+        ..
+    }): State<AppData>,
+) -> Response<Vec<crate::templatingrt::ThreadMetrics>> {
+    let metrics = crate::templatingrt::DEFAULT_THREAD_POOL
+    .get_vm_metrics_for_all()
+    .await
+    .map_err(|e| (reqwest::StatusCode::INTERNAL_SERVER_ERROR, e.to_string().into()))?;
+
+    Ok(Json(metrics))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
