@@ -101,13 +101,10 @@ impl ThreadEntry {
                     }
                 }));
 
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
+                let rt = tokio::runtime::LocalRuntime::new()
                     .expect("Failed to create tokio runtime");
 
-                let local = tokio::task::LocalSet::new();
-                local.block_on(&rt, async {
+                rt.block_on(async {
                     // Keep waiting for new events
                     struct VmData {
                         guild_state: Rc<GuildState>,

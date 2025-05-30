@@ -40,6 +40,10 @@ async fn main() {
 
     env_builder.init();
 
+    if CMD_ARGS.use_tokio_console {
+        console_subscriber::init();
+    }
+
     let proxy_url = CONFIG.meta.proxy.clone();
 
     info!("Proxy URL: {}", proxy_url);

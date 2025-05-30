@@ -17,6 +17,7 @@ use std::{collections::HashMap, sync::Arc};
 use crate::templatingrt::CreateGuildState;
 
 use crate::dispatch::{dispatch, dispatch_and_wait, parse_event};
+use crate::templatingrt::execute;
 
 #[derive(Clone)]
 pub struct AppData {
@@ -54,7 +55,8 @@ pub fn create(
             post(settings_operation),
         )
         .route("/threads-count", post(get_threads_count))
-        .route("/clear-inactive-guilds", post(clear_inactive_guilds));
+        .route("/clear-inactive-guilds", post(clear_inactive_guilds))
+        .route("/execute-luavmaction/:guild_id", post(execute_lua_vm_action));
     let router: Router<()> = router.with_state(AppData::new(data, ctx));
     router.into_make_service()
 }
@@ -190,6 +192,45 @@ async fn clear_inactive_guilds(
     }
 
     Ok(Json(results))
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct ExecuteLuaVmActionOpts {
+    pub wait_timeout: Option<std::time::Duration>,
+}
+
+/// Execute a lua vm action on a guild
+#[axum::debug_handler]
+async fn execute_lua_vm_action(
+    State(AppData {
+        data,
+        serenity_context,
+        ..
+    }): State<AppData>,
+    Path(guild_id): Path<serenity::all::GuildId>,
+    Query(opts): Query<ExecuteLuaVmActionOpts>,
+    Json(action): Json<crate::templatingrt::LuaVmAction>,
+) -> Response<crate::templatingrt::MultiLuaVmResultHandle> {
+    let handle = execute(
+        guild_id,
+        CreateGuildState {
+            pool: data.pool.clone(),
+            serenity_context,
+            reqwest_client: data.reqwest.clone(),
+            object_store: data.object_store.clone()
+        },
+        action
+    )
+    .await
+    .map_err(|e| (reqwest::StatusCode::INTERNAL_SERVER_ERROR, e.to_string().into()))?;
+
+    let result_handle = match handle.wait_timeout(opts.wait_timeout.unwrap_or(MAX_TEMPLATES_RETURN_WAIT_TIME)).await {
+        Ok(Some(action)) => action,
+        Ok(None) => return Err((reqwest::StatusCode::INTERNAL_SERVER_ERROR, "Timed out while waiting for response".into())),
+        Err(e) => return Err((reqwest::StatusCode::INTERNAL_SERVER_ERROR, e.to_string().into())),
+    };
+
+    Ok(Json(result_handle))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

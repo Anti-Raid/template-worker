@@ -12,7 +12,6 @@ use khronos_runtime::traits::scheduledexecprovider::ScheduledExecProvider;
 use khronos_runtime::traits::objectstorageprovider::ObjectStorageProvider;
 use khronos_runtime::traits::datastoreprovider::{DataStoreProvider, DataStoreImpl};
 use khronos_runtime::traits::ir::{ObjectMetadata, ScheduledExecution};
-use crate::templatingrt::vm_manager::KhronosRuntimeManager;
 use khronos_runtime::utils::executorscope::ExecutorScope;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use moka::future::Cache;

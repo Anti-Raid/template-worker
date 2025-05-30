@@ -41,6 +41,7 @@ pub async fn execute(
     Ok(RenderTemplateHandle { rx })
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct MultiLuaVmResultHandle {
     pub results: Vec<LuaVmResultHandle>,
 }
@@ -58,6 +59,7 @@ impl MultiLuaVmResultHandle {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct LuaVmResultHandle {
     pub result: LuaVmResult,
     pub template_name: String,

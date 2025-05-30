@@ -38,7 +38,7 @@ pub enum LuaVmAction { // tells what action the thread should apply to the guild
     Panic {},
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub enum LuaVmResult {
     Ok { result_val: serde_json::Value }, // any result can be a json enum
     LuaError { err: String },

@@ -33,6 +33,9 @@ pub struct CmdArgs {
     /// Distribution strategy for VMs
     #[clap(long, default_value = "thread-pool")]
     pub vm_distribution_strategy: VmDistributionStrategy,
+
+    #[clap(long, default_value_t = false)]
+    pub use_tokio_console: bool,
 }
 
 /// Global internal config object
