@@ -1,6 +1,5 @@
 use super::template::Template;
-use super::vm_manager::{get_lua_vm_if_exists, ArLuaHandle};
-use super::{LuaVmAction, RenderTemplateHandle, MAX_TEMPLATES_RETURN_WAIT_TIME};
+use super::{ThreadRequest, LuaVmAction, RenderTemplateHandle, MAX_TEMPLATES_RETURN_WAIT_TIME};
 use moka::future::Cache;
 use serenity::all::GuildId;
 use std::collections::HashMap;
@@ -184,9 +183,13 @@ pub async fn regenerate_cache(
 
     // Send a message to stop VMs running potentially outdated code
     let mut resync = false;
-    if let Some(vm) = get_lua_vm_if_exists(guild_id) {
+    if let Some(vm) = crate::templatingrt::POOL.get_guild_if_exists(guild_id)? {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        vm.send_action(LuaVmAction::Stop {}, tx)?;
+        vm.send(ThreadRequest::Dispatch {
+            callback: tx,
+            action: LuaVmAction::Stop {},
+            guild_id,
+        })?;
         let handle = RenderTemplateHandle { rx };
         let Some(mvmr) = handle.wait_timeout(MAX_TEMPLATES_RETURN_WAIT_TIME).await? else {
             return Err("Timed out waiting for templates to clear from VMs".into());

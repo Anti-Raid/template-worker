@@ -14,7 +14,6 @@ use khronos_runtime::rt::{KhronosRuntimeManager as Krm, IsolateData};
 use khronos_runtime::rt::CreatedKhronosContext;
 use khronos_runtime::rt::RuntimeCreateOpts;
 use khronos_runtime::utils::pluginholder::PluginSet;
-use khronos_runtime::utils::threadlimitmw::ThreadLimiter;
 use khronos_runtime::require::FilesystemWrapper;
 use khronos_runtime::TemplateContext;
 use mlua::prelude::*;
@@ -216,7 +215,7 @@ impl LuaVmResult {
 pub(super) fn configure_runtime_manager() -> LuaResult<KhronosRuntimeManager>
 {
     let mut rt = KhronosRuntime::new(
-        ThreadLimiter::new(10000),
+        khronos_runtime::utils::dummyfeedback::DummyFeedback {},
         RuntimeCreateOpts {
             disable_scheduler_lib: false,
             disable_task_lib: false,

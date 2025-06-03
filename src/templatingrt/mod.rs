@@ -5,12 +5,10 @@ pub mod template;
 mod vm_manager;
 
 pub use state::CreateGuildState;
-pub use vm_manager::{LuaVmAction, LuaVmResult, DEFAULT_THREAD_POOL, ThreadMetrics, ThreadGuildVmMetrics};
+pub use vm_manager::{LuaVmAction, LuaVmResult, ThreadRequest, ThreadMetrics, ThreadClearInactiveGuilds, POOL};
 
 use serenity::all::GuildId;
-use crate::templatingrt::vm_manager::ArLuaHandle;
 use primitives::sandwich_config;
-pub use vm_manager::get_lua_vm;
 
 pub const MAX_TEMPLATE_MEMORY_USAGE: usize = 1024 * 1024 * 20; // 20MB maximum memory
 pub const MAX_VM_THREAD_STACK_SIZE: usize = 1024 * 1024 * 20; // 20MB maximum memory
@@ -27,7 +25,7 @@ pub async fn execute(
     state: CreateGuildState,
     action: LuaVmAction,
 ) -> Result<RenderTemplateHandle, silverpelt::Error> {
-    let lua = get_lua_vm(
+    let lua = POOL.get_guild(
         guild_id,
         state
     )
@@ -35,8 +33,13 @@ pub async fn execute(
 
     let (tx, rx) = tokio::sync::oneshot::channel();
 
-    lua.send_action(action, tx)
-        .map_err(|e| format!("Could not send event to Lua thread: {}", e))?;
+    lua.send(
+        ThreadRequest::Dispatch {
+            guild_id,
+            action,
+            callback: tx,
+        }
+    ).map_err(|e| format!("Could not send event to Lua thread: {}", e))?;
 
     Ok(RenderTemplateHandle { rx })
 }

@@ -18,8 +18,10 @@ pub async fn benchmark_vm(
     guild_id: GuildId,
     cgs: CreateGuildState
 ) -> Result<FireBenchmark, silverpelt::Error> {
+    return Err("Being rewritten".into())
+
     // Get_lua_vm
-    let cgs_a = cgs.clone();
+    /*let cgs_a = cgs.clone();
     let guild_id_a = guild_id;
 
     let start = std::time::Instant::now();
@@ -167,6 +169,6 @@ pub async fn benchmark_vm(
         exec_simple,
         exec_no_wait,
         exec_error,
-    })
+    })*/
 }
 

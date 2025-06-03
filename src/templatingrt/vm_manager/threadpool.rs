@@ -1,280 +1,14 @@
-use super::KhronosRuntimeManager;
 use serenity::all::GuildId;
-use std::rc::Rc;
-use std::sync::atomic::AtomicUsize;
-use std::collections::HashMap;
-use std::sync::{Arc, LazyLock};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::oneshot::{Sender, Receiver, channel};
+use tokio::sync::mpsc::UnboundedSender;
 use std::sync::RwLock as StdRwLock;
-use std::cell::{Cell, RefCell};
 use crate::templatingrt::state::CreateGuildState;
 use crate::config::VmDistributionStrategy;
-use super::core::{
-    configure_runtime_manager,
-};
-use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use futures::FutureExt;
-use super::{client::ArLua, ArLuaHandle, LuaVmAction, LuaVmResult};
-use crate::templatingrt::MAX_VM_THREAD_STACK_SIZE;
-use crate::templatingrt::state::GuildState;
+use super::sharedguild::SharedGuild;
+use super::threadentry::ThreadEntry;
+use crate::templatingrt::vm_manager::ThreadRequest;
 
 pub const DEFAULT_MAX_THREADS: usize = 400; // Maximum number of threads in the pool
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct ThreadGuildVmMetrics {
-    pub used_memory: usize,
-    pub memory_limit: usize,
-    pub num_threads: i64,
-    pub max_threads: i64,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct ThreadMetrics {
-    vm_metrics: HashMap<GuildId, ThreadGuildVmMetrics >,
-    tid: u64,
-}
-
-enum ThreadRequest {
-    Dispatch {
-        guild_id: GuildId, // id of discord server
-        action: LuaVmAction, 
-        callback: Sender<Vec<(String, LuaVmResult)>>,
-    },
-    Ping {
-        tx: Sender<()>,
-    },
-    ClearInactiveGuilds {
-        tx: Sender< HashMap<GuildId, Option<String>> >,
-    },
-    RemoveIfUnused {
-        tx: Sender<bool>
-    },
-    GetVmMetrics {
-        tx: Sender < HashMap<GuildId, ThreadGuildVmMetrics > >,
-    },
-    CloseThread {
-        tx: Option<Sender<()>>
-    }
-}
-
-/// A thread entry in the pool (worker thread)
-struct ThreadEntry {
-    /// The unique identifier for the thread entry
-    id: u64,
-    /// Number of guilds in the pool
-    count: Arc<AtomicUsize>,
-    /// A sender to create a new guild handle
-    tx: UnboundedSender<ThreadRequest>,
-}
-
-impl ThreadEntry {
-    /// Creates a new thread entry
-    fn new(tx: UnboundedSender<ThreadRequest>) -> Self { // sending in and going out thread
-        Self {
-            id: {
-                // Generate a random id
-                use rand::Rng;
-
-                rand::thread_rng().gen()
-            },
-            count: Arc::new(AtomicUsize::new(0)),
-            tx,
-        }
-    }
-
-    /// Initializes a new thread entry, starting it after creation
-    fn create(
-        cgs: CreateGuildState, // all data needed by lua vm
-    ) -> Result<Self, silverpelt::Error> {
-        let (tx, rx) = unbounded_channel::<ThreadRequest>();
-
-        let entry = Self::new(tx);
-
-        entry.start(cgs, rx)?;
-
-        Ok(entry)
-    }
-
-    /// Returns the number of servers in the pool
-    fn thread_count(&self) -> usize {
-        self.count.load(std::sync::atomic::Ordering::Acquire)
-    }
-
-    /// Start the thread up
-    fn start(
-        &self,
-        cgs: CreateGuildState,
-        rx: UnboundedReceiver<ThreadRequest>,
-    ) -> Result<(), silverpelt::Error> {
-        let mut rx = rx; // Take mutable ownership to receiver
-        let count_ref = self.count.clone();
-        let tid = self.id; // thread id
-        std::thread::Builder::new()
-            .name(format!("lua-vm-threadpool-{}", self.id))
-            .stack_size(MAX_VM_THREAD_STACK_SIZE)
-            .spawn(move || {
-                super::perthreadpanichook::set_hook(Box::new(move |_| {
-                    if let Err(e) = DEFAULT_THREAD_POOL.remove_thread(tid) {
-                        log::error!("Error removing thread on panic: {:?}", e)
-                    }
-                }));
-
-                let rt = tokio::runtime::LocalRuntime::new()
-                    .expect("Failed to create tokio runtime");
-
-                rt.block_on(async {
-                    // Keep waiting for new events
-                    struct VmData {
-                        guild_state: Rc<GuildState>,
-                        tis_ref: KhronosRuntimeManager,
-                        count: Rc<Cell<usize>>
-                    }
-
-                    // it' a hashmap that can be mutably borrowed and is also reference counted
-                    let thread_vms: Rc<RefCell<HashMap<GuildId, Rc<VmData>>>> = Rc::new(HashMap::new().into());
-                    while let Some(send) = rx.recv().await {
-                        match send {
-                            ThreadRequest::Ping { tx }=> {
-                                // Send a pong
-                                let _ = tx.send(());
-                            }
-                            ThreadRequest::Dispatch { guild_id, action, callback } => {
-                                let vm = {
-                                    let mut vms = thread_vms.borrow_mut();
-
-                                    // Create server if not found, otherwise return existing
-                                    match vms.get(&guild_id) {
-                                        Some(vm) => vm.clone(), // not costly cause of Rc
-                                        None => {
-                                            // Create Lua VM
-                                            let cgs_ref = cgs.clone();
-                                            let gs = Rc::new(
-                                                match cgs_ref.to_guild_state(guild_id) {
-                                                    Ok(gs) => gs,
-                                                    Err(e) => {
-                                                        log::error!("Failed to create guild state: {}", e);
-                                                        continue;
-                                                    }
-                                                }
-                                            );
-    
-                                            let tis_ref = match configure_runtime_manager() {
-                                                Ok(tis) => tis,
-                                                Err(e) => {
-                                                    log::error!("Failed to configure Lua VM: {}", e);
-                                                    continue;
-                                                }
-                                            };
-    
-                                            count_ref.fetch_add(1, std::sync::atomic::Ordering::Release);
-    
-                                            let thread_vms_ref = thread_vms.clone();
-                                            tis_ref.set_on_broken(Box::new(move || {
-                                                super::remove_vm(guild_id);
-                                                {
-                                                    let mut vms = thread_vms_ref.borrow_mut();
-                                                    vms.remove(&guild_id);
-                                                }
-                                            }));
-    
-                                            // Store into the thread
-                                            let vmd = Rc::new(VmData {
-                                                guild_state: gs,
-                                                tis_ref: tis_ref,
-                                                count: Cell::new(0).into(),
-                                            });
-
-                                            vms.insert(
-                                                guild_id,
-                                                vmd.clone(),
-                                            );
-    
-                                            vmd
-                                        }
-                                    }    
-                                };
-
-                                let gcount_ref = vm.count.clone();
-                                tokio::task::spawn_local(async move {
-                                    gcount_ref.set(gcount_ref.get() + 1);
-                                    let tis_ref = vm.tis_ref.clone();
-                                    let gs = vm.guild_state.clone();
-                                    action.handle(tis_ref, gs, callback).await;
-                                    gcount_ref.set(gcount_ref.get() - 1);
-                                });
-                            },
-                            ThreadRequest::ClearInactiveGuilds { tx } => {
-                                let mut removed = vec![];
-
-                                {
-                                    let vms = thread_vms.borrow();
-                                    for (guild_id, vm) in vms.iter() {
-                                        if let Some(let_) = vm.tis_ref.runtime().last_execution_time() {
-                                            if std::time::Instant::now() - let_ > crate::templatingrt::MAX_SERVER_INACTIVITY {
-                                                removed.push((*guild_id, vm.tis_ref.clone()));
-                                            }
-                                        }
-                                    }
-                                }
-
-                                let mut close_errors = HashMap::new();
-                                for (guild_id, removed) in removed.into_iter() {
-                                    match removed.runtime().mark_broken(true) {
-                                        Ok(()) => close_errors.insert(guild_id, None),
-                                        Err(e) => close_errors.insert(guild_id, Some(e.to_string()))
-                                    };
-                                }
-
-                                let _ = tx.send(close_errors);
-                            },
-                            ThreadRequest::RemoveIfUnused { tx } => {
-                                let vms = thread_vms.borrow();
-                                if vms.is_empty() {
-                                    log::debug!("Clearing unused thread: {}", tid);
-                                    let _ = tx.send(true);
-                                    return;
-                                }
-
-                                let _ = tx.send(false);
-                            },
-                            ThreadRequest::CloseThread { tx } => {
-                                if let Some(tx) = tx {
-                                    let _ = tx.send(());
-                                }
-
-                                log::debug!("Closing thread: {}", tid);
-                                return;
-                            },
-                            ThreadRequest::GetVmMetrics { tx } => {
-                                {
-                                    let guard = thread_vms.borrow();
-                                    
-                                    let mut metrics_map = HashMap::with_capacity(guard.len());
-
-                                    for (guild, vm) in guard.iter() {
-                                        let metrics = ThreadGuildVmMetrics {
-                                            used_memory: vm.tis_ref.runtime().memory_usage(),
-                                            memory_limit: crate::templatingrt::MAX_TEMPLATE_MEMORY_USAGE,
-                                            num_threads: vm.tis_ref.runtime().current_threads(),
-                                            max_threads: vm.tis_ref.runtime().max_threads(),
-                                        };
-
-                                        metrics_map.insert(*guild, metrics);
-                                    }
-
-                                    let _ = tx.send(metrics_map);
-                                }
-                            }
-                        }
-                    }
-                })
-            })?;
-
-        Ok(())
-    }
-}
 
 pub struct ThreadPool {
     /// The worker threads in the pool
@@ -282,8 +16,8 @@ pub struct ThreadPool {
     /// We can't use a binary heap here due to interior mutability of ordering [count]
     threads: StdRwLock<Vec<ThreadEntry>>,
 
-    /// A record mapping a guild id to the thread its currently on
-    guilds: StdRwLock<HashMap<GuildId, u64>>,
+    /// 2 way thread entry guild map
+    sg: SharedGuild,
 
     /// The maximum number of threads in the pool
     max_threads: usize,
@@ -294,37 +28,30 @@ impl ThreadPool {
     pub fn new() -> Self {
         Self {
             threads: StdRwLock::new(Vec::new()),
-            guilds: StdRwLock::new(HashMap::new()),
+            sg: SharedGuild::new(),
             max_threads: DEFAULT_MAX_THREADS,
         }
     }
 
-    pub async fn clear_inactive_guilds(
-        &self
-    ) -> Result<HashMap<u64, Receiver<HashMap<GuildId, Option<String>>>>, crate::Error> {
-        let resp = {
+    pub fn send_request<K>(&self, req: impl Fn(&ThreadEntry) -> Option<(K, ThreadRequest)>) -> Result<Vec<K>, crate::Error> {
+        {
             let threads = self.threads.try_read().map_err(|_| "Failed to read threads")?;
-            let mut res = HashMap::new();
+            let mut data = Vec::with_capacity(threads.len());
             for thread in threads.iter() {
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                thread.tx.send(
-                    ThreadRequest::ClearInactiveGuilds {
-                        tx
-                    }
-                )?;
-                res.insert(thread.id, rx);
+                if let Some((k, treq)) = (req)(&thread) {
+                    thread.handle().send(
+                        treq
+                    )?;
+                    data.push(k);
+                }
             }
 
-            res
-        };
-
-        self.remove_unused_threads().await?;
-
-        Ok(resp)
+            Ok(data)
+        }
     }
 
     /// Remove broken threads from the pool
-    pub async fn remove_unused_threads(&self) -> Result<(), silverpelt::Error> {
+    pub async fn remove_unused_threads(&self) -> Result<Vec<u64>, silverpelt::Error> {
         let (mut good_threads, old_threads) = {
             let mut threads = self.threads.try_write().map_err(|_| "Failed to write lock threads")?;
 
@@ -334,10 +61,11 @@ impl ThreadPool {
             (good_threads, old_threads)
         };
 
+        let mut unused = vec![];
         for thread in old_threads {
             // Send Ping to thread
             let (tx, rx) = tokio::sync::oneshot::channel();
-            let _ = thread.tx.send(ThreadRequest::RemoveIfUnused { tx });
+            let _ = thread.handle().send(ThreadRequest::RemoveIfUnused { tx });
             tokio::select! {
                 resp = rx => {
                     // If we get a response of false, the thread is alive
@@ -356,7 +84,8 @@ impl ThreadPool {
             };
 
             // Delete the thread by doing nothing
-            log::warn!("Thread {} is unused, removing it from the pool", thread.id);
+            log::warn!("Thread {} is unused, removing it from the pool", thread.id());
+            unused.push(thread.id());
         }
 
         {
@@ -364,58 +93,7 @@ impl ThreadPool {
             *threads = good_threads;
         }
 
-        Ok(())
-    }
-
-    /// Get VM metrics for all thread entries
-    pub async fn get_vm_metrics_for_all(&self) -> Result<Vec<ThreadMetrics>, crate::Error> {
-        let fu = FuturesUnordered::new();
-        {
-            let threads = self.threads.try_read().map_err(|_| "Failed to read lock thread")?;
-            for thread in threads.iter() {
-                let (tx, rx) = channel();
-                let _ = thread.tx.send(ThreadRequest::GetVmMetrics { tx });
-                let tid = thread.id;
-                fu.push(rx.map(move |x| {
-                    ThreadMetrics {
-                        tid,
-                        vm_metrics: x.unwrap_or_default()
-                    }
-                }));
-            }
-        }
-
-        Ok(fu.collect().await)
-    }
-
-    /// Get VM metrics by thread id
-    pub async fn get_vm_metrics_by_tid(&self, tid: u64) -> Result<ThreadMetrics, crate::Error> {
-        let mut chan = None;
-        {
-            let threads = self.threads.try_read().map_err(|_| "Failed to read lock thread")?;
-            for thread in threads.iter() {
-                if thread.id == tid {
-                    let (tx, rx) = channel();
-                    let _ = thread.tx.send(ThreadRequest::GetVmMetrics { tx });
-                    chan = Some(rx);
-                    break;
-                }
-            }
-        }
-
-        let Some(rx) = chan else {
-            return Ok(ThreadMetrics {
-                tid,
-                vm_metrics: HashMap::with_capacity(0),
-            });
-        };
-
-        let resp = rx.await?;
-
-        Ok(ThreadMetrics {
-            tid,
-            vm_metrics: resp
-        })
+        Ok(unused)
     }
 
     /// Remove broken threads from the pool
@@ -432,7 +110,7 @@ impl ThreadPool {
         for thread in old_threads {
             // Send Ping to thread
             let (tx, rx) = tokio::sync::oneshot::channel();
-            let _ = thread.tx.send(ThreadRequest::Ping { tx });
+            let _ = thread.handle().send(ThreadRequest::Ping { tx });
             tokio::select! {
                 resp = rx => {
                     // If we get a response, the thread is alive
@@ -447,8 +125,9 @@ impl ThreadPool {
             };
 
             // Delete the thread
-            log::warn!("Thread {} is broken, removing it from the pool", thread.id);
-            let _ = thread.tx.send(ThreadRequest::CloseThread { tx: None });
+            log::warn!("Thread {} is broken, removing it from the pool", thread.id());
+            let _ = thread.handle().send(ThreadRequest::CloseThread { tx: None });
+            self.sg.remove_thread_entry(&thread)?;
         }
 
         {
@@ -465,7 +144,10 @@ impl ThreadPool {
         cgs: CreateGuildState
     ) -> Result<(), silverpelt::Error> {
         let mut threads = self.threads.try_write().map_err(|_| "Failed to write lock threads")?;
-        threads.push(ThreadEntry::create(cgs)?);
+        threads.push(ThreadEntry::create(
+            cgs, 
+            self.sg.clone()
+        )?);
         Ok(())
     }
 
@@ -479,8 +161,10 @@ impl ThreadPool {
 
             let mut idx = None;
             for (i, th) in threads.iter().enumerate() {
-                if th.id == id {
+                if th.id() == id {
                     idx = Some(i);
+                    self.sg.remove_thread_entry(th);
+                    break;
                 }
             }
 
@@ -496,15 +180,6 @@ impl ThreadPool {
             threads.remove(idx);
         }
 
-        {
-            let guilds_guard = self.guilds.try_read().map_err(|_| "Failed to read lock guilds")?;
-            for (guild_id, id_curr) in guilds_guard.iter() {
-                if *id_curr == id {
-                    super::remove_vm(*guild_id);
-                }
-            }
-        }
-
         Ok(())
     }
 
@@ -513,12 +188,19 @@ impl ThreadPool {
         Ok(self.threads.try_read().map_err(|_| "Failed to read lock threads for threads_len")?.len())
     }
 
-    /// Adds a guild to the pool
-    pub async fn add_guild(
+    /// Adds a guild to the pool if it does not already exist in the pool
+    ///
+    /// If the guild already exists in the pool, return the handle
+    pub async fn get_guild(
         &self,
         guild: GuildId,
         cgs: CreateGuildState
-    ) -> Result<ThreadPoolLuaHandle, silverpelt::Error> {
+    ) -> Result<UnboundedSender<ThreadRequest>, silverpelt::Error> {
+        // Check if the guild exists first
+        if let Some(handle) = self.sg.get_handle(guild)? {
+            return Ok(handle);
+        }
+
         // Flush out broken threads
         self.remove_broken_threads().await?;
 
@@ -535,7 +217,7 @@ impl ThreadPool {
 
         let threads = self.threads.try_read().map_err(|_| "Could not lock threads")?;
         for thread in threads.iter() {
-            let count = thread.thread_count();
+            let count = thread.server_count();
 
             if count < min_count {
                 min_count = count;
@@ -547,53 +229,17 @@ impl ThreadPool {
             return Err("Failed to add guild to VM pool [no threads]".into());
         };
 
-        {
-            let mut guilds_guard = self.guilds.try_write().map_err(|_| "Could not write lock guilds")?;
-            guilds_guard.insert(guild, thread.id);
+        // Block out the guild
+        self.sg.add_guild(guild, thread.clone())?;
+
+        return Ok(thread.handle().clone());
+    }
+
+    pub fn get_guild_if_exists(&self, guild: GuildId) -> Result<Option<UnboundedSender<ThreadRequest>>, silverpelt::Error> {
+        if let Some(handle) = self.sg.get_handle(guild)? {
+            return Ok(Some(handle));
         }
 
-        return Ok(ThreadPoolLuaHandle {
-            guild_id: guild,
-            handle: thread.tx.clone(),
-        });
-    }
-}
-
-/// The default thread pool that ``create_lua_vm`` uses
-pub static DEFAULT_THREAD_POOL: LazyLock<ThreadPool> = LazyLock::new(ThreadPool::new);
-
-pub async fn create_lua_vm(
-    guild_id: GuildId,
-    cgs: CreateGuildState
-) -> Result<ArLua, silverpelt::Error> {
-    let thread_pool_handle = DEFAULT_THREAD_POOL
-        .add_guild(guild_id, cgs)
-        .await?;
-
-    Ok(ArLua::ThreadPool(thread_pool_handle))
-}
-
-#[derive(Clone)]
-pub struct ThreadPoolLuaHandle {
-    /// The guild id
-    guild_id: GuildId,
-    /// The thread handle
-    handle: tokio::sync::mpsc::UnboundedSender<ThreadRequest>,
-}
-
-impl ArLuaHandle for ThreadPoolLuaHandle {
-    fn send_action(
-        &self,
-        action: LuaVmAction,
-        callback: Sender<Vec<(String, LuaVmResult)>>,
-    ) -> Result<(), khronos_runtime::Error> {
-        self.handle.send(
-            ThreadRequest::Dispatch {
-                guild_id: self.guild_id,
-                action,
-                callback,
-            }
-        )?;
-        Ok(())
+        Ok(None)
     }
 }

@@ -3,6 +3,7 @@ use crate::templatingrt::{
     MAX_TEMPLATES_RETURN_WAIT_TIME,
 };
 use crate::vmbench::{benchmark_vm as benchmark_vm_impl, FireBenchmark};
+use crate::templatingrt::POOL;
 use antiraid_types::ar_event::AntiraidEvent;
 use ar_settings::types::OperationType;
 use axum::{
@@ -132,7 +133,7 @@ async fn dispatch_event_and_wait(
 async fn get_threads_count(
     State(AppData { .. }): State<AppData>,
 ) -> Response<usize> {
-    let Ok(count) = crate::templatingrt::DEFAULT_THREAD_POOL.threads_len() else {
+    let Ok(count) = POOL.len() else {
         return Ok(Json(0));
     };
 
@@ -163,37 +164,17 @@ async fn benchmark_vm(
     Ok(Json(bvm))
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct FlushedGuild {
-    thread_id: u64,
-    guild_id: serenity::all::GuildId,
-    error: Option<String>
-}
-
 /// Flush out inactive guilds
 async fn clear_inactive_guilds(
     State(AppData {
         ..
     }): State<AppData>,
-) -> Response<Vec<FlushedGuild>> {
-    let Ok(hm) = crate::templatingrt::DEFAULT_THREAD_POOL.clear_inactive_guilds().await else {
+) -> Response<Vec<crate::templatingrt::ThreadClearInactiveGuilds>> {
+    let Ok(hm) = crate::templatingrt::POOL.clear_inactive_guilds().await else {
         return Err((reqwest::StatusCode::INTERNAL_SERVER_ERROR, "Failed to start inactive guild clear".to_string()));
     };
 
-    let mut results = Vec::new();
-
-    for (thread_id, rx) in hm {
-        let val = rx.await.map_err(|_| (reqwest::StatusCode::INTERNAL_SERVER_ERROR, "Failed to parse value".to_string()))?;
-        for (guild_id, error) in val {
-            results.push(FlushedGuild {
-                guild_id,
-                error,
-                thread_id
-            });
-        }
-    }
-
-    Ok(Json(results))
+    Ok(Json(hm))
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -244,8 +225,8 @@ async fn get_vm_metrics_by_tid(
         ..
     }): State<AppData>,
     Path(tid): Path<u64>,
-) -> Response<crate::templatingrt::ThreadMetrics> {
-    let metrics = crate::templatingrt::DEFAULT_THREAD_POOL
+) -> Response<Vec<crate::templatingrt::ThreadMetrics>> {
+    let metrics = crate::templatingrt::POOL
     .get_vm_metrics_by_tid(tid)
     .await
     .map_err(|e| (reqwest::StatusCode::INTERNAL_SERVER_ERROR, e.to_string().into()))?;
@@ -262,7 +243,7 @@ async fn get_vm_metrics_for_all(
         ..
     }): State<AppData>,
 ) -> Response<Vec<crate::templatingrt::ThreadMetrics>> {
-    let metrics = crate::templatingrt::DEFAULT_THREAD_POOL
+    let metrics = crate::templatingrt::POOL
     .get_vm_metrics_for_all()
     .await
     .map_err(|e| (reqwest::StatusCode::INTERNAL_SERVER_ERROR, e.to_string().into()))?;
