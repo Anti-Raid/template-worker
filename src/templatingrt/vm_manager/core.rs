@@ -13,10 +13,8 @@ use khronos_runtime::rt::KhronosRuntimeInterruptData;
 use khronos_runtime::rt::{KhronosRuntimeManager as Krm, IsolateData};
 use khronos_runtime::rt::CreatedKhronosContext;
 use khronos_runtime::rt::RuntimeCreateOpts;
-use khronos_runtime::utils::pluginholder::PluginSet;
 use khronos_runtime::require::FilesystemWrapper;
-use khronos_runtime::TemplateContext;
-use mlua::prelude::*;
+use khronos_runtime::rt::mlua::prelude::*;
 use std::rc::Rc;
 use std::sync::Arc;
 use super::client::{LuaVmAction, LuaVmResult};
@@ -215,9 +213,7 @@ impl LuaVmResult {
 pub(super) fn configure_runtime_manager() -> LuaResult<KhronosRuntimeManager>
 {
     let mut rt = KhronosRuntime::new(
-        khronos_runtime::utils::dummyfeedback::DummyFeedback {},
         RuntimeCreateOpts {
-            disable_scheduler_lib: false,
             disable_task_lib: false,
         },
         Some(|_a: &Lua, b: &KhronosRuntimeInterruptData| {
@@ -231,14 +227,8 @@ pub(super) fn configure_runtime_manager() -> LuaResult<KhronosRuntimeManager>
 
             Ok(LuaVmState::Continue)
         }),
-        None::<(fn(&Lua, LuaThread) -> Result<(), mlua::Error>, fn() -> ())>
+        None::<(fn(&Lua, LuaThread) -> Result<(), LuaError>, fn() -> ())>
     )?;
-
-    rt.load_plugins({
-        let mut pset = PluginSet::new();
-        pset.add_default_plugins::<TemplateContextProvider>();
-        pset
-    })?;
 
     rt.set_memory_limit(MAX_TEMPLATE_MEMORY_USAGE)?;
 
@@ -313,9 +303,7 @@ pub async fn dispatch_event_to_template(
             template.clone(),
         );
 
-        let template_context = TemplateContext::new(provider);
-
-        let created_context = match sub_isolate.create_context(template_context) {
+        let created_context = match sub_isolate.create_context(provider) {
             Ok(ctx) => ctx,
             Err(e) => return (LuaVmResult::LuaError { err: e.to_string() }).log_error_and_warn(&guild_state, &template).await
         };

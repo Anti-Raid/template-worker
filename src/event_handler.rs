@@ -21,7 +21,7 @@ impl Framework for EventFramework {
                 tokio::task::spawn(async move {
                     log::info!("Starting RPC server");
 
-                    let rpc_server = crate::http::create(data1, &ctx1);
+                    let rpc_server = crate::http::create(data1, &ctx1); 
 
                     let opts = rust_rpc_server::CreateRpcServerOptions {
                         bind: rust_rpc_server::CreateRpcServerBind::Address(format!(

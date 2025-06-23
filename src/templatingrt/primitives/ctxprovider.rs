@@ -1,7 +1,8 @@
 use crate::templatingrt::state::GuildState;
 use crate::templatingrt::template::Template;
 use antiraid_types::userinfo::UserInfo;
-use khronos_runtime::traits::context::{ScriptData, KhronosContext};
+use botox::crypto::gen_random;
+use khronos_runtime::traits::context::{CompatibilityFlags, KhronosContext, ScriptData};
 use khronos_runtime::traits::discordprovider::DiscordProvider;
 use khronos_runtime::traits::ir::kv::KvRecord;
 use khronos_runtime::traits::kvprovider::KVProvider;
@@ -12,7 +13,6 @@ use khronos_runtime::traits::scheduledexecprovider::ScheduledExecProvider;
 use khronos_runtime::traits::objectstorageprovider::ObjectStorageProvider;
 use khronos_runtime::traits::datastoreprovider::{DataStoreProvider, DataStoreImpl};
 use khronos_runtime::traits::ir::{ObjectMetadata, ScheduledExecution};
-use khronos_runtime::utils::executorscope::ExecutorScope;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use moka::future::Cache;
 use silverpelt::lockdowns::LockdownData;
@@ -83,7 +83,8 @@ impl TemplateContextProvider {
                     created_by: Some(template_data.created_by),
                     created_at: Some(template_data.created_at),
                     updated_by: Some(template_data.updated_by),
-                    updated_at: Some(template_data.updated_at)
+                    updated_at: Some(template_data.updated_at),
+                    compatibility_flags: CompatibilityFlags::empty()
                 }
             ),
             template_data,
@@ -143,34 +144,21 @@ impl KhronosContext for TemplateContextProvider {
         )
     }
 
-    fn kv_provider(&self, scope: ExecutorScope, kv_scope: &str) -> Option<Self::KVProvider> {
+    fn kv_provider(&self) -> Option<Self::KVProvider> {
         Some(ArKVProvider {
-            guild_id: match scope {
-                ExecutorScope::ThisGuild => self.guild_state.guild_id,
-                ExecutorScope::OwnerGuild => self
-                    .template_data
-                    .shop_owner
-                    .unwrap_or(self.guild_state.guild_id),
-            },
+            guild_id: self.guild_state.guild_id,
             guild_state: self.guild_state.clone(),
-            kv_scope: kv_scope.to_string()
         })
     }
 
-    fn discord_provider(&self, scope: ExecutorScope) -> Option<Self::DiscordProvider> {
+    fn discord_provider(&self) -> Option<Self::DiscordProvider> {
         Some(ArDiscordProvider {
-            guild_id: match scope {
-                ExecutorScope::ThisGuild => self.guild_state.guild_id,
-                ExecutorScope::OwnerGuild => self
-                    .template_data
-                    .shop_owner
-                    .unwrap_or(self.guild_state.guild_id), // TODO: consider if we should support ownerguild scope here
-            },
+            guild_id: self.guild_state.guild_id,
             guild_state: self.guild_state.clone(),
         })
     }
 
-    fn lockdown_provider(&self, _scope: ExecutorScope) -> Option<Self::LockdownProvider> {
+    fn lockdown_provider(&self) -> Option<Self::LockdownProvider> {
         Some(ArLockdownProvider {
             guild_state: self.guild_state.clone(),
             lockdown_data: Rc::new(
@@ -185,28 +173,16 @@ impl KhronosContext for TemplateContextProvider {
         })
     }
 
-    fn userinfo_provider(&self, scope: ExecutorScope) -> Option<Self::UserInfoProvider> {
+    fn userinfo_provider(&self) -> Option<Self::UserInfoProvider> {
         Some(ArUserInfoProvider {
-            guild_id: match scope {
-                ExecutorScope::ThisGuild => self.guild_state.guild_id,
-                ExecutorScope::OwnerGuild => self
-                    .template_data
-                    .shop_owner
-                    .unwrap_or(self.guild_state.guild_id),
-            },
+            guild_id: self.guild_state.guild_id,
             guild_state: self.guild_state.clone(),
         })
     }
 
-    fn page_provider(&self, scope: ExecutorScope) -> Option<Self::PageProvider> {
+    fn page_provider(&self) -> Option<Self::PageProvider> {
         Some(ArPageProvider {
-            guild_id: match scope {
-                ExecutorScope::ThisGuild => self.guild_state.guild_id,
-                ExecutorScope::OwnerGuild => self
-                    .template_data
-                    .shop_owner
-                    .unwrap_or(self.guild_state.guild_id), // TODO: consider if we should support ownerguild scope here
-            },
+            guild_id: self.guild_state.guild_id,
             guild_state: self.guild_state.clone(),
             template_id: self.template_data.name.clone(),
         })
@@ -218,29 +194,17 @@ impl KhronosContext for TemplateContextProvider {
         })
     }
 
-    fn datastore_provider(&self, scope: ExecutorScope) -> Option<Self::DataStoreProvider> {
+    fn datastore_provider(&self) -> Option<Self::DataStoreProvider> {
         Some(ArDataStoreProvider {
-            guild_id: match scope {
-                ExecutorScope::ThisGuild => self.guild_state.guild_id,
-                ExecutorScope::OwnerGuild => self
-                    .template_data
-                    .shop_owner
-                    .unwrap_or(self.guild_state.guild_id),
-            },
+            guild_id: self.guild_state.guild_id,
             guild_state: self.guild_state.clone(),
             datastores: self.datastores.clone(),
         })
     }
 
-    fn objectstorage_provider(&self, scope: ExecutorScope) -> Option<Self::ObjectStorageProvider> {
+    fn objectstorage_provider(&self) -> Option<Self::ObjectStorageProvider> {
         Some(ArObjectStorageProvider {
-            guild_id: match scope {
-                ExecutorScope::ThisGuild => self.guild_state.guild_id,
-                ExecutorScope::OwnerGuild => self
-                    .template_data
-                    .shop_owner
-                    .unwrap_or(self.guild_state.guild_id),
-            },
+            guild_id: self.guild_state.guild_id,
             guild_state: self.guild_state.clone(),
         })
     }
@@ -250,26 +214,25 @@ impl KhronosContext for TemplateContextProvider {
 pub struct ArKVProvider {
     guild_id: serenity::all::GuildId,
     guild_state: Rc<GuildState>,
-    kv_scope: String,
 }
 
 impl KVProvider for ArKVProvider {
-    fn attempt_action(&self, bucket: &str) -> Result<(), silverpelt::Error> {
+    fn attempt_action(&self, _scope: &[String], bucket: &str) -> Result<(), silverpelt::Error> {
         self.guild_state.ratelimits.kv.check(bucket)
     }
 
-    async fn get(&self, key: String) -> Result<Option<KvRecord>, silverpelt::Error> {
+    async fn get(&self, scopes: &[String], key: String) -> Result<Option<KvRecord>, silverpelt::Error> {
         // Check key length
         if key.len() > self.guild_state.kv_constraints.max_key_length {
             return Err("Key length too long".into());
         }
 
         let rec = sqlx::query(
-            "SELECT value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scope = $3",
+            "SELECT id, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
         )
         .bind(self.guild_id.to_string())
         .bind(&key)
-        .bind(&self.kv_scope)
+        .bind(scopes)
         .fetch_optional(&self.guild_state.pool)
         .await?;
 
@@ -278,7 +241,9 @@ impl KVProvider for ArKVProvider {
         };
 
         Ok(Some(KvRecord {
+            id: rec.try_get::<String, _>("id")?,
             key,
+            scopes: rec.try_get::<Vec<String>, _>("scopes")?,
             value: {
                 let value = rec
                 .try_get::<Option<serde_json::Value>, _>("value")?
@@ -293,7 +258,11 @@ impl KVProvider for ArKVProvider {
     }
 
     async fn list_scopes(&self) -> Result<Vec<String>, silverpelt::Error> {
-        let rec = sqlx::query("SELECT scope FROM guild_templates_kv WHERE guild_id = $1 GROUP BY scope")
+        let rec = sqlx::query(
+            "SELECT DISTINCT unnest_scope AS scope
+FROM guild_templates_kv, unnest(scopes) AS unnest_scope
+ORDER BY scope"
+        )
             .bind(self.guild_id.to_string())
             .fetch_all(&self.guild_state.pool)
             .await?;
@@ -307,7 +276,7 @@ impl KVProvider for ArKVProvider {
         Ok(scopes)
     }
 
-    async fn set(&self, key: String, data: KhronosValue) -> Result<(), silverpelt::Error> {
+    async fn set(&self, scopes: &[String], key: String, data: KhronosValue) -> Result<(), silverpelt::Error> {
         // Check key length
         if key.len() > self.guild_state.kv_constraints.max_key_length {
             return Err("Key length too long".into());
@@ -322,73 +291,100 @@ impl KVProvider for ArKVProvider {
 
         let mut tx = self.guild_state.pool.begin().await?;
 
-        let rec: i64 = sqlx::query("SELECT COUNT(*) FROM guild_templates_kv WHERE guild_id = $1 AND scope = $2")
+        let curr_id = {
+            let row = sqlx::query(
+                "SELECT id FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
+            )
             .bind(self.guild_id.to_string())
-            .bind(&self.kv_scope)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| e.to_string())?
-            .try_get::<Option<i64>, _>("count")?
-            .unwrap_or_default();
+            .bind(&key)
+            .bind(scopes)
+            .fetch_optional(&mut *tx)
+            .await?;
 
-        if rec
-            >= TryInto::<i64>::try_into(
-                self.guild_state.kv_constraints.max_keys,
-            )?
-        {
-            return Err("Max keys limit reached".into());
+            match row {
+                Some(row) => Some(row.try_get::<String, _>("id")?),
+                None => None,
+            }
+        };
+    
+        if let Some(curr_id) = curr_id {
+            // Update existing record
+            sqlx::query(
+                "UPDATE guild_templates_kv SET value = $1, last_updated_at = NOW() WHERE id = $2",
+            )
+            .bind(serde_json::to_value(data)?)
+            .bind(curr_id)
+            .execute(&mut *tx)
+            .await?;
+        } else {
+            // Insert new record
+            sqlx::query(
+                "INSERT INTO guild_templates_kv (id, guild_id, key, value, scopes) VALUES ($1, $2, $3, $4, $5)",
+            )
+            .bind(gen_random(64))
+            .bind(self.guild_id.to_string())
+            .bind(key)
+            .bind(serde_json::to_value(data)?)
+            .bind(scopes)
+            .execute(&mut *tx)
+            .await?;
         }
-
-        sqlx::query(
-            "INSERT INTO guild_templates_kv (guild_id, key, value, scope) VALUES ($1, $2, $3, $4) ON CONFLICT (guild_id, key, scope) DO UPDATE SET value = $3, last_updated_at = NOW()",
-        )
-        .bind(self.guild_id.to_string())
-        .bind(key)
-        .bind(serde_json::to_value(data)?)
-        .bind(&self.kv_scope)
-        .execute(&mut *tx)
-        .await?;
 
         tx.commit().await?;
 
         Ok(())
     }
 
-    async fn delete(&self, key: String) -> Result<(), silverpelt::Error> {
+    async fn delete(&self, scopes: &[String], key: String) -> Result<(), silverpelt::Error> {
         // Check key length
         if key.len() > self.guild_state.kv_constraints.max_key_length {
             return Err("Key length too long".into());
         }
 
-        sqlx::query("DELETE FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scope = $3")
+        sqlx::query("DELETE FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3")
             .bind(self.guild_id.to_string())
             .bind(key)
-            .bind(&self.kv_scope)
+            .bind(scopes)
             .execute(&self.guild_state.pool)
             .await?;
 
         Ok(())
     }
 
-    async fn find(&self, query: String) -> Result<Vec<KvRecord>, silverpelt::Error> {
+    async fn find(&self, scopes: &[String], query: String) -> Result<Vec<KvRecord>, silverpelt::Error> {
         // Check key length
         if query.len() > self.guild_state.kv_constraints.max_key_length {
             return Err("Query length too long".into());
         }
 
-        let rec = sqlx::query(
-            "SELECT key, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND scope = $2 AND key ILIKE $3",
-        )
-        .bind(self.guild_id.to_string())
-        .bind(&self.kv_scope)
-        .bind(query)
-        .fetch_all(&self.guild_state.pool)
-        .await?;
+        let rec = {
+            if query == "%%" {
+                // Fast path, omit ILIKE if '%%' is used
+                sqlx::query(
+                    "SELECT id, key, value, created_at, last_updated_at, scopes FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2",
+                )
+                .bind(self.guild_id.to_string())
+                .bind(scopes)
+                .fetch_all(&self.guild_state.pool)
+                .await?
+            } else {
+                sqlx::query(
+                    "SELECT id, key, value, created_at, last_updated_at, scopes FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2 AND key ILIKE $3",
+                )
+                .bind(self.guild_id.to_string())
+                .bind(scopes)
+                .bind(query)
+                .fetch_all(&self.guild_state.pool)
+                .await?    
+            }
+        };
 
         let mut records = vec![];
 
         for rec in rec {
             let record = KvRecord {
+                id: rec.try_get::<String, _>("id")?,
+                scopes: rec.try_get::<Vec<String>, _>("scopes")?,
                 key: rec.try_get("key")?,
                 value: {
                     let rec = rec
@@ -408,29 +404,28 @@ impl KVProvider for ArKVProvider {
         Ok(records)
     }
 
-    async fn exists(&self, key: String) -> Result<bool, silverpelt::Error> {
+    async fn exists(&self, scopes: &[String], key: String) -> Result<bool, silverpelt::Error> {
         // Check key length
         if key.len() > self.guild_state.kv_constraints.max_key_length {
             return Err("Key length too long".into());
         }
 
         let rec =
-            sqlx::query("SELECT COUNT(*) FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scope = $3")
+            sqlx::query("SELECT id FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3")
                 .bind(self.guild_id.to_string())
                 .bind(key)
-                .bind(&self.kv_scope)
-                .fetch_one(&self.guild_state.pool)
+                .bind(scopes)
+                .fetch_optional(&self.guild_state.pool)
                 .await?
-                .try_get::<Option<i64>, _>("count")?
-                .unwrap_or_default();
+                .is_some();
 
-        Ok(rec > 0)
+        Ok(rec)
     }
 
-    async fn keys(&self) -> Result<Vec<String>, silverpelt::Error> {
-        let rec = sqlx::query("SELECT key FROM guild_templates_kv WHERE guild_id = $1 AND scope = $2")
+    async fn keys(&self, scopes: &[String]) -> Result<Vec<String>, silverpelt::Error> {
+        let rec = sqlx::query("SELECT key FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2")
             .bind(self.guild_id.to_string())
-            .bind(&self.kv_scope)
+            .bind(scopes)
             .fetch_all(&self.guild_state.pool)
             .await?;
 

@@ -3,7 +3,6 @@ use tokio::sync::mpsc::UnboundedSender;
 use std::sync::RwLock as StdRwLock;
 use crate::templatingrt::state::CreateGuildState;
 use crate::config::VmDistributionStrategy;
-use futures::StreamExt;
 use super::sharedguild::SharedGuild;
 use super::threadentry::ThreadEntry;
 use crate::templatingrt::vm_manager::ThreadRequest;

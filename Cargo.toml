@@ -24,7 +24,6 @@ clap = { version = "4.5.16", features = ["derive"] }
 moka = { version = "0.12", features = ["future", "futures-util", "sync"] }
 indexmap = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["serde", "v4"] }
-mlua = { git = "https://github.com/Anti-Raid/mlua", features = ["luau", "serialize", "macros"] }
 antiraid-types = { git = "https://github.com/anti-raid/antiraid-types" }
 ar_settings = { git = "https://github.com/anti-raid/settings" }
 khronos_runtime = { git = "https://github.com/anti-raid/khronos" }
