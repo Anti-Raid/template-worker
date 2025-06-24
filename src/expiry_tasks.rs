@@ -17,6 +17,11 @@ pub async fn key_expiry_task(ctx: serenity::all::client::Context) -> ! {
     ) -> Result<(), silverpelt::Error> {
         let tevent = parse_event(&event)?;
 
+        log::info!(
+            "Dispatching key expiry event: {} and scopes {:?}",
+            tevent.name(),
+            scopes
+        );
         dispatch_scoped(serenity_context, data, tevent, scopes, guild_id).await?;
 
         Ok(())
@@ -38,6 +43,7 @@ pub async fn key_expiry_task(ctx: serenity::all::client::Context) -> ! {
             set.spawn(async move {
                 match event_listener(guild_id, &expired_task.scopes, &data, event, &ctx).await {
                     Ok(_) => {
+                        log::info!("Expiring key: {}", expired_task.key);
                         match remove_key_expiry(guild_id, &expired_task.id, &data.pool).await {
                             Ok(_) => {}
                             Err(e) => {

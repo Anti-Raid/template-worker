@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use crate::templatingrt::cache::{
-    has_templates, has_templates_with_event, has_templates_with_event_scoped,
-};
+use crate::templatingrt::cache::{get_templates_with_event, get_templates_with_event_scoped};
 use crate::templatingrt::{execute, CreateGuildState, LuaVmAction};
 use antiraid_types::ar_event::AntiraidEvent;
 use khronos_runtime::primitives::event::CreateEvent;
@@ -115,7 +113,8 @@ pub async fn dispatch(
     event: CreateEvent,
     guild_id: GuildId,
 ) -> Result<(), silverpelt::Error> {
-    if !has_templates_with_event(guild_id, &event).await {
+    let matching = get_templates_with_event(guild_id, &event).await;
+    if matching.is_empty() {
         if event.name() == "INTERACTION_CREATE" {
             log::debug!("No templates for event: {}", event.name());
         }
@@ -130,7 +129,10 @@ pub async fn dispatch(
             reqwest_client: data.reqwest.clone(),
             object_store: data.object_store.clone(),
         },
-        LuaVmAction::DispatchEvent { event },
+        LuaVmAction::DispatchEvent {
+            event,
+            templates: matching,
+        },
     )
     .await?;
 
@@ -144,10 +146,9 @@ pub async fn dispatch_scoped(
     scopes: &[String],
     guild_id: GuildId,
 ) -> Result<(), silverpelt::Error> {
-    if !has_templates_with_event_scoped(guild_id, &event, scopes).await {
-        if event.name() == "INTERACTION_CREATE" {
-            log::debug!("No templates for event: {}", event.name());
-        }
+    let matching = get_templates_with_event_scoped(guild_id, &event, scopes).await;
+    if matching.is_empty() {
+        log::debug!("No templates for event: {}", event.name());
         return Ok(());
     };
 
@@ -159,35 +160,9 @@ pub async fn dispatch_scoped(
             reqwest_client: data.reqwest.clone(),
             object_store: data.object_store.clone(),
         },
-        LuaVmAction::DispatchEvent { event },
-    )
-    .await?;
-
-    Ok(())
-}
-
-pub async fn dispatch_to_template(
-    ctx: &Context,
-    data: &Data,
-    event: CreateEvent,
-    guild_id: GuildId,
-    template_name: String,
-) -> Result<(), silverpelt::Error> {
-    if !has_templates(guild_id) {
-        return Ok(());
-    };
-
-    execute(
-        guild_id,
-        CreateGuildState {
-            serenity_context: ctx.clone(),
-            pool: data.pool.clone(),
-            reqwest_client: data.reqwest.clone(),
-            object_store: data.object_store.clone(),
-        },
-        LuaVmAction::DispatchTemplateEvent {
+        LuaVmAction::DispatchEvent {
             event,
-            template_name,
+            templates: matching,
         },
     )
     .await?;
@@ -203,7 +178,8 @@ pub async fn dispatch_and_wait(
     guild_id: GuildId,
     wait_timeout: std::time::Duration,
 ) -> Result<HashMap<String, serde_json::Value>, silverpelt::Error> {
-    if !has_templates(guild_id) {
+    let matching = get_templates_with_event(guild_id, &event).await;
+    if matching.is_empty() {
         return Ok(HashMap::new());
     };
 
@@ -215,53 +191,9 @@ pub async fn dispatch_and_wait(
             reqwest_client: data.reqwest.clone(),
             object_store: data.object_store.clone(),
         },
-        LuaVmAction::DispatchEvent { event },
-    )
-    .await?;
-
-    let result_handle = match handle.wait_timeout(wait_timeout).await {
-        Ok(Some(action)) => action,
-        Ok(None) => return Err("Timed out while waiting for response".into()),
-        Err(e) => return Err(e.to_string().into()),
-    };
-
-    let mut results = HashMap::with_capacity(result_handle.results.len());
-
-    for result in result_handle.results {
-        let name = result.template_name.clone();
-        if let Ok(value) = result.into_response::<serde_json::Value>() {
-            results.insert(name, value);
-        }
-    }
-
-    Ok(results)
-}
-
-#[allow(dead_code)]
-/// Dispatches a template event to all templates, waiting for the response and returning it
-pub async fn dispatch_to_template_and_wait(
-    ctx: &Context,
-    data: &Data,
-    event: CreateEvent,
-    guild_id: GuildId,
-    template_name: String,
-    wait_timeout: std::time::Duration,
-) -> Result<HashMap<String, serde_json::Value>, silverpelt::Error> {
-    if !has_templates(guild_id) {
-        return Ok(HashMap::new());
-    };
-
-    let handle = execute(
-        guild_id,
-        CreateGuildState {
-            serenity_context: ctx.clone(),
-            pool: data.pool.clone(),
-            reqwest_client: data.reqwest.clone(),
-            object_store: data.object_store.clone(),
-        },
-        LuaVmAction::DispatchTemplateEvent {
+        LuaVmAction::DispatchEvent {
             event,
-            template_name,
+            templates: matching,
         },
     )
     .await?;

@@ -76,41 +76,54 @@ pub fn has_templates(guild_id: GuildId) -> bool {
     TEMPLATES_CACHE.contains_key(&guild_id)
 }
 
-pub async fn has_templates_with_event(guild_id: GuildId, event: &CreateEvent) -> bool {
+pub async fn get_templates_with_event(
+    guild_id: GuildId,
+    event: &CreateEvent,
+) -> Vec<Arc<Template>> {
     if let Some(templates) = TEMPLATES_CACHE.get(&guild_id).await {
         // `templates` should have $test_base injected into it, so this is a simple for loop
+        let mut matching_templates = Vec::with_capacity(templates.len());
         for template in templates.iter() {
             if template.should_dispatch(event) {
-                return true;
+                matching_templates.push(template.clone());
             }
         }
-        return false;
+        return matching_templates;
     } else {
         if USE_TEST_BASE {
-            return TEST_BASE.should_dispatch(event);
+            if TEST_BASE.should_dispatch(event) {
+                let mut templates = Vec::with_capacity(1);
+                templates.push(TEST_BASE.clone());
+                return templates;
+            }
         }
-        return false;
+        return Vec::with_capacity(0);
     }
 }
 
-pub async fn has_templates_with_event_scoped(
+pub async fn get_templates_with_event_scoped(
     guild_id: GuildId,
     event: &CreateEvent,
     scopes: &[String],
-) -> bool {
+) -> Vec<Arc<Template>> {
     if let Some(templates) = TEMPLATES_CACHE.get(&guild_id).await {
         // `templates` should have $test_base injected into it, so this is a simple for loop
+        let mut matching_templates = Vec::with_capacity(templates.len());
         for template in templates.iter() {
             if template.should_dispatch_scoped(event, scopes) {
-                return true;
+                matching_templates.push(template.clone());
             }
         }
-        return false;
+        return matching_templates;
     } else {
         if USE_TEST_BASE {
-            return TEST_BASE.should_dispatch_scoped(event, scopes);
+            if TEST_BASE.should_dispatch_scoped(event, scopes) {
+                let mut templates = Vec::with_capacity(1);
+                templates.push(TEST_BASE.clone());
+                return templates;
+            }
         }
-        return false;
+        return Vec::with_capacity(0);
     }
 }
 

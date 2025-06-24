@@ -1,18 +1,17 @@
 //! Client side abstraction for the inner Lua VM
 
-use std::sync::Arc;
-use khronos_runtime::primitives::event::CreateEvent;
 use crate::templatingrt::template::Template;
+use khronos_runtime::primitives::event::CreateEvent;
+use std::sync::Arc;
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub enum LuaVmAction { // tells what action the thread should apply to the guild 
+pub enum LuaVmAction {
+    // tells what action the thread should apply to the guild
     /// Dispatch a template event to all templates
     /// template is a script that can be run on a server based on events
-    DispatchEvent { event: CreateEvent },
-    /// Dispatch a template event to a specific template
-    DispatchTemplateEvent {
+    DispatchEvent {
         event: CreateEvent,
-        template_name: String,
+        templates: Vec<Arc<Template>>,
     },
     /// Dispatch a template event to an inline template
     DispatchInlineEvent {

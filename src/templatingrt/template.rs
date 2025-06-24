@@ -122,7 +122,10 @@ impl Template {
         for scope in scopes {
             if self
                 .events
-                .contains(&format!("{}[{}]", event.base_name(), scope))
+                .contains(&format!("{}[{}]", event.name(), scope))
+                || self
+                    .events
+                    .contains(&format!("{}[{}]", event.base_name(), scope))
             {
                 return true;
             }
