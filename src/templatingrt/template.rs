@@ -1,10 +1,10 @@
 use std::str::FromStr;
 
+use super::cache::{TEST_BASE, TEST_BASE_NAME, USE_TEST_BASE};
 use khronos_runtime::primitives::event::CreateEvent;
+use rust_embed::Embed;
 use silverpelt::templates::parse_shop_template;
 use silverpelt::Error;
-use super::cache::{TEST_BASE_NAME, TEST_BASE, USE_TEST_BASE};
-use rust_embed::Embed;
 
 /// To make uploads not need to upload all of ``templating-types`` and keep them up to date:
 #[derive(Embed, Debug)]
@@ -117,6 +117,20 @@ impl Template {
             || self.events.contains(&event.base_name().to_string())
     }
 
+    /// Returns true if a scoped event should be dispatched to the template
+    pub fn should_dispatch_scoped(&self, event: &CreateEvent, scopes: &[String]) -> bool {
+        for scope in scopes {
+            if self
+                .events
+                .contains(&format!("{}[{}]", event.base_name(), scope))
+            {
+                return true;
+            }
+        }
+
+        self.should_dispatch(event)
+    }
+
     /// Returns all templates for a guild
     pub async fn guild(
         guild_id: serenity::all::GuildId,
@@ -181,8 +195,8 @@ impl Template {
                     content: {
                         let content: std::collections::HashMap<String, String> =
                             serde_json::from_value(shop_data.content)?;
-                        
-                            khronos_runtime::utils::memoryvfs::create_memory_vfs_from_map(content)
+
+                        khronos_runtime::utils::memoryvfs::create_memory_vfs_from_map(content)
                             .map_err(|e| {
                                 Error::from(format!("Failed to create vfs from map: {e}"))
                             })?
@@ -198,12 +212,10 @@ impl Template {
                     TEST_BASE.content.clone()
                 } else {
                     let content: std::collections::HashMap<String, String> =
-                    serde_json::from_value(template.content)?;
-                
+                        serde_json::from_value(template.content)?;
+
                     khronos_runtime::utils::memoryvfs::create_memory_vfs_from_map(content)
-                        .map_err(|e| {
-                            Error::from(format!("Failed to create vfs from map: {e}"))
-                        })?
+                        .map_err(|e| Error::from(format!("Failed to create vfs from map: {e}")))?
                 };
 
                 result.push(Self {
@@ -234,16 +246,23 @@ impl Template {
     }
 
     pub fn prepare_ready_fs(&mut self) {
-        let prepped_fs = if self.allowed_caps.contains(&"assetmanager:use_bundled_templating_types".to_string()) {
+        let prepped_fs = if self
+            .allowed_caps
+            .contains(&"assetmanager:use_bundled_templating_types".to_string())
+        {
             ConstructedFS::Overlay(vfs::OverlayFS::new(&vec![
                 self.content.clone().into(),
-                vfs::EmbeddedFS::<TemplatingTypes>::new().into()
-            ]))  
+                vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
+            ]))
         } else {
             ConstructedFS::Memory(self.content.clone())
         };
 
-        log::trace!("Prepared ready fs for template {}: {:?}", self.name, prepped_fs);
+        log::trace!(
+            "Prepared ready fs for template {}: {:?}",
+            self.name,
+            prepped_fs
+        );
         self.ready_fs = Some(prepped_fs);
     }
 }

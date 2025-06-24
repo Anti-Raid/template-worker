@@ -301,7 +301,7 @@ impl ThreadEntry {
                                 }
 
                                 log::debug!("Closing thread: {}", tid);
-                                sg.remove_thread_entry(&self_ref);
+                                let _ = sg.remove_thread_entry(&self_ref);
                                 return;
                             },
                             ThreadRequest::GetVmMetrics { tx } => {

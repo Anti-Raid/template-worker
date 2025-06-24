@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
-use crate::templatingrt::cache::{has_templates, has_templates_with_event};
-use crate::templatingrt::{execute, LuaVmAction, CreateGuildState};
+use crate::templatingrt::cache::{
+    has_templates, has_templates_with_event, has_templates_with_event_scoped,
+};
+use crate::templatingrt::{execute, CreateGuildState, LuaVmAction};
 use antiraid_types::ar_event::AntiraidEvent;
 use khronos_runtime::primitives::event::CreateEvent;
 use serenity::all::{Context, FullEvent, GuildId, Interaction};
@@ -135,6 +137,35 @@ pub async fn dispatch(
     Ok(())
 }
 
+pub async fn dispatch_scoped(
+    ctx: &Context,
+    data: &Data,
+    event: CreateEvent,
+    scopes: &[String],
+    guild_id: GuildId,
+) -> Result<(), silverpelt::Error> {
+    if !has_templates_with_event_scoped(guild_id, &event, scopes).await {
+        if event.name() == "INTERACTION_CREATE" {
+            log::debug!("No templates for event: {}", event.name());
+        }
+        return Ok(());
+    };
+
+    execute(
+        guild_id,
+        CreateGuildState {
+            serenity_context: ctx.clone(),
+            pool: data.pool.clone(),
+            reqwest_client: data.reqwest.clone(),
+            object_store: data.object_store.clone(),
+        },
+        LuaVmAction::DispatchEvent { event },
+    )
+    .await?;
+
+    Ok(())
+}
+
 pub async fn dispatch_to_template(
     ctx: &Context,
     data: &Data,
@@ -154,7 +185,10 @@ pub async fn dispatch_to_template(
             reqwest_client: data.reqwest.clone(),
             object_store: data.object_store.clone(),
         },
-        LuaVmAction::DispatchTemplateEvent { event, template_name },
+        LuaVmAction::DispatchTemplateEvent {
+            event,
+            template_name,
+        },
     )
     .await?;
 
@@ -225,7 +259,10 @@ pub async fn dispatch_to_template_and_wait(
             reqwest_client: data.reqwest.clone(),
             object_store: data.object_store.clone(),
         },
-        LuaVmAction::DispatchTemplateEvent { event, template_name },
+        LuaVmAction::DispatchTemplateEvent {
+            event,
+            template_name,
+        },
     )
     .await?;
 

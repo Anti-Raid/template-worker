@@ -1,15 +1,15 @@
 use super::template::Template;
-use super::{ThreadRequest, LuaVmAction, RenderTemplateHandle, MAX_TEMPLATES_RETURN_WAIT_TIME};
+use super::{LuaVmAction, RenderTemplateHandle, ThreadRequest, MAX_TEMPLATES_RETURN_WAIT_TIME};
+use crate::dispatch::parse_event;
+use antiraid_types::ar_event::AntiraidEvent;
+use khronos_runtime::primitives::event::CreateEvent;
 use moka::future::Cache;
 use serenity::all::GuildId;
+use silverpelt::data::Data;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
-use khronos_runtime::primitives::event::CreateEvent;
-use antiraid_types::ar_event::AntiraidEvent;
-use crate::dispatch::parse_event;
 use vfs::FileSystem;
-use silverpelt::data::Data;
 
 // Test base will be used for builtins in the future
 
@@ -43,15 +43,15 @@ pub static TEST_BASE_ARC_VEC: LazyLock<Arc<Vec<Arc<Template>>>> =
 pub const USE_TEST_BASE: bool = true;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct ScheduledExecution {
-    pub template_name: String,
+pub struct KeyExpiry {
     pub id: String,
-    pub data: serde_json::Value,
-    pub run_at: chrono::DateTime<chrono::Utc>,
+    pub key: String,
+    pub scopes: Vec<String>,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// This should be in descending order of run_at
-pub static SCHEDULED_EXECUTIONS: LazyLock<Cache<GuildId, Arc<Vec<Arc<ScheduledExecution>>>>> =
+/// This should be in descending order of expires_at
+pub static KEY_EXPIRIES: LazyLock<Cache<GuildId, Arc<Vec<Arc<KeyExpiry>>>>> =
     LazyLock::new(|| Cache::builder().build());
 
 pub static TEMPLATES_CACHE: LazyLock<Cache<GuildId, Arc<Vec<Arc<Template>>>>> =
@@ -76,10 +76,7 @@ pub fn has_templates(guild_id: GuildId) -> bool {
     TEMPLATES_CACHE.contains_key(&guild_id)
 }
 
-pub async fn has_templates_with_event(
-    guild_id: GuildId,
-    event: &CreateEvent,
-) -> bool {
+pub async fn has_templates_with_event(guild_id: GuildId, event: &CreateEvent) -> bool {
     if let Some(templates) = TEMPLATES_CACHE.get(&guild_id).await {
         // `templates` should have $test_base injected into it, so this is a simple for loop
         for template in templates.iter() {
@@ -91,7 +88,28 @@ pub async fn has_templates_with_event(
     } else {
         if USE_TEST_BASE {
             return TEST_BASE.should_dispatch(event);
-        }    
+        }
+        return false;
+    }
+}
+
+pub async fn has_templates_with_event_scoped(
+    guild_id: GuildId,
+    event: &CreateEvent,
+    scopes: &[String],
+) -> bool {
+    if let Some(templates) = TEMPLATES_CACHE.get(&guild_id).await {
+        // `templates` should have $test_base injected into it, so this is a simple for loop
+        for template in templates.iter() {
+            if template.should_dispatch_scoped(event, scopes) {
+                return true;
+            }
+        }
+        return false;
+    } else {
+        if USE_TEST_BASE {
+            return TEST_BASE.should_dispatch_scoped(event, scopes);
+        }
         return false;
     }
 }
@@ -113,15 +131,15 @@ pub async fn get_all_guild_templates(guild_id: GuildId) -> Option<Arc<Vec<Arc<Te
     }
 }
 
-/// Gets all expired scheduled executions across all guilds
-pub fn get_all_expired_scheduled_executions() -> Vec<(serenity::all::GuildId, Arc<ScheduledExecution>)> {
+/// Gets all expired keys across all guilds
+pub fn get_all_expired_keys() -> Vec<(serenity::all::GuildId, Arc<KeyExpiry>)> {
     let mut expired = Vec::new();
 
     let now = chrono::Utc::now();
-    for (guild_id, executions) in SCHEDULED_EXECUTIONS.iter() {
-        for execution in executions.iter() {
-            if execution.run_at <= now {
-                expired.push((*guild_id, execution.clone()));
+    for (guild_id, expiries) in KEY_EXPIRIES.iter() {
+        for expiry in expiries.iter() {
+            if expiry.expires_at <= now {
+                expired.push((*guild_id, expiry.clone()));
             }
         }
     }
@@ -153,10 +171,10 @@ pub async fn get_guild_template(guild_id: GuildId, name: &str) -> Option<Arc<Tem
     }
 }
 
-/// Sets up the initial template and scheduled execution cache
+/// Sets up the initial template and key expiry cache
 pub async fn setup(pool: &sqlx::PgPool) -> Result<(), silverpelt::Error> {
     get_all_templates_from_db(pool).await?;
-    get_all_scheduled_executions_from_db(pool).await?;
+    get_all_key_expiries_from_db(pool).await?;
     Ok(())
 }
 
@@ -169,15 +187,16 @@ pub async fn regenerate_cache(
 ) -> Result<(), silverpelt::Error> {
     println!("Clearing cache for guild {}", guild_id);
 
-    SCHEDULED_EXECUTIONS.remove(&guild_id).await;
+    KEY_EXPIRIES.remove(&guild_id).await;
 
     // NOTE: if this call fails, bail out early and don't clear the cache to ensure old code at least runs
     let templates = get_all_guild_templates_from_db(
-        guild_id, 
-        &data.pool, 
-        TEMPLATES_CACHE.remove(&guild_id).await
-    ).await?;
-    get_all_guild_scheduled_executions_from_db(guild_id, &data.pool).await?;
+        guild_id,
+        &data.pool,
+        TEMPLATES_CACHE.remove(&guild_id).await,
+    )
+    .await?;
+    get_all_guild_key_expiries_from_db(guild_id, &data.pool).await?;
 
     println!("Resyncing VMs");
 
@@ -209,22 +228,15 @@ pub async fn regenerate_cache(
     if resync {
         // Dispatch OnStartup events to all templates
         let templates = templates.iter().map(|t| t.name.clone()).collect();
-        let create_event =
-            match parse_event(&AntiraidEvent::OnStartup(templates)) {
-                Ok(e) => e,
-                Err(e) => {
-                    log::error!("Error parsing event: {:?}", e);
-                    return Ok(());
-                }
-            };
+        let create_event = match parse_event(&AntiraidEvent::OnStartup(templates)) {
+            Ok(e) => e,
+            Err(e) => {
+                log::error!("Error parsing event: {:?}", e);
+                return Ok(());
+            }
+        };
 
-        crate::dispatch::dispatch(
-            context,
-            data,
-            create_event,
-            guild_id,
-        )
-        .await?;
+        crate::dispatch::dispatch(context, data, create_event, guild_id).await?;
     }
 
     Ok(())
@@ -241,7 +253,8 @@ async fn get_all_templates_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt
             .fetch_all(pool)
             .await?;
 
-    let mut templates: HashMap<serenity::all::GuildId, Vec<Arc<Template>>> = HashMap::with_capacity(partials.len());
+    let mut templates: HashMap<serenity::all::GuildId, Vec<Arc<Template>>> =
+        HashMap::with_capacity(partials.len());
 
     for partial in partials {
         let guild_id = partial.guild_id.parse()?;
@@ -253,18 +266,20 @@ async fn get_all_templates_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt
                 let mut templates_found = Vec::with_capacity(templates_vec.len());
                 let mut found_base = false;
                 for template in templates_vec.into_iter() {
-                    let mut template = template; // Make sure we mutably own 
+                    let mut template = template; // Make sure we mutably own
                     if template.name == TEST_BASE_NAME {
                         found_base = true; // Mark that we have found the base template already
                     }
 
-                    // Get the content of old template 
+                    // Get the content of old template
                     // TODO: Optimize this logic maybe?
                     if let Some(ref old_templates) = old_templates {
                         for old_template in old_templates.iter() {
                             if template.name == old_template.name {
                                 // Copy over filesystem ref and make them point to the same thing
-                                old_template.content.take_from_filesystem(&template.content)?; // Propogate error upwards as this should never happen outside of poisoned RwLock
+                                old_template
+                                    .content
+                                    .take_from_filesystem(&template.content)?; // Propogate error upwards as this should never happen outside of poisoned RwLock
                                 template.content = old_template.content.clone();
                                 break;
                             }
@@ -296,44 +311,43 @@ async fn get_all_templates_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt
     Ok(())
 }
 
-async fn get_all_scheduled_executions_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt::Error> {
+async fn get_all_key_expiries_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt::Error> {
     #[derive(sqlx::FromRow)]
-    struct ScheduledExecutionPartial {
+    struct KeyExpiryPartial {
         guild_id: String,
-        template_name: String,
-        exec_id: String,
-        data: serde_json::Value,
-        run_at: chrono::DateTime<chrono::Utc>,
+        id: String,
+        key: String,
+        scopes: Vec<String>,
+        expires_at: chrono::DateTime<chrono::Utc>,
     }
 
-    let partials: Vec<ScheduledExecutionPartial> =
-        sqlx::query_as("SELECT guild_id, exec_id, data, run_at, template_name FROM scheduled_executions ORDER BY run_at DESC")
+    let partials: Vec<KeyExpiryPartial> =
+        sqlx::query_as("SELECT guild_id, id, key, scopes, expires_at FROM guild_templates_kv WHERE expires_at IS NOT NULL ORDER BY expires_at DESC")
             .fetch_all(pool)
             .await?;
 
-    let mut executions: HashMap<serenity::all::GuildId, Vec<Arc<ScheduledExecution>>> =
-        HashMap::new();
+    let mut expiries: HashMap<serenity::all::GuildId, Vec<Arc<KeyExpiry>>> = HashMap::new();
 
     for partial in partials {
         let guild_id = partial.guild_id.parse()?;
 
-        let execution = Arc::new(ScheduledExecution {
-            id: partial.exec_id,
-            template_name: partial.template_name,
-            data: partial.data,
-            run_at: partial.run_at,
+        let expiry = Arc::new(KeyExpiry {
+            id: partial.id,
+            key: partial.key,
+            scopes: partial.scopes,
+            expires_at: partial.expires_at,
         });
 
-        if let Some(executions_vec) = executions.get_mut(&guild_id) {
-            executions_vec.push(execution);
+        if let Some(expiries_vec) = expiries.get_mut(&guild_id) {
+            expiries_vec.push(expiry);
         } else {
-            executions.insert(guild_id, vec![execution]);
+            expiries.insert(guild_id, vec![expiry]);
         }
     }
 
     // Store the executions in the cache
-    for (guild_id, executions) in executions {
-        SCHEDULED_EXECUTIONS.insert(guild_id, executions.into()).await;
+    for (guild_id, expiry) in expiries {
+        KEY_EXPIRIES.insert(guild_id, expiry.into()).await;
     }
 
     Ok(())
@@ -355,7 +369,9 @@ async fn get_all_guild_templates_from_db(
             for old_template in old_templates.iter() {
                 if template.name == old_template.name {
                     // Copy over filesystem ref and make them point to the same thing
-                    old_template.content.take_from_filesystem(&template.content)?;
+                    old_template
+                        .content
+                        .take_from_filesystem(&template.content)?;
                     template.content = old_template.content.clone();
                     break;
                 }
@@ -393,20 +409,20 @@ async fn get_all_guild_templates_from_db(
     Ok(templates)
 }
 
-pub async fn get_all_guild_scheduled_executions_from_db(
+pub async fn get_all_guild_key_expiries_from_db(
     guild_id: GuildId,
     pool: &sqlx::PgPool,
 ) -> Result<(), silverpelt::Error> {
     #[derive(sqlx::FromRow)]
-    struct ScheduledExecutionPartial {
-        exec_id: String,
-        template_name: String,
-        data: serde_json::Value,
-        run_at: chrono::DateTime<chrono::Utc>,
+    struct KeyExpiryPartial {
+        id: String,
+        key: String,
+        scopes: Vec<String>,
+        expires_at: chrono::DateTime<chrono::Utc>,
     }
 
-    let executions_vec: Vec<ScheduledExecutionPartial> = sqlx::query_as(
-        "SELECT exec_id, template_name, data, run_at FROM scheduled_executions WHERE guild_id = $1 ORDER BY run_at DESC",
+    let executions_vec: Vec<KeyExpiryPartial> = sqlx::query_as(
+        "SELECT id, key, scopes, expires_at FROM guild_templates_kv WHERE guild_id = $1 AND expires_at IS NOT NULL ORDER BY expires_at DESC",
     )
     .bind(guild_id.to_string())
     .fetch_all(pool)
@@ -414,35 +430,35 @@ pub async fn get_all_guild_scheduled_executions_from_db(
 
     let executions_vec = executions_vec
         .into_iter()
-        .map(|partial| Arc::new(ScheduledExecution {
-            id: partial.exec_id,
-            template_name: partial.template_name,
-            data: partial.data,
-            run_at: partial.run_at,
-        }))
+        .map(|partial| {
+            Arc::new(KeyExpiry {
+                id: partial.id,
+                key: partial.key,
+                scopes: partial.scopes,
+                expires_at: partial.expires_at,
+            })
+        })
         .collect::<Vec<_>>();
 
     // Store the executions in the cache
-    SCHEDULED_EXECUTIONS.insert(guild_id, executions_vec.into()).await;
+    KEY_EXPIRIES.insert(guild_id, executions_vec.into()).await;
     Ok(())
 }
 
-/// Removes all scheduled execution with the given ID
-pub async fn remove_scheduled_execution(
+/// Removes keys with the given ID
+pub async fn remove_key_expiry(
     guild_id: serenity::all::GuildId,
     id: &str,
     pool: &sqlx::PgPool,
 ) -> Result<(), silverpelt::Error> {
-    sqlx::query(
-        "DELETE FROM scheduled_executions WHERE guild_id = $1 AND exec_id = $2",
-    )
-    .bind(guild_id.to_string())
-    .bind(id)
-    .execute(pool)
-    .await?;
+    sqlx::query("DELETE FROM guild_templates_kv WHERE guild_id = $1 AND id = $2")
+        .bind(guild_id.to_string())
+        .bind(id)
+        .execute(pool)
+        .await?;
 
     // Reset gse cache for this guild
-    get_all_guild_scheduled_executions_from_db(guild_id, pool).await?;
+    get_all_guild_key_expiries_from_db(guild_id, pool).await?;
 
-     Ok(())
+    Ok(())
 }

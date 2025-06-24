@@ -21,7 +21,7 @@ impl Framework for EventFramework {
                 tokio::task::spawn(async move {
                     log::info!("Starting RPC server");
 
-                    let rpc_server = crate::http::create(data1, &ctx1); 
+                    let rpc_server = crate::http::create(data1, &ctx1);
 
                     let opts = rust_rpc_server::CreateRpcServerOptions {
                         bind: rust_rpc_server::CreateRpcServerBind::Address(format!(
@@ -66,10 +66,10 @@ impl Framework for EventFramework {
                     }
                 });
 
-                // Start up the scheduled executions task
+                // Start up the key expiry task
                 let ctx3 = ctx.clone();
                 tokio::task::spawn(async move {
-                    crate::expiry_tasks::scheduled_executions_task(ctx3).await;
+                    crate::expiry_tasks::key_expiry_task(ctx3).await;
                 });
             });
         }
