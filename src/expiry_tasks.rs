@@ -2,10 +2,12 @@ use antiraid_types::ar_event::AntiraidEvent;
 use silverpelt::data::Data;
 use std::time::Duration;
 
-use crate::dispatch::{dispatch_scoped, parse_event};
-use crate::templatingrt::cache::{get_all_expired_keys, remove_key_expiry};
+use crate::dispatch::{dispatch_scoped_and_wait, parse_event};
+use crate::templatingrt::cache::{extend_key_expiry, get_all_expired_keys, remove_key_expiry};
+use crate::templatingrt::MAX_TEMPLATES_RETURN_WAIT_TIME;
 
 const EXPIRY_TICK_TIME: Duration = Duration::from_secs(5);
+const EXTEND_EXPIRY_BY: Duration = Duration::from_secs(60 * 60); // 1 hour
 
 pub async fn key_expiry_task(ctx: serenity::all::client::Context) -> ! {
     pub async fn event_listener(
@@ -22,7 +24,16 @@ pub async fn key_expiry_task(ctx: serenity::all::client::Context) -> ! {
             tevent.name(),
             scopes
         );
-        dispatch_scoped(serenity_context, data, tevent, scopes, guild_id).await?;
+
+        dispatch_scoped_and_wait(
+            serenity_context,
+            data,
+            tevent,
+            scopes,
+            guild_id,
+            MAX_TEMPLATES_RETURN_WAIT_TIME,
+        )
+        .await?;
 
         Ok(())
     }
@@ -52,6 +63,16 @@ pub async fn key_expiry_task(ctx: serenity::all::client::Context) -> ! {
                         }
                     }
                     Err(e) => {
+                        let new_expiry = chrono::Utc::now() + EXTEND_EXPIRY_BY;
+                        match extend_key_expiry(guild_id, &expired_task.id, new_expiry, &data.pool)
+                            .await
+                        {
+                            Ok(_) => {}
+                            Err(e) => {
+                                log::error!("Error removing scheduled execution: {:?}", e);
+                            }
+                        }
+
                         log::error!("Error in scheduled_executions_task: {:?}", e);
                     }
                 }

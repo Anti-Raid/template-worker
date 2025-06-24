@@ -11,6 +11,8 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use vfs::FileSystem;
 
+pub const MAX_EXTENDS: i64 = 12; // Maximum number of times a key expiry can be extended due to a failure in its handling
+
 // Test base will be used for builtins in the future
 
 // Exec simple with wait
@@ -66,14 +68,6 @@ pub fn get_all_guilds_with_templates() -> Vec<GuildId> {
     }
 
     guild_ids
-}
-
-/// Returns if a guild has any templates
-pub fn has_templates(guild_id: GuildId) -> bool {
-    if USE_TEST_BASE {
-        return true; // The quick answer here is: yes
-    }
-    TEMPLATES_CACHE.contains_key(&guild_id)
 }
 
 pub async fn get_templates_with_event(
@@ -158,30 +152,6 @@ pub fn get_all_expired_keys() -> Vec<(serenity::all::GuildId, Arc<KeyExpiry>)> {
     }
 
     expired
-}
-
-/// Gets a guild template by name
-pub async fn get_guild_template(guild_id: GuildId, name: &str) -> Option<Arc<Template>> {
-    match TEMPLATES_CACHE.get(&guild_id).await {
-        Some(templates) => {
-            // The `templates` variable should anyways have $test_base injected into it
-            for t in templates.iter() {
-                if t.name == name {
-                    return Some(t.clone());
-                }
-            }
-
-            return None;
-        }
-        None => {
-            // The server always has the test base template so ensure we return it
-            if USE_TEST_BASE && name == TEST_BASE_NAME {
-                return Some(TEST_BASE.clone());
-            }
-
-            return None;
-        }
-    }
 }
 
 /// Sets up the initial template and key expiry cache
@@ -469,6 +439,48 @@ pub async fn remove_key_expiry(
         .bind(id)
         .execute(pool)
         .await?;
+
+    // Reset gse cache for this guild
+    get_all_guild_key_expiries_from_db(guild_id, pool).await?;
+
+    Ok(())
+}
+
+/// Extend expiry of keys with the given ID
+/// due to an error in their handling
+pub async fn extend_key_expiry(
+    guild_id: serenity::all::GuildId,
+    id: &str,
+    new_expiry: chrono::DateTime<chrono::Utc>,
+    pool: &sqlx::PgPool,
+) -> Result<(), silverpelt::Error> {
+    let mut tx = pool.begin().await?;
+
+    // Check expiry_event_call_attempts
+    let attempts: i64 = sqlx::query_scalar(
+        "SELECT expiry_event_call_attempts FROM guild_templates_kv WHERE guild_id = $1 AND id = $2",
+    )
+    .bind(guild_id.to_string())
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if attempts >= MAX_EXTENDS {
+        return Err(format!(
+            "Key expiry with ID {} has exceeded maximum extend attempts",
+            id
+        )
+        .into());
+    }
+
+    sqlx::query("UPDATE guild_templates_kv SET expires_at = $1, expiry_event_call_attempts = expiry_event_call_attempts + 1 WHERE guild_id = $2 AND id = $3")
+        .bind(new_expiry)
+        .bind(guild_id.to_string())
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
 
     // Reset gse cache for this guild
     get_all_guild_key_expiries_from_db(guild_id, pool).await?;

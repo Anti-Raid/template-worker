@@ -139,6 +139,53 @@ pub async fn dispatch(
     Ok(())
 }
 
+/// Dispatches a template event to all templates, waiting for the response and returning it
+pub async fn dispatch_and_wait(
+    ctx: &Context,
+    data: &Data,
+    event: CreateEvent,
+    guild_id: GuildId,
+    wait_timeout: std::time::Duration,
+) -> Result<HashMap<String, serde_json::Value>, silverpelt::Error> {
+    let matching = get_templates_with_event(guild_id, &event).await;
+    if matching.is_empty() {
+        return Ok(HashMap::new());
+    };
+
+    let handle = execute(
+        guild_id,
+        CreateGuildState {
+            serenity_context: ctx.clone(),
+            pool: data.pool.clone(),
+            reqwest_client: data.reqwest.clone(),
+            object_store: data.object_store.clone(),
+        },
+        LuaVmAction::DispatchEvent {
+            event,
+            templates: matching,
+        },
+    )
+    .await?;
+
+    let result_handle = match handle.wait_timeout(wait_timeout).await {
+        Ok(Some(action)) => action,
+        Ok(None) => return Err("Timed out while waiting for response".into()),
+        Err(e) => return Err(e.to_string().into()),
+    };
+
+    let mut results = HashMap::with_capacity(result_handle.results.len());
+
+    for result in result_handle.results {
+        let name = result.template_name.clone();
+        if let Ok(value) = result.into_response::<serde_json::Value>() {
+            results.insert(name, value);
+        }
+    }
+
+    Ok(results)
+}
+
+#[allow(dead_code)]
 pub async fn dispatch_scoped(
     ctx: &Context,
     data: &Data,
@@ -171,14 +218,15 @@ pub async fn dispatch_scoped(
 }
 
 /// Dispatches a template event to all templates, waiting for the response and returning it
-pub async fn dispatch_and_wait(
+pub async fn dispatch_scoped_and_wait(
     ctx: &Context,
     data: &Data,
     event: CreateEvent,
+    scopes: &[String],
     guild_id: GuildId,
     wait_timeout: std::time::Duration,
 ) -> Result<HashMap<String, serde_json::Value>, silverpelt::Error> {
-    let matching = get_templates_with_event(guild_id, &event).await;
+    let matching = get_templates_with_event_scoped(guild_id, &event, scopes).await;
     if matching.is_empty() {
         return Ok(HashMap::new());
     };

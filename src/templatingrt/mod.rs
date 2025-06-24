@@ -5,19 +5,22 @@ pub mod template;
 mod vm_manager;
 
 pub use state::CreateGuildState;
-pub use vm_manager::{LuaVmAction, LuaVmResult, ThreadRequest, ThreadMetrics, ThreadClearInactiveGuilds, POOL};
+pub use vm_manager::{
+    LuaVmAction, LuaVmResult, ThreadClearInactiveGuilds, ThreadMetrics, ThreadRequest, POOL,
+};
 
-use serenity::all::GuildId;
 use primitives::sandwich_config;
+use serenity::all::GuildId;
 
 pub const MAX_TEMPLATE_MEMORY_USAGE: usize = 1024 * 1024 * 20; // 20MB maximum memory
 pub const MAX_VM_THREAD_STACK_SIZE: usize = 1024 * 1024 * 20; // 20MB maximum memory
 pub const MAX_TEMPLATES_EXECUTION_TIME: std::time::Duration =
     std::time::Duration::from_secs(60 * 5); // 5 minute maximum execution time
-pub const MAX_TEMPLATES_RETURN_WAIT_TIME: std::time::Duration = std::time::Duration::from_secs(10); // 10 seconds maximum execution time
+pub const MAX_TEMPLATES_RETURN_WAIT_TIME: std::time::Duration = std::time::Duration::from_secs(60); // 60 seconds maximum execution time
 
 pub const MAX_SERVER_INACTIVITY: std::time::Duration = std::time::Duration::from_secs(600); // 10 minutes till vm marked as inactive
-pub const MAX_SERVER_INACTIVITY_CHECK_TIME: std::time::Duration = std::time::Duration::from_secs(60 * 15); // Check for inactive servers every 15 minutes
+pub const MAX_SERVER_INACTIVITY_CHECK_TIME: std::time::Duration =
+    std::time::Duration::from_secs(60 * 15); // Check for inactive servers every 15 minutes
 
 /// Dispatches an event to all templates associated to a server
 pub async fn execute(
@@ -25,21 +28,16 @@ pub async fn execute(
     state: CreateGuildState,
     action: LuaVmAction,
 ) -> Result<RenderTemplateHandle, silverpelt::Error> {
-    let lua = POOL.get_guild(
-        guild_id,
-        state
-    )
-    .await?;
+    let lua = POOL.get_guild(guild_id, state).await?;
 
     let (tx, rx) = tokio::sync::oneshot::channel();
 
-    lua.send(
-        ThreadRequest::Dispatch {
-            guild_id,
-            action,
-            callback: tx,
-        }
-    ).map_err(|e| format!("Could not send event to Lua thread: {}", e))?;
+    lua.send(ThreadRequest::Dispatch {
+        guild_id,
+        action,
+        callback: tx,
+    })
+    .map_err(|e| format!("Could not send event to Lua thread: {}", e))?;
 
     Ok(RenderTemplateHandle { rx })
 }
