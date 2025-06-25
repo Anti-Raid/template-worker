@@ -106,8 +106,14 @@ impl DataStoreImpl for LinksStore {
         match key.as_str() {
             "links" => Some(DataStoreMethod::Sync(Rc::new(move |_v| {
                 let support_server = crate::CONFIG.meta.support_server_invite.clone();
+                let api_url = crate::CONFIG.sites.api.clone();
+                let frontend_url = crate::CONFIG.sites.frontend.clone();
+                let docs_url = crate::CONFIG.sites.docs.clone();
                 Ok(value!(
-                    "support_server".to_string() => support_server
+                    "support_server".to_string() => support_server,
+                    "api_url".to_string() => api_url,
+                    "frontend_url".to_string() => frontend_url,
+                    "docs_url".to_string() => docs_url
                 ))
             }))),
             _ => None,
