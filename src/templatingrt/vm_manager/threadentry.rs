@@ -1,19 +1,19 @@
+use super::core::configure_runtime_manager;
+use super::sharedguild::SharedGuild;
 use super::KhronosRuntimeManager;
+use super::{LuaVmAction, LuaVmResult};
+use crate::templatingrt::state::CreateGuildState;
+use crate::templatingrt::state::GuildState;
+use crate::templatingrt::MAX_VM_THREAD_STACK_SIZE;
 use serenity::all::GuildId;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
-use std::cell::{Cell, RefCell};
-use crate::templatingrt::state::CreateGuildState;
-use super::core::configure_runtime_manager;
-use super::sharedguild::SharedGuild;
-use super::{LuaVmAction, LuaVmResult};
-use crate::templatingrt::MAX_VM_THREAD_STACK_SIZE;
-use crate::templatingrt::state::GuildState;
-use std::hash::{Hash, Hasher};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct ThreadGuildVmMetrics {
@@ -29,43 +29,37 @@ pub struct ThreadGuildVmMetrics {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct ThreadMetrics {
-    pub vm_metrics: HashMap<GuildId, ThreadGuildVmMetrics >,
+    pub vm_metrics: HashMap<GuildId, ThreadGuildVmMetrics>,
     pub tid: u64,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct ThreadClearInactiveGuilds {
     pub tid: u64,
-    pub cleared: HashMap<GuildId, Option<String>>
+    pub cleared: HashMap<GuildId, Option<String>>,
 }
 
 pub enum ThreadRequest {
     /// Dispatch an 'action'
     Dispatch {
         guild_id: GuildId, // id of discord server
-        action: LuaVmAction, 
+        action: LuaVmAction,
         callback: Sender<Vec<(String, LuaVmResult)>>,
     },
     /// Diagnostic message to check if a vm is alive or not
-    Ping {
-        tx: Sender<()>,
-    },
+    Ping { tx: Sender<()> },
     /// Clear out inactive guilds
     ClearInactiveGuilds {
-        tx: Sender< HashMap<GuildId, Option<String>> >,
+        tx: Sender<HashMap<GuildId, Option<String>>>,
     },
     /// Stop the underlying thread if it has no VM's currently on it
-    RemoveIfUnused {
-        tx: Sender<bool>
-    },
+    RemoveIfUnused { tx: Sender<bool> },
     /// Get VM metrics across all guilds in the thread
     GetVmMetrics {
-        tx: Sender < HashMap<GuildId, ThreadGuildVmMetrics > >,
+        tx: Sender<HashMap<GuildId, ThreadGuildVmMetrics>>,
     },
     /// Close the underlying thread unconditionally
-    CloseThread {
-        tx: Option<Sender<()>>
-    }
+    CloseThread { tx: Option<Sender<()>> },
 }
 
 /// A thread entry (worker thread)
@@ -80,7 +74,7 @@ pub struct ThreadEntry {
     /// A sender to create a new guild handle
     tx: UnboundedSender<ThreadRequest>,
     /// shared guild
-    sg: SharedGuild
+    sg: SharedGuild,
 }
 
 impl Hash for ThreadEntry {
@@ -99,7 +93,8 @@ impl Eq for ThreadEntry {}
 
 impl ThreadEntry {
     /// Creates, but does not spawn a new thread entry
-    fn new(tx: UnboundedSender<ThreadRequest>, sg: SharedGuild) -> Self { // sending in and going out thread
+    fn new(tx: UnboundedSender<ThreadRequest>, sg: SharedGuild) -> Self {
+        // sending in and going out thread
         Self {
             id: {
                 // Generate a random id for the thread entry
@@ -116,7 +111,7 @@ impl ThreadEntry {
     /// Initializes a new thread entry, starting it after creation
     pub fn create(
         cgs: CreateGuildState, // all data needed by lua vm
-        sg: SharedGuild
+        sg: SharedGuild,
     ) -> Result<Self, silverpelt::Error> {
         let (tx, rx) = unbounded_channel::<ThreadRequest>();
 
@@ -165,26 +160,31 @@ impl ThreadEntry {
                     }
                 }));
 
-                let rt = tokio::runtime::LocalRuntime::new()
-                    .expect("Failed to create tokio runtime");
+                let rt =
+                    tokio::runtime::LocalRuntime::new().expect("Failed to create tokio runtime");
 
                 rt.block_on(async move {
                     // Keep waiting for new events
                     struct VmData {
                         guild_state: Rc<GuildState>,
                         tis_ref: KhronosRuntimeManager,
-                        count: Rc<Cell<usize>>
+                        count: Rc<Cell<usize>>,
                     }
 
                     // it' a hashmap that can be mutably borrowed and is also reference counted
-                    let thread_vms: Rc<RefCell<HashMap<GuildId, Rc<VmData>>>> = Rc::new(HashMap::new().into());
+                    let thread_vms: Rc<RefCell<HashMap<GuildId, Rc<VmData>>>> =
+                        Rc::new(HashMap::new().into());
                     while let Some(send) = rx.recv().await {
                         match send {
-                            ThreadRequest::Ping { tx }=> {
+                            ThreadRequest::Ping { tx } => {
                                 // Send a pong
                                 let _ = tx.send(());
                             }
-                            ThreadRequest::Dispatch { guild_id, action, callback } => {
+                            ThreadRequest::Dispatch {
+                                guild_id,
+                                action,
+                                callback,
+                            } => {
                                 let vm = {
                                     let mut vms = thread_vms.borrow_mut();
 
@@ -194,26 +194,32 @@ impl ThreadEntry {
                                         None => {
                                             // Create Lua VM
                                             let cgs_ref = cgs.clone();
-                                            let gs = Rc::new(
-                                                match cgs_ref.to_guild_state(guild_id) {
+                                            let gs =
+                                                Rc::new(match cgs_ref.to_guild_state(guild_id) {
                                                     Ok(gs) => gs,
                                                     Err(e) => {
-                                                        log::error!("Failed to create guild state: {}", e);
+                                                        log::error!(
+                                                            "Failed to create guild state: {}",
+                                                            e
+                                                        );
                                                         continue;
                                                     }
-                                                }
-                                            );
-    
+                                                });
+
                                             let tis_ref = match configure_runtime_manager() {
                                                 Ok(tis) => tis,
                                                 Err(e) => {
-                                                    log::error!("Failed to configure Lua VM: {}", e);
+                                                    log::error!(
+                                                        "Failed to configure Lua VM: {}",
+                                                        e
+                                                    );
                                                     continue;
                                                 }
                                             };
-    
-                                            count_ref.fetch_add(1, std::sync::atomic::Ordering::Release);
-    
+
+                                            count_ref
+                                                .fetch_add(1, std::sync::atomic::Ordering::Release);
+
                                             let thread_vms_ref = thread_vms.clone();
                                             let sg_ref_a = sg.clone();
                                             tis_ref.set_on_broken(Box::new(move || {
@@ -226,7 +232,7 @@ impl ThreadEntry {
                                                     vms.remove(&guild_id);
                                                 }
                                             }));
-    
+
                                             // Store into the thread
                                             let vmd = Rc::new(VmData {
                                                 guild_state: gs,
@@ -234,16 +240,19 @@ impl ThreadEntry {
                                                 count: Cell::new(0).into(),
                                             });
 
-                                            vms.insert(
-                                                guild_id,
-                                                vmd.clone(),
-                                            );
+                                            vms.insert(guild_id, vmd.clone());
 
-                                            sg.add_guild(guild_id, self_ref.clone());
-    
+                                            if let Err(e) = sg.add_guild(guild_id, self_ref.clone())
+                                            {
+                                                log::error!(
+                                                    "Error adding guild to shared guild: {:?}",
+                                                    e
+                                                );
+                                            }
+
                                             vmd
                                         }
-                                    }    
+                                    }
                                 };
 
                                 let gcount_ref = vm.count.clone();
@@ -254,15 +263,19 @@ impl ThreadEntry {
                                     action.handle(tis_ref, gs, callback).await;
                                     gcount_ref.set(gcount_ref.get() - 1);
                                 });
-                            },
+                            }
                             ThreadRequest::ClearInactiveGuilds { tx } => {
                                 let mut removed = vec![];
 
                                 {
                                     let vms = thread_vms.borrow();
                                     for (guild_id, vm) in vms.iter() {
-                                        if let Some(let_) = vm.tis_ref.runtime().last_execution_time() {
-                                            if std::time::Instant::now() - let_ > crate::templatingrt::MAX_SERVER_INACTIVITY {
+                                        if let Some(let_) =
+                                            vm.tis_ref.runtime().last_execution_time()
+                                        {
+                                            if std::time::Instant::now() - let_
+                                                > crate::templatingrt::MAX_SERVER_INACTIVITY
+                                            {
                                                 removed.push((*guild_id, vm.tis_ref.clone()));
                                             }
                                         }
@@ -273,7 +286,9 @@ impl ThreadEntry {
                                 for (guild_id, removed) in removed.into_iter() {
                                     match removed.runtime().mark_broken(true) {
                                         Ok(()) => close_errors.insert(guild_id, None),
-                                        Err(e) => close_errors.insert(guild_id, Some(e.to_string()))
+                                        Err(e) => {
+                                            close_errors.insert(guild_id, Some(e.to_string()))
+                                        }
                                     };
 
                                     if let Err(e) = sg.remove_guild(guild_id) {
@@ -282,19 +297,21 @@ impl ThreadEntry {
                                 }
 
                                 let _ = tx.send(close_errors);
-                            },
+                            }
                             ThreadRequest::RemoveIfUnused { tx } => {
                                 // Borrow VMs for removal
                                 let vms = thread_vms.borrow();
                                 if vms.is_empty() {
                                     log::debug!("Clearing unused thread: {}", tid);
-                                    sg.remove_thread_entry(&self_ref);
+                                    if let Err(e) = sg.remove_thread_entry(&self_ref) {
+                                        log::error!("Error removing thread entry: {:?}", e);
+                                    }
                                     let _ = tx.send(true);
                                     return;
                                 }
 
                                 let _ = tx.send(false);
-                            },
+                            }
                             ThreadRequest::CloseThread { tx } => {
                                 if let Some(tx) = tx {
                                     let _ = tx.send(());
@@ -303,26 +320,25 @@ impl ThreadEntry {
                                 log::debug!("Closing thread: {}", tid);
                                 let _ = sg.remove_thread_entry(&self_ref);
                                 return;
-                            },
+                            }
                             ThreadRequest::GetVmMetrics { tx } => {
-                                {
-                                    let guard = thread_vms.borrow();
-                                    
-                                    let mut metrics_map = HashMap::with_capacity(guard.len());
+                                let guard = thread_vms.borrow();
 
-                                    for (guild, vm) in guard.iter() {
-                                        let metrics = ThreadGuildVmMetrics {
-                                            used_memory: vm.tis_ref.runtime().memory_usage(),
-                                            memory_limit: crate::templatingrt::MAX_TEMPLATE_MEMORY_USAGE,
-                                            num_threads: vm.tis_ref.runtime().current_threads(),
-                                            max_threads: vm.tis_ref.runtime().max_threads(),
-                                        };
+                                let mut metrics_map = HashMap::with_capacity(guard.len());
 
-                                        metrics_map.insert(*guild, metrics);
-                                    }
+                                for (guild, vm) in guard.iter() {
+                                    let metrics = ThreadGuildVmMetrics {
+                                        used_memory: vm.tis_ref.runtime().memory_usage(),
+                                        memory_limit:
+                                            crate::templatingrt::MAX_TEMPLATE_MEMORY_USAGE,
+                                        num_threads: vm.tis_ref.runtime().current_threads(),
+                                        max_threads: vm.tis_ref.runtime().max_threads(),
+                                    };
 
-                                    let _ = tx.send(metrics_map);
+                                    metrics_map.insert(*guild, metrics);
                                 }
+
+                                let _ = tx.send(metrics_map);
                             }
                         }
                     }

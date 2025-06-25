@@ -1,11 +1,11 @@
-use serenity::all::GuildId;
-use tokio::sync::mpsc::UnboundedSender;
-use std::sync::RwLock as StdRwLock;
-use crate::templatingrt::state::CreateGuildState;
-use crate::config::VmDistributionStrategy;
 use super::sharedguild::SharedGuild;
 use super::threadentry::ThreadEntry;
+use crate::config::VmDistributionStrategy;
+use crate::templatingrt::state::CreateGuildState;
 use crate::templatingrt::vm_manager::ThreadRequest;
+use serenity::all::GuildId;
+use std::sync::RwLock as StdRwLock;
+use tokio::sync::mpsc::UnboundedSender;
 
 pub const DEFAULT_MAX_THREADS: usize = 400; // Maximum number of threads in the pool
 
@@ -32,15 +32,19 @@ impl ThreadPool {
         }
     }
 
-    pub fn send_request<K>(&self, req: impl Fn(&ThreadEntry) -> Option<(K, ThreadRequest)>) -> Result<Vec<K>, crate::Error> {
+    pub fn send_request<K>(
+        &self,
+        req: impl Fn(&ThreadEntry) -> Option<(K, ThreadRequest)>,
+    ) -> Result<Vec<K>, crate::Error> {
         {
-            let threads = self.threads.try_read().map_err(|_| "Failed to read threads")?;
+            let threads = self
+                .threads
+                .try_read()
+                .map_err(|_| "Failed to read threads")?;
             let mut data = Vec::with_capacity(threads.len());
             for thread in threads.iter() {
                 if let Some((k, treq)) = (req)(&thread) {
-                    thread.handle().send(
-                        treq
-                    )?;
+                    thread.handle().send(treq)?;
                     data.push(k);
                 }
             }
@@ -52,9 +56,12 @@ impl ThreadPool {
     /// Remove broken threads from the pool
     pub async fn remove_unused_threads(&self) -> Result<Vec<u64>, silverpelt::Error> {
         let (mut good_threads, old_threads) = {
-            let mut threads = self.threads.try_write().map_err(|_| "Failed to write lock threads")?;
+            let mut threads = self
+                .threads
+                .try_write()
+                .map_err(|_| "Failed to write lock threads")?;
 
-            let good_threads = Vec::with_capacity(threads.len());   
+            let good_threads = Vec::with_capacity(threads.len());
             let old_threads = std::mem::take(&mut *threads);
 
             (good_threads, old_threads)
@@ -83,12 +90,18 @@ impl ThreadPool {
             };
 
             // Delete the thread by doing nothing
-            log::warn!("Thread {} is unused, removing it from the pool", thread.id());
+            log::warn!(
+                "Thread {} is unused, removing it from the pool",
+                thread.id()
+            );
             unused.push(thread.id());
         }
 
         {
-            let mut threads = self.threads.try_write().map_err(|_| "Failed to write lock threads")?; 
+            let mut threads = self
+                .threads
+                .try_write()
+                .map_err(|_| "Failed to write lock threads")?;
             *threads = good_threads;
         }
 
@@ -98,9 +111,12 @@ impl ThreadPool {
     /// Remove broken threads from the pool
     pub async fn remove_broken_threads(&self) -> Result<(), silverpelt::Error> {
         let (mut good_threads, old_threads) = {
-            let mut threads = self.threads.try_write().map_err(|_| "Failed to write lock threads")?;
+            let mut threads = self
+                .threads
+                .try_write()
+                .map_err(|_| "Failed to write lock threads")?;
 
-            let good_threads = Vec::with_capacity(threads.len());   
+            let good_threads = Vec::with_capacity(threads.len());
             let old_threads = std::mem::take(&mut *threads);
 
             (good_threads, old_threads)
@@ -124,13 +140,21 @@ impl ThreadPool {
             };
 
             // Delete the thread
-            log::warn!("Thread {} is broken, removing it from the pool", thread.id());
-            let _ = thread.handle().send(ThreadRequest::CloseThread { tx: None });
+            log::warn!(
+                "Thread {} is broken, removing it from the pool",
+                thread.id()
+            );
+            let _ = thread
+                .handle()
+                .send(ThreadRequest::CloseThread { tx: None });
             self.sg.remove_thread_entry(&thread)?;
         }
 
         {
-            let mut threads = self.threads.try_write().map_err(|_| "Failed to write lock threads")?; 
+            let mut threads = self
+                .threads
+                .try_write()
+                .map_err(|_| "Failed to write lock threads")?;
             *threads = good_threads;
         }
 
@@ -138,31 +162,28 @@ impl ThreadPool {
     }
 
     /// Adds a new thread to the pool
-    pub fn add_thread(
-        &self,
-        cgs: CreateGuildState
-    ) -> Result<(), silverpelt::Error> {
-        let mut threads = self.threads.try_write().map_err(|_| "Failed to write lock threads")?;
-        threads.push(ThreadEntry::create(
-            cgs, 
-            self.sg.clone()
-        )?);
+    pub fn add_thread(&self, cgs: CreateGuildState) -> Result<(), silverpelt::Error> {
+        let mut threads = self
+            .threads
+            .try_write()
+            .map_err(|_| "Failed to write lock threads")?;
+        threads.push(ThreadEntry::create(cgs, self.sg.clone())?);
         Ok(())
     }
 
     /// Removes a thread from the pool. This also removes all guild vms attached to said thread as well
-    pub fn remove_thread(
-        &self,
-        id: u64,
-    ) -> Result<(), silverpelt::Error> {
+    pub fn remove_thread(&self, id: u64) -> Result<(), silverpelt::Error> {
         let idx = {
-            let threads = self.threads.try_read().map_err(|_| "Failed to read lock threads")?;
+            let threads = self
+                .threads
+                .try_read()
+                .map_err(|_| "Failed to read lock threads")?;
 
             let mut idx = None;
             for (i, th) in threads.iter().enumerate() {
                 if th.id() == id {
                     idx = Some(i);
-                    self.sg.remove_thread_entry(th);
+                    self.sg.remove_thread_entry(th)?;
                     break;
                 }
             }
@@ -175,7 +196,10 @@ impl ThreadPool {
         };
 
         {
-            let mut threads = self.threads.try_write().map_err(|_| "Failed to write lock threads")?;
+            let mut threads = self
+                .threads
+                .try_write()
+                .map_err(|_| "Failed to write lock threads")?;
             threads.remove(idx);
         }
 
@@ -184,7 +208,11 @@ impl ThreadPool {
 
     /// Returns the number of threads in the pool
     pub fn threads_len(&self) -> Result<usize, silverpelt::Error> {
-        Ok(self.threads.try_read().map_err(|_| "Failed to read lock threads for threads_len")?.len())
+        Ok(self
+            .threads
+            .try_read()
+            .map_err(|_| "Failed to read lock threads for threads_len")?
+            .len())
     }
 
     /// Adds a guild to the pool if it does not already exist in the pool
@@ -193,7 +221,7 @@ impl ThreadPool {
     pub async fn get_guild(
         &self,
         guild: GuildId,
-        cgs: CreateGuildState
+        cgs: CreateGuildState,
     ) -> Result<UnboundedSender<ThreadRequest>, silverpelt::Error> {
         // Check if the guild exists first
         if let Some(handle) = self.sg.get_handle(guild)? {
@@ -203,7 +231,9 @@ impl ThreadPool {
         // Flush out broken threads
         self.remove_broken_threads().await?;
 
-        if self.threads_len()? < self.max_threads || crate::CMD_ARGS.vm_distribution_strategy == VmDistributionStrategy::ThreadPerGuild {
+        if self.threads_len()? < self.max_threads
+            || crate::CMD_ARGS.vm_distribution_strategy == VmDistributionStrategy::ThreadPerGuild
+        {
             // Add a new thread to the pool
             self.add_thread(cgs)?;
         }
@@ -214,7 +244,10 @@ impl ThreadPool {
         let mut min_thread = None;
         let mut min_count = usize::MAX;
 
-        let threads = self.threads.try_read().map_err(|_| "Could not lock threads")?;
+        let threads = self
+            .threads
+            .try_read()
+            .map_err(|_| "Could not lock threads")?;
         for thread in threads.iter() {
             let count = thread.server_count();
 
@@ -234,7 +267,10 @@ impl ThreadPool {
         return Ok(thread.handle().clone());
     }
 
-    pub fn get_guild_if_exists(&self, guild: GuildId) -> Result<Option<UnboundedSender<ThreadRequest>>, silverpelt::Error> {
+    pub fn get_guild_if_exists(
+        &self,
+        guild: GuildId,
+    ) -> Result<Option<UnboundedSender<ThreadRequest>>, silverpelt::Error> {
         if let Some(handle) = self.sg.get_handle(guild)? {
             return Ok(Some(handle));
         }

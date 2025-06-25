@@ -48,6 +48,7 @@ pub struct MultiLuaVmResultHandle {
 }
 
 impl MultiLuaVmResultHandle {
+    #[allow(dead_code)]
     /// Converts the first result to a response if possible, returning an error if the result is an error
     pub fn into_response_first<T: serde::de::DeserializeOwned>(
         self,
@@ -94,6 +95,7 @@ impl LuaVmResultHandle {
         matches!(self.result, LuaVmResult::VmBroken {})
     }
 
+    #[allow(dead_code)]
     /// Returns the inner error if the result is an error
     pub fn lua_error(&self) -> Option<&str> {
         match &self.result {
@@ -110,6 +112,7 @@ pub struct RenderTemplateHandle {
 }
 
 impl RenderTemplateHandle {
+    #[allow(dead_code)]
     /// Wait for the template to render
     pub async fn wait(self) -> Result<MultiLuaVmResultHandle, silverpelt::Error> {
         let res = self.rx.await?;

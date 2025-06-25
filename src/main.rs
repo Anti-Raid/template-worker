@@ -1,4 +1,5 @@
 mod config;
+mod coresettings; // TEMPORARY
 mod dispatch;
 mod event_handler;
 mod expiry_tasks;
