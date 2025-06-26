@@ -15,7 +15,7 @@ impl Ratelimits {
     fn new_discord_rl() -> Result<LuaRatelimits, silverpelt::Error> {
         // Create the global limit
         let global_quota =
-            LuaRatelimits::create_quota(create_nonmax_u32(15)?, Duration::from_secs(10))?;
+            LuaRatelimits::create_quota(create_nonmax_u32(25)?, Duration::from_secs(10))?;
         let global1 = DefaultKeyedRateLimiter::keyed(global_quota);
         let global = vec![global1];
 
