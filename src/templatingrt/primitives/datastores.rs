@@ -128,7 +128,6 @@ to_struct! {
         pub create: bool,
         pub execute: bool,
         pub id: Option<String>, // If create is false, this is required
-        pub user_id: String,
     }
 }
 
@@ -259,7 +258,7 @@ impl DataStoreImpl for JobServerStore {
                             create: spawn.create,
                             execute: spawn.execute,
                             id: spawn.id,
-                            user_id: spawn.user_id,
+                            guild_id: guild_state.guild_id.to_string(),
                         };
 
                         let resp = jobserver::spawn::spawn_task(

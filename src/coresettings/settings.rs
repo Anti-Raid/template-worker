@@ -13,6 +13,7 @@ use silverpelt::userinfo::{NoMember, UserInfoOperations};
 use std::sync::LazyLock;
 use async_trait::async_trait;
 use super::data::SettingsData;
+use crate::templatingrt::cache::regenerate_cache;
 use crate::Error;
 use silverpelt::lockdowns::LockdownData;
 use sqlx::Row;
@@ -1291,6 +1292,9 @@ impl GuildTemplateExecutor {
 
     async fn post_action(&self, ctx: &SettingsData, name: &str) -> Result<(), Error> {
         // Dispatch a OnStartup event for the template
+        regenerate_cache(&ctx.serenity_context, &ctx.data, ctx.scope.guild_id()?)
+            .await?;
+
         let ce = crate::dispatch::parse_event(&AntiraidEvent::OnStartup(vec![name.to_string()]))?;
         crate::dispatch::dispatch(
             &ctx.serenity_context, 
@@ -2489,6 +2493,9 @@ impl SettingUpdater<SettingsData> for GuildTemplateShopExecutor {
                 }
             };
 
+            regenerate_cache(&ctx.serenity_context, &ctx.data, guild_id)
+            .await?;
+
             let ce = crate::dispatch::parse_event(
                 &AntiraidEvent::OnStartup(vec![data.name.to_string()])
             )?;
@@ -2576,6 +2583,9 @@ impl SettingDeleter<SettingsData> for GuildTemplateShopExecutor {
                     continue;
                 }
             };
+
+            regenerate_cache(&ctx.serenity_context, &ctx.data, guild_id)
+            .await?;
 
             let ce = crate::dispatch::parse_event(
                 &AntiraidEvent::OnStartup(vec![row.name.to_string()])
