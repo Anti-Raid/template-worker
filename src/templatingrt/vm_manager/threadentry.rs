@@ -154,14 +154,24 @@ impl ThreadEntry {
             .spawn(move || {
                 let sg_ref = sg.clone();
                 let self_ref_a = self_ref.clone();
-                super::perthreadpanichook::set_hook(Box::new(move |_| {
+                super::perthreadpanichook::set_hook(Box::new(move |e| {
                     if let Err(e) = sg_ref.remove_thread_entry(&self_ref_a) {
                         log::error!("Error removing thread on panic: {:?}", e)
                     }
+
+                    if let Some(e) = e.payload().downcast_ref::<String>() {
+                        log::error!("Thread panicked: {}", e);
+                    } else if let Some(e) = e.payload().downcast_ref::<&str>() {
+                        log::error!("Thread panicked: {}", e);
+                    }
+
+                    log::error!("Thread panicked without representable panic!");
                 }));
 
-                let rt =
-                    tokio::runtime::LocalRuntime::new().expect("Failed to create tokio runtime");
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build_local(&tokio::runtime::LocalOptions::default())
+                    .expect("Failed to create tokio runtime");
 
                 rt.block_on(async move {
                     // Keep waiting for new events
@@ -174,6 +184,7 @@ impl ThreadEntry {
                     // it' a hashmap that can be mutably borrowed and is also reference counted
                     let thread_vms: Rc<RefCell<HashMap<GuildId, Rc<VmData>>>> =
                         Rc::new(HashMap::new().into());
+
                     while let Some(send) = rx.recv().await {
                         match send {
                             ThreadRequest::Ping { tx } => {

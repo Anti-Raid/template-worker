@@ -31,7 +31,7 @@ pub static TEST_BASE: LazyLock<Arc<Template>> = LazyLock::new(|| {
     let mut templ = Template {
         content: str_to_fs("local evt, ctx = ...\nif evt.name == 'INTERACTION_CREATE' then error(ctx.guild_id) end"),
         name: TEST_BASE_NAME.to_string(),
-        events: vec!["INTERACTION_CREATE".to_string()],
+        events: vec!["INTERACTION_CREATE".to_string(), "MESSAGE".to_string()],
 
         ..Default::default()
     };
