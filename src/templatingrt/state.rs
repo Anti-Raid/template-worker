@@ -36,7 +36,7 @@ impl Ratelimits {
 
         // Send message channel limits (are smaller to allow for more actions)
         let create_message_quota1 =
-            LuaRatelimits::create_quota(create_nonmax_u32(15)?, Duration::from_secs(20))?;
+            LuaRatelimits::create_quota(create_nonmax_u32(30)?, Duration::from_secs(10))?;
         let create_message_lim1 = DefaultKeyedRateLimiter::keyed(create_message_quota1);
 
         // Create Interaction Response

@@ -8,6 +8,7 @@ use khronos_runtime::utils::khronos_value::KhronosValue;
 use khronos_runtime::{to_struct, value};
 use serde_json::Value;
 use serenity::async_trait;
+use std::collections::VecDeque;
 use std::rc::Rc;
 use uuid::Uuid;
 
@@ -309,9 +310,9 @@ impl DataStoreImpl for JobServerStore {
                 Some(DataStoreMethod::Async(Rc::new(move |v| {
                     let guild_state = guild_state_ref.clone(); // satisfy rusts borrowing rules
                     Box::pin(async move {
-                        let mut v = v;
+                        let mut v = VecDeque::from(v);
 
-                        let Some(name) = v.pop() else {
+                        let Some(name) = v.pop_front() else {
                             return Err(
                                 "arg #1 of JobServerStore.list_named is missing (name)".into()
                             );
@@ -334,7 +335,7 @@ impl DataStoreImpl for JobServerStore {
                         };
 
                         let mut needs_statuses = false;
-                        if let Some(val) = v.pop() {
+                        if let Some(val) = v.pop_front() {
                             match val {
                                 KhronosValue::Boolean(b) => needs_statuses = b,
                                 _ => {
@@ -366,19 +367,19 @@ impl DataStoreImpl for JobServerStore {
                 Some(DataStoreMethod::Async(Rc::new(move |v| {
                     let guild_state = guild_state_ref.clone(); // satisfy rusts borrowing rules
                     Box::pin(async move {
-                        let mut v = v;
+                        let mut v = VecDeque::from(v);
 
-                        let Some(job_id) = v.pop() else {
+                        let Some(job_id) = v.pop_front() else {
                             return Err("arg #1 of JobServerStore.get is missing (job_id)".into());
                         };
 
                         let mut need_statuses = false;
-                        if let Some(val) = v.pop() {
+                        if let Some(val) = v.pop_front() {
                             match val {
                                 KhronosValue::Boolean(b) => need_statuses = b,
                                 _ => {
                                     return Err(
-                                        "arg #2 to JobServerStore.get must be a boolean (need_statuses)".into()
+                                        format!("arg #2 to JobServerStore.get must be a boolean (need_statuses), got {:?} and vals {:?}", val, v).into()
                                     )
                                 }
                             }

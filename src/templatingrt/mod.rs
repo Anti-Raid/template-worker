@@ -15,7 +15,7 @@ use serenity::all::GuildId;
 pub const MAX_TEMPLATE_MEMORY_USAGE: usize = 1024 * 1024 * 20; // 20MB maximum memory
 pub const MAX_VM_THREAD_STACK_SIZE: usize = 1024 * 1024 * 20; // 20MB maximum memory
 pub const MAX_TEMPLATES_EXECUTION_TIME: std::time::Duration =
-    std::time::Duration::from_secs(60 * 5); // 5 minute maximum execution time
+    std::time::Duration::from_secs(60 * 10); // 10 minute maximum execution time
 pub const MAX_TEMPLATES_RETURN_WAIT_TIME: std::time::Duration = std::time::Duration::from_secs(60); // 60 seconds maximum execution time
 
 pub const MAX_SERVER_INACTIVITY: std::time::Duration = std::time::Duration::from_secs(600); // 10 minutes till vm marked as inactive
