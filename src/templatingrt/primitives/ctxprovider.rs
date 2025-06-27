@@ -4,6 +4,7 @@ use crate::templatingrt::template::Template;
 use crate::userinfo::{NoMember, UserInfoOperations};
 use antiraid_types::userinfo::UserInfo;
 use botox::crypto::gen_random;
+use botox::ExtractMap;
 use khronos_runtime::traits::context::{CompatibilityFlags, KhronosContext, ScriptData};
 use khronos_runtime::traits::datastoreprovider::{DataStoreImpl, DataStoreProvider};
 use khronos_runtime::traits::discordprovider::DiscordProvider;
@@ -671,6 +672,37 @@ impl DiscordProvider for ArDiscordProvider {
         )
         .await
         .map_err(|e| format!("Failed to fetch member information from sandwich: {}", e))?)
+    }
+
+    async fn get_guild_channels(
+        &self,
+    ) -> serenity::Result<Vec<serenity::all::GuildChannel>, crate::Error> {
+        let channels = crate::sandwich::guild_channels(
+            &self.guild_state.serenity_context.cache,
+            &self.guild_state.serenity_context.http,
+            &self.guild_state.reqwest_client,
+            self.guild_id,
+        )
+        .await
+        .map_err(|e| format!("Failed to fetch channel information from sandwich: {}", e))?;
+
+        Ok(channels)
+    }
+
+    async fn get_guild_roles(
+        &self,
+    ) -> serenity::Result<ExtractMap<serenity::all::RoleId, serenity::all::Role>, crate::Error>
+    {
+        let roles = crate::sandwich::guild_roles(
+            &self.guild_state.serenity_context.cache,
+            &self.guild_state.serenity_context.http,
+            &self.guild_state.reqwest_client,
+            self.guild_id,
+        )
+        .await
+        .map_err(|e| format!("Failed to fetch role information from sandwich: {}", e))?;
+
+        Ok(roles.into_iter().collect())
     }
 
     async fn get_channel(

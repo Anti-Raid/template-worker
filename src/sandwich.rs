@@ -258,6 +258,101 @@ pub async fn member_in_guild(
     Ok(Some(member))
 }
 
+/// Faster version of serenity guild_roles that also takes into account the sandwich proxy layer
+pub async fn guild_roles(
+    cache: &serenity::all::Cache,
+    http: &serenity::http::Http,
+    reqwest_client: &reqwest::Client,
+    guild_id: serenity::model::id::GuildId,
+) -> Result<Vec<serenity::all::Role>, Error> {
+    // Try serenity cache first
+    {
+        if let Some(guild) = cache.guild(guild_id) {
+            let roles = guild.roles.clone();
+            return Ok(roles.into_iter().collect());
+        };
+    }
+
+    let url = format!(
+        "{}/antiraid/api/state?col=guild_roles&id={}",
+        crate::CONFIG.meta.sandwich_http_api,
+        guild_id
+    );
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Resp {
+        ok: bool,
+        data: Option<Vec<serenity::all::Role>>,
+        error: Option<String>,
+    }
+
+    let resp = reqwest_client
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await?
+        .json::<Resp>()
+        .await;
+
+    match resp {
+        Ok(resp) => {
+            if resp.ok {
+                let Some(roles) = resp.data else {
+                    return Err("No roles found".into());
+                };
+
+                return Ok(roles);
+            } else {
+                log::warn!(
+                    "Sandwich proxy returned error [get guild roles]: {:?}",
+                    resp.error
+                );
+            }
+        }
+        Err(e) => {
+            log::warn!("Failed to fetch member (http): {:?}", e);
+        }
+    }
+
+    // Last resort, fetch from http and then update sandwich as well
+    let roles = match http.get_guild_roles(guild_id).await {
+        Ok(mem) => mem,
+        Err(e) => match e {
+            serenity::Error::Http(e) => match e {
+                serenity::all::HttpError::UnsuccessfulRequest(er) => {
+                    if er.status_code == reqwest::StatusCode::NOT_FOUND {
+                        return Err("No channels found".into());
+                    } else {
+                        return Err(
+                            format!("Failed to fetch roles (http, non-404): {:?}", er).into()
+                        );
+                    }
+                }
+                _ => {
+                    return Err(format!("Failed to fetch roles (http): {:?}", e).into());
+                }
+            },
+            _ => {
+                return Err(format!("Failed to fetch roles: {:?}", e).into());
+            }
+        },
+    };
+
+    let roles = roles.into_iter().collect();
+
+    // Update sandwich with a POST
+    let resp = reqwest_client.post(&url).json(&roles).send().await?;
+
+    if !resp.status().is_success() {
+        log::warn!(
+            "Failed to update sandwich proxy with channel data: {:?}",
+            resp.text().await
+        );
+    }
+
+    Ok(roles)
+}
+
 /// Faster version of serenity guild_channels that also takes into account the sandwich proxy layer
 pub async fn guild_channels(
     cache: &serenity::all::Cache,
