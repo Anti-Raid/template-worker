@@ -34,7 +34,7 @@ impl Pool {
     }
 
     /// Returns the number of worker process
-    pub fn len(&self) -> Result<usize, silverpelt::Error> {
+    pub fn len(&self) -> Result<usize, crate::Error> {
         match &self.inner {
             PoolBacker::ThreadPool(tp) => tp.threads_len(),
         }
@@ -45,7 +45,7 @@ impl Pool {
         &self,
         guild: GuildId,
         cgs: CreateGuildState,
-    ) -> Result<UnboundedSender<ThreadRequest>, silverpelt::Error> {
+    ) -> Result<UnboundedSender<ThreadRequest>, crate::Error> {
         match &self.inner {
             PoolBacker::ThreadPool(tp) => tp.get_guild(guild, cgs).await,
         }
@@ -55,7 +55,7 @@ impl Pool {
     pub fn get_guild_if_exists(
         &self,
         guild: GuildId,
-    ) -> Result<Option<UnboundedSender<ThreadRequest>>, silverpelt::Error> {
+    ) -> Result<Option<UnboundedSender<ThreadRequest>>, crate::Error> {
         match &self.inner {
             PoolBacker::ThreadPool(tp) => tp.get_guild_if_exists(guild),
         }

@@ -1,6 +1,7 @@
-use super::{kittycat_permission_config_data, sandwich_config};
+use crate::lockdowns::LockdownData;
 use crate::templatingrt::state::GuildState;
 use crate::templatingrt::template::Template;
+use crate::userinfo::{NoMember, UserInfoOperations};
 use antiraid_types::userinfo::UserInfo;
 use botox::crypto::gen_random;
 use khronos_runtime::traits::context::{CompatibilityFlags, KhronosContext, ScriptData};
@@ -15,8 +16,6 @@ use khronos_runtime::traits::pageprovider::PageProvider;
 use khronos_runtime::traits::userinfoprovider::UserInfoProvider;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use moka::future::Cache;
-use silverpelt::lockdowns::LockdownData;
-use silverpelt::userinfo::{NoMember, UserInfoOperations};
 use sqlx::Row;
 use std::sync::LazyLock;
 use std::{rc::Rc, sync::Arc};
@@ -161,7 +160,6 @@ impl KhronosContext for TemplateContextProvider {
                 self.guild_state.serenity_context.http.clone(),
                 self.guild_state.pool.clone(),
                 self.guild_state.reqwest_client.clone(),
-                sandwich_config(),
             )),
         })
     }
@@ -204,15 +202,11 @@ pub struct ArKVProvider {
 }
 
 impl KVProvider for ArKVProvider {
-    fn attempt_action(&self, _scope: &[String], bucket: &str) -> Result<(), silverpelt::Error> {
+    fn attempt_action(&self, _scope: &[String], bucket: &str) -> Result<(), crate::Error> {
         self.guild_state.ratelimits.kv.check(bucket)
     }
 
-    async fn get(
-        &self,
-        scopes: &[String],
-        key: String,
-    ) -> Result<Option<KvRecord>, silverpelt::Error> {
+    async fn get(&self, scopes: &[String], key: String) -> Result<Option<KvRecord>, crate::Error> {
         // Check key length
         if key.len() > self.guild_state.kv_constraints.max_key_length {
             return Err("Key length too long".into());
@@ -249,7 +243,7 @@ impl KVProvider for ArKVProvider {
         }))
     }
 
-    async fn get_by_id(&self, id: String) -> Result<Option<KvRecord>, silverpelt::Error> {
+    async fn get_by_id(&self, id: String) -> Result<Option<KvRecord>, crate::Error> {
         let rec = sqlx::query(
             "SELECT key, expires_at, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND id = $2",
         )
@@ -280,7 +274,7 @@ impl KVProvider for ArKVProvider {
         }))
     }
 
-    async fn list_scopes(&self) -> Result<Vec<String>, silverpelt::Error> {
+    async fn list_scopes(&self) -> Result<Vec<String>, crate::Error> {
         let rec = sqlx::query(
             "SELECT DISTINCT unnest_scope AS scope
 FROM guild_templates_kv, unnest(scopes) AS unnest_scope
@@ -305,7 +299,7 @@ ORDER BY scope",
         key: String,
         data: KhronosValue,
         expires_at: Option<chrono::DateTime<chrono::Utc>>,
-    ) -> Result<(bool, String), silverpelt::Error> {
+    ) -> Result<(bool, String), crate::Error> {
         // Check key length
         if key.len() > self.guild_state.kv_constraints.max_key_length {
             return Err("Key length too long".into());
@@ -493,7 +487,7 @@ ORDER BY scope",
         Ok(())
     }
 
-    async fn delete(&self, scopes: &[String], key: String) -> Result<(), silverpelt::Error> {
+    async fn delete(&self, scopes: &[String], key: String) -> Result<(), crate::Error> {
         // Check key length
         if key.len() > self.guild_state.kv_constraints.max_key_length {
             return Err("Key length too long".into());
@@ -524,7 +518,7 @@ ORDER BY scope",
         Ok(())
     }
 
-    async fn delete_by_id(&self, id: String) -> Result<(), silverpelt::Error> {
+    async fn delete_by_id(&self, id: String) -> Result<(), crate::Error> {
         let row = sqlx::query(
             "DELETE FROM guild_templates_kv WHERE guild_id = $1 AND id = $2 RETURNING expires_at",
         )
@@ -549,11 +543,7 @@ ORDER BY scope",
         Ok(())
     }
 
-    async fn find(
-        &self,
-        scopes: &[String],
-        query: String,
-    ) -> Result<Vec<KvRecord>, silverpelt::Error> {
+    async fn find(&self, scopes: &[String], query: String) -> Result<Vec<KvRecord>, crate::Error> {
         // Check key length
         if query.len() > self.guild_state.kv_constraints.max_key_length {
             return Err("Query length too long".into());
@@ -607,7 +597,7 @@ ORDER BY scope",
         Ok(records)
     }
 
-    async fn exists(&self, scopes: &[String], key: String) -> Result<bool, silverpelt::Error> {
+    async fn exists(&self, scopes: &[String], key: String) -> Result<bool, crate::Error> {
         // Check key length
         if key.len() > self.guild_state.kv_constraints.max_key_length {
             return Err("Key length too long".into());
@@ -626,7 +616,7 @@ ORDER BY scope",
         Ok(rec)
     }
 
-    async fn keys(&self, scopes: &[String]) -> Result<Vec<String>, silverpelt::Error> {
+    async fn keys(&self, scopes: &[String]) -> Result<Vec<String>, crate::Error> {
         let rec =
             sqlx::query("SELECT key FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2")
                 .bind(self.guild_id.to_string())
@@ -651,19 +641,18 @@ pub struct ArDiscordProvider {
 }
 
 impl DiscordProvider for ArDiscordProvider {
-    fn attempt_action(&self, bucket: &str) -> serenity::Result<(), silverpelt::Error> {
+    fn attempt_action(&self, bucket: &str) -> serenity::Result<(), crate::Error> {
         self.guild_state.ratelimits.discord.check(bucket)
     }
 
     async fn get_guild(
         &self,
-    ) -> serenity::Result<serenity::model::prelude::PartialGuild, silverpelt::Error> {
-        Ok(sandwich_driver::guild(
+    ) -> serenity::Result<serenity::model::prelude::PartialGuild, crate::Error> {
+        Ok(crate::sandwich::guild(
             &self.guild_state.serenity_context.cache,
             &self.guild_state.serenity_context.http,
             &self.guild_state.reqwest_client,
             self.guild_id,
-            &sandwich_config(),
         )
         .await
         .map_err(|e| format!("Failed to fetch guild information from sandwich: {}", e))?)
@@ -672,14 +661,13 @@ impl DiscordProvider for ArDiscordProvider {
     async fn get_guild_member(
         &self,
         user_id: serenity::all::UserId,
-    ) -> serenity::Result<Option<serenity::all::Member>, silverpelt::Error> {
-        Ok(sandwich_driver::member_in_guild(
+    ) -> serenity::Result<Option<serenity::all::Member>, crate::Error> {
+        Ok(crate::sandwich::member_in_guild(
             &self.guild_state.serenity_context.cache,
             &self.guild_state.serenity_context.http,
             &self.guild_state.reqwest_client,
             self.guild_id,
             user_id,
-            &sandwich_config(),
         )
         .await
         .map_err(|e| format!("Failed to fetch member information from sandwich: {}", e))?)
@@ -688,7 +676,7 @@ impl DiscordProvider for ArDiscordProvider {
     async fn get_channel(
         &self,
         channel_id: serenity::all::ChannelId,
-    ) -> serenity::Result<serenity::all::GuildChannel, silverpelt::Error> {
+    ) -> serenity::Result<serenity::all::GuildChannel, crate::Error> {
         {
             // Check cache first
             let cached_channel = CHANNEL_CACHE.get(&channel_id).await;
@@ -702,13 +690,12 @@ impl DiscordProvider for ArDiscordProvider {
             }
         }
 
-        let channel = sandwich_driver::channel(
+        let channel = crate::sandwich::channel(
             &self.guild_state.serenity_context.cache,
             &self.guild_state.serenity_context.http,
             &self.guild_state.reqwest_client,
             Some(self.guild_id),
             channel_id,
-            &sandwich_config(),
         )
         .await
         .map_err(|e| format!("Failed to fetch channel information from sandwich: {}", e))?;
@@ -761,7 +748,7 @@ impl DiscordProvider for ArDiscordProvider {
         channel_id: serenity::all::ChannelId,
         map: impl serde::Serialize,
         audit_log_reason: Option<&str>,
-    ) -> Result<serenity::model::channel::GuildChannel, silverpelt::Error> {
+    ) -> Result<serenity::model::channel::GuildChannel, crate::Error> {
         let chan = self
             .guild_state
             .serenity_context
@@ -780,7 +767,7 @@ impl DiscordProvider for ArDiscordProvider {
         &self,
         channel_id: serenity::all::ChannelId,
         audit_log_reason: Option<&str>,
-    ) -> Result<serenity::model::channel::Channel, silverpelt::Error> {
+    ) -> Result<serenity::model::channel::Channel, crate::Error> {
         let chan = self
             .guild_state
             .serenity_context
@@ -803,7 +790,7 @@ pub struct ArLockdownProvider {
 }
 
 impl LockdownProvider<LockdownData> for ArLockdownProvider {
-    fn attempt_action(&self, bucket: &str) -> serenity::Result<(), silverpelt::Error> {
+    fn attempt_action(&self, bucket: &str) -> serenity::Result<(), crate::Error> {
         self.guild_state.ratelimits.lockdowns.check(bucket)
     }
 
@@ -825,19 +812,17 @@ pub struct ArUserInfoProvider {
 }
 
 impl UserInfoProvider for ArUserInfoProvider {
-    fn attempt_action(&self, bucket: &str) -> serenity::Result<(), silverpelt::Error> {
+    fn attempt_action(&self, bucket: &str) -> serenity::Result<(), crate::Error> {
         self.guild_state.ratelimits.userinfo.check(bucket)
     }
 
-    async fn get(&self, user_id: serenity::all::UserId) -> Result<UserInfo, silverpelt::Error> {
+    async fn get(&self, user_id: serenity::all::UserId) -> Result<UserInfo, crate::Error> {
         let userinfo = UserInfo::get(
             self.guild_id,
             user_id,
             &self.guild_state.pool,
             &self.guild_state.serenity_context,
             &self.guild_state.reqwest_client,
-            kittycat_permission_config_data(),
-            &sandwich_config(),
             None::<NoMember>,
         )
         .await
@@ -855,7 +840,7 @@ pub struct ArPageProvider {
 }
 
 impl PageProvider for ArPageProvider {
-    fn attempt_action(&self, bucket: &str) -> Result<(), silverpelt::Error> {
+    fn attempt_action(&self, bucket: &str) -> Result<(), crate::Error> {
         self.guild_state.ratelimits.page.check(bucket)
     }
 
@@ -930,7 +915,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
     }
 
     fn bucket_name(&self) -> String {
-        silverpelt::objectstore::guild_bucket(self.guild_id)
+        crate::objectstore::guild_bucket(self.guild_id)
     }
 
     async fn list_files(
@@ -941,7 +926,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
             .guild_state
             .object_store
             .list_files(
-                &silverpelt::objectstore::guild_bucket(self.guild_id),
+                &crate::objectstore::guild_bucket(self.guild_id),
                 prefix.as_ref().map(|x| x.as_str()),
             )
             .await?
@@ -959,7 +944,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
         Ok(self
             .guild_state
             .object_store
-            .exists(&silverpelt::objectstore::guild_bucket(self.guild_id), &key)
+            .exists(&crate::objectstore::guild_bucket(self.guild_id), &key)
             .await?)
     }
 
@@ -967,7 +952,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
         Ok(self
             .guild_state
             .object_store
-            .download_file(&silverpelt::objectstore::guild_bucket(self.guild_id), &key)
+            .download_file(&crate::objectstore::guild_bucket(self.guild_id), &key)
             .await?)
     }
 
@@ -980,7 +965,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
             .guild_state
             .object_store
             .get_url(
-                &silverpelt::objectstore::guild_bucket(self.guild_id),
+                &crate::objectstore::guild_bucket(self.guild_id),
                 &key,
                 expiry,
             )
@@ -1003,11 +988,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
 
         self.guild_state
             .object_store
-            .upload_file(
-                &silverpelt::objectstore::guild_bucket(self.guild_id),
-                &key,
-                data,
-            )
+            .upload_file(&crate::objectstore::guild_bucket(self.guild_id), &key, data)
             .await?;
 
         Ok(())
@@ -1017,7 +998,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
         Ok(self
             .guild_state
             .object_store
-            .delete(&silverpelt::objectstore::guild_bucket(self.guild_id), &key)
+            .delete(&crate::objectstore::guild_bucket(self.guild_id), &key)
             .await?)
     }
 }

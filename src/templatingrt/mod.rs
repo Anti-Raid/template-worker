@@ -9,7 +9,6 @@ pub use vm_manager::{
     LuaVmAction, LuaVmResult, ThreadClearInactiveGuilds, ThreadMetrics, ThreadRequest, POOL,
 };
 
-use primitives::sandwich_config;
 use serenity::all::GuildId;
 
 pub const MAX_TEMPLATE_MEMORY_USAGE: usize = 1024 * 1024 * 20; // 20MB maximum memory
@@ -27,7 +26,7 @@ pub async fn execute(
     guild_id: GuildId,
     state: CreateGuildState,
     action: LuaVmAction,
-) -> Result<RenderTemplateHandle, silverpelt::Error> {
+) -> Result<RenderTemplateHandle, crate::Error> {
     let lua = POOL.get_guild(guild_id, state).await?;
 
     let (tx, rx) = tokio::sync::oneshot::channel();
@@ -50,9 +49,7 @@ pub struct MultiLuaVmResultHandle {
 impl MultiLuaVmResultHandle {
     #[allow(dead_code)]
     /// Converts the first result to a response if possible, returning an error if the result is an error
-    pub fn into_response_first<T: serde::de::DeserializeOwned>(
-        self,
-    ) -> Result<T, silverpelt::Error> {
+    pub fn into_response_first<T: serde::de::DeserializeOwned>(self) -> Result<T, crate::Error> {
         let Some(result) = self.results.into_iter().next() else {
             return Err("No results".into());
         };
@@ -69,7 +66,7 @@ pub struct LuaVmResultHandle {
 
 impl LuaVmResultHandle {
     /// Convert the result to a response if possible, returning an error if the result is an error
-    pub fn into_response<T: serde::de::DeserializeOwned>(self) -> Result<T, silverpelt::Error> {
+    pub fn into_response<T: serde::de::DeserializeOwned>(self) -> Result<T, crate::Error> {
         match self.result {
             LuaVmResult::Ok { result_val } => {
                 let res = serde_json::from_value(result_val)?;
@@ -114,7 +111,7 @@ pub struct RenderTemplateHandle {
 impl RenderTemplateHandle {
     #[allow(dead_code)]
     /// Wait for the template to render
-    pub async fn wait(self) -> Result<MultiLuaVmResultHandle, silverpelt::Error> {
+    pub async fn wait(self) -> Result<MultiLuaVmResultHandle, crate::Error> {
         let res = self.rx.await?;
         let res = res
             .into_iter()
@@ -133,7 +130,7 @@ impl RenderTemplateHandle {
     pub async fn wait_timeout(
         self,
         timeout: std::time::Duration,
-    ) -> Result<Option<MultiLuaVmResultHandle>, silverpelt::Error> {
+    ) -> Result<Option<MultiLuaVmResultHandle>, crate::Error> {
         match tokio::time::timeout(timeout, self.rx).await {
             Ok(Ok(res)) => {
                 let res = res

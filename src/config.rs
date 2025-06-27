@@ -1,7 +1,7 @@
+use crate::objectstore::ObjectStore;
 use clap::{Parser, ValueEnum};
 use serde::{Deserialize, Serialize};
 use serenity::all::UserId;
-use silverpelt::objectstore::ObjectStore;
 use std::fs::File;
 use std::sync::LazyLock;
 
@@ -36,6 +36,9 @@ pub struct CmdArgs {
 
     #[clap(long, default_value_t = false)]
     pub use_tokio_console: bool,
+
+    #[clap(long, default_value_t = false)]
+    pub register_commands_only: bool,
 }
 
 /// Global internal config object

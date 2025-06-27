@@ -54,7 +54,7 @@ impl ThreadPool {
     }
 
     /// Remove broken threads from the pool
-    pub async fn remove_unused_threads(&self) -> Result<Vec<u64>, silverpelt::Error> {
+    pub async fn remove_unused_threads(&self) -> Result<Vec<u64>, crate::Error> {
         let (mut good_threads, old_threads) = {
             let mut threads = self
                 .threads
@@ -109,7 +109,7 @@ impl ThreadPool {
     }
 
     /// Adds a new thread to the pool
-    pub fn add_thread(&self, cgs: CreateGuildState) -> Result<(), silverpelt::Error> {
+    pub fn add_thread(&self, cgs: CreateGuildState) -> Result<(), crate::Error> {
         let mut threads = self
             .threads
             .try_write()
@@ -119,7 +119,7 @@ impl ThreadPool {
     }
 
     /// Removes a thread from the pool. This also removes all guild vms attached to said thread as well
-    pub fn remove_thread(&self, id: u64) -> Result<(), silverpelt::Error> {
+    pub fn remove_thread(&self, id: u64) -> Result<(), crate::Error> {
         let idx = {
             let threads = self
                 .threads
@@ -154,7 +154,7 @@ impl ThreadPool {
     }
 
     /// Returns the number of threads in the pool
-    pub fn threads_len(&self) -> Result<usize, silverpelt::Error> {
+    pub fn threads_len(&self) -> Result<usize, crate::Error> {
         Ok(self
             .threads
             .try_read()
@@ -169,7 +169,7 @@ impl ThreadPool {
         &self,
         guild: GuildId,
         cgs: CreateGuildState,
-    ) -> Result<UnboundedSender<ThreadRequest>, silverpelt::Error> {
+    ) -> Result<UnboundedSender<ThreadRequest>, crate::Error> {
         // Check if the guild exists first
         if let Some(handle) = self.sg.get_handle(guild)? {
             return Ok(handle);
@@ -235,7 +235,7 @@ impl ThreadPool {
     pub fn get_guild_if_exists(
         &self,
         guild: GuildId,
-    ) -> Result<Option<UnboundedSender<ThreadRequest>>, silverpelt::Error> {
+    ) -> Result<Option<UnboundedSender<ThreadRequest>>, crate::Error> {
         if let Some(handle) = self.sg.get_handle(guild)? {
             return Ok(Some(handle));
         }

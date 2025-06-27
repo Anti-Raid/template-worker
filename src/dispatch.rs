@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
+use crate::data::Data;
 use crate::templatingrt::cache::{get_templates_with_event, get_templates_with_event_scoped};
 use crate::templatingrt::{execute, CreateGuildState, LuaVmAction};
 use antiraid_types::ar_event::AntiraidEvent;
 use khronos_runtime::primitives::event::CreateEvent;
 use serenity::all::{Context, FullEvent, GuildId, Interaction};
-use silverpelt::data::Data;
 
 #[inline]
 const fn not_audit_loggable_event() -> &'static [&'static str] {
@@ -20,7 +20,7 @@ const fn not_audit_loggable_event() -> &'static [&'static str] {
 pub async fn discord_event_dispatch(
     event: &FullEvent,
     serenity_context: &Context,
-) -> Result<(), silverpelt::Error> {
+) -> Result<(), crate::Error> {
     let data = serenity_context.data::<Data>();
 
     let Some(guild_id) = gwevent::core::get_event_guild_id(event) else {
@@ -98,7 +98,7 @@ pub async fn discord_event_dispatch(
 }
 
 /// Parses an antiraid event into a template event
-pub fn parse_event(event: &AntiraidEvent) -> Result<CreateEvent, silverpelt::Error> {
+pub fn parse_event(event: &AntiraidEvent) -> Result<CreateEvent, crate::Error> {
     Ok(CreateEvent::new(
         "AntiRaid".to_string(),
         event.to_string(),
@@ -112,7 +112,7 @@ pub async fn dispatch(
     data: &Data,
     event: CreateEvent,
     guild_id: GuildId,
-) -> Result<(), silverpelt::Error> {
+) -> Result<(), crate::Error> {
     let matching = get_templates_with_event(guild_id, &event).await;
     if matching.is_empty() {
         if event.name() == "INTERACTION_CREATE" {
@@ -146,7 +146,7 @@ pub async fn dispatch_and_wait(
     event: CreateEvent,
     guild_id: GuildId,
     wait_timeout: std::time::Duration,
-) -> Result<HashMap<String, serde_json::Value>, silverpelt::Error> {
+) -> Result<HashMap<String, serde_json::Value>, crate::Error> {
     let matching = get_templates_with_event(guild_id, &event).await;
     if matching.is_empty() {
         return Ok(HashMap::new());
@@ -192,7 +192,7 @@ pub async fn dispatch_scoped(
     event: CreateEvent,
     scopes: &[String],
     guild_id: GuildId,
-) -> Result<(), silverpelt::Error> {
+) -> Result<(), crate::Error> {
     let matching = get_templates_with_event_scoped(guild_id, &event, scopes).await;
     if matching.is_empty() {
         log::debug!("No templates for event: {}", event.name());
@@ -225,7 +225,7 @@ pub async fn dispatch_scoped_and_wait(
     scopes: &[String],
     guild_id: GuildId,
     wait_timeout: std::time::Duration,
-) -> Result<HashMap<String, serde_json::Value>, silverpelt::Error> {
+) -> Result<HashMap<String, serde_json::Value>, crate::Error> {
     let matching = get_templates_with_event_scoped(guild_id, &event, scopes).await;
     if matching.is_empty() {
         return Ok(HashMap::new());

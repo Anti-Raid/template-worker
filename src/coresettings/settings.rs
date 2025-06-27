@@ -9,16 +9,16 @@ use ar_settings::types::{
 use kittycat::perms::Permission;
 use serde_json::Value;
 use antiraid_types::ar_event::{AntiraidEvent, ExternalKeyUpdateEventData, ExternalKeyUpdateEventDataAction};
-use silverpelt::userinfo::{NoMember, UserInfoOperations};
+use crate::templatingrt::state::LuaKVConstraints;
+use crate::templatingrt::template::Template;
+use crate::userinfo::{NoMember, UserInfoOperations, member_permission_calc};
 use std::sync::LazyLock;
 use async_trait::async_trait;
 use super::data::SettingsData;
 use crate::templatingrt::cache::regenerate_cache;
 use crate::Error;
-use silverpelt::lockdowns::LockdownData;
+use crate::lockdowns::LockdownData;
 use sqlx::Row;
-
-use crate::templatingrt::primitives::{kittycat_permission_config_data, sandwich_config};
 
 async fn check_perms(
     ctx: &SettingsData,
@@ -33,8 +33,6 @@ async fn check_perms(
         &ctx.data.pool,
         &ctx.serenity_context,
         &ctx.data.reqwest,
-        kittycat_permission_config_data(),
-        &sandwich_config(),
         None::<NoMember>, // No poise context available
     )
     .await?;
@@ -406,12 +404,11 @@ impl GuildRolesExecutor {
             None
         };
 
-        let guild = sandwich_driver::guild(
+        let guild = crate::sandwich::guild(
             &ctx.serenity_context.cache,
             &ctx.serenity_context.http,
             &ctx.data.reqwest,
             ctx.scope.guild_id()?,
-            &sandwich_config(),
         )
         .await
         .map_err(|e| format!("Failed to get guild: {:?}", e))?;
@@ -426,13 +423,12 @@ impl GuildRolesExecutor {
             });
         }
 
-        let Some(member) = sandwich_driver::member_in_guild(
+        let Some(member) = crate::sandwich::member_in_guild(
             &ctx.serenity_context.cache,
             &ctx.serenity_context.http,
             &ctx.data.reqwest,
             ctx.scope.guild_id()?,
             ctx.scope.user_id()?,
-            &sandwich_config(),
         )
         .await
         .map_err(|e| format!("Failed to get member: {:?}", e))?
@@ -509,13 +505,12 @@ impl GuildRolesExecutor {
             return Err("You do not have permission to edit this role's permissions as they are higher than you".into());
         }
 
-        let author_kittycat_perms = silverpelt::member_permission_calc::get_kittycat_perms(
+        let author_kittycat_perms = member_permission_calc::get_kittycat_perms(
             &ctx.data.pool,
             ctx.scope.guild_id()?,
             guild.owner_id,
             ctx.scope.user_id()?,
             &member.roles,
-            kittycat_permission_config_data()
         )
         .await
         .map_err(|e| format!("Failed to get author permissions: {:?}", e))?
@@ -669,13 +664,12 @@ impl GuildMembersExecutor {
         guild_owner_id: serenity::all::UserId,
         user_id: serenity::all::UserId,
     ) -> Result<(Vec<serenity::all::RoleId>, Vec<kittycat::perms::Permission>), Error> {
-        let Some(member) = sandwich_driver::member_in_guild(
+        let Some(member) = crate::sandwich::member_in_guild(
             &data.serenity_context.cache,
             &data.serenity_context.http,
             &data.data.reqwest,
             guild_id,
             user_id,
-            &sandwich_config(),
         )
         .await
         .map_err(|e| format!("Failed to get user {}: {:?}", user_id, e))?
@@ -683,13 +677,12 @@ impl GuildMembersExecutor {
             return Ok((Vec::new(), Vec::new()));
         };
 
-        let kittycat_perms = silverpelt::member_permission_calc::get_kittycat_perms(
+        let kittycat_perms = member_permission_calc::get_kittycat_perms(
             pool,
             guild_id,
             guild_owner_id,
             user_id,
             &member.roles,
-            kittycat_permission_config_data()
         )
         .await
         .map_err(|e| format!("Failed to get user permissions: {:?} ({})", e, user_id))?
@@ -762,12 +755,11 @@ impl GuildMembersExecutor {
             perm_overrides
         };
 
-        let guild = sandwich_driver::guild(
+        let guild = crate::sandwich::guild(
             &ctx.serenity_context.cache,
             &ctx.serenity_context.http,
             &ctx.data.reqwest,
             ctx.scope.guild_id()?,
-            &sandwich_config(),
         )
         .await
         .map_err(|e| format!("Failed to get guild: {:?}", e))?;
@@ -821,13 +813,13 @@ impl GuildMembersExecutor {
 
         // Find new user's permissions with the given perm overrides
         let new_user_kittycat_perms = {
-            let roles_str = silverpelt::member_permission_calc::create_roles_list_for_guild(
+            let roles_str = member_permission_calc::create_roles_list_for_guild(
                 &target_member_roles,
                 ctx.scope.guild_id()?,
             );
 
             let user_positions =
-                silverpelt::member_permission_calc::get_user_positions_from_db(
+                member_permission_calc::get_user_positions_from_db(
                     &ctx.data.pool,
                     ctx.scope.guild_id()?,
                     &roles_str,
@@ -1186,13 +1178,12 @@ pub struct GuildTemplateExecutor;
 impl GuildTemplateExecutor {
     async fn validate_channel(&self, ctx: &SettingsData, channel_field: &str, channel_id: serenity::all::ChannelId) -> Result<(), Error> {
         // Perform required checks
-        let channel = sandwich_driver::channel(
+        let channel = crate::sandwich::channel(
             &ctx.serenity_context.cache,
             &ctx.serenity_context.http,
             &ctx.data.reqwest,
             Some(ctx.scope.guild_id()?),
             channel_id,
-            &sandwich_config(),
         )
         .await
         .map_err(|e| format!("Failed to fetch channel id: {} with field: {}", e, channel_field))?;
@@ -1212,13 +1203,12 @@ impl GuildTemplateExecutor {
         let bot_user_id =
             ctx.serenity_context.cache.current_user().id;
 
-        let bot_user = sandwich_driver::member_in_guild(
+        let bot_user = crate::sandwich::member_in_guild(
             &ctx.serenity_context.cache,
             &ctx.serenity_context.http,
             &ctx.data.reqwest,
             ctx.scope.guild_id()?,
             bot_user_id,
-            &sandwich_config(),
         )
         .await
         .map_err(|e| {
@@ -1238,12 +1228,11 @@ impl GuildTemplateExecutor {
             );
         };
 
-        let guild = sandwich_driver::guild(
+        let guild = crate::sandwich::guild(
             &ctx.serenity_context.cache,
             &ctx.serenity_context.http,
             &ctx.data.reqwest,
             ctx.scope.guild_id()?,
-            &sandwich_config(),
         )
         .await
         .map_err(|e| 
@@ -1267,7 +1256,7 @@ impl GuildTemplateExecutor {
 
     async fn validate(&self, ctx: &SettingsData, name: &str) -> Result<(), Error> {
         if name.starts_with("$shop/") {
-            let (shop_tname, shop_tversion) = silverpelt::templates::parse_shop_template(name)
+            let (shop_tname, shop_tversion) = Template::parse_shop_template(name)
                 .map_err(|e| format!("Failed to parse shop template: {:?}", e))?;
 
             let shop_template_count = sqlx::query(
@@ -1665,7 +1654,7 @@ pub static GUILD_TEMPLATES_KV: LazyLock<Setting<SettingsData>> = LazyLock::new(|
             column_type: ColumnType::new_scalar(InnerColumnType::String {
                 kind: "normal".to_string(),
                 min_length: None,
-                max_length: Some(silverpelt::templates::LuaKVConstraints::default().max_key_length),
+                max_length: Some(LuaKVConstraints::default().max_key_length),
                 allowed_values: vec![],
             }),
             primary_key: true,
@@ -1681,7 +1670,7 @@ pub static GUILD_TEMPLATES_KV: LazyLock<Setting<SettingsData>> = LazyLock::new(|
             column_type: ColumnType::new_scalar(InnerColumnType::String {
                 kind: "normal".to_string(),
                 min_length: None,
-                max_length: Some(silverpelt::templates::LuaKVConstraints::default().max_key_length),
+                max_length: Some(LuaKVConstraints::default().max_key_length),
                 allowed_values: vec![],
             }),
             primary_key: true,
@@ -1696,7 +1685,7 @@ pub static GUILD_TEMPLATES_KV: LazyLock<Setting<SettingsData>> = LazyLock::new(|
             description: "The value of the record".to_string(),
             column_type: ColumnType::new_scalar(InnerColumnType::Json {
                 kind: "kv_value".to_string(),
-                max_bytes: Some(silverpelt::templates::LuaKVConstraints::default().max_value_bytes),
+                max_bytes: Some(LuaKVConstraints::default().max_value_bytes),
             }),
             primary_key: false,
             nullable: true,
@@ -2475,7 +2464,7 @@ impl SettingUpdater<SettingsData> for GuildTemplateShopExecutor {
             "SELECT guild_id FROM guild_templates WHERE name = $1 AND paused = false",
         )
         .bind(
-            silverpelt::templates::create_shop_template(
+            Template::create_shop_template(
                 &data.name,
                 &data.version,
             )
@@ -2566,7 +2555,7 @@ impl SettingDeleter<SettingsData> for GuildTemplateShopExecutor {
             "SELECT guild_id FROM guild_templates WHERE name = $1 AND paused = false",
         )
         .bind(
-            silverpelt::templates::create_shop_template(
+            Template::create_shop_template(
                 &row.name,
                 &row.version,
             )
@@ -3110,7 +3099,6 @@ impl SettingCreator<SettingsData> for LockdownExecutor {
                 context.serenity_context.http.clone(),
                 context.data.pool.clone(),
                 context.data.reqwest.clone(),
-                sandwich_config(),
             ),
         )
             .await
@@ -3184,7 +3172,6 @@ impl SettingDeleter<SettingsData> for LockdownExecutor {
                 context.serenity_context.http.clone(),
                 context.data.pool.clone(),
                 context.data.reqwest.clone(),
-                sandwich_config(),
             ),
         )
             .await

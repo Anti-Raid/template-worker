@@ -1,5 +1,5 @@
-use super::sandwich_config;
 use crate::config::CONFIG;
+use crate::jobserver;
 use crate::templatingrt::state::GuildState;
 use chrono::Utc;
 use indexmap::IndexMap;
@@ -42,11 +42,8 @@ impl DataStoreImpl for StatsStore {
                     let total_cached_guilds = ctx.cache.guild_count();
 
                     let total_guilds = {
-                        let sandwich_resp = sandwich_driver::get_status(
-                            &guild_state.reqwest_client,
-                            &sandwich_config(),
-                        )
-                        .await?;
+                        let sandwich_resp =
+                            crate::sandwich::get_status(&guild_state.reqwest_client).await?;
 
                         let mut guild_count = 0;
                         sandwich_resp.shard_conns.iter().for_each(|(_, sc)| {
@@ -262,7 +259,7 @@ impl DataStoreImpl for JobServerStore {
                             guild_id: guild_state.guild_id.to_string(),
                         };
 
-                        let resp = jobserver::spawn::spawn_task(
+                        let resp = jobserver::spawn_task(
                             &guild_state.reqwest_client,
                             &js_spawn,
                             &CONFIG.base_ports.jobserver_base_addr,

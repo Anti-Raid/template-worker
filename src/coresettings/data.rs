@@ -1,4 +1,4 @@
-use silverpelt::data::Data;
+use crate::data::Data;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy)]

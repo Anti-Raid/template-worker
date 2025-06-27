@@ -1,19 +1,26 @@
 mod config;
 mod coresettings; // TEMPORARY
+mod data;
 mod dispatch;
 mod event_handler;
 mod expiry_tasks;
 mod http;
+mod jobserver;
+mod lockdowns;
+mod objectstore;
 mod pages;
+mod register;
+mod sandwich;
 mod templatingrt;
+mod userinfo;
 mod vmbench;
 
 use crate::config::{CMD_ARGS, CONFIG};
+use crate::data::Data;
 use crate::event_handler::EventFramework;
 use crate::templatingrt::cache::setup;
 use log::{error, info};
 use serenity::all::HttpBuilder;
-use silverpelt::data::Data;
 use sqlx::postgres::PgPoolOptions;
 use std::io::Write;
 use std::{sync::Arc, time::Duration};
@@ -102,6 +109,37 @@ async fn main() {
 
     client.cache.set_max_messages(10000);
 
+    info!("Getting registration data from builtins");
+
+    let data = register::register().expect("Failed to get registration data from builtins");
+
+    println!("Register data: {:?}", data);
+
+    if CMD_ARGS.register_commands_only {
+        let app_id = client
+            .http
+            .get_current_application_info()
+            .await
+            .expect("Failed to get application info")
+            .id;
+
+        client.http.set_application_id(app_id);
+
+        client
+            .http
+            .create_global_commands(&data.commands)
+            .await
+            .expect("Failed to register commands");
+
+        return;
+    }
+
+    info!("Setting up template cache");
+
+    setup(&pg_pool)
+        .await
+        .expect("Failed to setup template cache");
+
     if let Some(shard_count) = CMD_ARGS.shard_count {
         if let Some(ref shards) = CMD_ARGS.shards {
             let shard_range = std::ops::Range {
@@ -127,18 +165,12 @@ async fn main() {
 
             return;
         }
-    }
+    } else {
+        info!("Starting using autosharding");
 
-    info!("Setting up template cache");
-
-    setup(&pg_pool)
-        .await
-        .expect("Failed to setup template cache");
-
-    info!("Starting using autosharding");
-
-    if let Err(why) = client.start_autosharded().await {
-        error!("Client error: {:?}", why);
-        std::process::exit(1); // Clean exit with status code of 1
+        if let Err(why) = client.start_autosharded().await {
+            error!("Client error: {:?}", why);
+            std::process::exit(1); // Clean exit with status code of 1
+        }
     }
 }

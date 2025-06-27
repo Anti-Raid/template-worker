@@ -1,5 +1,6 @@
 use crate::config::CONFIG;
 use crate::dispatch::{discord_event_dispatch, dispatch, parse_event};
+use crate::http::init::{start_rpc_server, CreateRpcServerBind, CreateRpcServerOptions};
 use crate::templatingrt::cache::{get_all_guild_templates, get_all_guilds_with_templates};
 use antiraid_types::ar_event::AntiraidEvent;
 use async_trait::async_trait;
@@ -16,22 +17,22 @@ impl Framework for EventFramework {
         if let serenity::all::FullEvent::Ready { .. } = event {
             ONCE.call_once(|| {
                 let ctx1 = ctx.clone();
-                let data1 = ctx.data::<silverpelt::data::Data>();
+                let data1 = ctx.data::<crate::data::Data>();
 
                 tokio::task::spawn(async move {
                     log::info!("Starting RPC server");
 
-                    let rpc_server = crate::http::create(data1, &ctx1);
+                    let rpc_server = crate::http::server::create(data1, &ctx1);
 
-                    let opts = rust_rpc_server::CreateRpcServerOptions {
-                        bind: rust_rpc_server::CreateRpcServerBind::Address(format!(
+                    let opts = CreateRpcServerOptions {
+                        bind: CreateRpcServerBind::Address(format!(
                             "{}:{}",
                             CONFIG.base_ports.template_worker_bind_addr,
                             CONFIG.base_ports.template_worker_port
                         )),
                     };
 
-                    rust_rpc_server::start_rpc_server(opts, rpc_server).await;
+                    start_rpc_server(opts, rpc_server).await;
                 });
 
                 // Fire OnStartup event to all templates
@@ -41,7 +42,7 @@ impl Framework for EventFramework {
 
                     for guild in get_all_guilds_with_templates() {
                         let ctx = ctx2.clone();
-                        let data = ctx.data::<silverpelt::data::Data>();
+                        let data = ctx.data::<crate::data::Data>();
                         tokio::task::spawn(async move {
                             let Some(templates) = get_all_guild_templates(guild).await else {
                                 return;

@@ -1,6 +1,4 @@
 use crate::coresettings::data::RequestScope;
-use crate::coresettings::data::SettingsData;
-use crate::templatingrt::primitives::sandwich_config;
 use crate::templatingrt::CreateGuildState;
 use crate::templatingrt::POOL;
 use crate::templatingrt::{cache::regenerate_cache, MAX_TEMPLATES_RETURN_WAIT_TIME};
@@ -13,14 +11,12 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use serenity::all::GuildChannel;
-use serenity::all::Permissions;
-use serenity::all::Role;
-use serenity::all::RoleId;
 use std::{collections::HashMap, sync::Arc};
 
+use super::types::{
+    BaseGuildUserInfo, CanonicalSettingsResult, DispatchEventAndWaitQuery, ExecuteLuaVmActionOpts,
+    GuildChannelWithPermissions, PageSettingsOperationRequest, SettingsOperationRequest, TwState,
+};
 use crate::dispatch::{dispatch, dispatch_and_wait, parse_event};
 use crate::templatingrt::execute;
 
@@ -38,12 +34,12 @@ pub static STATE_CACHE: std::sync::LazyLock<Arc<TwState>> = std::sync::LazyLock:
 
 #[derive(Clone)]
 pub struct AppData {
-    pub data: Arc<silverpelt::data::Data>,
+    pub data: Arc<crate::data::Data>,
     pub serenity_context: serenity::all::Context,
 }
 
 impl AppData {
-    pub fn new(data: Arc<silverpelt::data::Data>, ctx: &serenity::all::Context) -> Self {
+    pub fn new(data: Arc<crate::data::Data>, ctx: &serenity::all::Context) -> Self {
         Self {
             data,
             serenity_context: ctx.clone(),
@@ -54,7 +50,7 @@ impl AppData {
 type Response<T> = Result<Json<T>, (StatusCode, String)>;
 
 pub fn create(
-    data: Arc<silverpelt::data::Data>,
+    data: Arc<crate::data::Data>,
     ctx: &serenity::all::Context,
 ) -> axum::routing::IntoMakeService<Router> {
     let router = Router::new()
@@ -126,13 +122,6 @@ async fn dispatch_event(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(()))
-}
-
-/// Query parameters for dispatch_event_and_wait
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct DispatchEventAndWaitQuery {
-    /// Wait duration in milliseconds
-    pub wait_timeout: Option<u64>,
 }
 
 /// Dispatches a new event and waits for a response
@@ -212,11 +201,6 @@ async fn clear_inactive_guilds(
     };
 
     Ok(Json(hm))
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct ExecuteLuaVmActionOpts {
-    pub wait_timeout: Option<std::time::Duration>,
 }
 
 /// Execute a lua vm action on a guild
@@ -303,24 +287,6 @@ async fn get_vm_metrics_for_all() -> Response<Vec<crate::templatingrt::ThreadMet
         })?;
 
     Ok(Json(metrics))
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PageSettingsOperationRequest {
-    pub fields: indexmap::IndexMap<String, Value>,
-    pub op: OperationType,
-    pub template: String,
-    pub setting_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum CanonicalSettingsResult {
-    Ok {
-        fields: Vec<indexmap::IndexMap<String, Value>>,
-    },
-    Err {
-        error: String,
-    },
 }
 
 /// Gets the pages for a guild
@@ -439,12 +405,11 @@ pub(crate) async fn guilds_exist(
     let mut guilds_exist = Vec::with_capacity(guilds.len());
 
     for guild in guilds {
-        let has_guild = sandwich_driver::has_guild(
+        let has_guild = crate::sandwich::has_guild(
             &serenity_context.cache,
             &serenity_context.http,
             &data.reqwest,
             guild,
-            &sandwich_config(),
         )
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -471,12 +436,11 @@ async fn base_guild_user_info(
     Path((guild_id, user_id)): Path<(serenity::all::GuildId, serenity::all::UserId)>,
 ) -> Response<BaseGuildUserInfo> {
     let bot_user_id = serenity_context.cache.current_user().id;
-    let guild = sandwich_driver::guild(
+    let guild = crate::sandwich::guild(
         &serenity_context.cache,
         &serenity_context.http,
         &data.reqwest,
         guild_id,
-        &sandwich_config(),
     )
     .await
     .map_err(|e| {
@@ -487,13 +451,12 @@ async fn base_guild_user_info(
     })?;
 
     // Next fetch the member and bot_user
-    let member: serenity::model::prelude::Member = match sandwich_driver::member_in_guild(
+    let member: serenity::model::prelude::Member = match crate::sandwich::member_in_guild(
         &serenity_context.cache,
         &serenity_context.http,
         &data.reqwest,
         guild_id,
         user_id,
-        &sandwich_config(),
     )
     .await
     {
@@ -509,13 +472,12 @@ async fn base_guild_user_info(
         }
     };
 
-    let bot_user: serenity::model::prelude::Member = match sandwich_driver::member_in_guild(
+    let bot_user: serenity::model::prelude::Member = match crate::sandwich::member_in_guild(
         &serenity_context.cache,
         &serenity_context.http,
         &data.reqwest,
         guild_id,
         bot_user_id,
-        &sandwich_config(),
     )
     .await
     {
@@ -532,12 +494,11 @@ async fn base_guild_user_info(
     };
 
     // Fetch the channels
-    let channels = sandwich_driver::guild_channels(
+    let channels = crate::sandwich::guild_channels(
         &serenity_context.cache,
         &serenity_context.http,
         &data.reqwest,
         guild_id,
-        &sandwich_config(),
     )
     .await
     .map_err(|e| {
@@ -778,38 +739,4 @@ pub(crate) async fn settings_operation_anonymous(
 /// Returns a list of modules [Modules]
 async fn state(State(AppData { .. }): State<AppData>) -> Json<Arc<TwState>> {
     Json(STATE_CACHE.clone())
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct GuildChannelWithPermissions {
-    pub user: Permissions,
-    pub bot: Permissions,
-    pub channel: GuildChannel,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct BaseGuildUserInfo {
-    pub owner_id: String,
-    pub name: String,
-    pub icon: Option<String>,
-    /// List of all roles in the server
-    pub roles: Vec<Role>,
-    /// List of roles the user has
-    pub user_roles: Vec<RoleId>,
-    /// List of roles the bot has
-    pub bot_roles: Vec<RoleId>,
-    /// List of all channels in the server
-    pub channels: Vec<GuildChannelWithPermissions>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SettingsOperationRequest {
-    pub fields: indexmap::IndexMap<String, Value>,
-    pub op: ar_settings::types::OperationType,
-    pub setting: String,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct TwState {
-    pub settings: Vec<ar_settings::types::Setting<SettingsData>>,
 }

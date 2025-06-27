@@ -1,5 +1,5 @@
-use crate::templatingrt::*;
 use crate::templatingrt::template::Template;
+use crate::templatingrt::*;
 use khronos_runtime::primitives::event::CreateEvent;
 use serenity::all::GuildId;
 use vfs::FileSystem;
@@ -16,9 +16,9 @@ pub struct FireBenchmark {
 /// Benchmark the Lua VM
 pub async fn benchmark_vm(
     guild_id: GuildId,
-    cgs: CreateGuildState
-) -> Result<FireBenchmark, silverpelt::Error> {
-    return Err("Being rewritten".into())
+    cgs: CreateGuildState,
+) -> Result<FireBenchmark, crate::Error> {
+    return Err("Being rewritten".into());
 
     // Get_lua_vm
     /*let cgs_a = cgs.clone();
@@ -41,7 +41,7 @@ pub async fn benchmark_vm(
             .write_all(s.as_bytes())
             .unwrap();
         fs
-    }    
+    }
 
     let pt = {
         let mut tmpl = Template {
@@ -171,4 +171,3 @@ pub async fn benchmark_vm(
         exec_error,
     })*/
 }
-

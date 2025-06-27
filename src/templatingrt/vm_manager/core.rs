@@ -1,8 +1,7 @@
 use super::client::{LuaVmAction, LuaVmResult};
 use crate::templatingrt::primitives::ctxprovider::TemplateContextProvider;
-use crate::templatingrt::sandwich_config;
 use crate::templatingrt::state::GuildState;
-use crate::templatingrt::template::{ConstructedFS, Template};
+use crate::templatingrt::template::Template;
 use crate::templatingrt::MAX_TEMPLATES_EXECUTION_TIME;
 use crate::templatingrt::MAX_TEMPLATES_RETURN_WAIT_TIME;
 use crate::templatingrt::MAX_TEMPLATE_MEMORY_USAGE;
@@ -121,13 +120,12 @@ impl LuaVmResult {
         };
 
         if let Some(error_channel) = template.error_channel {
-            let Some(channel) = sandwich_driver::channel(
+            let Some(channel) = crate::sandwich::channel(
                 &guild_state.serenity_context.cache,
                 &guild_state.serenity_context.http,
                 &guild_state.reqwest_client,
                 Some(template.guild_id),
                 error_channel,
-                &sandwich_config(),
             )
             .await?
             else {
@@ -217,20 +215,10 @@ pub async fn dispatch_event_to_template(
         let sub_isolate = loop {
             // It may take a few attempts to create a subisolate successfully
             // due to ongoing Lua VM operations
-            match KhronosIsolate::new_subisolate(manager.runtime().clone(), {
-                match template.ready_fs {
-                    Some(ConstructedFS::Memory(ref fs)) => FilesystemWrapper::new(fs.clone()),
-                    Some(ConstructedFS::Overlay(ref fs)) => FilesystemWrapper::new(fs.clone()),
-                    None => {
-                        return LuaVmResult::LuaError {
-                            err: format!(
-                                "Template {} does not have a ready filesystem",
-                                template.name
-                            ),
-                        };
-                    }
-                }
-            }) {
+            match KhronosIsolate::new_subisolate(
+                manager.runtime().clone(),
+                FilesystemWrapper::new(template.content.0.clone()),
+            ) {
                 Ok(isolate) => {
                     break isolate;
                 }

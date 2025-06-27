@@ -1,16 +1,15 @@
 use std::str::FromStr;
 
-use super::cache::{TEST_BASE, TEST_BASE_NAME, USE_TEST_BASE};
+use super::cache::{BUILTINS, BUILTINS_NAME, USE_BUILTINS};
+use crate::Error;
 use khronos_runtime::primitives::event::CreateEvent;
 use rust_embed::Embed;
-use silverpelt::templates::parse_shop_template;
-use silverpelt::Error;
 
 /// To make uploads not need to upload all of ``templating-types`` and keep them up to date:
 #[derive(Embed, Debug)]
 #[folder = "$CARGO_MANIFEST_DIR/../../infra/templating-types"]
 #[prefix = "templating-types/"]
-struct TemplatingTypes;
+pub struct TemplatingTypes;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, Default, Debug)]
 pub enum TemplateLanguage {
@@ -40,9 +39,22 @@ impl std::fmt::Display for TemplateLanguage {
 
 #[derive(Clone, Debug)]
 /// The constructed filesystem for the template
-pub enum ConstructedFS {
-    Memory(vfs::MemoryFS),
-    Overlay(vfs::OverlayFS),
+pub struct DefaultableOverlayFS(pub vfs::OverlayFS);
+
+impl std::ops::Deref for DefaultableOverlayFS {
+    type Target = vfs::OverlayFS;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Default for DefaultableOverlayFS {
+    fn default() -> Self {
+        Self(vfs::OverlayFS::new(&vec![
+            vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
+        ]))
+    }
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default)]
@@ -63,10 +75,7 @@ pub struct Template {
     pub error_channel: Option<serenity::all::ChannelId>,
     /// The content of the template
     #[serde(skip)]
-    pub content: vfs::MemoryFS,
-    /// The constructed filesystem
-    #[serde(skip)]
-    pub ready_fs: Option<ConstructedFS>,
+    pub content: DefaultableOverlayFS,
     /// The language of the template
     pub lang: TemplateLanguage,
     /// The allowed capabilities the template has access to
@@ -150,7 +159,7 @@ impl Template {
 
         for template in templates {
             if template.name.starts_with("$shop/") {
-                let (shop_tname, shop_tversion) = parse_shop_template(&template.name)?;
+                let (shop_tname, shop_tversion) = Self::parse_shop_template(&template.name)?;
 
                 let shop_data = if shop_tversion == "latest" {
                     let rec: Option<TemplateShopData> = sqlx::query_as(
@@ -199,26 +208,41 @@ impl Template {
                         let content: std::collections::HashMap<String, String> =
                             serde_json::from_value(shop_data.content)?;
 
-                        khronos_runtime::utils::memoryvfs::create_memory_vfs_from_map(content)
-                            .map_err(|e| {
-                                Error::from(format!("Failed to create vfs from map: {e}"))
-                            })?
+                        let mem_fs =
+                            khronos_runtime::utils::memoryvfs::create_memory_vfs_from_map(content)
+                                .map_err(|e| {
+                                    Error::from(format!("Failed to create vfs from map: {e}"))
+                                })?;
+
+                        // Now create prepped fs
+                        DefaultableOverlayFS(vfs::OverlayFS::new(&vec![
+                            mem_fs.into(),
+                            vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
+                        ]))
                     },
-                    ready_fs: None,
                     created_by: shop_data.created_by.parse()?,
                     created_at: shop_data.created_at,
                     updated_by: shop_data.last_updated_by.parse()?,
                     updated_at: shop_data.last_updated_at,
                 });
             } else {
-                let content = if USE_TEST_BASE && template.name == TEST_BASE_NAME {
-                    TEST_BASE.content.clone()
+                let content = if USE_BUILTINS && template.name == BUILTINS_NAME {
+                    BUILTINS.content.clone()
                 } else {
                     let content: std::collections::HashMap<String, String> =
                         serde_json::from_value(template.content)?;
 
-                    khronos_runtime::utils::memoryvfs::create_memory_vfs_from_map(content)
-                        .map_err(|e| Error::from(format!("Failed to create vfs from map: {e}")))?
+                    let mem_fs =
+                        khronos_runtime::utils::memoryvfs::create_memory_vfs_from_map(content)
+                            .map_err(|e| {
+                                Error::from(format!("Failed to create vfs from map: {e}"))
+                            })?;
+
+                    // Now create prepped fs
+                    DefaultableOverlayFS(vfs::OverlayFS::new(&vec![
+                        mem_fs.into(),
+                        vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
+                    ]))
                 };
 
                 result.push(Self {
@@ -233,7 +257,6 @@ impl Template {
                         None => None,
                     },
                     content,
-                    ready_fs: None,
                     lang: TemplateLanguage::from_str(&template.language)
                         .map_err(|_| "Invalid language")?,
                     allowed_caps: template.allowed_caps,
@@ -248,24 +271,19 @@ impl Template {
         Ok(result)
     }
 
-    pub fn prepare_ready_fs(&mut self) {
-        let prepped_fs = if self
-            .allowed_caps
-            .contains(&"assetmanager:use_bundled_templating_types".to_string())
-        {
-            ConstructedFS::Overlay(vfs::OverlayFS::new(&vec![
-                self.content.clone().into(),
-                vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
-            ]))
-        } else {
-            ConstructedFS::Memory(self.content.clone())
+    /// Parses a shop template of form template_name#version
+    pub fn parse_shop_template(s: &str) -> Result<(String, String), Error> {
+        let s = s.trim_start_matches("$shop/");
+        let (template, version) = match s.split_once('#') {
+            Some((template, version)) => (template, version),
+            None => return Err("Invalid shop template".into()),
         };
 
-        log::trace!(
-            "Prepared ready fs for template {}: {:?}",
-            self.name,
-            prepped_fs
-        );
-        self.ready_fs = Some(prepped_fs);
+        Ok((template.to_string(), version.to_string()))
+    }
+
+    /// Creates a shop template string given name and version
+    pub fn create_shop_template(template: &str, version: &str) -> String {
+        format!("$shop/{}#{}", template, version)
     }
 }

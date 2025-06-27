@@ -112,7 +112,7 @@ impl ThreadEntry {
     pub fn create(
         cgs: CreateGuildState, // all data needed by lua vm
         sg: SharedGuild,
-    ) -> Result<Self, silverpelt::Error> {
+    ) -> Result<Self, crate::Error> {
         let (tx, rx) = unbounded_channel::<ThreadRequest>();
 
         let entry = Self::new(tx, sg);
@@ -142,7 +142,7 @@ impl ThreadEntry {
         &self,
         cgs: CreateGuildState,
         rx: UnboundedReceiver<ThreadRequest>,
-    ) -> Result<(), silverpelt::Error> {
+    ) -> Result<(), crate::Error> {
         let mut rx = rx; // Take mutable ownership to receiver
         let count_ref = self.count.clone();
         let tid = self.id; // thread id

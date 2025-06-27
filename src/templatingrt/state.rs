@@ -1,18 +1,17 @@
+use crate::objectstore::ObjectStore;
 use governor::{clock::QuantaClock, DefaultKeyedRateLimiter};
 use khronos_runtime::utils::ratelimits::LuaRatelimits;
-use silverpelt::objectstore::ObjectStore;
-pub use silverpelt::templates::LuaKVConstraints;
 use std::num::NonZeroU32;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub fn create_nonmax_u32(value: u32) -> Result<NonZeroU32, silverpelt::Error> {
+pub fn create_nonmax_u32(value: u32) -> Result<NonZeroU32, crate::Error> {
     Ok(NonZeroU32::new(value).ok_or("Value must be non-zero")?)
 }
 
 impl Ratelimits {
-    fn new_discord_rl() -> Result<LuaRatelimits, silverpelt::Error> {
+    fn new_discord_rl() -> Result<LuaRatelimits, crate::Error> {
         // Create the global limit
         let global_quota =
             LuaRatelimits::create_quota(create_nonmax_u32(25)?, Duration::from_secs(10))?;
@@ -81,7 +80,7 @@ impl Ratelimits {
         })
     }
 
-    fn new_kv_rl() -> Result<LuaRatelimits, silverpelt::Error> {
+    fn new_kv_rl() -> Result<LuaRatelimits, crate::Error> {
         // Create the global limit
         let global_quota =
             LuaRatelimits::create_quota(create_nonmax_u32(500)?, Duration::from_millis(100))?;
@@ -98,7 +97,7 @@ impl Ratelimits {
         })
     }
 
-    fn new_lockdowns_rl() -> Result<LuaRatelimits, silverpelt::Error> {
+    fn new_lockdowns_rl() -> Result<LuaRatelimits, crate::Error> {
         // Create the global limit
         let global_quota =
             LuaRatelimits::create_quota(create_nonmax_u32(10)?, Duration::from_secs(60))?;
@@ -124,7 +123,7 @@ impl Ratelimits {
         })
     }
 
-    fn new_userinfo_rl() -> Result<LuaRatelimits, silverpelt::Error> {
+    fn new_userinfo_rl() -> Result<LuaRatelimits, crate::Error> {
         // Create the global limit
         let global_quota =
             LuaRatelimits::create_quota(create_nonmax_u32(7)?, Duration::from_secs(60))?;
@@ -141,7 +140,7 @@ impl Ratelimits {
         })
     }
 
-    fn new_page_rl() -> Result<LuaRatelimits, silverpelt::Error> {
+    fn new_page_rl() -> Result<LuaRatelimits, crate::Error> {
         // Create the global limit
         let global_quota =
             LuaRatelimits::create_quota(create_nonmax_u32(10)?, Duration::from_secs(1))?;
@@ -158,7 +157,7 @@ impl Ratelimits {
         })
     }
 
-    fn new_data_stores_rl() -> Result<LuaRatelimits, silverpelt::Error> {
+    fn new_data_stores_rl() -> Result<LuaRatelimits, crate::Error> {
         // Create the global limit
         let global_quota =
             LuaRatelimits::create_quota(create_nonmax_u32(75)?, Duration::from_secs(1))?;
@@ -175,7 +174,7 @@ impl Ratelimits {
         })
     }
 
-    fn new_object_storage_rl() -> Result<LuaRatelimits, silverpelt::Error> {
+    fn new_object_storage_rl() -> Result<LuaRatelimits, crate::Error> {
         // Create the global limit
         let global_quota =
             LuaRatelimits::create_quota(create_nonmax_u32(75)?, Duration::from_secs(1))?;
@@ -217,7 +216,7 @@ pub struct Ratelimits {
 }
 
 impl Ratelimits {
-    pub fn new() -> Result<Self, silverpelt::Error> {
+    pub fn new() -> Result<Self, crate::Error> {
         Ok(Ratelimits {
             discord: Ratelimits::new_discord_rl()?,
             kv: Ratelimits::new_kv_rl()?,
@@ -245,7 +244,7 @@ pub struct GuildState {
 pub struct CreateGuildState {
     pub serenity_context: serenity::all::Context,
     pub reqwest_client: reqwest::Client,
-    pub object_store: Arc<silverpelt::objectstore::ObjectStore>,
+    pub object_store: Arc<crate::objectstore::ObjectStore>,
     pub pool: sqlx::PgPool,
 }
 
@@ -253,7 +252,7 @@ impl CreateGuildState {
     pub fn to_guild_state(
         self,
         guild_id: serenity::all::GuildId,
-    ) -> Result<GuildState, silverpelt::Error> {
+    ) -> Result<GuildState, crate::Error> {
         Ok(GuildState {
             pool: self.pool,
             guild_id,
@@ -263,5 +262,30 @@ impl CreateGuildState {
             kv_constraints: LuaKVConstraints::default(),
             ratelimits: Rc::new(Ratelimits::new()?),
         })
+    }
+}
+
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub struct LuaKVConstraints {
+    /// Maximum length of a key
+    pub max_key_length: usize,
+    /// Maximum length of a value (in bytes)
+    pub max_value_bytes: usize,
+    /// Maximum length of a object storage path
+    pub max_object_storage_path_length: usize,
+    /// Maximum length of a object storage data
+    pub max_object_storage_bytes: usize,
+}
+
+impl Default for LuaKVConstraints {
+    fn default() -> Self {
+        LuaKVConstraints {
+            max_key_length: 512,
+            // 256kb max per value
+            max_value_bytes: 256 * 1024,
+            max_object_storage_path_length: 2048,
+            // 512kb max per value
+            max_object_storage_bytes: 512 * 1024,
+        }
     }
 }

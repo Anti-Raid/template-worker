@@ -1,11 +1,13 @@
 use super::template::Template;
 use super::{LuaVmAction, RenderTemplateHandle, ThreadRequest, MAX_TEMPLATES_RETURN_WAIT_TIME};
+use crate::data::Data;
 use crate::dispatch::parse_event;
+use crate::templatingrt::template::{DefaultableOverlayFS, TemplatingTypes};
 use antiraid_types::ar_event::AntiraidEvent;
 use khronos_runtime::primitives::event::CreateEvent;
 use moka::future::Cache;
+use rust_embed::Embed;
 use serenity::all::GuildId;
-use silverpelt::data::Data;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
@@ -15,8 +17,8 @@ pub const MAX_EXTENDS: i64 = 12; // Maximum number of times a key expiry can be 
 
 // Test base will be used for builtins in the future
 
-// Exec simple with wait
-fn str_to_fs(s: &str) -> vfs::MemoryFS {
+#[allow(dead_code)]
+pub fn str_to_fs(s: &str) -> vfs::MemoryFS {
     let fs = vfs::MemoryFS::new();
     fs.create_file("/init.luau")
         .unwrap()
@@ -25,24 +27,34 @@ fn str_to_fs(s: &str) -> vfs::MemoryFS {
     fs
 }
 
-// Replace this with the new builtins template once ready to deploy
-pub const TEST_BASE_NAME: &str = "$test_base";
-pub static TEST_BASE: LazyLock<Arc<Template>> = LazyLock::new(|| {
-    let mut templ = Template {
-        content: str_to_fs("local evt, ctx = ...\nif evt.name == 'INTERACTION_CREATE' then error(ctx.guild_id) end"),
-        name: TEST_BASE_NAME.to_string(),
-        events: vec!["INTERACTION_CREATE".to_string(), "MESSAGE".to_string()],
+/// Builtins
+#[derive(Embed, Debug)]
+#[folder = "$CARGO_MANIFEST_DIR/../../builtins"]
+#[prefix = ""]
+pub struct Builtins;
 
+// Replace this with the new builtins template once ready to deploy
+pub const BUILTINS_NAME: &str = "$builtins";
+pub static BUILTINS: LazyLock<Arc<Template>> = LazyLock::new(|| {
+    let templ = Template {
+        content: DefaultableOverlayFS(vfs::OverlayFS::new(&vec![
+            vfs::EmbeddedFS::<Builtins>::new().into(),
+            vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
+        ])),
+        name: BUILTINS_NAME.to_string(),
+        events: vec![
+            "INTERACTION_CREATE".to_string(),
+            "KeyExpiry[builtins.remindme]".to_string(),
+        ],
+        allowed_caps: vec!["*".to_string()],
         ..Default::default()
     };
 
-    templ.prepare_ready_fs();
-
     Arc::new(templ)
 });
-pub static TEST_BASE_ARC_VEC: LazyLock<Arc<Vec<Arc<Template>>>> =
-    LazyLock::new(|| Arc::new(vec![TEST_BASE.clone()]));
-pub const USE_TEST_BASE: bool = true;
+pub static BUILTINS_ARC_VEC: LazyLock<Arc<Vec<Arc<Template>>>> =
+    LazyLock::new(|| Arc::new(vec![BUILTINS.clone()]));
+pub const USE_BUILTINS: bool = true;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct KeyExpiry {
@@ -75,7 +87,7 @@ pub async fn get_templates_with_event(
     event: &CreateEvent,
 ) -> Vec<Arc<Template>> {
     if let Some(templates) = TEMPLATES_CACHE.get(&guild_id).await {
-        // `templates` should have $test_base injected into it, so this is a simple for loop
+        // `templates` should have $BUILTINS injected into it, so this is a simple for loop
         let mut matching_templates = Vec::with_capacity(templates.len());
         for template in templates.iter() {
             if template.should_dispatch(event) {
@@ -84,10 +96,10 @@ pub async fn get_templates_with_event(
         }
         return matching_templates;
     } else {
-        if USE_TEST_BASE {
-            if TEST_BASE.should_dispatch(event) {
+        if USE_BUILTINS {
+            if BUILTINS.should_dispatch(event) {
                 let mut templates = Vec::with_capacity(1);
-                templates.push(TEST_BASE.clone());
+                templates.push(BUILTINS.clone());
                 return templates;
             }
         }
@@ -101,7 +113,7 @@ pub async fn get_templates_with_event_scoped(
     scopes: &[String],
 ) -> Vec<Arc<Template>> {
     if let Some(templates) = TEMPLATES_CACHE.get(&guild_id).await {
-        // `templates` should have $test_base injected into it, so this is a simple for loop
+        // `templates` should have $BUILTINS injected into it, so this is a simple for loop
         let mut matching_templates = Vec::with_capacity(templates.len());
         for template in templates.iter() {
             if template.should_dispatch_scoped(event, scopes) {
@@ -110,10 +122,10 @@ pub async fn get_templates_with_event_scoped(
         }
         return matching_templates;
     } else {
-        if USE_TEST_BASE {
-            if TEST_BASE.should_dispatch_scoped(event, scopes) {
+        if USE_BUILTINS {
+            if BUILTINS.should_dispatch_scoped(event, scopes) {
                 let mut templates = Vec::with_capacity(1);
-                templates.push(TEST_BASE.clone());
+                templates.push(BUILTINS.clone());
                 return templates;
             }
         }
@@ -125,11 +137,11 @@ pub async fn get_templates_with_event_scoped(
 #[allow(dead_code)]
 pub async fn get_all_guild_templates(guild_id: GuildId) -> Option<Arc<Vec<Arc<Template>>>> {
     match TEMPLATES_CACHE.get(&guild_id).await {
-        Some(templates) => return Some(templates), // `templates` should have $test_base injected into it
+        Some(templates) => return Some(templates), // `templates` should have $BUILTINS injected into it
         None => {
-            if USE_TEST_BASE {
-                log::debug!("Called get_all_guild_templates with USE_TEST_BASE");
-                let templates = TEST_BASE_ARC_VEC.clone();
+            if USE_BUILTINS {
+                log::debug!("Called get_all_guild_templates with USE_BUILTINS");
+                let templates = BUILTINS_ARC_VEC.clone();
                 return Some(templates); // Return the test base template
             }
 
@@ -155,7 +167,7 @@ pub fn get_all_expired_keys() -> Vec<(serenity::all::GuildId, Arc<KeyExpiry>)> {
 }
 
 /// Sets up the initial template and key expiry cache
-pub async fn setup(pool: &sqlx::PgPool) -> Result<(), silverpelt::Error> {
+pub async fn setup(pool: &sqlx::PgPool) -> Result<(), crate::Error> {
     get_all_templates_from_db(pool).await?;
     get_all_key_expiries_from_db(pool).await?;
     Ok(())
@@ -167,18 +179,13 @@ pub async fn regenerate_cache(
     context: &serenity::all::Context,
     data: &Data,
     guild_id: GuildId,
-) -> Result<(), silverpelt::Error> {
+) -> Result<(), crate::Error> {
     println!("Clearing cache for guild {}", guild_id);
 
     KEY_EXPIRIES.remove(&guild_id).await;
 
     // NOTE: if this call fails, bail out early and don't clear the cache to ensure old code at least runs
-    let templates = get_all_guild_templates_from_db(
-        guild_id,
-        &data.pool,
-        TEMPLATES_CACHE.remove(&guild_id).await,
-    )
-    .await?;
+    let templates = get_all_guild_templates_from_db(guild_id, &data.pool).await?;
     get_all_guild_key_expiries_from_db(guild_id, &data.pool).await?;
 
     println!("Resyncing VMs");
@@ -225,7 +232,7 @@ pub async fn regenerate_cache(
     Ok(())
 }
 
-async fn get_all_templates_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt::Error> {
+async fn get_all_templates_from_db(pool: &sqlx::PgPool) -> Result<(), crate::Error> {
     #[derive(sqlx::FromRow)]
     struct GuildTemplatePartial {
         guild_id: String,
@@ -242,40 +249,21 @@ async fn get_all_templates_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt
     for partial in partials {
         let guild_id = partial.guild_id.parse()?;
 
-        let old_templates = TEMPLATES_CACHE.get(&guild_id).await;
-
         if let Ok(templates_vec) = Template::guild(guild_id, pool).await {
             let templates_vec = {
                 let mut templates_found = Vec::with_capacity(templates_vec.len());
                 let mut found_base = false;
                 for template in templates_vec.into_iter() {
-                    let mut template = template; // Make sure we mutably own
-                    if template.name == TEST_BASE_NAME {
+                    let template = template; // Make sure we mutably own
+                    if template.name == BUILTINS_NAME {
                         found_base = true; // Mark that we have found the base template already
                     }
-
-                    // Get the content of old template
-                    // TODO: Optimize this logic maybe?
-                    if let Some(ref old_templates) = old_templates {
-                        for old_template in old_templates.iter() {
-                            if template.name == old_template.name {
-                                // Copy over filesystem ref and make them point to the same thing
-                                old_template
-                                    .content
-                                    .take_from_filesystem(&template.content)?; // Propogate error upwards as this should never happen outside of poisoned RwLock
-                                template.content = old_template.content.clone();
-                                break;
-                            }
-                        }
-                    }
-
-                    template.prepare_ready_fs();
 
                     templates_found.push(Arc::new(template));
                 }
 
-                if !found_base && USE_TEST_BASE {
-                    templates_found.push(TEST_BASE.clone()); // Add default test base template if not found
+                if !found_base && USE_BUILTINS {
+                    templates_found.push(BUILTINS.clone()); // Add default test base template if not found
                 }
 
                 templates_found
@@ -294,7 +282,7 @@ async fn get_all_templates_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt
     Ok(())
 }
 
-async fn get_all_key_expiries_from_db(pool: &sqlx::PgPool) -> Result<(), silverpelt::Error> {
+async fn get_all_key_expiries_from_db(pool: &sqlx::PgPool) -> Result<(), crate::Error> {
     #[derive(sqlx::FromRow)]
     struct KeyExpiryPartial {
         guild_id: String,
@@ -339,50 +327,24 @@ async fn get_all_key_expiries_from_db(pool: &sqlx::PgPool) -> Result<(), silverp
 async fn get_all_guild_templates_from_db(
     guild_id: GuildId,
     pool: &sqlx::PgPool,
-    old: Option<Arc<Vec<Arc<Template>>>>,
-) -> Result<Arc<Vec<Arc<Template>>>, silverpelt::Error> {
+) -> Result<Arc<Vec<Arc<Template>>>, crate::Error> {
     let mut templates_vec = Template::guild(guild_id, pool)
         .await?
         .into_iter()
+        .map(|template| Arc::new(template))
         .collect::<Vec<_>>();
 
-    // If we have old templates, we need to copy over the filesystem
-    if let Some(old_templates) = old {
-        for template in templates_vec.iter_mut() {
-            for old_template in old_templates.iter() {
-                if template.name == old_template.name {
-                    // Copy over filesystem ref and make them point to the same thing
-                    old_template
-                        .content
-                        .take_from_filesystem(&template.content)?;
-                    template.content = old_template.content.clone();
-                    break;
-                }
-            }
-        }
-    }
-
-    // Prepare the ready filesystem
-    let mut templates_vec = templates_vec
-        .into_iter()
-        .map(|template| {
-            let mut template = template;
-            template.prepare_ready_fs();
-            Arc::new(template)
-        })
-        .collect::<Vec<_>>();
-
-    if USE_TEST_BASE {
+    if USE_BUILTINS {
         let mut found_base = false;
         for template in templates_vec.iter() {
-            if template.name == TEST_BASE_NAME {
+            if template.name == BUILTINS_NAME {
                 found_base = true;
                 break;
             }
         }
 
         if !found_base {
-            templates_vec.push(TEST_BASE.clone());
+            templates_vec.push(BUILTINS.clone());
         }
     }
 
@@ -395,7 +357,7 @@ async fn get_all_guild_templates_from_db(
 pub async fn get_all_guild_key_expiries_from_db(
     guild_id: GuildId,
     pool: &sqlx::PgPool,
-) -> Result<(), silverpelt::Error> {
+) -> Result<(), crate::Error> {
     #[derive(sqlx::FromRow)]
     struct KeyExpiryPartial {
         id: String,
@@ -433,7 +395,7 @@ pub async fn remove_key_expiry(
     guild_id: serenity::all::GuildId,
     id: &str,
     pool: &sqlx::PgPool,
-) -> Result<(), silverpelt::Error> {
+) -> Result<(), crate::Error> {
     sqlx::query("DELETE FROM guild_templates_kv WHERE guild_id = $1 AND id = $2")
         .bind(guild_id.to_string())
         .bind(id)
@@ -453,7 +415,7 @@ pub async fn extend_key_expiry(
     id: &str,
     new_expiry: chrono::DateTime<chrono::Utc>,
     pool: &sqlx::PgPool,
-) -> Result<(), silverpelt::Error> {
+) -> Result<(), crate::Error> {
     let mut tx = pool.begin().await?;
 
     // Check expiry_event_call_attempts

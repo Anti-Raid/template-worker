@@ -1,5 +1,5 @@
+use crate::data::Data;
 use antiraid_types::ar_event::AntiraidEvent;
-use silverpelt::data::Data;
 use std::time::Duration;
 
 use crate::dispatch::{dispatch_scoped_and_wait, parse_event};
@@ -16,7 +16,7 @@ pub async fn key_expiry_task(ctx: serenity::all::client::Context) -> ! {
         data: &Data,
         event: AntiraidEvent,
         serenity_context: &serenity::all::Context,
-    ) -> Result<(), silverpelt::Error> {
+    ) -> Result<(), crate::Error> {
         let tevent = parse_event(&event)?;
 
         log::info!(
@@ -38,7 +38,7 @@ pub async fn key_expiry_task(ctx: serenity::all::client::Context) -> ! {
         Ok(())
     }
 
-    let data = ctx.data::<silverpelt::data::Data>();
+    let data = ctx.data::<crate::data::Data>();
     let mut set = tokio::task::JoinSet::new();
     loop {
         for (guild_id, expired_task) in get_all_expired_keys() {
