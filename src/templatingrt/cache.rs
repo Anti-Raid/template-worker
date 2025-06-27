@@ -33,11 +33,18 @@ pub fn str_to_fs(s: &str) -> vfs::MemoryFS {
 #[prefix = ""]
 pub struct Builtins;
 
+/// Builtins patches
+#[derive(Embed, Debug)]
+#[folder = "$CARGO_MANIFEST_DIR/../../builtins_patches"]
+#[prefix = ""]
+pub struct BuiltinsPatches;
+
 // Replace this with the new builtins template once ready to deploy
 pub const BUILTINS_NAME: &str = "$builtins";
 pub static BUILTINS: LazyLock<Arc<Template>> = LazyLock::new(|| {
     let templ = Template {
         content: DefaultableOverlayFS(vfs::OverlayFS::new(&vec![
+            vfs::EmbeddedFS::<BuiltinsPatches>::new().into(),
             vfs::EmbeddedFS::<Builtins>::new().into(),
             vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
         ])),

@@ -129,6 +129,29 @@ impl LuaVmResult {
             )
             .await?
             else {
+                // Send to main server
+                crate::CONFIG
+                    .meta
+                    .default_error_channel
+                    .send_message(
+                        &guild_state.serenity_context.http,
+                        serenity::all::CreateMessage::new()
+                            .embed(
+                                serenity::all::CreateEmbed::new()
+                                    .title("Error executing template")
+                                    .field("Error", error, false)
+                                    .field("Template", template.name.clone(), false),
+                            )
+                            .components(vec![serenity::all::CreateActionRow::Buttons(
+                                vec![serenity::all::CreateButton::new_link(
+                                    &CONFIG.meta.support_server_invite,
+                                )
+                                .label("Support Server")]
+                                .into(),
+                            )]),
+                    )
+                    .await?;
+
                 return Ok(());
             };
 

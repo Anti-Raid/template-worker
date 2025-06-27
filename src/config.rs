@@ -126,6 +126,7 @@ pub struct Meta {
     pub proxy: String,
     pub support_server_invite: String,
     pub sandwich_http_api: String,
+    pub default_error_channel: serenity::all::ChannelId,
 }
 
 #[derive(Serialize, Deserialize)]
