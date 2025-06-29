@@ -428,3 +428,47 @@ impl DataStoreImpl for JobServerStore {
         }
     }
 }
+
+pub struct CoreSettingsDataStore {
+    pub guild_state: Rc<GuildState>, // reference counted
+}
+
+impl CoreSettingsDataStore {
+    fn name(&self) -> String {
+        "TempCoreSettingsDataStore".to_string()
+    }
+
+    fn need_caps(&self, _method: &str) -> bool {
+        true
+    }
+
+    fn methods(&self) -> Vec<String> {
+        vec![
+            "view".to_string(),
+            "create".to_string(),
+            "update".to_string(),
+            "delete".to_string(),
+        ]
+    }
+
+    fn get_method(&self, key: String) -> Option<DataStoreMethod> {
+        let guild_state_ref = self.guild_state.clone(); // reference to the guild state data
+        match key.as_str() {
+            "view" => Some(DataStoreMethod::Async(Rc::new(move |v| {
+                let guild_state = guild_state_ref.clone(); // satisfy rusts borrowing rules
+                Box::pin(async move {
+                    let mut v = VecDeque::from(v);
+
+                    let Some(setting) = v.pop_front() else {
+                        return Err(
+                            "arg #1 of CoreSettingsDataStore.view is missing (setting)".into()
+                        );
+                    };
+
+                    Ok(KhronosValue::Null)
+                })
+            }))),
+            _ => None,
+        }
+    }
+}

@@ -15,7 +15,7 @@ use crate::userinfo::{NoMember, UserInfoOperations, member_permission_calc};
 use std::sync::LazyLock;
 use async_trait::async_trait;
 use super::data::SettingsData;
-use crate::templatingrt::cache::regenerate_cache;
+use crate::templatingrt::cache::{DeferredCacheRegenMode, DEFERRED_CACHE_REGENS};
 use crate::Error;
 use crate::lockdowns::LockdownData;
 use sqlx::Row;
@@ -1280,18 +1280,10 @@ impl GuildTemplateExecutor {
     }
 
     async fn post_action(&self, ctx: &SettingsData, name: &str) -> Result<(), Error> {
-        // Dispatch a OnStartup event for the template
-        regenerate_cache(&ctx.serenity_context, &ctx.data, ctx.scope.guild_id()?)
-            .await?;
-
-        let ce = crate::dispatch::parse_event(&AntiraidEvent::OnStartup(vec![name.to_string()]))?;
-        crate::dispatch::dispatch(
-            &ctx.serenity_context, 
-            &ctx.data, 
-            ce, 
-            ctx.scope.guild_id()?)
-            .await
-            .map_err(|e| format!("Failed to dispatch OnStartup event: {:?}", e))?;
+        DEFERRED_CACHE_REGENS.insert(ctx.scope.guild_id()?, DeferredCacheRegenMode::OnReady 
+        { 
+            modified: vec![name.to_string()], 
+        }).await;
 
         Ok(())
     }
@@ -2473,7 +2465,8 @@ impl SettingUpdater<SettingsData> for GuildTemplateShopExecutor {
         .await
         .map_err(|e| format!("Failed to fetch guilds with this template: {:?}", e))?;
 
-        for guild in guilds {
+        let mut other_affected_guilds = Vec::with_capacity(guilds.len());
+        for guild in &guilds {
             let guild_id = match guild.guild_id.parse::<serenity::all::GuildId>() {
                 Ok(guild_id) => guild_id,
                 Err(e) => {
@@ -2482,22 +2475,13 @@ impl SettingUpdater<SettingsData> for GuildTemplateShopExecutor {
                 }
             };
 
-            regenerate_cache(&ctx.serenity_context, &ctx.data, guild_id)
-            .await?;
-
-            let ce = crate::dispatch::parse_event(
-                &AntiraidEvent::OnStartup(vec![data.name.to_string()])
-            )?;
-            
-            if let Err(e) = crate::dispatch::dispatch(
-                &ctx.serenity_context, 
-                &ctx.data, 
-                ce, 
-                guild_id)
-                .await {
-                log::error!("Failed to dispatch OnStartup event: {:?}", e);   
-            }
+            other_affected_guilds.push(guild_id);
         }
+
+        DEFERRED_CACHE_REGENS.insert(
+            ctx.scope.guild_id()?,
+            DeferredCacheRegenMode::FlushMultiple { other_guilds: other_affected_guilds, flush_self: false },
+        ).await;  
 
         Ok(entry)
     }
@@ -2564,31 +2548,23 @@ impl SettingDeleter<SettingsData> for GuildTemplateShopExecutor {
         .await
         .map_err(|e| format!("Failed to fetch guilds with this template: {:?}", e))?;
 
-        for guild in guilds {
+        let mut other_affected_guilds = Vec::with_capacity(guilds.len());
+        for guild in &guilds {
             let guild_id = match guild.guild_id.parse::<serenity::all::GuildId>() {
                 Ok(guild_id) => guild_id,
                 Err(e) => {
-                    log::error!("Failed to parse guild id {:?}", e);
+                    log::error!("Failed to parse guild id: {:?}", e);
                     continue;
                 }
             };
 
-            regenerate_cache(&ctx.serenity_context, &ctx.data, guild_id)
-            .await?;
-
-            let ce = crate::dispatch::parse_event(
-                &AntiraidEvent::OnStartup(vec![row.name.to_string()])
-            )?;
-            
-            if let Err(e) = crate::dispatch::dispatch(
-                &ctx.serenity_context, 
-                &ctx.data, 
-                ce, 
-                guild_id)
-                .await {
-                log::error!("Failed to dispatch OnStartup event: {:?}", e);   
-            }
+            other_affected_guilds.push(guild_id);
         }
+
+        DEFERRED_CACHE_REGENS.insert(
+            ctx.scope.guild_id()?,
+            DeferredCacheRegenMode::FlushMultiple { other_guilds: other_affected_guilds, flush_self: false },
+        ).await;  
 
         Ok(())
     }

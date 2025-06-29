@@ -78,6 +78,68 @@ pub static KEY_EXPIRIES: LazyLock<Cache<GuildId, Arc<Vec<Arc<KeyExpiry>>>>> =
 pub static TEMPLATES_CACHE: LazyLock<Cache<GuildId, Arc<Vec<Arc<Template>>>>> =
     LazyLock::new(|| Cache::builder().build());
 
+#[derive(Debug, Clone)]
+pub enum DeferredCacheRegenMode {
+    #[allow(unused)]
+    NoOnReady,
+    OnReady {
+        modified: Vec<String>,
+    },
+    FlushMultiple {
+        other_guilds: Vec<GuildId>,
+        flush_self: bool,
+    },
+}
+
+// Deferred cache regens
+//
+// Useful for OPs that need to regenerate the cache after a return from Luau VM
+pub static DEFERRED_CACHE_REGENS: LazyLock<Cache<GuildId, DeferredCacheRegenMode>> =
+    LazyLock::new(|| Cache::builder().build());
+
+// Regenerates the cache for a guild (and other affected guilds), and dispatches OnStartup events if needed
+pub async fn regenerate_deferred(
+    context: &serenity::all::Context,
+    data: &Data,
+    guild_id: GuildId,
+) -> Result<(), crate::Error> {
+    if let Some(mode) = DEFERRED_CACHE_REGENS.remove(&guild_id).await {
+        regenerate_cache(context, data, guild_id).await?;
+
+        match mode {
+            DeferredCacheRegenMode::NoOnReady => {}
+            DeferredCacheRegenMode::OnReady { modified } => {
+                let ce = crate::dispatch::parse_event(&AntiraidEvent::OnStartup(modified))?;
+                crate::dispatch::dispatch(context, data, ce, guild_id)
+                    .await
+                    .map_err(|e| format!("Failed to dispatch OnStartup event: {:?}", e))?;
+            }
+            DeferredCacheRegenMode::FlushMultiple {
+                other_guilds,
+                flush_self,
+            } => {
+                let ce = crate::dispatch::parse_event(&AntiraidEvent::OnStartup(vec![]))?;
+
+                if flush_self {
+                    crate::dispatch::dispatch(context, data, ce.clone(), guild_id)
+                        .await
+                        .map_err(|e| format!("Failed to dispatch OnStartup event: {:?}", e))?;
+                }
+
+                for other_guild in other_guilds {
+                    regenerate_cache(context, data, other_guild).await?;
+
+                    crate::dispatch::dispatch(context, data, ce.clone(), other_guild)
+                        .await
+                        .map_err(|e| format!("Failed to dispatch OnStartup event: {:?}", e))?;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Gets all guilds with templates
 pub fn get_all_guilds_with_templates() -> Vec<GuildId> {
     let mut guild_ids = Vec::new();
