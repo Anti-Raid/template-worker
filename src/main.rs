@@ -9,6 +9,7 @@ mod jobserver;
 mod lockdowns;
 mod objectstore;
 mod pages;
+mod pages2;
 mod register;
 mod sandwich;
 mod templatingrt;
