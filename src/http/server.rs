@@ -306,14 +306,14 @@ pub(crate) async fn get_settings_for_guild_user(
         ..
     }): State<AppData>,
     Path((guild_id, user_id)): Path<(serenity::all::GuildId, serenity::all::UserId)>,
-) -> Response<HashMap<String, DispatchResult<antiraid_types::setting::Setting>>> {
+) -> Response<HashMap<String, DispatchResult<Vec<antiraid_types::setting::Setting>>>> {
     // Make a GetSetting event
     let event = parse_event(&AntiraidEvent::GetSettings(GetSettingsEvent {
         author: user_id,
     }))
     .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
-    let results = dispatch_and_wait::<antiraid_types::setting::Setting>(
+    let results = dispatch_and_wait(
         &serenity_context,
         &data,
         event,
