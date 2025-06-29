@@ -1,6 +1,8 @@
 use crate::lockdowns::LockdownData;
 use antiraid_types::userinfo::UserInfo;
-use khronos_runtime::traits::context::{CompatibilityFlags, KhronosContext, ScriptData};
+use khronos_runtime::traits::context::{
+    CompatibilityFlags, KhronosContext, Limitations, ScriptData,
+};
 use khronos_runtime::traits::datastoreprovider::{DataStoreImpl, DataStoreProvider};
 use khronos_runtime::traits::discordprovider::DiscordProvider;
 use khronos_runtime::traits::ir::kv::KvRecord;
@@ -8,7 +10,6 @@ use khronos_runtime::traits::ir::ObjectMetadata;
 use khronos_runtime::traits::kvprovider::KVProvider;
 use khronos_runtime::traits::lockdownprovider::LockdownProvider;
 use khronos_runtime::traits::objectstorageprovider::ObjectStorageProvider;
-use khronos_runtime::traits::pageprovider::PageProvider;
 use khronos_runtime::traits::userinfoprovider::UserInfoProvider;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use std::{rc::Rc, sync::Arc};
@@ -50,7 +51,6 @@ impl KhronosContext for DummyProvider {
     type LockdownDataStore = LockdownData;
     type LockdownProvider = DummyLockdownProvider;
     type UserInfoProvider = DummyUserInfoProvider;
-    type PageProvider = DummyPageProvider;
     type DataStoreProvider = DummyDataStoreProvider;
     type ObjectStorageProvider = DummyObjectStorageProvider;
 
@@ -58,13 +58,8 @@ impl KhronosContext for DummyProvider {
         &self.template_data
     }
 
-    fn allowed_caps(&self) -> &[String] {
-        self.template_data.allowed_caps.as_ref()
-    }
-
-    /// Returns if the current context has a specific capability
-    fn has_cap(&self, _cap: &str) -> bool {
-        false
+    fn limitations(&self) -> Limitations {
+        Limitations::new(Vec::with_capacity(0))
     }
 
     fn guild_id(&self) -> Option<serenity::all::GuildId> {
@@ -96,10 +91,6 @@ impl KhronosContext for DummyProvider {
     }
 
     fn userinfo_provider(&self) -> Option<Self::UserInfoProvider> {
-        None
-    }
-
-    fn page_provider(&self) -> Option<Self::PageProvider> {
         None
     }
 
@@ -251,30 +242,6 @@ impl UserInfoProvider for DummyUserInfoProvider {
     }
 
     async fn get(&self, _user_id: serenity::all::UserId) -> Result<UserInfo, crate::Error> {
-        unreachable!()
-    }
-}
-
-#[derive(Clone)]
-pub struct DummyPageProvider {}
-
-impl PageProvider for DummyPageProvider {
-    fn attempt_action(&self, _bucket: &str) -> Result<(), crate::Error> {
-        Ok(())
-    }
-
-    async fn get_page(&self) -> Option<khronos_runtime::traits::ir::Page> {
-        unreachable!()
-    }
-
-    async fn set_page(
-        &self,
-        _page: khronos_runtime::traits::ir::Page,
-    ) -> Result<(), khronos_runtime::Error> {
-        unreachable!()
-    }
-
-    async fn delete_page(&self) -> Result<(), khronos_runtime::Error> {
         unreachable!()
     }
 }

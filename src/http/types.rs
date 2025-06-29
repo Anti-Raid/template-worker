@@ -1,4 +1,3 @@
-use ar_settings::types::OperationType;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serenity::all::GuildChannel;
@@ -18,14 +17,6 @@ pub struct DispatchEventAndWaitQuery {
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct ExecuteLuaVmActionOpts {
     pub wait_timeout: Option<std::time::Duration>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PageSettingsOperationRequest {
-    pub fields: indexmap::IndexMap<String, Value>,
-    pub op: OperationType,
-    pub template: String,
-    pub setting_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -25,7 +25,7 @@ pub async fn key_expiry_task(ctx: serenity::all::client::Context) -> ! {
             scopes
         );
 
-        dispatch_scoped_and_wait(
+        dispatch_scoped_and_wait::<serde_json::Value>(
             serenity_context,
             data,
             tevent,

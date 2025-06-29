@@ -139,14 +139,21 @@ pub async fn dispatch(
     Ok(())
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", content = "data")]
+pub enum DispatchResult<T> {
+    Ok(T),
+    Err(String),
+}
+
 /// Dispatches a template event to all templates, waiting for the response and returning it
-pub async fn dispatch_and_wait(
+pub async fn dispatch_and_wait<T: serde::de::DeserializeOwned>(
     ctx: &Context,
     data: &Data,
     event: CreateEvent,
     guild_id: GuildId,
     wait_timeout: std::time::Duration,
-) -> Result<HashMap<String, serde_json::Value>, crate::Error> {
+) -> Result<HashMap<String, DispatchResult<T>>, crate::Error> {
     let matching = get_templates_with_event(guild_id, &event).await;
     if matching.is_empty() {
         return Ok(HashMap::new());
@@ -177,8 +184,19 @@ pub async fn dispatch_and_wait(
 
     for result in result_handle.results {
         let name = result.template_name.clone();
-        if let Ok(value) = result.into_response::<serde_json::Value>() {
-            results.insert(name, value);
+
+        if let Some(e) = result.lua_error() {
+            results.insert(name, DispatchResult::Err(e.to_string()));
+            continue;
+        }
+
+        match result.into_response::<T>() {
+            Ok(value) => {
+                results.insert(name, DispatchResult::Ok(value));
+            }
+            Err(e) => {
+                results.insert(name, DispatchResult::Err(e.to_string()));
+            }
         }
     }
 
@@ -218,14 +236,14 @@ pub async fn dispatch_scoped(
 }
 
 /// Dispatches a template event to all templates, waiting for the response and returning it
-pub async fn dispatch_scoped_and_wait(
+pub async fn dispatch_scoped_and_wait<T: serde::de::DeserializeOwned>(
     ctx: &Context,
     data: &Data,
     event: CreateEvent,
     scopes: &[String],
     guild_id: GuildId,
     wait_timeout: std::time::Duration,
-) -> Result<HashMap<String, serde_json::Value>, crate::Error> {
+) -> Result<HashMap<String, DispatchResult<T>>, crate::Error> {
     let matching = get_templates_with_event_scoped(guild_id, &event, scopes).await;
     if matching.is_empty() {
         return Ok(HashMap::new());
@@ -256,8 +274,19 @@ pub async fn dispatch_scoped_and_wait(
 
     for result in result_handle.results {
         let name = result.template_name.clone();
-        if let Ok(value) = result.into_response::<serde_json::Value>() {
-            results.insert(name, value);
+
+        if let Some(e) = result.lua_error() {
+            results.insert(name, DispatchResult::Err(e.to_string()));
+            continue;
+        }
+
+        match result.into_response::<T>() {
+            Ok(value) => {
+                results.insert(name, DispatchResult::Ok(value));
+            }
+            Err(e) => {
+                results.insert(name, DispatchResult::Err(e.to_string()));
+            }
         }
     }
 

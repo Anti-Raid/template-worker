@@ -5,7 +5,9 @@ use crate::userinfo::{NoMember, UserInfoOperations};
 use antiraid_types::userinfo::UserInfo;
 use botox::crypto::gen_random;
 use botox::ExtractMap;
-use khronos_runtime::traits::context::{CompatibilityFlags, KhronosContext, ScriptData};
+use khronos_runtime::traits::context::{
+    CompatibilityFlags, KhronosContext, Limitations, ScriptData,
+};
 use khronos_runtime::traits::datastoreprovider::{DataStoreImpl, DataStoreProvider};
 use khronos_runtime::traits::discordprovider::DiscordProvider;
 use khronos_runtime::traits::ir::kv::KvRecord;
@@ -13,7 +15,6 @@ use khronos_runtime::traits::ir::ObjectMetadata;
 use khronos_runtime::traits::kvprovider::KVProvider;
 use khronos_runtime::traits::lockdownprovider::LockdownProvider;
 use khronos_runtime::traits::objectstorageprovider::ObjectStorageProvider;
-use khronos_runtime::traits::pageprovider::PageProvider;
 use khronos_runtime::traits::userinfoprovider::UserInfoProvider;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use moka::future::Cache;
@@ -92,7 +93,6 @@ impl KhronosContext for TemplateContextProvider {
     type LockdownDataStore = LockdownData;
     type LockdownProvider = ArLockdownProvider;
     type UserInfoProvider = ArUserInfoProvider;
-    type PageProvider = ArPageProvider;
     type DataStoreProvider = ArDataStoreProvider;
     type ObjectStorageProvider = ArObjectStorageProvider;
 
@@ -100,21 +100,8 @@ impl KhronosContext for TemplateContextProvider {
         &self.script_data
     }
 
-    fn allowed_caps(&self) -> &[String] {
-        self.template_data.allowed_caps.as_ref()
-    }
-
-    /// Returns if the current context has a specific capability
-    fn has_cap(&self, cap: &str) -> bool {
-        for allowed_cap in self.template_data.allowed_caps.iter() {
-            if allowed_cap == cap
-                || (allowed_cap == "*" && cap != "assetmanager:use_bundled_templating_types")
-            {
-                return true;
-            }
-        }
-
-        false
+    fn limitations(&self) -> Limitations {
+        Limitations::new(self.template_data.allowed_caps.clone())
     }
 
     fn guild_id(&self) -> Option<serenity::all::GuildId> {
@@ -169,14 +156,6 @@ impl KhronosContext for TemplateContextProvider {
         Some(ArUserInfoProvider {
             guild_id: self.guild_state.guild_id,
             guild_state: self.guild_state.clone(),
-        })
-    }
-
-    fn page_provider(&self) -> Option<Self::PageProvider> {
-        Some(ArPageProvider {
-            guild_id: self.guild_state.guild_id,
-            guild_state: self.guild_state.clone(),
-            template_id: self.template_data.name.clone(),
         })
     }
 
@@ -861,44 +840,6 @@ impl UserInfoProvider for ArUserInfoProvider {
         .map_err(|e| format!("Failed to get user info: {}", e))?;
 
         Ok(userinfo)
-    }
-}
-
-#[derive(Clone)]
-pub struct ArPageProvider {
-    template_id: String,
-    guild_id: serenity::all::GuildId,
-    guild_state: Rc<GuildState>,
-}
-
-impl PageProvider for ArPageProvider {
-    fn attempt_action(&self, bucket: &str) -> Result<(), crate::Error> {
-        self.guild_state.ratelimits.page.check(bucket)
-    }
-
-    async fn get_page(&self) -> Option<khronos_runtime::traits::ir::Page> {
-        crate::pages::get_page_by_id(self.guild_id, &self.template_id)
-            .await
-            .map(crate::pages::unravel_page)
-    }
-
-    async fn set_page(
-        &self,
-        page: khronos_runtime::traits::ir::Page,
-    ) -> Result<(), khronos_runtime::Error> {
-        crate::pages::set_page(
-            self.guild_id,
-            self.template_id.clone(),
-            crate::pages::create_page(page, self.guild_id, self.template_id.clone()),
-        )
-        .await;
-
-        Ok(())
-    }
-
-    async fn delete_page(&self) -> Result<(), khronos_runtime::Error> {
-        crate::pages::remove_page(self.guild_id, &self.template_id).await;
-        Ok(())
     }
 }
 

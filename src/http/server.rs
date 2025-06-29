@@ -1,9 +1,13 @@
 use crate::coresettings::data::RequestScope;
+use crate::dispatch::DispatchResult;
 use crate::templatingrt::CreateGuildState;
 use crate::templatingrt::POOL;
 use crate::templatingrt::{cache::regenerate_cache, MAX_TEMPLATES_RETURN_WAIT_TIME};
 use crate::vmbench::{benchmark_vm as benchmark_vm_impl, FireBenchmark};
 use antiraid_types::ar_event::AntiraidEvent;
+use antiraid_types::ar_event::GetSettingsEvent;
+use antiraid_types::ar_event::SettingExecuteEvent;
+use antiraid_types::setting::OperationType as AROperationType;
 use ar_settings::types::OperationType;
 use axum::{
     extract::{Path, Query, State},
@@ -15,7 +19,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use super::types::{
     BaseGuildUserInfo, CanonicalSettingsResult, DispatchEventAndWaitQuery, ExecuteLuaVmActionOpts,
-    GuildChannelWithPermissions, PageSettingsOperationRequest, SettingsOperationRequest, TwState,
+    GuildChannelWithPermissions, SettingsOperationRequest, TwState,
 };
 use crate::dispatch::{dispatch, dispatch_and_wait, parse_event};
 use crate::templatingrt::execute;
@@ -62,10 +66,13 @@ pub fn create(
         )
         .route("/healthcheck", post(|| async { Json(()) }))
         .route("/benchmark-vm/:guild_id", post(benchmark_vm))
-        .route("/pages/:guild_id", post(get_pages_for_guild))
+        .route(
+            "/settings/:guild_id/:user_id",
+            post(get_settings_for_guild_user),
+        )
         .route(
             "/page-settings-operation/:guild_id/:user_id",
-            post(page_settings_operation),
+            post(execute_setting_for_guild_user),
         )
         .route("/threads-count", get(get_threads_count))
         .route("/clear-inactive-guilds", post(clear_inactive_guilds))
@@ -134,7 +141,7 @@ async fn dispatch_event_and_wait(
     Path(guild_id): Path<serenity::all::GuildId>,
     Query(query): Query<DispatchEventAndWaitQuery>,
     Json(event): Json<AntiraidEvent>,
-) -> Response<HashMap<String, serde_json::Value>> {
+) -> Response<HashMap<String, DispatchResult<serde_json::Value>>> {
     // Regenerate cache for guild if event is OnStartup
     if let AntiraidEvent::OnStartup(_) = event {
         regenerate_cache(&serenity_context, &data, guild_id)
@@ -289,108 +296,70 @@ async fn get_vm_metrics_for_all() -> Response<Vec<crate::templatingrt::ThreadMet
     Ok(Json(metrics))
 }
 
-/// Gets the pages for a guild
-pub(crate) async fn get_pages_for_guild(
-    State(AppData { .. }): State<AppData>,
-    Path(guild_id): Path<serenity::all::GuildId>,
-) -> Json<Vec<Arc<crate::pages::Page>>> {
-    let Some(pages) = crate::pages::get_all_pages(guild_id).await else {
-        return Json(vec![]);
-    };
+/// Gets the settings for a guild given a user
+pub(crate) async fn get_settings_for_guild_user(
+    State(AppData {
+        serenity_context,
+        data,
+        ..
+    }): State<AppData>,
+    Path((guild_id, user_id)): Path<(serenity::all::GuildId, serenity::all::UserId)>,
+) -> Response<HashMap<String, DispatchResult<antiraid_types::setting::Setting>>> {
+    // Make a GetSetting event
+    let event = parse_event(&AntiraidEvent::GetSettings(GetSettingsEvent {
+        author: user_id,
+    }))
+    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
-    Json(pages)
+    let results = dispatch_and_wait::<antiraid_types::setting::Setting>(
+        &serenity_context,
+        &data,
+        event,
+        guild_id,
+        MAX_TEMPLATES_RETURN_WAIT_TIME,
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(results))
 }
 
-/// Executes an operation on a setting [SettingsOperation]
-pub(crate) async fn page_settings_operation(
+/// Executes a setting for a guild given a user
+pub(crate) async fn execute_setting_for_guild_user(
     State(AppData {
         serenity_context,
         data,
     }): State<AppData>,
     Path((guild_id, user_id)): Path<(serenity::all::GuildId, serenity::all::UserId)>,
-    Json(req): Json<PageSettingsOperationRequest>,
-) -> Json<CanonicalSettingsResult> {
-    let op: OperationType = req.op;
-
-    // Find the setting
-    let Some(page) = crate::pages::get_page_by_id(guild_id, &req.template).await else {
-        return Json(CanonicalSettingsResult::Err {
-            error: "Template not found".to_string(),
-        });
+    Json(req): Json<SettingsOperationRequest>,
+) -> Response<HashMap<String, DispatchResult<serde_json::Value>>> {
+    let op: AROperationType = match req.op {
+        OperationType::View => AROperationType::View,
+        OperationType::Create => AROperationType::Create,
+        OperationType::Update => AROperationType::Update,
+        OperationType::Delete => AROperationType::Delete,
     };
 
-    let mut setting = None;
-    for setting_obj in page.settings.iter() {
-        if setting_obj.id == req.setting_id {
-            setting = Some(setting_obj);
-            break;
-        }
-    }
+    // Make a ExecuteSetting event
+    let event = parse_event(&AntiraidEvent::ExecuteSetting(SettingExecuteEvent {
+        id: req.setting,
+        op,
+        author: user_id,
+        fields: req.fields,
+    }))
+    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
-    let Some(setting) = setting else {
-        return Json(CanonicalSettingsResult::Err {
-            error: "Setting not found".to_string(),
-        });
-    };
+    let results = dispatch_and_wait::<serde_json::Value>(
+        &serenity_context,
+        &data,
+        event,
+        guild_id,
+        MAX_TEMPLATES_RETURN_WAIT_TIME,
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    match op {
-        OperationType::View => {
-            match ar_settings::cfg::settings_view(
-                setting,
-                &crate::pages::SettingExecutionData::new(data.clone(), serenity_context, user_id),
-                req.fields,
-            )
-            .await
-            {
-                Ok(res) => Json(CanonicalSettingsResult::Ok { fields: res }),
-                Err(e) => Json(CanonicalSettingsResult::Err {
-                    error: e.to_string(),
-                }),
-            }
-        }
-        OperationType::Create => {
-            match ar_settings::cfg::settings_create(
-                setting,
-                &crate::pages::SettingExecutionData::new(data.clone(), serenity_context, user_id),
-                req.fields,
-            )
-            .await
-            {
-                Ok(res) => Json(CanonicalSettingsResult::Ok { fields: vec![res] }),
-                Err(e) => Json(CanonicalSettingsResult::Err {
-                    error: e.to_string(),
-                }),
-            }
-        }
-        OperationType::Update => {
-            match ar_settings::cfg::settings_update(
-                setting,
-                &crate::pages::SettingExecutionData::new(data.clone(), serenity_context, user_id),
-                req.fields,
-            )
-            .await
-            {
-                Ok(res) => Json(CanonicalSettingsResult::Ok { fields: vec![res] }),
-                Err(e) => Json(CanonicalSettingsResult::Err {
-                    error: e.to_string(),
-                }),
-            }
-        }
-        OperationType::Delete => {
-            match ar_settings::cfg::settings_delete(
-                setting,
-                &crate::pages::SettingExecutionData::new(data.clone(), serenity_context, user_id),
-                req.fields,
-            )
-            .await
-            {
-                Ok(_res) => Json(CanonicalSettingsResult::Ok { fields: vec![] }),
-                Err(e) => Json(CanonicalSettingsResult::Err {
-                    error: e.to_string(),
-                }),
-            }
-        }
-    }
+    Ok(Json(results))
 }
 
 /// Given a list of guild ids, return a set of 0s and 1s indicating whether each guild exists in cache [GuildsExist]
