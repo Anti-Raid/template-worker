@@ -11,6 +11,7 @@ use serde_json::Value;
 use serenity::all::*;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::RwLock;
 use std::time::Duration;
 
@@ -76,7 +77,10 @@ pub struct RegisterResult {
     pub commands: Vec<CreateCommand>,
 }
 
-pub fn register() -> Result<RegisterResult, crate::Error> {
+pub static REGISTER: LazyLock<RegisterResult> =
+    LazyLock::new(|| register().expect("Failed to register builtins"));
+
+fn register() -> Result<RegisterResult, crate::Error> {
     let result = Arc::new(RwLock::new(None::<RegisterResult>));
 
     let ref_a = result.clone();

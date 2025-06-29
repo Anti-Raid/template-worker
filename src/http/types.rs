@@ -60,5 +60,6 @@ pub struct SettingsOperationRequest {
 
 #[derive(Serialize, Deserialize)]
 pub struct TwState {
+    pub commands: Vec<crate::register::CreateCommand>,
     pub settings: Vec<ar_settings::types::Setting<SettingsData>>,
 }

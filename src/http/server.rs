@@ -27,6 +27,7 @@ use crate::templatingrt::execute;
 pub static STATE_CACHE: std::sync::LazyLock<Arc<TwState>> = std::sync::LazyLock::new(|| {
     let mut state = TwState {
         settings: Vec::with_capacity(crate::coresettings::config_options().len()),
+        commands: crate::register::REGISTER.commands.clone(),
     };
 
     for setting in crate::coresettings::config_options() {

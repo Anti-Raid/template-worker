@@ -110,7 +110,7 @@ async fn main() {
 
     info!("Getting registration data from builtins");
 
-    let data = register::register().expect("Failed to get registration data from builtins");
+    let data = &*register::REGISTER;
 
     println!("Register data: {:?}", data);
 
