@@ -97,13 +97,13 @@ pub async fn guild(
     guild_id: serenity::model::id::GuildId,
 ) -> Result<serenity::all::PartialGuild, Error> {
     // Check serenity cache
-    {
+    /*{
         let res = cache.guild(guild_id);
 
         if let Some(res) = res {
             return Ok(res.clone().into());
         }
-    }
+    }*/
 
     #[derive(serde::Serialize, serde::Deserialize, Debug)]
     struct Resp {
@@ -172,11 +172,11 @@ pub async fn member_in_guild(
     user_id: serenity::model::id::UserId,
 ) -> Result<Option<serenity::all::Member>, Error> {
     // Check serenity cache
-    if let Some(guild) = cache.guild(guild_id) {
+    /*if let Some(guild) = cache.guild(guild_id) {
         if let Some(member) = guild.members.get(&user_id).cloned() {
             return Ok(Some(member));
         }
-    }
+    }*/
 
     // Part 2, try sandwich state
     let url = format!(
@@ -266,12 +266,12 @@ pub async fn guild_roles(
     guild_id: serenity::model::id::GuildId,
 ) -> Result<Vec<serenity::all::Role>, Error> {
     // Try serenity cache first
-    {
+    /*{
         if let Some(guild) = cache.guild(guild_id) {
             let roles = guild.roles.clone();
             return Ok(roles.into_iter().collect());
         };
-    }
+    }*/
 
     let url = format!(
         "{}/antiraid/api/state?col=guild_roles&id={}",
@@ -361,12 +361,12 @@ pub async fn guild_channels(
     guild_id: serenity::model::id::GuildId,
 ) -> Result<Vec<serenity::all::GuildChannel>, Error> {
     // Try serenity cache first
-    {
+    /*{
         if let Some(guild) = cache.guild(guild_id) {
             let channels = guild.channels.clone();
             return Ok(channels.into_iter().collect());
         };
-    }
+    }*/
 
     let url = format!(
         "{}/antiraid/api/state?col=guild_channels&id={}",
@@ -458,7 +458,7 @@ pub async fn channel(
     // Try serenity cache first
     //
     // We do this to ensure that we get up to date information if possible
-    if let Some(guild_id) = guild_id {
+    /*if let Some(guild_id) = guild_id {
         if let Some(guild) = cache.guild(guild_id) {
             let channels = guild.channels.clone();
 
@@ -467,7 +467,7 @@ pub async fn channel(
                 return Ok(Some(chan));
             }
         };
-    }
+    }*/
 
     let url = match guild_id {
         Some(guild_id) => format!(

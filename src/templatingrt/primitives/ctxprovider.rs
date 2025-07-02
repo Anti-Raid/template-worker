@@ -192,14 +192,24 @@ impl KVProvider for ArKVProvider {
             return Err("Key length too long".into());
         }
 
-        let rec = sqlx::query(
-            "SELECT id, expires_at, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
-        )
-        .bind(self.guild_id.to_string())
-        .bind(&key)
-        .bind(scopes)
-        .fetch_optional(&self.guild_state.pool)
-        .await?;
+        let rec = if scopes.is_empty() {
+            sqlx::query(
+            "SELECT id, expires_at, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2",
+            )
+            .bind(self.guild_id.to_string())
+            .bind(&key)
+            .fetch_optional(&self.guild_state.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT id, expires_at, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
+            )
+            .bind(self.guild_id.to_string())
+            .bind(&key)
+            .bind(scopes)
+            .fetch_optional(&self.guild_state.pool)
+            .await?
+        };
 
         let Some(rec) = rec else {
             return Ok(None);
@@ -280,6 +290,11 @@ ORDER BY scope",
         data: KhronosValue,
         expires_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<(bool, String), crate::Error> {
+        // Shouldn't happen but scopes must be non-empty
+        if scopes.is_empty() {
+            return Err("Scopes cannot be empty".into());
+        }
+
         // Check key length
         if key.len() > self.guild_state.kv_constraints.max_key_length {
             return Err("Key length too long".into());
@@ -368,15 +383,26 @@ ORDER BY scope",
             return Err("Key length too long".into());
         }
 
-        sqlx::query(
-            "UPDATE guild_templates_kv SET expires_at = $1, last_updated_at = NOW() WHERE guild_id = $2 AND key = $3 AND scopes @> $4",
-        )
-        .bind(expires_at)
-        .bind(self.guild_id.to_string())
-        .bind(&key)
-        .bind(scopes)
-        .execute(&self.guild_state.pool)
-        .await?;
+        if scopes.is_empty() {
+            sqlx::query(
+            "UPDATE guild_templates_kv SET expires_at = $1, last_updated_at = NOW() WHERE guild_id = $2 AND key = $3",
+            )
+            .bind(expires_at)
+            .bind(self.guild_id.to_string())
+            .bind(&key)
+            .execute(&self.guild_state.pool)
+            .await?;
+        } else {
+            sqlx::query(
+                "UPDATE guild_templates_kv SET expires_at = $1, last_updated_at = NOW() WHERE guild_id = $2 AND key = $3 AND scopes @> $4",
+            )
+            .bind(expires_at)
+            .bind(self.guild_id.to_string())
+            .bind(&key)
+            .bind(scopes)
+            .execute(&self.guild_state.pool)
+            .await?;
+        }
 
         // Regenerate the cache in any case
         crate::templatingrt::cache::get_all_guild_key_expiries_from_db(
@@ -473,16 +499,26 @@ ORDER BY scope",
             return Err("Key length too long".into());
         }
 
-        let row = sqlx::query(
+        let rows = if scopes.is_empty() {
+            sqlx::query(
+            "DELETE FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 RETURNING expires_at",
+            )
+            .bind(self.guild_id.to_string())
+            .bind(key)
+            .fetch_all(&self.guild_state.pool)
+            .await?
+        } else {
+            sqlx::query(
             "DELETE FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3 RETURNING expires_at",
-        )
-        .bind(self.guild_id.to_string())
-        .bind(key)
-        .bind(scopes)
-        .fetch_optional(&self.guild_state.pool)
-        .await?;
+            )
+            .bind(self.guild_id.to_string())
+            .bind(key)
+            .bind(scopes)
+            .fetch_all(&self.guild_state.pool)
+            .await?
+        };
 
-        if let Some(row) = row {
+        for row in rows {
             let expires_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("expires_at")?;
 
             if expires_at.is_some() {
@@ -492,6 +528,8 @@ ORDER BY scope",
                     &self.guild_state.pool,
                 )
                 .await?;
+
+                break; // No need to continue if we found at least one expiry
             }
         }
 
@@ -532,22 +570,45 @@ ORDER BY scope",
         let rec = {
             if query == "%%" {
                 // Fast path, omit ILIKE if '%%' is used
-                sqlx::query(
-                    "SELECT id, key, value, expires_at, created_at, last_updated_at, scopes FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2",
-                )
-                .bind(self.guild_id.to_string())
-                .bind(scopes)
-                .fetch_all(&self.guild_state.pool)
-                .await?
+                if scopes.is_empty() {
+                    // no query, no scopes
+                    sqlx::query(
+                    "SELECT id, key, value, expires_at, created_at, last_updated_at, scopes FROM guild_templates_kv WHERE guild_id = $1",
+                    )
+                    .bind(self.guild_id.to_string())
+                    .fetch_all(&self.guild_state.pool)
+                    .await?
+                } else {
+                    // no query, scopes
+                    sqlx::query(
+                        "SELECT id, key, value, expires_at, created_at, last_updated_at, scopes FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2",
+                    )
+                    .bind(self.guild_id.to_string())
+                    .bind(scopes)
+                    .fetch_all(&self.guild_state.pool)
+                    .await?
+                }
             } else {
-                sqlx::query(
+                if scopes.is_empty() {
+                    // query, no scopes
+                    sqlx::query(
+                    "SELECT id, key, value, expires_at, created_at, last_updated_at, scopes FROM guild_templates_kv WHERE guild_id = $1 AND key ILIKE $2",
+                    )
+                    .bind(self.guild_id.to_string())
+                    .bind(query)
+                    .fetch_all(&self.guild_state.pool)
+                    .await?
+                } else {
+                    // query, scopes
+                    sqlx::query(
                     "SELECT id, key, value, expires_at, created_at, last_updated_at, scopes FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2 AND key ILIKE $3",
-                )
-                .bind(self.guild_id.to_string())
-                .bind(scopes)
-                .bind(query)
-                .fetch_all(&self.guild_state.pool)
-                .await?
+                    )
+                    .bind(self.guild_id.to_string())
+                    .bind(scopes)
+                    .bind(query)
+                    .fetch_all(&self.guild_state.pool)
+                    .await?
+                }
             }
         };
 

@@ -1,29 +1,26 @@
-use antiraid_types::userinfo::UserInfo;
-use ar_settings::types::{
-    settings_wrap, Column, ColumnSuggestion, ColumnType, InnerColumnType,
-    OperationType, Setting, SettingOperations,
-};
-use ar_settings::types::{
-    SettingCreator, SettingDeleter, SettingUpdater, SettingView,
-};
-use kittycat::perms::Permission;
-use serde_json::Value;
-use antiraid_types::ar_event::{AntiraidEvent, ExternalKeyUpdateEventData, ExternalKeyUpdateEventDataAction};
+use super::data::SettingsData;
+use crate::lockdowns::LockdownData;
+use crate::templatingrt::cache::{DeferredCacheRegenMode, DEFERRED_CACHE_REGENS};
 use crate::templatingrt::state::LuaKVConstraints;
 use crate::templatingrt::template::Template;
-use crate::userinfo::{NoMember, UserInfoOperations, member_permission_calc};
-use std::sync::LazyLock;
-use async_trait::async_trait;
-use super::data::SettingsData;
-use crate::templatingrt::cache::{DeferredCacheRegenMode, DEFERRED_CACHE_REGENS};
+use crate::userinfo::{member_permission_calc, NoMember, UserInfoOperations};
 use crate::Error;
-use crate::lockdowns::LockdownData;
+use antiraid_types::ar_event::{
+    AntiraidEvent, ExternalKeyUpdateEventData, ExternalKeyUpdateEventDataAction,
+};
+use antiraid_types::userinfo::UserInfo;
+use ar_settings::types::{
+    settings_wrap, Column, ColumnSuggestion, ColumnType, InnerColumnType, OperationType, Setting,
+    SettingOperations,
+};
+use ar_settings::types::{SettingCreator, SettingDeleter, SettingUpdater, SettingView};
+use async_trait::async_trait;
+use kittycat::perms::Permission;
+use serde_json::Value;
 use sqlx::Row;
+use std::sync::LazyLock;
 
-async fn check_perms(
-    ctx: &SettingsData,
-    perm: kittycat::perms::Permission,
-) -> Result<(), Error> {
+async fn check_perms(ctx: &SettingsData, perm: kittycat::perms::Permission) -> Result<(), Error> {
     let guild_id = ctx.scope.guild_id()?;
     let user_id = ctx.scope.user_id()?;
 
@@ -37,13 +34,12 @@ async fn check_perms(
     )
     .await?;
 
-    if !kittycat::perms::has_perm(
-        &user_info.kittycat_resolved_permissions,
-        &perm,
-    ) {
-        return Err(
-            format!("You do not have permission to perform this action: {}", perm).into(),
-        );
+    if !kittycat::perms::has_perm(&user_info.kittycat_resolved_permissions, &perm) {
+        return Err(format!(
+            "You do not have permission to perform this action: {}",
+            perm
+        )
+        .into());
     }
 
     Ok(())
@@ -188,16 +184,15 @@ impl SettingCreator<SettingsData> for GuildRolesExecutor {
             .base_verify_checks(ctx, &entry, OperationType::Create)
             .await?;
 
-        let count = sqlx::query(
-            "SELECT COUNT(*) FROM guild_roles WHERE guild_id = $1 AND role_id = $2",
-        )
-        .bind(ctx.scope.guild_id()?.to_string())
-        .bind(res.role_id.to_string())
-        .fetch_one(&ctx.data.pool)
-        .await
-        .map_err(|e| format!("Failed to check role counts from database: {:?}", e))?
-        .try_get::<Option<i64>, _>(0)?
-        .unwrap_or_default();
+        let count =
+            sqlx::query("SELECT COUNT(*) FROM guild_roles WHERE guild_id = $1 AND role_id = $2")
+                .bind(ctx.scope.guild_id()?.to_string())
+                .bind(res.role_id.to_string())
+                .fetch_one(&ctx.data.pool)
+                .await
+                .map_err(|e| format!("Failed to check role counts from database: {:?}", e))?
+                .try_get::<Option<i64>, _>(0)?
+                .unwrap_or_default();
 
         if count > 0 {
             return Err("Role already exists".into());
@@ -293,14 +288,12 @@ impl SettingDeleter<SettingsData> for GuildRolesExecutor {
             .base_verify_checks(ctx, &entry, OperationType::Delete)
             .await?;
 
-        sqlx::query(
-            "DELETE FROM guild_roles WHERE guild_id = $1 AND role_id = $2",
-        )
-        .bind(ctx.scope.guild_id()?.to_string())
-        .bind(res.role_id.to_string())
-        .execute(&ctx.data.pool)
-        .await
-        .map_err(|e| format!("Failed to delete role: {:?}", e))?;
+        sqlx::query("DELETE FROM guild_roles WHERE guild_id = $1 AND role_id = $2")
+            .bind(ctx.scope.guild_id()?.to_string())
+            .bind(res.role_id.to_string())
+            .execute(&ctx.data.pool)
+            .await
+            .map_err(|e| format!("Failed to delete role: {:?}", e))?;
 
         Ok(())
     }
@@ -325,7 +318,9 @@ impl GuildRolesExecutor {
                 Value::Number(new_index) => Value::Number(new_index.clone()),
                 Value::Null => Value::Null,
                 _ => {
-                    return Err(format!("Failed to retrieve valid `index`: {:?}", new_index_val).into());
+                    return Err(
+                        format!("Failed to retrieve valid `index`: {:?}", new_index_val).into(),
+                    );
                 }
             }
         } else {
@@ -351,24 +346,23 @@ impl GuildRolesExecutor {
                     max: Option<i32>,
                 }
 
-                let max_index_row: HighestIndexRow = sqlx::query_as(
-                    "SELECT MAX(index) FROM guild_roles WHERE guild_id = $1",
-                )
-                .bind(ctx.scope.guild_id()?.to_string())
-                .fetch_one(&ctx.data.pool)
-                .await
-                .map_err(|e| format!("Failed to get highest index: {:?}", e))?;
-                
-                let highest_index_rec = max_index_row
-                .max
-                .unwrap_or(0);
+                let max_index_row: HighestIndexRow =
+                    sqlx::query_as("SELECT MAX(index) FROM guild_roles WHERE guild_id = $1")
+                        .bind(ctx.scope.guild_id()?.to_string())
+                        .fetch_one(&ctx.data.pool)
+                        .await
+                        .map_err(|e| format!("Failed to get highest index: {:?}", e))?;
+
+                let highest_index_rec = max_index_row.max.unwrap_or(0);
 
                 let index: i32 = highest_index_rec + 1;
 
                 index
             }
             _ => {
-                return Err(format!("Missing or invalid field: `index`: {:?}", parsed_value).into());
+                return Err(
+                    format!("Missing or invalid field: `index`: {:?}", parsed_value).into(),
+                );
             }
         };
 
@@ -444,13 +438,12 @@ impl GuildRolesExecutor {
                 perms: Vec<String>,
             }
 
-            let query: Vec<GuildRolesRow> = sqlx::query_as(
-                "SELECT index, role_id, perms FROM guild_roles WHERE guild_id = $1",
-            )
-            .bind(ctx.scope.guild_id()?.to_string())
-            .fetch_all(&ctx.data.pool)
-            .await
-            .map_err(|e| format!("Failed to get current role configuration: {:?}", e))?;
+            let query: Vec<GuildRolesRow> =
+                sqlx::query_as("SELECT index, role_id, perms FROM guild_roles WHERE guild_id = $1")
+                    .bind(ctx.scope.guild_id()?.to_string())
+                    .fetch_all(&ctx.data.pool)
+                    .await
+                    .map_err(|e| format!("Failed to get current role configuration: {:?}", e))?;
 
             query
                 .into_iter()
@@ -494,11 +487,18 @@ impl GuildRolesExecutor {
 
         // Check that our index is lower than the targets index
         let Some(lowest_index) = lowest_index else {
-            return Err("You do not have any Anti-Raid configured roles yet! [could not find lowest index]".into());
+            return Err(
+                "You do not have any Anti-Raid configured roles yet! [could not find lowest index]"
+                    .into(),
+            );
         };
 
         let Some(settings_role) = guild.roles.get(&settings_role_id) else {
-            return Err(format!("Expected a role but could not find it: {}", settings_role_id).into());
+            return Err(format!(
+                "Expected a role but could not find it: {}",
+                settings_role_id
+            )
+            .into());
         };
 
         if highest_role <= settings_role {
@@ -530,10 +530,12 @@ impl GuildRolesExecutor {
                         .map(|x| Permission::from_string(x))
                         .collect::<Vec<Permission>>(),
                 )
-                .map_err(|e| format!(
-                    "You do not have permission to add a role with these permissions: {}",
-                    e
-                ))?;
+                .map_err(|e| {
+                    format!(
+                        "You do not have permission to add a role with these permissions: {}",
+                        e
+                    )
+                })?;
             }
             OperationType::Update => {
                 let Some((index, current_perms)) = current_roles.get(settings_role_id_str.as_str())
@@ -556,10 +558,12 @@ impl GuildRolesExecutor {
                         .map(|x| Permission::from_string(x))
                         .collect::<Vec<Permission>>(),
                 )
-                .map_err(|e| format!(
-                    "You do not have permission to edit this role's permissions: {}",
-                    e
-                ))?;
+                .map_err(|e| {
+                    format!(
+                        "You do not have permission to edit this role's permissions: {}",
+                        e
+                    )
+                })?;
             }
             OperationType::Delete => {
                 kittycat::perms::check_patch_changes(
@@ -570,10 +574,12 @@ impl GuildRolesExecutor {
                         .collect::<Vec<Permission>>(),
                     &[],
                 )
-                .map_err(|e| format!(
-                    "You do not have permission to remove a role with these permissions: {}",
-                    e
-                ))?;
+                .map_err(|e| {
+                    format!(
+                        "You do not have permission to remove a role with these permissions: {}",
+                        e
+                    )
+                })?;
             }
             _ => {
                 return Err(format!("Invalid operation type: {}", op).into());
@@ -709,8 +715,9 @@ impl GuildMembersExecutor {
         };
 
         // Parse the user id
-        let user_id: serenity::all::UserId =
-            user_id.parse().map_err(|e| format!("Failed to parse user id: {:?}", e))?;
+        let user_id: serenity::all::UserId = user_id
+            .parse()
+            .map_err(|e| format!("Failed to parse user id: {:?}", e))?;
 
         let Some(Value::Bool(public)) = state.get("public") else {
             return Err("Missing or invalid field: `public`".into());
@@ -774,42 +781,38 @@ impl GuildMembersExecutor {
         }
 
         // Get the authors kittycat permissions
-        let author_kittycat_perms =
-            match self
-                .get_kittycat_perms_for_user(
-                    ctx,
-                    &ctx.data.pool,
-                    ctx.scope.guild_id()?,
-                    guild.owner_id,
-                    ctx.scope.user_id()?,
-                )
-                .await
-            {
-                Ok((_, author_kittycat_perms)) => author_kittycat_perms,
-                Err(e) => {
-                    return Err(format!("Failed to get author permissions: {:?}", e).into())
-                }
-            };
+        let author_kittycat_perms = match self
+            .get_kittycat_perms_for_user(
+                ctx,
+                &ctx.data.pool,
+                ctx.scope.guild_id()?,
+                guild.owner_id,
+                ctx.scope.user_id()?,
+            )
+            .await
+        {
+            Ok((_, author_kittycat_perms)) => author_kittycat_perms,
+            Err(e) => return Err(format!("Failed to get author permissions: {:?}", e).into()),
+        };
 
         // Get the target members current kittycat permissions (if any) as well as their roles (for finding new permissions with overrides taken into account)
-        let (target_member_roles, current_user_kittycat_perms) =
-            match self
-                .get_kittycat_perms_for_user(
-                    ctx,
-                    &ctx.data.pool,
-                    ctx.scope.guild_id()?,
-                    guild.owner_id,
-                    user_id,
-                )
-                .await
-            {
-                Ok((target_member_roles, current_user_kittycat_perms)) => {
-                    (target_member_roles, current_user_kittycat_perms)
-                }
-                Err(e) => {
-                    return Err(format!("Failed to get target member permissions: {:?}", e).into())
-                }
-            };
+        let (target_member_roles, current_user_kittycat_perms) = match self
+            .get_kittycat_perms_for_user(
+                ctx,
+                &ctx.data.pool,
+                ctx.scope.guild_id()?,
+                guild.owner_id,
+                user_id,
+            )
+            .await
+        {
+            Ok((target_member_roles, current_user_kittycat_perms)) => {
+                (target_member_roles, current_user_kittycat_perms)
+            }
+            Err(e) => {
+                return Err(format!("Failed to get target member permissions: {:?}", e).into())
+            }
+        };
 
         // Find new user's permissions with the given perm overrides
         let new_user_kittycat_perms = {
@@ -818,14 +821,13 @@ impl GuildMembersExecutor {
                 ctx.scope.guild_id()?,
             );
 
-            let user_positions =
-                member_permission_calc::get_user_positions_from_db(
-                    &ctx.data.pool,
-                    ctx.scope.guild_id()?,
-                    &roles_str,
-                )
-                .await
-                .map_err(|e| format!("Failed to get user positions: {:?}", e))?;
+            let user_positions = member_permission_calc::get_user_positions_from_db(
+                &ctx.data.pool,
+                ctx.scope.guild_id()?,
+                &roles_str,
+            )
+            .await
+            .map_err(|e| format!("Failed to get user positions: {:?}", e))?;
 
             kittycat::perms::StaffPermissions {
                 user_positions,
@@ -842,10 +844,12 @@ impl GuildMembersExecutor {
                     &[],
                     &new_user_kittycat_perms,
                 )
-                .map_err(|e| format!(
-                    "You do not have permission to add a role with these permissions: {}",
-                    e
-                ))?;
+                .map_err(|e| {
+                    format!(
+                        "You do not have permission to add a role with these permissions: {}",
+                        e
+                    )
+                })?;
             }
             OperationType::Update => {
                 kittycat::perms::check_patch_changes(
@@ -853,10 +857,12 @@ impl GuildMembersExecutor {
                     &current_user_kittycat_perms,
                     &new_user_kittycat_perms,
                 )
-                .map_err(|e| format!(
-                    "You do not have permission to edit this role's permissions: {}",
-                    e
-                ))?;
+                .map_err(|e| {
+                    format!(
+                        "You do not have permission to edit this role's permissions: {}",
+                        e
+                    )
+                })?;
             }
             OperationType::Delete => {
                 kittycat::perms::check_patch_changes(
@@ -864,10 +870,12 @@ impl GuildMembersExecutor {
                     &current_user_kittycat_perms,
                     &[],
                 )
-                .map_err(|e| format!(
+                .map_err(|e| {
+                    format!(
                     "You do not have permission to remove this members permission overrides: {}",
                     e
-                ))?;
+                )
+                })?;
             }
             _ => {
                 return Err(format!("Invalid operation type: {}", op).into());
@@ -932,17 +940,16 @@ impl SettingCreator<SettingsData> for GuildMembersExecutor {
 
         let res = self.verify(ctx, &entry, OperationType::Create).await?;
 
-        let count = sqlx::query(
-            "SELECT COUNT(*) FROM guild_members WHERE guild_id = $1 AND user_id = $2",
-        )
-        .bind(ctx.scope.guild_id()?.to_string())
-        .bind(res.user_id.to_string())
-        .fetch_one(&ctx.data.pool)
-        .await
-        .map_err(|e| format!("Failed to check if role exists: {:?}", e))?
-        .try_get::<Option<i64>, _>(0)
-        .map_err(|e| format!("Failed to get count: {:?}", e))?
-        .unwrap_or_default();
+        let count =
+            sqlx::query("SELECT COUNT(*) FROM guild_members WHERE guild_id = $1 AND user_id = $2")
+                .bind(ctx.scope.guild_id()?.to_string())
+                .bind(res.user_id.to_string())
+                .fetch_one(&ctx.data.pool)
+                .await
+                .map_err(|e| format!("Failed to check if role exists: {:?}", e))?
+                .try_get::<Option<i64>, _>(0)
+                .map_err(|e| format!("Failed to get count: {:?}", e))?
+                .unwrap_or_default();
 
         if count > 0 {
             return Err("Role already exists".into());
@@ -1027,14 +1034,12 @@ impl SettingDeleter<SettingsData> for GuildMembersExecutor {
 
         let res = self.verify(ctx, &entry, OperationType::Delete).await?;
 
-        sqlx::query(
-            "DELETE FROM guild_members WHERE guild_id = $1 AND user_id = $2",
-        )
-        .bind(ctx.scope.guild_id()?.to_string())
-        .bind(res.user_id.to_string())
-        .execute(&ctx.data.pool)
-        .await
-        .map_err(|e| format!("Failed to delete role: {:?}", e))?;
+        sqlx::query("DELETE FROM guild_members WHERE guild_id = $1 AND user_id = $2")
+            .bind(ctx.scope.guild_id()?.to_string())
+            .bind(res.user_id.to_string())
+            .execute(&ctx.data.pool)
+            .await
+            .map_err(|e| format!("Failed to delete role: {:?}", e))?;
 
         Ok(())
     }
@@ -1066,7 +1071,9 @@ pub static GUILD_TEMPLATES: LazyLock<Setting<SettingsData>> = LazyLock::new(|| {
             Column {
                 id: "language".to_string(),
                 name: "Language".to_string(),
-                description: "The language of the script. Only Roblox Luau is currently supported here.".to_string(),
+                description:
+                    "The language of the script. Only Roblox Luau is currently supported here."
+                        .to_string(),
                 column_type: ColumnType::new_scalar(InnerColumnType::String {
                     kind: "normal".to_string(),
                     min_length: None,
@@ -1108,25 +1115,31 @@ pub static GUILD_TEMPLATES: LazyLock<Setting<SettingsData>> = LazyLock::new(|| {
                 id: "events".to_string(),
                 name: "Events".to_string(),
                 description: "The events that this script can be executed on.".to_string(),
-                column_type: ColumnType::new_array(InnerColumnType::String { 
-                    min_length: None, 
-                    max_length: None, 
+                column_type: ColumnType::new_array(InnerColumnType::String {
+                    min_length: None,
+                    max_length: None,
                     allowed_values: vec![],
-                    kind: "normal".to_string()
+                    kind: "normal".to_string(),
                 }),
                 primary_key: false,
                 nullable: true,
                 suggestions: ColumnSuggestion::Static {
                     suggestions: {
                         let mut vec = AntiraidEvent::variant_names()
-                        .iter()
-                        .map(|x| x.to_string())
-                        .collect::<Vec<String>>();
-                        
-                        vec.extend(gwevent::core::event_list().iter().copied().map(|x| x.to_string()).collect::<Vec<String>>());
+                            .iter()
+                            .map(|x| x.to_string())
+                            .collect::<Vec<String>>();
+
+                        vec.extend(
+                            gwevent::core::event_list()
+                                .iter()
+                                .copied()
+                                .map(|x| x.to_string())
+                                .collect::<Vec<String>>(),
+                        );
 
                         vec
-                    }
+                    },
                 },
                 ignored_for: vec![],
                 secret: false,
@@ -1135,13 +1148,16 @@ pub static GUILD_TEMPLATES: LazyLock<Setting<SettingsData>> = LazyLock::new(|| {
                 id: "allowed_caps".to_string(),
                 name: "Capabilities".to_string(),
                 description: "The capabilities the script will have.".to_string(),
-                column_type: ColumnType::new_array(InnerColumnType::String { min_length: None, max_length: None, allowed_values: vec![], kind: "normal".to_string() }),
+                column_type: ColumnType::new_array(InnerColumnType::String {
+                    min_length: None,
+                    max_length: None,
+                    allowed_values: vec![],
+                    kind: "normal".to_string(),
+                }),
                 primary_key: false,
                 nullable: true,
                 suggestions: ColumnSuggestion::Static {
-                    suggestions: vec![
-                        "discord:create_message".to_string()
-                    ]
+                    suggestions: vec!["discord:create_message".to_string()],
                 },
                 ignored_for: vec![],
                 secret: false,
@@ -1176,7 +1192,12 @@ pub static GUILD_TEMPLATES: LazyLock<Setting<SettingsData>> = LazyLock::new(|| {
 pub struct GuildTemplateExecutor;
 
 impl GuildTemplateExecutor {
-    async fn validate_channel(&self, ctx: &SettingsData, channel_field: &str, channel_id: serenity::all::ChannelId) -> Result<(), Error> {
+    async fn validate_channel(
+        &self,
+        ctx: &SettingsData,
+        channel_field: &str,
+        channel_id: serenity::all::ChannelId,
+    ) -> Result<(), Error> {
         // Perform required checks
         let channel = crate::sandwich::channel(
             &ctx.serenity_context.cache,
@@ -1186,22 +1207,38 @@ impl GuildTemplateExecutor {
             channel_id,
         )
         .await
-        .map_err(|e| format!("Failed to fetch channel id: {} with field: {}", e, channel_field))?;
+        .map_err(|e| {
+            format!(
+                "Failed to fetch channel id: {} with field: {}",
+                e, channel_field
+            )
+        })?;
 
         let Some(channel) = channel else {
-            return Err(format!("Could not find channel with id: {} and field: {}", channel_id, channel_field).into());
+            return Err(format!(
+                "Could not find channel with id: {} and field: {}",
+                channel_id, channel_field
+            )
+            .into());
         };
 
         let Some(guild_channel) = channel.guild() else {
-            return Err(format!("Channel with id: {} and field: {} is not in a guild", channel_id, channel_field).into());
+            return Err(format!(
+                "Channel with id: {} and field: {} is not in a guild",
+                channel_id, channel_field
+            )
+            .into());
         };
 
         if guild_channel.guild_id != ctx.scope.guild_id()? {
-            return Err(format!("Channel with id: {} and field: {} is not in the same guild as the setting", channel_id, channel_field).into());
+            return Err(format!(
+                "Channel with id: {} and field: {} is not in the same guild as the setting",
+                channel_id, channel_field
+            )
+            .into());
         }
 
-        let bot_user_id =
-            ctx.serenity_context.cache.current_user().id;
+        let bot_user_id = ctx.serenity_context.cache.current_user().id;
 
         let bot_user = crate::sandwich::member_in_guild(
             &ctx.serenity_context.cache,
@@ -1211,21 +1248,10 @@ impl GuildTemplateExecutor {
             bot_user_id,
         )
         .await
-        .map_err(|e| {
-            format!(
-                "Failed to get bot user: {}",
-                e
-            )
-        })?;
+        .map_err(|e| format!("Failed to get bot user: {}", e))?;
 
         let Some(bot_user) = bot_user else {
-            return Err(
-                format!(
-                    "Could not find bot user: {}",
-                    bot_user_id
-                )
-                .into()
-            );
+            return Err(format!("Could not find bot user: {}", bot_user_id).into());
         };
 
         let guild = crate::sandwich::guild(
@@ -1235,15 +1261,9 @@ impl GuildTemplateExecutor {
             ctx.scope.guild_id()?,
         )
         .await
-        .map_err(|e| 
-            format!(
-                "Failed to get guild: {}",
-                e
-            )
-        )?;
+        .map_err(|e| format!("Failed to get guild: {}", e))?;
 
-        let permissions =
-            guild.user_permissions_in(&guild_channel, &bot_user);
+        let permissions = guild.user_permissions_in(&guild_channel, &bot_user);
 
         if !permissions.contains(serenity::all::Permissions::SEND_MESSAGES) {
             return Err(
@@ -1251,7 +1271,7 @@ impl GuildTemplateExecutor {
             );
         }
 
-        Ok(())        
+        Ok(())
     }
 
     async fn validate(&self, ctx: &SettingsData, name: &str) -> Result<(), Error> {
@@ -1259,17 +1279,16 @@ impl GuildTemplateExecutor {
             let (shop_tname, shop_tversion) = Template::parse_shop_template(name)
                 .map_err(|e| format!("Failed to parse shop template: {:?}", e))?;
 
-            let shop_template_count = sqlx::query(
-                "SELECT COUNT(*) FROM template_shop WHERE name = $1 AND version = $2",
-            )
-            .bind(shop_tname)
-            .bind(shop_tversion)
-            .fetch_one(&ctx.data.pool)
-            .await
-            .map_err(|e| format!("Failed to get shop template: {:?}", e))?
-            .try_get::<Option<i64>, _>(0)
-            .map_err(|e| format!("Failed to get count: {:?}", e))?
-            .unwrap_or_default();
+            let shop_template_count =
+                sqlx::query("SELECT COUNT(*) FROM template_shop WHERE name = $1 AND version = $2")
+                    .bind(shop_tname)
+                    .bind(shop_tversion)
+                    .fetch_one(&ctx.data.pool)
+                    .await
+                    .map_err(|e| format!("Failed to get shop template: {:?}", e))?
+                    .try_get::<Option<i64>, _>(0)
+                    .map_err(|e| format!("Failed to get count: {:?}", e))?
+                    .unwrap_or_default();
 
             if shop_template_count == 0 {
                 return Err("Shop template does not exist".into());
@@ -1280,10 +1299,14 @@ impl GuildTemplateExecutor {
     }
 
     async fn post_action(&self, ctx: &SettingsData, name: &str) -> Result<(), Error> {
-        DEFERRED_CACHE_REGENS.insert(ctx.scope.guild_id()?, DeferredCacheRegenMode::OnReady 
-        { 
-            modified: vec![name.to_string()], 
-        }).await;
+        DEFERRED_CACHE_REGENS
+            .insert(
+                ctx.scope.guild_id()?,
+                DeferredCacheRegenMode::OnReady {
+                    modified: vec![name.to_string()],
+                },
+            )
+            .await;
 
         Ok(())
     }
@@ -1296,9 +1319,12 @@ impl SettingView<SettingsData> for GuildTemplateExecutor {
         context: &SettingsData,
         _filters: indexmap::IndexMap<String, Value>,
     ) -> Result<Vec<indexmap::IndexMap<String, Value>>, Error> {
-        log::info!("Viewing guild templates for guild id: {}", context.scope.guild_id()?);
+        log::info!(
+            "Viewing guild templates for guild id: {}",
+            context.scope.guild_id()?
+        );
 
-        check_perms(context,"guild_templates.view".into()).await?;
+        check_perms(context, "guild_templates.view".into()).await?;
 
         #[derive(sqlx::FromRow)]
         struct TemplateRow {
@@ -1368,17 +1394,16 @@ impl SettingCreator<SettingsData> for GuildTemplateExecutor {
             return Err("Missing or invalid field: `name`".into());
         };
 
-        let count = sqlx::query(
-            "SELECT COUNT(*) FROM guild_templates WHERE guild_id = $1 AND name = $2",
-        )
-        .bind(ctx.scope.guild_id()?.to_string())
-        .bind(name)
-        .fetch_one(&ctx.data.pool)
-        .await
-        .map_err(|e| format!("Failed to check if template exists: {:?}", e))?
-        .try_get::<Option<i64>, _>(0)
-        .map_err(|e| format!("Failed to get count: {:?}", e))?
-        .unwrap_or_default();
+        let count =
+            sqlx::query("SELECT COUNT(*) FROM guild_templates WHERE guild_id = $1 AND name = $2")
+                .bind(ctx.scope.guild_id()?.to_string())
+                .bind(name)
+                .fetch_one(&ctx.data.pool)
+                .await
+                .map_err(|e| format!("Failed to check if template exists: {:?}", e))?
+                .try_get::<Option<i64>, _>(0)
+                .map_err(|e| format!("Failed to get count: {:?}", e))?
+                .unwrap_or_default();
 
         if count > 0 {
             return Err("Template already exists".into());
@@ -1398,56 +1423,60 @@ impl SettingCreator<SettingsData> for GuildTemplateExecutor {
         let string_form = serde_json::to_string(&content)
             .map_err(|e| format!("Failed to convert content to string: {:?}", e))?;
 
-        let _: indexmap::IndexMap<String, Value> = serde_json::from_str(&string_form)   
-            .map_err(|e| format!("Failed to parse content: {:?}", e))?;     
+        let _: indexmap::IndexMap<String, Value> = serde_json::from_str(&string_form)
+            .map_err(|e| format!("Failed to parse content: {:?}", e))?;
 
         let Some(Value::Bool(paused)) = entry.get("paused") else {
             return Err("Missing or invalid field: `paused`".into());
         };
 
         let events = match entry.get("events") {
-            Some(Value::Array(events)) => 
-                events
-                    .iter()
-                    .map(|x| {
-                        if let Value::String(x) = x {
-                            Ok(x.to_string())
-                        } else {
-                            Err("Failed to parse events".into())
-                        }
-                    })
-                    .collect::<Result<Vec<String>, Error>>()?,
+            Some(Value::Array(events)) => events
+                .iter()
+                .map(|x| {
+                    if let Value::String(x) = x {
+                        Ok(x.to_string())
+                    } else {
+                        Err("Failed to parse events".into())
+                    }
+                })
+                .collect::<Result<Vec<String>, Error>>()?,
             _ => {
                 vec![]
-            },
+            }
         };
 
         let allowed_caps = match entry.get("allowed_caps") {
-            Some(Value::Array(allowed_caps)) => 
-                allowed_caps
-                    .iter()
-                    .map(|x| {
-                        if let Value::String(x) = x {
-                            Ok(x.to_string())
-                        } else {
-                            Err(format!("Failed to parse allowed capabilities due to invalid capability: {:?}", x).into())
-                        }
-                    })
-                    .collect::<Result<Vec<String>, Error>>()?,
+            Some(Value::Array(allowed_caps)) => allowed_caps
+                .iter()
+                .map(|x| {
+                    if let Value::String(x) = x {
+                        Ok(x.to_string())
+                    } else {
+                        Err(format!(
+                            "Failed to parse allowed capabilities due to invalid capability: {:?}",
+                            x
+                        )
+                        .into())
+                    }
+                })
+                .collect::<Result<Vec<String>, Error>>()?,
             _ => {
                 vec![]
-            },
+            }
         };
 
         let error_channel = match entry.get("error_channel") {
             Some(Value::String(error_channel)) => {
-                let channel_id: serenity::all::ChannelId = error_channel.parse()
-                .map_err(|e| format!("Failed to parse error channel: {:?}", e))?;
+                let channel_id: serenity::all::ChannelId = error_channel
+                    .parse()
+                    .map_err(|e| format!("Failed to parse error channel: {:?}", e))?;
 
-                self.validate_channel(ctx, "error_channel", channel_id).await?;
+                self.validate_channel(ctx, "error_channel", channel_id)
+                    .await?;
 
                 Some(error_channel.to_string())
-            },
+            }
             _ => None,
         };
 
@@ -1515,24 +1544,23 @@ impl SettingUpdater<SettingsData> for GuildTemplateExecutor {
         let string_form = serde_json::to_string(&content)
             .map_err(|e| format!("Failed to convert content to string: {:?}", e))?;
 
-        let _: indexmap::IndexMap<String, Value> = serde_json::from_str(&string_form)   
-            .map_err(|e| format!("Failed to parse content: {:?}", e))?;     
+        let _: indexmap::IndexMap<String, Value> = serde_json::from_str(&string_form)
+            .map_err(|e| format!("Failed to parse content: {:?}", e))?;
 
         let events = match entry.get("events") {
-            Some(Value::Array(events)) => 
-                events
-                    .iter()
-                    .map(|x| {
-                        if let Value::String(x) = x {
-                            Ok(x.to_string())
-                        } else {
-                            Err(format!("Failed to parse events due to invalid event: {:?}", x).into())
-                        }
-                    })
-                    .collect::<Result<Vec<String>, Error>>()?,
+            Some(Value::Array(events)) => events
+                .iter()
+                .map(|x| {
+                    if let Value::String(x) = x {
+                        Ok(x.to_string())
+                    } else {
+                        Err(format!("Failed to parse events due to invalid event: {:?}", x).into())
+                    }
+                })
+                .collect::<Result<Vec<String>, Error>>()?,
             _ => {
                 vec![]
-            },
+            }
         };
 
         let Some(Value::Bool(paused)) = entry.get("paused") else {
@@ -1540,32 +1568,36 @@ impl SettingUpdater<SettingsData> for GuildTemplateExecutor {
         };
 
         let allowed_caps = match entry.get("allowed_caps") {
-            Some(Value::Array(allowed_caps)) => 
-                allowed_caps
-                    .iter()
-                    .map(|x| {
-                        if let Value::String(x) = x {
-                            Ok(x.to_string())
-                        } else {
-                            Err(format!("Failed to parse allowed capabilities due to invalid capability: {:?}", x).into())
-                        }
-                    })
-                    .collect::<Result<Vec<String>, Error>>()?,
+            Some(Value::Array(allowed_caps)) => allowed_caps
+                .iter()
+                .map(|x| {
+                    if let Value::String(x) = x {
+                        Ok(x.to_string())
+                    } else {
+                        Err(format!(
+                            "Failed to parse allowed capabilities due to invalid capability: {:?}",
+                            x
+                        )
+                        .into())
+                    }
+                })
+                .collect::<Result<Vec<String>, Error>>()?,
             _ => {
                 vec![]
-            },
+            }
         };
-        
 
         let error_channel = match entry.get("error_channel") {
             Some(Value::String(error_channel)) => {
-                let channel_id: serenity::all::ChannelId = error_channel.parse()
-                .map_err(|e| format!("Failed to parse error channel: {:?}", e))?;
+                let channel_id: serenity::all::ChannelId = error_channel
+                    .parse()
+                    .map_err(|e| format!("Failed to parse error channel: {:?}", e))?;
 
-                self.validate_channel(ctx, "error_channel", channel_id).await?;
+                self.validate_channel(ctx, "error_channel", channel_id)
+                    .await?;
 
                 Some(error_channel.to_string())
-            },
+            }
             _ => None,
         };
 
@@ -1604,28 +1636,27 @@ impl SettingDeleter<SettingsData> for GuildTemplateExecutor {
             return Err("Invalid primary key".into());
         };
 
-        let Some(row) = sqlx::query(
-            "SELECT name FROM guild_templates WHERE guild_id = $1 AND name = $2",
-        )
-        .bind(ctx.scope.guild_id()?.to_string())
-        .bind(primary_key)
-        .fetch_optional(&ctx.data.pool)
-        .await
-        .map_err(|e| format!("Error while fetching template: {}", e))?
+        let Some(row) =
+            sqlx::query("SELECT name FROM guild_templates WHERE guild_id = $1 AND name = $2")
+                .bind(ctx.scope.guild_id()?.to_string())
+                .bind(primary_key)
+                .fetch_optional(&ctx.data.pool)
+                .await
+                .map_err(|e| format!("Error while fetching template: {}", e))?
         else {
             return Err("Template not found when trying to delete it!".into());
         };
 
-        let name = row.try_get::<String, _>(0).map_err(|e| format!("Failed to get name: {:?}", e))?;
+        let name = row
+            .try_get::<String, _>(0)
+            .map_err(|e| format!("Failed to get name: {:?}", e))?;
 
-        sqlx::query(
-            "DELETE FROM guild_templates WHERE guild_id = $1 AND name = $2",
-        )
-        .bind(ctx.scope.guild_id()?.to_string())
-        .bind(&name)
-        .execute(&ctx.data.pool)
-        .await
-        .map_err(|e| format!("Failed to delete template: {:?}", e))?;
+        sqlx::query("DELETE FROM guild_templates WHERE guild_id = $1 AND name = $2")
+            .bind(ctx.scope.guild_id()?.to_string())
+            .bind(&name)
+            .execute(&ctx.data.pool)
+            .await
+            .map_err(|e| format!("Failed to delete template: {:?}", e))?;
 
         self.post_action(ctx, &name).await?;
 
@@ -1702,7 +1733,7 @@ impl SettingView<SettingsData> for GuildTemplatesKVExecutor {
         context: &SettingsData,
         _filters: indexmap::IndexMap<String, Value>,
     ) -> Result<Vec<indexmap::IndexMap<String, Value>>, Error> {
-        check_perms(context,"guild_templates_kv.view".into()).await?;
+        check_perms(context, "guild_templates_kv.view".into()).await?;
 
         #[derive(sqlx::FromRow)]
         struct GuildTemplatesKVRow {
@@ -1788,17 +1819,15 @@ impl SettingCreator<SettingsData> for GuildTemplatesKVExecutor {
         .map_err(|e| format!("Failed to insert kv: {:?}", e))?;
 
         // Dispatch a ExternalKeyUpdate event for the template
-        let ce = crate::dispatch::parse_event(&AntiraidEvent::ExternalKeyUpdate(ExternalKeyUpdateEventData {
-            key_modified: key.to_string(),
-            author: ctx.scope.user_id()?,
-            action: ExternalKeyUpdateEventDataAction::Create
-        }))?;
+        let ce = crate::dispatch::parse_event(&AntiraidEvent::ExternalKeyUpdate(
+            ExternalKeyUpdateEventData {
+                key_modified: key.to_string(),
+                author: ctx.scope.user_id()?,
+                action: ExternalKeyUpdateEventDataAction::Create,
+            },
+        ))?;
 
-        crate::dispatch::dispatch(
-            &ctx.serenity_context, 
-            &ctx.data, 
-            ce, 
-            ctx.scope.guild_id()?)
+        crate::dispatch::dispatch(&ctx.serenity_context, &ctx.data, ce, ctx.scope.guild_id()?)
             .await
             .map_err(|e| format!("Failed to dispatch ExternalKeyUpdate event: {:?}", e))?;
 
@@ -1838,18 +1867,16 @@ impl SettingUpdater<SettingsData> for GuildTemplatesKVExecutor {
         .await
         .map_err(|e| format!("Failed to update kv: {:?}", e))?;
 
-    // Dispatch a ExternalKeyUpdate event for the template
-    let ce = crate::dispatch::parse_event(&AntiraidEvent::ExternalKeyUpdate(ExternalKeyUpdateEventData {
-        key_modified: key.to_string(),
-        author: ctx.scope.user_id()?,
-        action: ExternalKeyUpdateEventDataAction::Update
-    }))?;
+        // Dispatch a ExternalKeyUpdate event for the template
+        let ce = crate::dispatch::parse_event(&AntiraidEvent::ExternalKeyUpdate(
+            ExternalKeyUpdateEventData {
+                key_modified: key.to_string(),
+                author: ctx.scope.user_id()?,
+                action: ExternalKeyUpdateEventDataAction::Update,
+            },
+        ))?;
 
-        crate::dispatch::dispatch(
-            &ctx.serenity_context, 
-            &ctx.data, 
-            ce, 
-            ctx.scope.guild_id()?)
+        crate::dispatch::dispatch(&ctx.serenity_context, &ctx.data, ce, ctx.scope.guild_id()?)
             .await
             .map_err(|e| format!("Failed to dispatch ExternalKeyUpdate event: {:?}", e))?;
 
@@ -1902,17 +1929,15 @@ impl SettingDeleter<SettingsData> for GuildTemplatesKVExecutor {
         .map_err(|e| format!("Failed to delete kv: {:?}", e))?;
 
         // Dispatch a ExternalKeyUpdate event for the template
-        let ce = crate::dispatch::parse_event(&AntiraidEvent::ExternalKeyUpdate(ExternalKeyUpdateEventData {
-            key_modified: primary_key,
-            author: ctx.scope.user_id()?,
-            action: ExternalKeyUpdateEventDataAction::Delete
-        }))?;
+        let ce = crate::dispatch::parse_event(&AntiraidEvent::ExternalKeyUpdate(
+            ExternalKeyUpdateEventData {
+                key_modified: primary_key,
+                author: ctx.scope.user_id()?,
+                action: ExternalKeyUpdateEventDataAction::Delete,
+            },
+        ))?;
 
-        crate::dispatch::dispatch(
-            &ctx.serenity_context, 
-            &ctx.data, 
-            ce, 
-            ctx.scope.guild_id()?)
+        crate::dispatch::dispatch(&ctx.serenity_context, &ctx.data, ce, ctx.scope.guild_id()?)
             .await
             .map_err(|e| format!("Failed to dispatch ExternalKeyUpdate event: {:?}", e))?;
 
@@ -2113,7 +2138,7 @@ impl SettingView<SettingsData> for GuildTemplateShopExecutor {
         context: &SettingsData,
         _filters: indexmap::IndexMap<String, Value>,
     ) -> Result<Vec<indexmap::IndexMap<String, Value>>, Error> {
-        check_perms(context,"guild_templates_shop.view".into()).await?;
+        check_perms(context, "guild_templates_shop.view".into()).await?;
 
         #[derive(sqlx::FromRow)]
         struct GuildTemplateShopRow {
@@ -2196,7 +2221,9 @@ impl SettingCreator<SettingsData> for GuildTemplateShopExecutor {
         if name.starts_with('@') {
             // This is a namespaced template, check that the server owns the namespace
             if !name.contains('/') {
-                return Err("Please contact support to claim ownership over a specific namespace".into());
+                return Err(
+                    "Please contact support to claim ownership over a specific namespace".into(),
+                );
             }
 
             let namespace = name.split('/').next().unwrap();
@@ -2272,45 +2299,47 @@ impl SettingCreator<SettingsData> for GuildTemplateShopExecutor {
         let string_form = serde_json::to_string(&content)
             .map_err(|e| format!("Failed to convert content to string: {:?}", e))?;
 
-        let _: indexmap::IndexMap<String, Value> = serde_json::from_str(&string_form)   
-            .map_err(|e| format!("Failed to parse content: {:?}", e))?;     
+        let _: indexmap::IndexMap<String, Value> = serde_json::from_str(&string_form)
+            .map_err(|e| format!("Failed to parse content: {:?}", e))?;
 
         let Some(Value::String(r#type)) = entry.get("type") else {
             return Err("Missing or invalid field: `type`".into());
         };
 
         let events = match entry.get("events") {
-            Some(Value::Array(events)) => 
-                events
-                    .iter()
-                    .map(|x| {
-                        if let Value::String(x) = x {
-                            Ok(x.to_string())
-                        } else {
-                            Err("Failed to parse events".into())
-                        }
-                    })
-                    .collect::<Result<Vec<String>, Error>>()?,
+            Some(Value::Array(events)) => events
+                .iter()
+                .map(|x| {
+                    if let Value::String(x) = x {
+                        Ok(x.to_string())
+                    } else {
+                        Err("Failed to parse events".into())
+                    }
+                })
+                .collect::<Result<Vec<String>, Error>>()?,
             _ => {
                 vec![]
-            },
+            }
         };
 
         let allowed_caps = match entry.get("allowed_caps") {
-            Some(Value::Array(allowed_caps)) => 
-                allowed_caps
-                    .iter()
-                    .map(|x| {
-                        if let Value::String(x) = x {
-                            Ok(x.to_string())
-                        } else {
-                            Err(format!("Failed to parse allowed capabilities due to invalid capability: {:?}", x).into())
-                        }
-                    })
-                    .collect::<Result<Vec<String>, Error>>()?,
+            Some(Value::Array(allowed_caps)) => allowed_caps
+                .iter()
+                .map(|x| {
+                    if let Value::String(x) = x {
+                        Ok(x.to_string())
+                    } else {
+                        Err(format!(
+                            "Failed to parse allowed capabilities due to invalid capability: {:?}",
+                            x
+                        )
+                        .into())
+                    }
+                })
+                .collect::<Result<Vec<String>, Error>>()?,
             _ => {
                 vec![]
-            },
+            }
         };
 
         let id = sqlx::query(
@@ -2332,7 +2361,9 @@ impl SettingCreator<SettingsData> for GuildTemplateShopExecutor {
         .await
         .map_err(|e| format!("Failed to insert shop template: {:?}", e))?;
 
-        let id: uuid::Uuid = id.try_get(0).map_err(|e| format!("Failed to get ID of created setting: {:?}", e))?;
+        let id: uuid::Uuid = id
+            .try_get(0)
+            .map_err(|e| format!("Failed to get ID of created setting: {:?}", e))?;
 
         // Add returned ID to entry
         let mut entry = entry;
@@ -2355,7 +2386,9 @@ impl SettingUpdater<SettingsData> for GuildTemplateShopExecutor {
             return Err("Missing or invalid field: `id`".into());
         };
 
-        let id: uuid::Uuid = id.parse().map_err(|e| format!("Failed to parse ID: {:?}", e))?;
+        let id: uuid::Uuid = id
+            .parse()
+            .map_err(|e| format!("Failed to parse ID: {:?}", e))?;
 
         #[derive(sqlx::FromRow)]
         pub struct TemplateShopData {
@@ -2393,41 +2426,43 @@ impl SettingUpdater<SettingsData> for GuildTemplateShopExecutor {
         let string_form = serde_json::to_string(&content)
             .map_err(|e| format!("Failed to convert content to string: {:?}", e))?;
 
-        let _: indexmap::IndexMap<String, Value> = serde_json::from_str(&string_form)   
-            .map_err(|e| format!("Failed to parse content: {:?}", e))?;     
+        let _: indexmap::IndexMap<String, Value> = serde_json::from_str(&string_form)
+            .map_err(|e| format!("Failed to parse content: {:?}", e))?;
 
         let events = match entry.get("events") {
-            Some(Value::Array(events)) => 
-                events
-                    .iter()
-                    .map(|x| {
-                        if let Value::String(x) = x {
-                            Ok(x.to_string())
-                        } else {
-                            Err("Failed to parse events".into())
-                        }
-                    })
-                    .collect::<Result<Vec<String>, Error>>()?,
+            Some(Value::Array(events)) => events
+                .iter()
+                .map(|x| {
+                    if let Value::String(x) = x {
+                        Ok(x.to_string())
+                    } else {
+                        Err("Failed to parse events".into())
+                    }
+                })
+                .collect::<Result<Vec<String>, Error>>()?,
             _ => {
                 vec![]
-            },
+            }
         };
 
         let allowed_caps = match entry.get("allowed_caps") {
-            Some(Value::Array(allowed_caps)) => 
-                allowed_caps
-                    .iter()
-                    .map(|x| {
-                        if let Value::String(x) = x {
-                            Ok(x.to_string())
-                        } else {
-                            Err(format!("Failed to parse allowed capabilities due to invalid capability: {:?}", x).into())
-                        }
-                    })
-                    .collect::<Result<Vec<String>, Error>>()?,
+            Some(Value::Array(allowed_caps)) => allowed_caps
+                .iter()
+                .map(|x| {
+                    if let Value::String(x) = x {
+                        Ok(x.to_string())
+                    } else {
+                        Err(format!(
+                            "Failed to parse allowed capabilities due to invalid capability: {:?}",
+                            x
+                        )
+                        .into())
+                    }
+                })
+                .collect::<Result<Vec<String>, Error>>()?,
             _ => {
                 vec![]
-            },
+            }
         };
 
         sqlx::query(
@@ -2455,12 +2490,7 @@ impl SettingUpdater<SettingsData> for GuildTemplateShopExecutor {
         let guilds: Vec<GuildTemplateShopGuildRow> = sqlx::query_as(
             "SELECT guild_id FROM guild_templates WHERE name = $1 AND paused = false",
         )
-        .bind(
-            Template::create_shop_template(
-                &data.name,
-                &data.version,
-            )
-        )
+        .bind(Template::create_shop_template(&data.name, &data.version))
         .fetch_all(&ctx.data.pool)
         .await
         .map_err(|e| format!("Failed to fetch guilds with this template: {:?}", e))?;
@@ -2478,10 +2508,15 @@ impl SettingUpdater<SettingsData> for GuildTemplateShopExecutor {
             other_affected_guilds.push(guild_id);
         }
 
-        DEFERRED_CACHE_REGENS.insert(
-            ctx.scope.guild_id()?,
-            DeferredCacheRegenMode::FlushMultiple { other_guilds: other_affected_guilds, flush_self: false },
-        ).await;  
+        DEFERRED_CACHE_REGENS
+            .insert(
+                ctx.scope.guild_id()?,
+                DeferredCacheRegenMode::FlushMultiple {
+                    other_guilds: other_affected_guilds,
+                    flush_self: false,
+                },
+            )
+            .await;
 
         Ok(entry)
     }
@@ -2500,7 +2535,9 @@ impl SettingDeleter<SettingsData> for GuildTemplateShopExecutor {
             return Err("Missing or invalid field: `id`".into());
         };
 
-        let primary_key = primary_key.parse::<uuid::Uuid>().map_err(|e| format!("Failed to parse ID: {:?}", e))?;
+        let primary_key = primary_key
+            .parse::<uuid::Uuid>()
+            .map_err(|e| format!("Failed to parse ID: {:?}", e))?;
 
         #[derive(sqlx::FromRow)]
         struct GuildTemplateShopRow {
@@ -2519,14 +2556,12 @@ impl SettingDeleter<SettingsData> for GuildTemplateShopExecutor {
         .map_err(|e| format!("Error while fetching shop template: {}", e))?
         .ok_or_else(|| "Shop template not found when trying to delete it!".to_string())?;
 
-        sqlx::query(
-            "DELETE FROM template_shop WHERE owner_guild = $1 AND id = $2",
-        )
-        .bind(ctx.scope.guild_id()?.to_string())
-        .bind(row.id)
-        .execute(&ctx.data.pool)
-        .await
-        .map_err(|e| format!("Failed to delete shop template: {:?}", e))?;
+        sqlx::query("DELETE FROM template_shop WHERE owner_guild = $1 AND id = $2")
+            .bind(ctx.scope.guild_id()?.to_string())
+            .bind(row.id)
+            .execute(&ctx.data.pool)
+            .await
+            .map_err(|e| format!("Failed to delete shop template: {:?}", e))?;
 
         // Dispatch a OnStartup event for the template
         #[derive(sqlx::FromRow)]
@@ -2538,12 +2573,7 @@ impl SettingDeleter<SettingsData> for GuildTemplateShopExecutor {
         let guilds: Vec<GuildTemplateShopGuildRow> = sqlx::query_as(
             "SELECT guild_id FROM guild_templates WHERE name = $1 AND paused = false",
         )
-        .bind(
-            Template::create_shop_template(
-                &row.name,
-                &row.version,
-            )
-        )
+        .bind(Template::create_shop_template(&row.name, &row.version))
         .fetch_all(&ctx.data.pool)
         .await
         .map_err(|e| format!("Failed to fetch guilds with this template: {:?}", e))?;
@@ -2561,17 +2591,22 @@ impl SettingDeleter<SettingsData> for GuildTemplateShopExecutor {
             other_affected_guilds.push(guild_id);
         }
 
-        DEFERRED_CACHE_REGENS.insert(
-            ctx.scope.guild_id()?,
-            DeferredCacheRegenMode::FlushMultiple { other_guilds: other_affected_guilds, flush_self: false },
-        ).await;  
+        DEFERRED_CACHE_REGENS
+            .insert(
+                ctx.scope.guild_id()?,
+                DeferredCacheRegenMode::FlushMultiple {
+                    other_guilds: other_affected_guilds,
+                    flush_self: false,
+                },
+            )
+            .await;
 
         Ok(())
     }
 }
 
-pub static GUILD_TEMPLATE_SHOP_PUBLIC_LIST: LazyLock<Setting<SettingsData>> = LazyLock::new(|| {
-    Setting {
+pub static GUILD_TEMPLATE_SHOP_PUBLIC_LIST: LazyLock<Setting<SettingsData>> =
+    LazyLock::new(|| Setting {
         id: "template_shop_public_list".to_string(),
         name: "Explore the shop!".to_string(),
         description: "Explore other templates published by other servers".to_string(),
@@ -2595,7 +2630,8 @@ pub static GUILD_TEMPLATE_SHOP_PUBLIC_LIST: LazyLock<Setting<SettingsData>> = La
             Column {
                 id: "name".to_string(),
                 name: "Name".to_string(),
-                description: "The name of the template on the shop. Cannot be updated once set".to_string(),
+                description: "The name of the template on the shop. Cannot be updated once set"
+                    .to_string(),
                 column_type: ColumnType::new_scalar(InnerColumnType::String {
                     kind: "normal".to_string(),
                     min_length: None,
@@ -2611,7 +2647,7 @@ pub static GUILD_TEMPLATE_SHOP_PUBLIC_LIST: LazyLock<Setting<SettingsData>> = La
             Column {
                 id: "version".to_string(),
                 name: "Version".to_string(),
-                description: "The version of the template. Cannot be updated once set".to_string(), 
+                description: "The version of the template. Cannot be updated once set".to_string(),
                 column_type: ColumnType::new_scalar(InnerColumnType::String {
                     kind: "normal".to_string(),
                     min_length: None,
@@ -2627,7 +2663,7 @@ pub static GUILD_TEMPLATE_SHOP_PUBLIC_LIST: LazyLock<Setting<SettingsData>> = La
             Column {
                 id: "description".to_string(),
                 name: "Description".to_string(),
-                description: "The description of the template".to_string(), 
+                description: "The description of the template".to_string(),
                 column_type: ColumnType::new_scalar(InnerColumnType::String {
                     kind: "normal".to_string(),
                     min_length: None,
@@ -2656,7 +2692,11 @@ pub static GUILD_TEMPLATE_SHOP_PUBLIC_LIST: LazyLock<Setting<SettingsData>> = La
                 ignored_for: vec![],
                 secret: false,
             },
-            ar_settings::common_columns::guild_id("owner_guild", "Guild ID", "The ID of the server which owns the templaye"),
+            ar_settings::common_columns::guild_id(
+                "owner_guild",
+                "Guild ID",
+                "The ID of the server which owns the templaye",
+            ),
             ar_settings::common_columns::created_at(),
             ar_settings::common_columns::created_by(),
             ar_settings::common_columns::last_updated_at(),
@@ -2664,8 +2704,7 @@ pub static GUILD_TEMPLATE_SHOP_PUBLIC_LIST: LazyLock<Setting<SettingsData>> = La
         ]),
         title_template: "{name}".to_string(),
         operations: SettingOperations::to_view_op(GuildTemplateShopPublicListExecutor),
-    }
-});
+    });
 
 #[derive(Clone)]
 pub struct GuildTemplateShopPublicListExecutor;
@@ -2782,7 +2821,7 @@ impl SettingView<SettingsData> for LockdownSettingsExecutor {
         context: &SettingsData,
         _filters: indexmap::IndexMap<String, Value>,
     ) -> Result<Vec<indexmap::IndexMap<String, Value>>, Error> {
-        check_perms(context,"lockdown_settings.view".into()).await?;
+        check_perms(context, "lockdown_settings.view".into()).await?;
 
         #[derive(sqlx::FromRow)]
         struct LockdownRow {
@@ -2815,7 +2854,7 @@ impl SettingView<SettingsData> for LockdownSettingsExecutor {
 
             result.push(map);
         }
-        
+
         Ok(result)
     }
 }
@@ -2827,17 +2866,20 @@ impl SettingCreator<SettingsData> for LockdownSettingsExecutor {
         context: &SettingsData,
         entry: indexmap::IndexMap<String, Value>,
     ) -> Result<indexmap::IndexMap<String, Value>, Error> {
-        check_perms(context,"lockdown_settings.create".into()).await?;
+        check_perms(context, "lockdown_settings.create".into()).await?;
 
         let Some(Value::Array(member_roles)) = entry.get("member_roles") else {
             return Err("Missing or invalid field: `member_roles`".into());
         };
 
-        let member_roles: Vec<String> = member_roles.iter().map(|v| match v {
-            Value::String(s) => Ok(s.clone()),
-            _ => Err("Invalid member role".into()),
-        }).collect::<Result<Vec<String>, Error>>()?;
-        
+        let member_roles: Vec<String> = member_roles
+            .iter()
+            .map(|v| match v {
+                Value::String(s) => Ok(s.clone()),
+                _ => Err("Invalid member role".into()),
+            })
+            .collect::<Result<Vec<String>, Error>>()?;
+
         let Some(Value::Bool(require_correct_layout)) = entry.get("require_correct_layout") else {
             return Err("Missing or invalid field: `require_correct_layout`".into());
         };
@@ -2865,31 +2907,32 @@ impl SettingUpdater<SettingsData> for LockdownSettingsExecutor {
         context: &SettingsData,
         entry: indexmap::IndexMap<String, Value>,
     ) -> Result<indexmap::IndexMap<String, Value>, Error> {
-        check_perms(context,"lockdown_settings.uodate".into()).await?;
+        check_perms(context, "lockdown_settings.uodate".into()).await?;
 
         let Some(Value::Array(member_roles)) = entry.get("member_roles") else {
             return Err("Missing or invalid field: `member_roles`".into());
         };
 
-        let member_roles: Vec<String> = member_roles.iter().map(|v| match v {
-            Value::String(s) => Ok(s.clone()),
-            _ => Err("Invalid member role".into()),
-        }).collect::<Result<Vec<String>, Error>>()?;
-        
+        let member_roles: Vec<String> = member_roles
+            .iter()
+            .map(|v| match v {
+                Value::String(s) => Ok(s.clone()),
+                _ => Err("Invalid member role".into()),
+            })
+            .collect::<Result<Vec<String>, Error>>()?;
+
         let Some(Value::Bool(require_correct_layout)) = entry.get("require_correct_layout") else {
             return Err("Missing or invalid field: `require_correct_layout`".into());
         };
 
-        let count = sqlx::query(
-            "SELECT COUNT(*) FROM lockdown__guilds WHERE guild_id = $1",
-        )
-        .bind(context.scope.guild_id()?.to_string())
-        .fetch_one(&context.data.pool)
-        .await
-        .map_err(|e| format!("Error while updating lockdown settings: {}", e))?
-        .try_get::<Option<i64>, _>(0)
-        .map_err(|e| format!("Error while updating lockdown settings: {}", e))?
-        .unwrap_or(0);
+        let count = sqlx::query("SELECT COUNT(*) FROM lockdown__guilds WHERE guild_id = $1")
+            .bind(context.scope.guild_id()?.to_string())
+            .fetch_one(&context.data.pool)
+            .await
+            .map_err(|e| format!("Error while updating lockdown settings: {}", e))?
+            .try_get::<Option<i64>, _>(0)
+            .map_err(|e| format!("Error while updating lockdown settings: {}", e))?
+            .unwrap_or(0);
 
         if count == 0 {
             return Err("Lockdown settings not found".into());
@@ -2917,7 +2960,7 @@ impl SettingDeleter<SettingsData> for LockdownSettingsExecutor {
         context: &SettingsData,
         _fields: indexmap::IndexMap<String, Value>,
     ) -> Result<(), Error> {
-        check_perms(context,"lockdown_settings.delete".into()).await?;
+        check_perms(context, "lockdown_settings.delete".into()).await?;
 
         sqlx::query("DELETE FROM lockdown__guilds WHERE guild_id = $1")
             .bind(context.scope.guild_id()?.to_string())
@@ -2975,7 +3018,10 @@ pub static LOCKDOWNS: LazyLock<Setting<SettingsData>> = LazyLock::new(|| Setting
             id: "data".to_string(),
             name: "Data".to_string(),
             description: "The data stored of the lockdown.".to_string(),
-            column_type: ColumnType::new_scalar(InnerColumnType::Json { max_bytes: None, kind: "normal".to_string() }),
+            column_type: ColumnType::new_scalar(InnerColumnType::Json {
+                max_bytes: None,
+                kind: "normal".to_string(),
+            }),
             primary_key: false,
             nullable: false,
             suggestions: ColumnSuggestion::None {},
@@ -3045,7 +3091,7 @@ impl SettingView<SettingsData> for LockdownExecutor {
 
             result.push(map);
         }
-        
+
         Ok(result) // TODO: Implement
     }
 }
@@ -3057,8 +3103,8 @@ impl SettingCreator<SettingsData> for LockdownExecutor {
         context: &SettingsData,
         entry: indexmap::IndexMap<String, Value>,
     ) -> Result<indexmap::IndexMap<String, Value>, Error> {
-        check_perms(context,"lockdowns.create".into()).await?;
-    
+        check_perms(context, "lockdowns.create".into()).await?;
+
         let Some(Value::String(typ)) = entry.get("type") else {
             return Err("Missing or invalid field: `type`".into());
         };
@@ -3069,7 +3115,7 @@ impl SettingCreator<SettingsData> for LockdownExecutor {
 
         // Get the current lockdown set
         let mut lockdowns = lockdowns::LockdownSet::guild(
-            context.scope.guild_id()?, 
+            context.scope.guild_id()?,
             LockdownData::new(
                 context.serenity_context.cache.clone(),
                 context.serenity_context.http.clone(),
@@ -3077,10 +3123,8 @@ impl SettingCreator<SettingsData> for LockdownExecutor {
                 context.data.reqwest.clone(),
             ),
         )
-            .await
-            .map_err(|e| 
-                format!("Error while fetching lockdown set: {:?}", e)
-            )?;
+        .await
+        .map_err(|e| format!("Error while fetching lockdown set: {:?}", e))?;
 
         // Create the lockdown
         let lockdown_type =
@@ -3109,12 +3153,10 @@ impl SettingCreator<SettingsData> for LockdownExecutor {
             .await
             .map_err(|e| format!("Error while applying lockdown: {}", e))?;
 
-        let created_lockdown =
-        lockdowns
+        let created_lockdown = lockdowns
             .lockdowns()
             .last()
             .ok_or_else(|| "No lockdowns created!".to_string())?;
-        
 
         Ok(indexmap::indexmap! {
             "id".to_string() => Value::String(created_lockdown.id.to_string()),
@@ -3132,17 +3174,19 @@ impl SettingDeleter<SettingsData> for LockdownExecutor {
         context: &SettingsData,
         mut fields: indexmap::IndexMap<String, Value>,
     ) -> Result<(), Error> {
-        check_perms(context,"lockdowns.delete".into()).await?;
-                
+        check_perms(context, "lockdowns.delete".into()).await?;
+
         let Some(Value::String(primary_key)) = fields.swap_remove("id") else {
             return Err("Missing or invalid field: `id`".into());
         };
 
-        let primary_key = primary_key.parse::<uuid::Uuid>().map_err(|e| format!("Failed to parse ID: {:?}", e))?;
+        let primary_key = primary_key
+            .parse::<uuid::Uuid>()
+            .map_err(|e| format!("Failed to parse ID: {:?}", e))?;
 
         // Get the current lockdown set
         let mut lockdowns = lockdowns::LockdownSet::guild(
-            context.scope.guild_id()?, 
+            context.scope.guild_id()?,
             LockdownData::new(
                 context.serenity_context.cache.clone(),
                 context.serenity_context.http.clone(),
@@ -3150,8 +3194,8 @@ impl SettingDeleter<SettingsData> for LockdownExecutor {
                 context.data.reqwest.clone(),
             ),
         )
-            .await
-            .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
+        .await
+        .map_err(|e| format!("Error while fetching lockdown set: {}", e))?;
 
         // Remove the lockdown
         lockdowns

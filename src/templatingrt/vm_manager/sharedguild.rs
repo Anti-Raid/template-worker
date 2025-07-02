@@ -1,9 +1,9 @@
+use super::threadentry::ThreadRequest;
+use crate::templatingrt::vm_manager::ThreadEntry;
+use serenity::all::GuildId;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock as StdRwLock};
-use serenity::all::GuildId;
-use crate::templatingrt::vm_manager::ThreadEntry;
 use tokio::sync::mpsc::UnboundedSender;
-use super::threadentry::ThreadRequest;
 
 #[derive(Clone)]
 /// A two-way binding between a guild id and its associated worker thread
@@ -15,20 +15,27 @@ pub struct SharedGuild {
     entries: Arc<StdRwLock<HashMap<ThreadEntry, Vec<GuildId>>>>,
 }
 
-impl SharedGuild { 
+impl SharedGuild {
     pub fn new() -> Self {
         Self {
             guilds: StdRwLock::new(HashMap::new()).into(),
-            entries: StdRwLock::new(HashMap::new()).into()
+            entries: StdRwLock::new(HashMap::new()).into(),
         }
     }
 
-    pub fn add_guild(&self, guild_id: GuildId, thread_entry: ThreadEntry) -> Result<(), crate::Error> {
+    pub fn add_guild(
+        &self,
+        guild_id: GuildId,
+        thread_entry: ThreadEntry,
+    ) -> Result<(), crate::Error> {
         let mut guilds = self.guilds.try_write().map_err(|e| e.to_string())?;
         let mut entries = self.entries.try_write().map_err(|e| e.to_string())?;
 
         if let Some(old_entry) = guilds.insert(guild_id, thread_entry.clone()) {
-            entries.entry(old_entry).or_default().retain(|x| *x != guild_id);
+            entries
+                .entry(old_entry)
+                .or_default()
+                .retain(|x| *x != guild_id);
         }
 
         entries.entry(thread_entry).or_default().push(guild_id);
@@ -44,7 +51,10 @@ impl SharedGuild {
         };
 
         let mut entries = self.entries.try_write().map_err(|e| e.to_string())?;
-        entries.entry(thread_entry).or_default().retain(|x| *x != guild_id);
+        entries
+            .entry(thread_entry)
+            .or_default()
+            .retain(|x| *x != guild_id);
 
         Ok(())
     }
@@ -73,14 +83,35 @@ impl SharedGuild {
     }
 
     pub fn get_thread_entry(&self, guild_id: GuildId) -> Result<Option<ThreadEntry>, crate::Error> {
-        Ok(self.guilds.try_read().map_err(|e| e.to_string())?.get(&guild_id).cloned())
+        Ok(self
+            .guilds
+            .try_read()
+            .map_err(|e| e.to_string())?
+            .get(&guild_id)
+            .cloned())
     }
 
-    pub fn get_handle(&self, guild_id: GuildId) -> Result<Option<UnboundedSender<ThreadRequest>>, crate::Error> {
-        Ok(self.guilds.try_read().map_err(|e| e.to_string())?.get(&guild_id).map(|x| x.handle().clone()))
+    pub fn get_handle(
+        &self,
+        guild_id: GuildId,
+    ) -> Result<Option<UnboundedSender<ThreadRequest>>, crate::Error> {
+        Ok(self
+            .guilds
+            .try_read()
+            .map_err(|e| e.to_string())?
+            .get(&guild_id)
+            .map(|x| x.handle().clone()))
     }
 
-    pub fn get_thread_guilds(&self, thread_entry: &ThreadEntry) -> Result<Option<Vec<GuildId>>, crate::Error> {
-        Ok(self.entries.try_read().map_err(|e| e.to_string())?.get(thread_entry).cloned())
+    pub fn get_thread_guilds(
+        &self,
+        thread_entry: &ThreadEntry,
+    ) -> Result<Option<Vec<GuildId>>, crate::Error> {
+        Ok(self
+            .entries
+            .try_read()
+            .map_err(|e| e.to_string())?
+            .get(thread_entry)
+            .cloned())
     }
 }
