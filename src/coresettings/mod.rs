@@ -10,7 +10,6 @@ pub mod settings;
 
 pub fn config_options() -> Vec<ar_settings::types::Setting<data::SettingsData>> {
     vec![
-        (*settings::GUILD_ROLES).clone(),
         (*settings::GUILD_MEMBERS).clone(),
         (*settings::GUILD_TEMPLATES).clone(),
         (*settings::GUILD_TEMPLATES_KV).clone(),
@@ -23,7 +22,6 @@ pub fn config_options() -> Vec<ar_settings::types::Setting<data::SettingsData>> 
 
 pub fn str_to_setting(setting: &str) -> Option<&ar_settings::types::Setting<SettingsData>> {
     match setting {
-        "roles" => Some(&settings::GUILD_ROLES),
         "guild_members" => Some(&settings::GUILD_MEMBERS),
         "scripts" => Some(&settings::GUILD_TEMPLATES),
         "script_kv" => Some(&settings::GUILD_TEMPLATES_KV),
