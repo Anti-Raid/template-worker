@@ -9,7 +9,6 @@ use antiraid_types::ar_event::AntiraidEvent;
 use antiraid_types::ar_event::GetSettingsEvent;
 use antiraid_types::ar_event::SettingExecuteEvent;
 use antiraid_types::setting::OperationType as AROperationType;
-use ar_settings::types::OperationType;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -65,10 +64,10 @@ pub fn create(
         .route("/benchmark-vm/:guild_id", post(benchmark_vm))
         .route(
             "/settings/:guild_id/:user_id",
-            post(get_settings_for_guild_user),
+            get(get_settings_for_guild_user),
         )
         .route(
-            "/page-settings-operation/:guild_id/:user_id",
+            "/settings/:guild_id/:user_id",
             post(execute_setting_for_guild_user),
         )
         .route("/threads-count", get(get_threads_count))
@@ -320,12 +319,7 @@ pub(crate) async fn execute_setting_for_guild_user(
     Path((guild_id, user_id)): Path<(serenity::all::GuildId, serenity::all::UserId)>,
     Json(req): Json<SettingsOperationRequest>,
 ) -> Response<HashMap<String, DispatchResult<serde_json::Value>>> {
-    let op: AROperationType = match req.op {
-        OperationType::View => AROperationType::View,
-        OperationType::Create => AROperationType::Create,
-        OperationType::Update => AROperationType::Update,
-        OperationType::Delete => AROperationType::Delete,
-    };
+    let op: AROperationType = req.op;
 
     // Make a ExecuteSetting event
     let event = parse_event(&AntiraidEvent::ExecuteSetting(SettingExecuteEvent {

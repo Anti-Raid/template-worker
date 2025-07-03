@@ -17,16 +17,6 @@ pub struct ExecuteLuaVmActionOpts {
     pub wait_timeout: Option<std::time::Duration>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum CanonicalSettingsResult {
-    Ok {
-        fields: Vec<indexmap::IndexMap<String, Value>>,
-    },
-    Err {
-        error: String,
-    },
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GuildChannelWithPermissions {
     pub user: Permissions,
@@ -52,7 +42,7 @@ pub struct BaseGuildUserInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SettingsOperationRequest {
     pub fields: indexmap::IndexMap<String, Value>,
-    pub op: ar_settings::types::OperationType,
+    pub op: antiraid_types::setting::OperationType,
     pub setting: String,
 }
 
