@@ -1,5 +1,4 @@
 mod config;
-mod coresettings; // TEMPORARY
 mod data;
 mod dispatch;
 mod event_handler;
@@ -11,7 +10,6 @@ mod objectstore;
 mod register;
 mod sandwich;
 mod templatingrt;
-mod userinfo;
 mod vmbench;
 
 use crate::config::{CMD_ARGS, CONFIG};

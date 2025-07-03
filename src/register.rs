@@ -89,7 +89,7 @@ fn register() -> Result<RegisterResult, crate::Error> {
         .spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
-                .build_local(&tokio::runtime::LocalOptions::default())
+                .build_local(tokio::runtime::LocalOptions::default())
                 .expect("Failed to create tokio runtime");
 
             rt.block_on(async move {

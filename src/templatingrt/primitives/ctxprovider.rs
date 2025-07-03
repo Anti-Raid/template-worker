@@ -1,8 +1,6 @@
 use crate::lockdowns::LockdownData;
 use crate::templatingrt::state::GuildState;
 use crate::templatingrt::template::Template;
-use crate::userinfo::{NoMember, UserInfoOperations};
-use antiraid_types::userinfo::UserInfo;
 use botox::crypto::gen_random;
 use botox::ExtractMap;
 use khronos_runtime::traits::context::{
@@ -15,7 +13,6 @@ use khronos_runtime::traits::ir::ObjectMetadata;
 use khronos_runtime::traits::kvprovider::KVProvider;
 use khronos_runtime::traits::lockdownprovider::LockdownProvider;
 use khronos_runtime::traits::objectstorageprovider::ObjectStorageProvider;
-use khronos_runtime::traits::userinfoprovider::UserInfoProvider;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use moka::future::Cache;
 use sqlx::Row;
@@ -92,7 +89,6 @@ impl KhronosContext for TemplateContextProvider {
     type DiscordProvider = ArDiscordProvider;
     type LockdownDataStore = LockdownData;
     type LockdownProvider = ArLockdownProvider;
-    type UserInfoProvider = ArUserInfoProvider;
     type DataStoreProvider = ArDataStoreProvider;
     type ObjectStorageProvider = ArObjectStorageProvider;
 
@@ -149,13 +145,6 @@ impl KhronosContext for TemplateContextProvider {
                 self.guild_state.pool.clone(),
                 self.guild_state.reqwest_client.clone(),
             )),
-        })
-    }
-
-    fn userinfo_provider(&self) -> Option<Self::UserInfoProvider> {
-        Some(ArUserInfoProvider {
-            guild_id: self.guild_state.guild_id,
-            guild_state: self.guild_state.clone(),
         })
     }
 
@@ -874,33 +863,6 @@ impl LockdownProvider<LockdownData> for ArLockdownProvider {
     /// Serenity HTTP client
     fn serenity_http(&self) -> &serenity::http::Http {
         &self.guild_state.serenity_context.http
-    }
-}
-
-#[derive(Clone)]
-pub struct ArUserInfoProvider {
-    guild_id: serenity::all::GuildId,
-    guild_state: Rc<GuildState>,
-}
-
-impl UserInfoProvider for ArUserInfoProvider {
-    fn attempt_action(&self, bucket: &str) -> serenity::Result<(), crate::Error> {
-        self.guild_state.ratelimits.userinfo.check(bucket)
-    }
-
-    async fn get(&self, user_id: serenity::all::UserId) -> Result<UserInfo, crate::Error> {
-        let userinfo = UserInfo::get(
-            self.guild_id,
-            user_id,
-            &self.guild_state.pool,
-            &self.guild_state.serenity_context,
-            &self.guild_state.reqwest_client,
-            None::<NoMember>,
-        )
-        .await
-        .map_err(|e| format!("Failed to get user info: {}", e))?;
-
-        Ok(userinfo)
     }
 }
 

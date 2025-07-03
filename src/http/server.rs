@@ -1,4 +1,4 @@
-use crate::coresettings::data::RequestScope;
+use crate::dispatch::dispatch_scoped_and_wait;
 use crate::dispatch::DispatchResult;
 use crate::templatingrt::cache::regenerate_deferred;
 use crate::templatingrt::CreateGuildState;
@@ -19,21 +19,16 @@ use axum::{
 use std::{collections::HashMap, sync::Arc};
 
 use super::types::{
-    BaseGuildUserInfo, CanonicalSettingsResult, DispatchEventAndWaitQuery, ExecuteLuaVmActionOpts,
+    BaseGuildUserInfo, DispatchEventAndWaitQuery, ExecuteLuaVmActionOpts,
     GuildChannelWithPermissions, SettingsOperationRequest, TwState,
 };
 use crate::dispatch::{dispatch, dispatch_and_wait, parse_event};
 use crate::templatingrt::execute;
 
 pub static STATE_CACHE: std::sync::LazyLock<Arc<TwState>> = std::sync::LazyLock::new(|| {
-    let mut state = TwState {
-        settings: Vec::with_capacity(crate::coresettings::config_options().len()),
+    let state = TwState {
         commands: crate::register::REGISTER.commands.clone(),
     };
-
-    for setting in crate::coresettings::config_options() {
-        state.settings.push(setting);
-    }
 
     Arc::new(state)
 });
@@ -90,16 +85,6 @@ pub fn create(
         .route(
             "/base-guild-user-info/:guild_id/:user_id",
             get(base_guild_user_info),
-        )
-        // Executes an operation on a setting [SettingsOperation]
-        .route(
-            "/settings-operation/:guild_id/:user_id",
-            post(settings_operation),
-        )
-        // Executes an operation on a setting [SettingsOperationAnonymous]
-        .route(
-            "/settings-operation-anonymous",
-            post(settings_operation_anonymous),
         )
         // Returns the bots state [BotState]
         .route("/state", get(state));
@@ -344,17 +329,18 @@ pub(crate) async fn execute_setting_for_guild_user(
 
     // Make a ExecuteSetting event
     let event = parse_event(&AntiraidEvent::ExecuteSetting(SettingExecuteEvent {
-        id: req.setting,
+        id: req.setting.clone(),
         op,
         author: user_id,
         fields: req.fields,
     }))
     .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
-    let results = dispatch_and_wait::<serde_json::Value>(
+    let results = dispatch_scoped_and_wait::<serde_json::Value>(
         &serenity_context,
         &data,
         event,
+        &[req.setting],
         guild_id,
         MAX_TEMPLATES_RETURN_WAIT_TIME,
     )
@@ -503,219 +489,6 @@ async fn base_guild_user_info(
         channels: channels_with_permissions,
     }))
 }
-
-// Temporary OPS below
-
-/// Executes an operation on a setting [SettingsOperation]
-pub(crate) async fn settings_operation(
-    State(AppData {
-        serenity_context,
-        data,
-        ..
-    }): State<AppData>,
-    Path((guild_id, user_id)): Path<(serenity::all::GuildId, serenity::all::UserId)>,
-    Json(req): Json<SettingsOperationRequest>,
-) -> Response<CanonicalSettingsResult> {
-    let op: OperationType = req.op;
-
-    // Find the setting
-    let mut setting = None;
-
-    for setting_obj in crate::coresettings::config_options() {
-        if setting_obj.id == req.setting {
-            setting = Some(setting_obj);
-            break;
-        }
-    }
-
-    //if let Some(page_setting) = templating::cache::get_setting(guild_id, &req.setting).await {
-    //    setting = Some(page_setting);
-    //};
-
-    let Some(setting) = setting else {
-        return Err((StatusCode::NOT_FOUND, "Setting not found".into()));
-    };
-
-    let res = match op {
-        OperationType::View => {
-            match ar_settings::cfg::settings_view(
-                &setting,
-                &crate::coresettings::data::settings_data(
-                    serenity_context.clone(),
-                    RequestScope::Guild((guild_id, user_id)),
-                ),
-                req.fields,
-            )
-            .await
-            {
-                Ok(res) => Json(CanonicalSettingsResult::Ok { fields: res }),
-                Err(e) => Json(CanonicalSettingsResult::Err {
-                    error: e.to_string(),
-                }),
-            }
-        }
-        OperationType::Create => {
-            match ar_settings::cfg::settings_create(
-                &setting,
-                &crate::coresettings::data::settings_data(
-                    serenity_context.clone(),
-                    RequestScope::Guild((guild_id, user_id)),
-                ),
-                req.fields,
-            )
-            .await
-            {
-                Ok(res) => Json(CanonicalSettingsResult::Ok { fields: vec![res] }),
-                Err(e) => Json(CanonicalSettingsResult::Err {
-                    error: e.to_string(),
-                }),
-            }
-        }
-        OperationType::Update => {
-            match ar_settings::cfg::settings_update(
-                &setting,
-                &crate::coresettings::data::settings_data(
-                    serenity_context.clone(),
-                    RequestScope::Guild((guild_id, user_id)),
-                ),
-                req.fields,
-            )
-            .await
-            {
-                Ok(res) => Json(CanonicalSettingsResult::Ok { fields: vec![res] }),
-                Err(e) => Json(CanonicalSettingsResult::Err {
-                    error: e.to_string(),
-                }),
-            }
-        }
-        OperationType::Delete => {
-            match ar_settings::cfg::settings_delete(
-                &setting,
-                &crate::coresettings::data::settings_data(
-                    serenity_context.clone(),
-                    RequestScope::Guild((guild_id, user_id)),
-                ),
-                req.fields,
-            )
-            .await
-            {
-                Ok(_res) => Json(CanonicalSettingsResult::Ok { fields: vec![] }),
-                Err(e) => Json(CanonicalSettingsResult::Err {
-                    error: e.to_string(),
-                }),
-            }
-        }
-    };
-
-    regenerate_deferred(&serenity_context, &data, guild_id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    Ok(res)
-}
-
-/// Executes an operation on a setting [SettingsOperationAnonymous]
-pub(crate) async fn settings_operation_anonymous(
-    State(AppData {
-        serenity_context, ..
-    }): State<AppData>,
-    Json(req): Json<SettingsOperationRequest>,
-) -> Json<CanonicalSettingsResult> {
-    let op: OperationType = req.op;
-
-    // Find the setting
-    let mut setting = None;
-
-    for setting_obj in crate::coresettings::config_options() {
-        if setting_obj.id == req.setting {
-            setting = Some(setting_obj);
-            break;
-        }
-    }
-
-    //if let Some(page_setting) = templating::cache::get_setting(guild_id, &req.setting).await {
-    //    setting = Some(page_setting);
-    //};
-
-    let Some(setting) = setting else {
-        return Json(CanonicalSettingsResult::Err {
-            error: "Setting not found".to_string(),
-        });
-    };
-
-    match op {
-        OperationType::View => {
-            match ar_settings::cfg::settings_view(
-                &setting,
-                &crate::coresettings::data::settings_data(
-                    serenity_context,
-                    RequestScope::Anonymous,
-                ),
-                req.fields,
-            )
-            .await
-            {
-                Ok(res) => Json(CanonicalSettingsResult::Ok { fields: res }),
-                Err(e) => Json(CanonicalSettingsResult::Err {
-                    error: e.to_string(),
-                }),
-            }
-        }
-        OperationType::Create => {
-            match ar_settings::cfg::settings_create(
-                &setting,
-                &crate::coresettings::data::settings_data(
-                    serenity_context,
-                    RequestScope::Anonymous,
-                ),
-                req.fields,
-            )
-            .await
-            {
-                Ok(res) => Json(CanonicalSettingsResult::Ok { fields: vec![res] }),
-                Err(e) => Json(CanonicalSettingsResult::Err {
-                    error: e.to_string(),
-                }),
-            }
-        }
-        OperationType::Update => {
-            match ar_settings::cfg::settings_update(
-                &setting,
-                &crate::coresettings::data::settings_data(
-                    serenity_context,
-                    RequestScope::Anonymous,
-                ),
-                req.fields,
-            )
-            .await
-            {
-                Ok(res) => Json(CanonicalSettingsResult::Ok { fields: vec![res] }),
-                Err(e) => Json(CanonicalSettingsResult::Err {
-                    error: e.to_string(),
-                }),
-            }
-        }
-        OperationType::Delete => {
-            match ar_settings::cfg::settings_delete(
-                &setting,
-                &crate::coresettings::data::settings_data(
-                    serenity_context,
-                    RequestScope::Anonymous,
-                ),
-                req.fields,
-            )
-            .await
-            {
-                Ok(_res) => Json(CanonicalSettingsResult::Ok { fields: vec![] }),
-                Err(e) => Json(CanonicalSettingsResult::Err {
-                    error: e.to_string(),
-                }),
-            }
-        }
-    }
-}
-
-// End of temporary API's
 
 /// Returns a list of modules [Modules]
 async fn state(State(AppData { .. }): State<AppData>) -> Json<Arc<TwState>> {

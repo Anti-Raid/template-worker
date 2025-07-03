@@ -99,7 +99,7 @@ impl ObjectStorage {
 
                 let cdn_endpoint_url = format!(
                     "{}://{}",
-                    if self.secure.unwrap_or(false) {
+                    if self.cdn_secure.unwrap_or(false) {
                         "https"
                     } else {
                         "http"

@@ -1,5 +1,4 @@
 use crate::lockdowns::LockdownData;
-use antiraid_types::userinfo::UserInfo;
 use khronos_runtime::traits::context::{
     CompatibilityFlags, KhronosContext, Limitations, ScriptData,
 };
@@ -10,7 +9,6 @@ use khronos_runtime::traits::ir::ObjectMetadata;
 use khronos_runtime::traits::kvprovider::KVProvider;
 use khronos_runtime::traits::lockdownprovider::LockdownProvider;
 use khronos_runtime::traits::objectstorageprovider::ObjectStorageProvider;
-use khronos_runtime::traits::userinfoprovider::UserInfoProvider;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use std::{rc::Rc, sync::Arc};
 
@@ -50,7 +48,6 @@ impl KhronosContext for DummyProvider {
     type DiscordProvider = DummyDiscordProvider;
     type LockdownDataStore = LockdownData;
     type LockdownProvider = DummyLockdownProvider;
-    type UserInfoProvider = DummyUserInfoProvider;
     type DataStoreProvider = DummyDataStoreProvider;
     type ObjectStorageProvider = DummyObjectStorageProvider;
 
@@ -87,10 +84,6 @@ impl KhronosContext for DummyProvider {
     }
 
     fn lockdown_provider(&self) -> Option<Self::LockdownProvider> {
-        None
-    }
-
-    fn userinfo_provider(&self) -> Option<Self::UserInfoProvider> {
         None
     }
 
@@ -229,19 +222,6 @@ impl LockdownProvider<LockdownData> for DummyLockdownProvider {
 
     /// Serenity HTTP client
     fn serenity_http(&self) -> &serenity::http::Http {
-        unreachable!()
-    }
-}
-
-#[derive(Clone)]
-pub struct DummyUserInfoProvider {}
-
-impl UserInfoProvider for DummyUserInfoProvider {
-    fn attempt_action(&self, _bucket: &str) -> serenity::Result<(), crate::Error> {
-        Ok(())
-    }
-
-    async fn get(&self, _user_id: serenity::all::UserId) -> Result<UserInfo, crate::Error> {
         unreachable!()
     }
 }
