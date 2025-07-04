@@ -3,6 +3,7 @@ use crate::jobserver;
 use crate::templatingrt::cache::{DeferredCacheRegenMode, DEFERRED_CACHE_REGENS};
 use crate::templatingrt::state::GuildState;
 use crate::templatingrt::template::TemplateLanguage;
+use antiraid_types::ar_event::AntiraidEvent;
 use chrono::Utc;
 use indexmap::IndexMap;
 use khronos_runtime::traits::ir::{DataStoreImpl, DataStoreMethod};
@@ -101,7 +102,7 @@ impl DataStoreImpl for LinksStore {
     }
 
     fn methods(&self) -> Vec<String> {
-        vec!["links".to_string()]
+        vec!["links".to_string(), "event_list".to_string()]
     }
 
     fn get_method(&self, key: String) -> Option<DataStoreMethod> {
@@ -117,6 +118,22 @@ impl DataStoreImpl for LinksStore {
                     "frontend_url".to_string() => frontend_url,
                     "docs_url".to_string() => docs_url
                 ))
+            }))),
+            "event_list" => Some(DataStoreMethod::Sync(Rc::new(move |_v| {
+                let mut vec = AntiraidEvent::variant_names()
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<String>>();
+
+                vec.extend(
+                    gwevent::core::event_list()
+                        .iter()
+                        .copied()
+                        .map(|x| x.to_string())
+                        .collect::<Vec<String>>(),
+                );
+
+                Ok(value!(vec))
             }))),
             _ => None,
         }
