@@ -55,6 +55,9 @@ impl TemplateContextProvider {
             Rc::new(super::datastores::JobServerStore {
                 guild_state: guild_state.clone(),
             }),
+            Rc::new(super::datastores::TemplateStore {
+                guild_state: guild_state.clone(),
+            }),
         ]
     }
 
@@ -73,9 +76,9 @@ impl TemplateContextProvider {
                 error_channel: template_data.error_channel,
                 lang: template_data.lang.to_string(),
                 allowed_caps: template_data.allowed_caps.clone(),
-                created_by: Some(template_data.created_by),
+                created_by: None,
                 created_at: Some(template_data.created_at),
-                updated_by: Some(template_data.updated_by),
+                updated_by: None,
                 updated_at: Some(template_data.updated_at),
                 compatibility_flags: CompatibilityFlags::empty(),
             }),

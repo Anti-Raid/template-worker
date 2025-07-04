@@ -1,6 +1,8 @@
 use crate::config::CONFIG;
 use crate::jobserver;
+use crate::templatingrt::cache::{DeferredCacheRegenMode, DEFERRED_CACHE_REGENS};
 use crate::templatingrt::state::GuildState;
+use crate::templatingrt::template::TemplateLanguage;
 use chrono::Utc;
 use indexmap::IndexMap;
 use khronos_runtime::traits::ir::{DataStoreImpl, DataStoreMethod};
@@ -8,9 +10,11 @@ use khronos_runtime::utils::khronos_value::KhronosValue;
 use khronos_runtime::{to_struct, value};
 use serde_json::Value;
 use serenity::async_trait;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
+use std::str::FromStr;
 use uuid::Uuid;
+use sqlx::Row;
 
 /// A data store to expose Anti-Raid's statistics (type in discord /"stats")
 pub struct StatsStore {
@@ -428,3 +432,382 @@ impl DataStoreImpl for JobServerStore {
         }
     }
 }
+
+to_struct!(
+    #[derive(Clone, Debug, Default)]
+    pub struct Template {
+        pub name: String,
+        pub events: Vec<String>,
+        pub error_channel: Option<String>,
+        pub content: HashMap<String, String>,
+        pub lang: String,
+        pub allowed_caps: Vec<String>,
+        pub created_at: chrono::DateTime<chrono::Utc>,
+        pub updated_at: chrono::DateTime<chrono::Utc>,
+        pub paused: bool,
+    }
+);
+
+
+to_struct!(
+    #[derive(Clone, Debug, Default)]
+    pub struct CreateTemplate {
+        pub name: String,
+        pub events: Vec<String>,
+        pub error_channel: Option<String>,
+        pub content: HashMap<String, String>,
+        pub lang: String,
+        pub allowed_caps: Vec<String>,
+        pub paused: bool,
+    }
+);
+
+/// Internal representation of a template in postgres
+#[derive(sqlx::FromRow)]
+struct TemplateData {
+    name: String,
+    content: serde_json::Value,
+    language: String,
+    allowed_caps: Vec<String>,
+    events: Vec<String>,
+    error_channel: Option<String>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    last_updated_at: chrono::DateTime<chrono::Utc>,
+    paused: bool,
+}
+
+#[derive(Clone)]
+/// A data store to expose template management
+pub struct TemplateStore {
+    pub guild_state: Rc<GuildState>, // reference counted
+}
+
+impl TemplateStore {
+    /// Validate the error channel provided for the template
+    async fn validate_error_channel(&self, channel_id: serenity::all::ChannelId) -> Result<(), crate::Error> {
+        // Perform required checks
+        let Some(channel) = crate::sandwich::channel(
+            &self.guild_state.serenity_context.cache,
+            &self.guild_state.serenity_context.http,
+            &self.guild_state.reqwest_client,
+            Some(self.guild_state.guild_id),
+            channel_id,
+        )
+        .await? else {
+            return Err(format!("Could not find channel with id: {}", channel_id).into());
+        };
+
+        let Some(guild_channel) = channel.guild() else {
+            return Err(format!("Channel with id {} is not in a guild", channel_id).into());
+        };
+
+        if guild_channel.guild_id != self.guild_state.guild_id {
+            return Err(format!("Channel with id {} is not in the current guild", channel_id).into());
+        }
+
+        let bot_user_id = self.guild_state.serenity_context.cache.current_user().id;
+
+        let bot_user = crate::sandwich::member_in_guild(
+            &self.guild_state.serenity_context.cache,
+            &self.guild_state.serenity_context.http,
+            &self.guild_state.reqwest_client,
+            self.guild_state.guild_id,
+            bot_user_id,
+        )
+        .await
+        .map_err(|e| format!("Failed to get bot user: {}", e))?;
+
+        let Some(bot_user) = bot_user else {
+            return Err(format!("Could not find bot user: {}", bot_user_id).into());
+        };
+
+        let guild = crate::sandwich::guild(
+            &self.guild_state.serenity_context.cache,
+            &self.guild_state.serenity_context.http,
+            &self.guild_state.reqwest_client,
+            self.guild_state.guild_id,
+        )
+        .await
+        .map_err(|e| format!("Failed to get guild: {}", e))?;
+
+        let permissions = guild.user_permissions_in(&guild_channel, &bot_user);
+
+        if !permissions.contains(serenity::all::Permissions::SEND_MESSAGES) {
+            return Err(
+                format!("Bot does not have permission to `Send Messages` in channel with id: {}", channel_id).into()
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn validate_name(&self, name: &str) -> Result<(), crate::Error> {
+        if name.starts_with("$shop/") {
+            let (shop_tname, shop_tversion) = crate::templatingrt::template::Template::parse_shop_template(name)
+                .map_err(|e| format!("Failed to parse shop template: {:?}", e))?;
+
+            let shop_template_count =
+                sqlx::query("SELECT COUNT(*) FROM template_shop WHERE name = $1 AND version = $2")
+                    .bind(shop_tname)
+                    .bind(shop_tversion)
+                    .fetch_one(&self.guild_state.pool)
+                    .await
+                    .map_err(|e| format!("Failed to get shop template: {:?}", e))?
+                    .try_get::<Option<i64>, _>(0)
+                    .map_err(|e| format!("Failed to get count: {:?}", e))?
+                    .unwrap_or_default();
+
+            if shop_template_count == 0 {
+                return Err("Shop template does not exist".into());
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn does_template_exist(&self, name: &str) -> Result<bool, crate::Error> {
+        let count = sqlx::query("SELECT COUNT(*) FROM guild_templates WHERE guild_id = $1 AND name = $2")
+            .bind(self.guild_state.guild_id.to_string())
+            .bind(name)
+            .fetch_one(&self.guild_state.pool)
+            .await
+            .map_err(|e| format!("Failed to check if template exists: {:?}", e))?
+            .try_get::<i64, _>(0)
+            .map_err(|e| format!("Failed to get count: {:?}", e))?;
+
+        Ok(count > 0)
+    }
+}
+
+#[async_trait(?Send)]
+impl DataStoreImpl for TemplateStore {
+    fn name(&self) -> String {
+        "TemplateStore".to_string()
+    }
+
+    fn need_caps(&self, _method: &str) -> bool {
+        true
+    }
+
+    fn methods(&self) -> Vec<String> {
+        vec![
+            "list".to_string(),
+            "create".to_string(),
+            "update".to_string(),
+            "delete".to_string(),
+        ]
+    }
+
+    fn get_method(&self, key: String) -> Option<DataStoreMethod> {
+        match key.as_str() {
+            "list" => {
+                let guild_state_ref = self.guild_state.clone(); // reference to the guild state data
+                Some(DataStoreMethod::Async(Rc::new(move |_v| {
+                    let guild_state = guild_state_ref.clone(); // satisfy rusts borrowing rules
+                    Box::pin(async move {
+                        let templates: Vec<TemplateData> = sqlx::query_as(
+                            "SELECT name, content, language, allowed_caps, events, error_channel, created_at, created_by, last_updated_at, last_updated_by FROM guild_templates WHERE guild_id = $1 AND paused = false",
+                        )
+                        .bind(guild_state.guild_id.to_string())
+                        .fetch_all(&guild_state.pool)
+                        .await?;
+
+                        let mut result = Vec::with_capacity(templates.len());
+
+                        for template in templates {
+                            result.push(Template {
+                                name: template.name,
+                                events: template.events,
+                                error_channel: template.error_channel,
+                                content: serde_json::from_value(template.content)
+                                    .map_err(|e| format!("Failed to parse content: {}", e))?,
+                                lang: template.language,
+                                allowed_caps: template.allowed_caps,
+                                created_at: template.created_at,
+                                updated_at: template.last_updated_at,
+                                paused: template.paused,
+                            });
+                        }
+
+                        Ok(value!(result))
+                    })
+                })))
+            },
+            "create" => {
+                let self_ref = self.clone(); // reference to the guild state data
+                Some(DataStoreMethod::Async(Rc::new(move |v| {
+                    let self_ref = self_ref.clone(); // satisfy rusts borrowing rules
+                    Box::pin(async move {
+                        let mut v = VecDeque::from(v);
+
+                        let Some(data) = v.pop_front() else {
+                            // first arg b/c rust creates internal lua func
+                            return Err("arg #1 of spawn data is missing".into());
+                        };
+
+                        let create_template: CreateTemplate = data.try_into()?;
+
+                        if self_ref.does_template_exist(&create_template.name).await? {
+                            return Err("Template already exists".into());
+                        }
+
+                        self_ref.validate_name(&create_template.name).await?;
+
+                        if let Some(error_channel) = &create_template.error_channel {
+                            let channel_id: serenity::all::ChannelId = error_channel
+                                .parse()
+                                .map_err(|e| format!("Failed to parse error channel: {:?}", e))?;
+
+                            self_ref.validate_error_channel(channel_id).await.map_err(|e| {
+                                format!("Failed to validate error channel: {}", e)
+                            })?;
+                        }
+
+                        TemplateLanguage::from_str(&create_template.lang)
+                            .map_err(|e| format!("Failed to parse language: {:?}", e))?;
+
+                        sqlx::query(
+                            "INSERT INTO guild_templates (guild_id, name, language, content, events, paused, allowed_caps, error_channel) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                        )
+                        .bind(self_ref.guild_state.guild_id.to_string())
+                        .bind(&create_template.name)
+                        .bind(create_template.lang)
+                        .bind(serde_json::to_value(create_template.content)?)
+                        .bind(&create_template.events)
+                        .bind(create_template.paused)
+                        .bind(&create_template.allowed_caps)
+                        .bind(&create_template.error_channel)
+                        .execute(&self_ref.guild_state.pool)
+                        .await
+                        .map_err(|e| format!("Failed to insert template: {:?}", e))?;
+
+                        DEFERRED_CACHE_REGENS
+                            .insert(
+                                self_ref.guild_state.guild_id,
+                                DeferredCacheRegenMode::OnReady {
+                                    modified: vec![create_template.name.to_string()],
+                                },
+                            )
+                            .await;
+
+                        Ok(value!(KhronosValue::Null))
+                    })
+                })))
+            }
+            "update" => {
+                let self_ref = self.clone(); // reference to the guild state data
+                Some(DataStoreMethod::Async(Rc::new(move |v| {
+                    let self_ref = self_ref.clone(); // satisfy rusts borrowing rules
+                    Box::pin(async move {
+                        let mut v = VecDeque::from(v);
+
+                        let Some(data) = v.pop_front() else {
+                            // first arg b/c rust creates internal lua func
+                            return Err("arg #1 of spawn data is missing".into());
+                        };
+
+                        let create_template: CreateTemplate = data.try_into()?;
+
+                        if !self_ref.does_template_exist(&create_template.name).await? {
+                            return Err("Template does not already exist".into());
+                        }
+
+                        self_ref.validate_name(&create_template.name).await?;
+
+                        if let Some(error_channel) = &create_template.error_channel {
+                            let channel_id: serenity::all::ChannelId = error_channel
+                                .parse()
+                                .map_err(|e| format!("Failed to parse error channel: {:?}", e))?;
+
+                            self_ref.validate_error_channel(channel_id).await.map_err(|e| {
+                                format!("Failed to validate error channel: {}", e)
+                            })?;
+                        }
+
+                        TemplateLanguage::from_str(&create_template.lang)
+                            .map_err(|e| format!("Failed to parse language: {:?}", e))?;
+
+                        sqlx::query(
+                            "UPDATE guild_templates SET language = $3, content = $4, events = $5, paused = $6, allowed_caps = $7, error_channel = $8, last_updated_at = NOW() WHERE guild_id = $1 AND name = $2",
+                        )
+                        .bind(self_ref.guild_state.guild_id.to_string())
+                        .bind(&create_template.name)
+                        .bind(create_template.lang)
+                        .bind(serde_json::to_value(create_template.content)?)
+                        .bind(&create_template.events)
+                        .bind(create_template.paused)
+                        .bind(&create_template.allowed_caps)
+                        .bind(&create_template.error_channel)
+                        .execute(&self_ref.guild_state.pool)
+                        .await
+                        .map_err(|e| format!("Failed to update template: {:?}", e))?;
+
+                        DEFERRED_CACHE_REGENS
+                            .insert(
+                                self_ref.guild_state.guild_id,
+                                DeferredCacheRegenMode::OnReady {
+                                    modified: vec![create_template.name.to_string()],
+                                },
+                            )
+                            .await;
+
+                        Ok(value!(KhronosValue::Null))
+                    })
+                })))
+            }
+            "delete" => {
+                let self_ref = self.clone(); // reference to the guild state data
+                Some(DataStoreMethod::Async(Rc::new(move |v| {
+                    let self_ref = self_ref.clone(); // satisfy rusts borrowing rules
+                    Box::pin(async move {
+                        let mut v = VecDeque::from(v);
+
+                        let Some(name) = v.pop_front() else {
+                            return Err("arg #1 of TemplateStore.delete is missing (name)".into());
+                        };
+
+                        let name: String = match name {
+                            KhronosValue::Text(name) => {
+                                if name.is_empty() {
+                                    return Err("arg #1 of TemplateStore.delete must not be empty (name)".into());
+                                }
+                                name
+                            }
+                            _ => {
+                                return Err(
+                                    "arg #1 to TemplateStore.delete must be a string (name)".into(),
+                                )
+                            }
+                        };
+
+                        if !self_ref.does_template_exist(&name).await? {
+                            return Err("Template does not exist".into());
+                        }
+
+                        sqlx::query(
+                            "DELETE FROM guild_templates WHERE guild_id = $1 AND name = $2",
+                        )
+                        .bind(self_ref.guild_state.guild_id.to_string())
+                        .bind(&name)
+                        .execute(&self_ref.guild_state.pool)
+                        .await
+                        .map_err(|e| format!("Failed to delete template: {:?}", e))?;
+
+                        DEFERRED_CACHE_REGENS
+                            .insert(
+                                self_ref.guild_state.guild_id,
+                                DeferredCacheRegenMode::OnReady {
+                                    modified: vec![name],
+                                },
+                            )
+                            .await;
+
+                        Ok(value!(KhronosValue::Null))
+                    })
+                })))
+            }
+            _ => None,
+        }
+    }
+}
+

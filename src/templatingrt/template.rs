@@ -80,12 +80,8 @@ pub struct Template {
     pub lang: TemplateLanguage,
     /// The allowed capabilities the template has access to
     pub allowed_caps: Vec<String>,
-    /// The user who created the template
-    pub created_by: serenity::all::UserId,
     /// The time the template was created
     pub created_at: chrono::DateTime<chrono::Utc>,
-    /// The user who last updated the template
-    pub updated_by: serenity::all::UserId,
     /// The time the template was last updated
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -100,9 +96,7 @@ struct TemplateData {
     events: Vec<String>,
     error_channel: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
-    created_by: String,
     last_updated_at: chrono::DateTime<chrono::Utc>,
-    last_updated_by: String,
 }
 
 /// Internal representation of a template in the shop in postgres
@@ -114,9 +108,7 @@ struct TemplateShopData {
     description: String,
     content: serde_json::Value,
     created_at: chrono::DateTime<chrono::Utc>,
-    created_by: String,
     last_updated_at: chrono::DateTime<chrono::Utc>,
-    last_updated_by: String,
 }
 
 impl Template {
@@ -149,13 +141,13 @@ impl Template {
         pool: &sqlx::PgPool,
     ) -> Result<Vec<Self>, Error> {
         let templates: Vec<TemplateData> = sqlx::query_as(
-            "SELECT name, content, language, allowed_caps, events, error_channel, created_at, created_by, last_updated_at, last_updated_by FROM guild_templates WHERE guild_id = $1 AND paused = false",
+            "SELECT name, content, language, allowed_caps, events, error_channel, created_at, last_updated_at FROM guild_templates WHERE guild_id = $1 AND paused = false",
         )
         .bind(guild_id.to_string())
         .fetch_all(pool)
         .await?;
 
-        let mut result = Vec::new();
+        let mut result = Vec::with_capacity(templates.len());
 
         for template in templates {
             if template.name.starts_with("$shop/") {
@@ -163,7 +155,7 @@ impl Template {
 
                 let shop_data = if shop_tversion == "latest" {
                     let rec: Option<TemplateShopData> = sqlx::query_as(
-                        "SELECT owner_guild, name, description, content, created_at, created_by, last_updated_at, last_updated_by FROM template_shop WHERE name = $1 ORDER BY version DESC LIMIT 1",
+                        "SELECT owner_guild, name, description, content, created_at, last_updated_at FROM template_shop WHERE name = $1 ORDER BY version DESC LIMIT 1",
                     )
                     .bind(shop_tname)
                     .fetch_optional(pool)
@@ -176,7 +168,7 @@ impl Template {
                     rec
                 } else {
                     let rec: Option<TemplateShopData> = sqlx::query_as(
-                        "SELECT owner_guild, name, description, content, created_at, created_by, last_updated_at, last_updated_by FROM template_shop WHERE name = $1 AND version = $2",
+                        "SELECT owner_guild, name, description, content, created_at, last_updated_at FROM template_shop WHERE name = $1 AND version = $2",
                     )
                     .bind(shop_tname)
                     .bind(shop_tversion)
@@ -220,9 +212,7 @@ impl Template {
                             vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
                         ]))
                     },
-                    created_by: shop_data.created_by.parse()?,
                     created_at: shop_data.created_at,
-                    updated_by: shop_data.last_updated_by.parse()?,
                     updated_at: shop_data.last_updated_at,
                 });
             } else {
@@ -260,9 +250,7 @@ impl Template {
                     lang: TemplateLanguage::from_str(&template.language)
                         .map_err(|_| "Invalid language")?,
                     allowed_caps: template.allowed_caps,
-                    created_by: template.created_by.parse()?,
                     created_at: template.created_at,
-                    updated_by: template.last_updated_by.parse()?,
                     updated_at: template.last_updated_at,
                 });
             }
