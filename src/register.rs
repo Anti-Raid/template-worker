@@ -144,11 +144,11 @@ fn register() -> Result<RegisterResult, crate::Error> {
                     .expect("Failed to spawn asset");
 
                 let result = spawn_result
-                    .into_serde_json_value(&subisolate)
+                    .into_khronos_value(&subisolate)
                     .expect("Failed to convert result to serde_json_value");
 
-                let result: RegisterResult =
-                    serde_json::from_value(result).expect("Failed to deserialize RegisterResult");
+                let result: RegisterResult = result.into_value()
+                .expect("Failed to deserialize RegisterResult");
 
                 // Store the result in the shared Arc<RwLock>
                 let mut result_lock = ref_a.write().unwrap();

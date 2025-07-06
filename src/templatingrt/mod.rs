@@ -69,8 +69,20 @@ impl LuaVmResultHandle {
     pub fn into_response<T: serde::de::DeserializeOwned>(self) -> Result<T, crate::Error> {
         match self.result {
             LuaVmResult::Ok { result_val } => {
-                let res = serde_json::from_value(result_val)?;
-                Ok(res)
+                let res = result_val.into_value::<T>();
+                res
+            }
+            LuaVmResult::LuaError { err } => Err(format!("Lua error: {}", err).into()),
+            LuaVmResult::VmBroken {} => Err("Lua VM is marked as broken".into()),
+        }
+    }
+
+    /// Convert the result to a response if possible, returning an error if the result is an error
+    pub fn into_response_without_types<T: serde::de::DeserializeOwned>(self) -> Result<T, crate::Error> {
+        match self.result {
+            LuaVmResult::Ok { result_val } => {
+                let res = result_val.into_value_untyped::<T>();
+                res
             }
             LuaVmResult::LuaError { err } => Err(format!("Lua error: {}", err).into()),
             LuaVmResult::VmBroken {} => Err("Lua VM is marked as broken".into()),

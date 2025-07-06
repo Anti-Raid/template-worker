@@ -190,7 +190,7 @@ pub async fn dispatch_and_wait<T: serde::de::DeserializeOwned>(
             continue;
         }
 
-        match result.into_response::<T>() {
+        match result.into_response_without_types::<T>() {
             Ok(value) => {
                 results.insert(name, DispatchResult::Ok(value));
             }
@@ -280,7 +280,7 @@ pub async fn dispatch_scoped_and_wait<T: serde::de::DeserializeOwned>(
             continue;
         }
 
-        match result.into_response::<T>() {
+        match result.into_response_without_types::<T>() {
             Ok(value) => {
                 results.insert(name, DispatchResult::Ok(value));
             }

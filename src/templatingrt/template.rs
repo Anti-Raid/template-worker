@@ -102,7 +102,7 @@ struct TemplateData {
 /// Internal representation of a template in the shop in postgres
 #[derive(sqlx::FromRow)]
 struct TemplateShopData {
-    // owner_guild, name, description, content, created_at, created_by, last_updated_at, last_updated_by
+    // owner_guild, name, description, content, created_at, last_updated_at, last_updated_by
     owner_guild: String,
     name: String,
     description: String,

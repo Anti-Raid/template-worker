@@ -16,6 +16,7 @@ use khronos_runtime::rt::KhronosRuntime;
 use khronos_runtime::rt::KhronosRuntimeInterruptData;
 use khronos_runtime::rt::RuntimeCreateOpts;
 use khronos_runtime::rt::{IsolateData, KhronosRuntimeManager as Krm};
+use khronos_runtime::utils::khronos_value::KhronosValue;
 use std::rc::Rc;
 use std::sync::Arc;
 use tokio::sync::oneshot::Sender;
@@ -56,24 +57,45 @@ impl LuaVmAction {
                 let _ = callback.send(vec![(
                     "_".to_string(),
                     LuaVmResult::Ok {
-                        result_val: serde_json::Value::Null,
+                        result_val: KhronosValue::Null,
                     },
                 )]);
             }
             LuaVmAction::GetMemoryUsage {} => {
                 let used = tis_ref.runtime().memory_usage();
 
+                let Ok(used_u64) = used.try_into() else {
+                    log::error!("Memory usage is too large to fit into u64, returning 0");
+                    
+                    let _ = callback.send(vec![(
+                        "_".to_string(),
+                        LuaVmResult::Ok {
+                            result_val: KhronosValue::UnsignedInteger(0),
+                        },
+                    )]);
+                    
+                    return;
+                };
+
                 let _ = callback.send(vec![(
                     "_".to_string(),
                     LuaVmResult::Ok {
-                        result_val: serde_json::Value::Number(used.into()),
+                        result_val: KhronosValue::UnsignedInteger(used_u64),
                     },
                 )]);
             }
             LuaVmAction::SetMemoryLimit { limit } => {
                 let result = match tis_ref.runtime().set_memory_limit(limit) {
-                    Ok(limit) => LuaVmResult::Ok {
-                        result_val: serde_json::Value::Number(limit.into()),
+                    Ok(limit) => {
+
+                        let limit_u64 = limit.try_into().unwrap_or_else(|_| {
+                            log::error!("Memory limit is too large to fit into u64, returning 0");
+                            0
+                        });
+                        
+                        LuaVmResult::Ok {
+                            result_val: KhronosValue::UnsignedInteger(limit_u64),
+                        }
                     },
                     Err(e) => LuaVmResult::LuaError { err: e.to_string() },
                 };
@@ -86,7 +108,7 @@ impl LuaVmAction {
                 let _ = callback.send(vec![(
                     "_".to_string(),
                     LuaVmResult::Ok {
-                        result_val: serde_json::Value::Null,
+                        result_val: KhronosValue::Null,
                     },
                 )]);
             }
@@ -313,7 +335,7 @@ pub async fn dispatch_event_to_template(
         }
     };
 
-    let json_value = match spawn_result.into_serde_json_value(&sub_isolate) {
+    let value = match spawn_result.into_khronos_value(&sub_isolate) {
         Ok(v) => v,
         Err(e) => {
             return (LuaVmResult::LuaError {
@@ -325,7 +347,7 @@ pub async fn dispatch_event_to_template(
     };
 
     LuaVmResult::Ok {
-        result_val: json_value,
+        result_val: value,
     }
 }
 

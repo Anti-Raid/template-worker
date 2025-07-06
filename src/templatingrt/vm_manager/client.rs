@@ -1,7 +1,7 @@
 //! Client side abstraction for the inner Lua VM
 
 use crate::templatingrt::template::Template;
-use khronos_runtime::primitives::event::CreateEvent;
+use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
 use std::sync::Arc;
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -35,7 +35,7 @@ pub enum LuaVmAction {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub enum LuaVmResult {
-    Ok { result_val: serde_json::Value }, // any result can be a json enum
+    Ok { result_val: KhronosValue }, // any result can be a json enum
     LuaError { err: String },
     VmBroken {},
 }

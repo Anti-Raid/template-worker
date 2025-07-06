@@ -8,7 +8,6 @@ use crate::vmbench::{benchmark_vm as benchmark_vm_impl, FireBenchmark};
 use antiraid_types::ar_event::AntiraidEvent;
 use antiraid_types::ar_event::GetSettingsEvent;
 use antiraid_types::ar_event::SettingExecuteEvent;
-use antiraid_types::setting::OperationType as AROperationType;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -319,7 +318,7 @@ pub(crate) async fn execute_setting_for_guild_user(
     Path((guild_id, user_id)): Path<(serenity::all::GuildId, serenity::all::UserId)>,
     Json(req): Json<SettingsOperationRequest>,
 ) -> Response<HashMap<String, DispatchResult<serde_json::Value>>> {
-    let op: AROperationType = req.op;
+    let op = req.op;
 
     // Make a ExecuteSetting event
     let event = parse_event(&AntiraidEvent::ExecuteSetting(SettingExecuteEvent {

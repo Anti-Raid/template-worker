@@ -41,8 +41,8 @@ pub struct BaseGuildUserInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SettingsOperationRequest {
-    pub fields: indexmap::IndexMap<String, Value>,
-    pub op: antiraid_types::setting::OperationType,
+    pub fields: Value,
+    pub op: String,
     pub setting: String,
 }
 

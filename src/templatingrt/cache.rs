@@ -52,6 +52,10 @@ pub static BUILTINS: LazyLock<Arc<Template>> = LazyLock::new(|| {
         events: vec![
             "INTERACTION_CREATE".to_string(),
             "KeyExpiry[builtins.remindme]".to_string(),
+            "GetSettings".to_string(),
+            "ExecuteSetting[guildmembers]".to_string(),
+            "ExecuteSetting[guildroles]".to_string(),
+            "ExecuteSetting[scripts]".to_string(),
         ],
         allowed_caps: vec!["*".to_string()],
         ..Default::default()

@@ -7,7 +7,7 @@ use antiraid_types::ar_event::AntiraidEvent;
 use chrono::Utc;
 use indexmap::IndexMap;
 use khronos_runtime::traits::ir::{DataStoreImpl, DataStoreMethod};
-use khronos_runtime::utils::khronos_value::KhronosValue;
+use khronos_runtime::utils::khronos_value::{KhronosLazyValue, KhronosValue};
 use khronos_runtime::{to_struct, value};
 use serde_json::Value;
 use serenity::async_trait;
@@ -451,13 +451,13 @@ impl DataStoreImpl for JobServerStore {
 }
 
 to_struct!(
-    #[derive(Clone, Debug, Default)]
+    #[derive(Clone, Debug)]
     pub struct Template {
         pub name: String,
         pub events: Vec<String>,
         pub error_channel: Option<String>,
-        pub content: HashMap<String, String>,
-        pub lang: String,
+        pub content: KhronosLazyValue,
+        pub language: String,
         pub allowed_caps: Vec<String>,
         pub created_at: chrono::DateTime<chrono::Utc>,
         pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -473,7 +473,7 @@ to_struct!(
         pub events: Vec<String>,
         pub error_channel: Option<String>,
         pub content: HashMap<String, String>,
-        pub lang: String,
+        pub language: String,
         pub allowed_caps: Vec<String>,
         pub paused: bool,
     }
@@ -623,7 +623,7 @@ impl DataStoreImpl for TemplateStore {
                     let guild_state = guild_state_ref.clone(); // satisfy rusts borrowing rules
                     Box::pin(async move {
                         let templates: Vec<TemplateData> = sqlx::query_as(
-                            "SELECT name, content, language, allowed_caps, events, error_channel, created_at, created_by, last_updated_at, last_updated_by FROM guild_templates WHERE guild_id = $1 AND paused = false",
+                            "SELECT name, content, language, allowed_caps, events, error_channel, paused, created_at, last_updated_at FROM guild_templates WHERE guild_id = $1",
                         )
                         .bind(guild_state.guild_id.to_string())
                         .fetch_all(&guild_state.pool)
@@ -636,9 +636,8 @@ impl DataStoreImpl for TemplateStore {
                                 name: template.name,
                                 events: template.events,
                                 error_channel: template.error_channel,
-                                content: serde_json::from_value(template.content)
-                                    .map_err(|e| format!("Failed to parse content: {}", e))?,
-                                lang: template.language,
+                                content: KhronosLazyValue { data: template.content },
+                                language: template.language,
                                 allowed_caps: template.allowed_caps,
                                 created_at: template.created_at,
                                 updated_at: template.last_updated_at,
@@ -680,7 +679,7 @@ impl DataStoreImpl for TemplateStore {
                             })?;
                         }
 
-                        TemplateLanguage::from_str(&create_template.lang)
+                        TemplateLanguage::from_str(&create_template.language)
                             .map_err(|e| format!("Failed to parse language: {:?}", e))?;
 
                         sqlx::query(
@@ -688,7 +687,7 @@ impl DataStoreImpl for TemplateStore {
                         )
                         .bind(self_ref.guild_state.guild_id.to_string())
                         .bind(&create_template.name)
-                        .bind(create_template.lang)
+                        .bind(create_template.language)
                         .bind(serde_json::to_value(create_template.content)?)
                         .bind(&create_template.events)
                         .bind(create_template.paused)
@@ -741,7 +740,7 @@ impl DataStoreImpl for TemplateStore {
                             })?;
                         }
 
-                        TemplateLanguage::from_str(&create_template.lang)
+                        TemplateLanguage::from_str(&create_template.language)
                             .map_err(|e| format!("Failed to parse language: {:?}", e))?;
 
                         sqlx::query(
@@ -749,7 +748,7 @@ impl DataStoreImpl for TemplateStore {
                         )
                         .bind(self_ref.guild_state.guild_id.to_string())
                         .bind(&create_template.name)
-                        .bind(create_template.lang)
+                        .bind(create_template.language)
                         .bind(serde_json::to_value(create_template.content)?)
                         .bind(&create_template.events)
                         .bind(create_template.paused)
