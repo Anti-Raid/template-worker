@@ -85,14 +85,14 @@ impl LockdownDataStore for LockdownData {
         &self,
         guild_id: serenity::all::GuildId,
     ) -> Result<serenity::all::PartialGuild, lockdowns::Error> {
-        crate::sandwich::guild(&self.cache, &self.http, &self.reqwest, guild_id).await
+        crate::sandwich::guild(&self.http, &self.reqwest, guild_id).await
     }
 
     async fn guild_channels(
         &self,
         guild_id: serenity::all::GuildId,
     ) -> Result<Vec<serenity::all::GuildChannel>, lockdowns::Error> {
-        crate::sandwich::guild_channels(&self.cache, &self.http, &self.reqwest, guild_id).await
+        crate::sandwich::guild_channels(&self.http, &self.reqwest, guild_id).await
     }
 
     fn cache(&self) -> Option<&serenity::all::Cache> {

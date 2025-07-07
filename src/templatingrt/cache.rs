@@ -83,8 +83,8 @@ pub static TEMPLATES_CACHE: LazyLock<Cache<GuildId, Arc<Vec<Arc<Template>>>>> =
     LazyLock::new(|| Cache::builder().build());
 
 #[derive(Debug, Clone)]
+#[allow(unused)]
 pub enum DeferredCacheRegenMode {
-    #[allow(unused)]
     NoOnReady,
     OnReady {
         modified: Vec<String>,
@@ -397,7 +397,12 @@ async fn get_all_key_expiries_from_db(pool: &sqlx::PgPool) -> Result<(), crate::
     Ok(())
 }
 
-async fn get_all_guild_templates_from_db(
+/// Gets all templates for a guild from the database
+/// 
+/// This will cache the templates in `TEMPLATES_CACHE` for future use.
+/// 
+/// Note that this method will *NOT* regenerate Lua VMs
+pub async fn get_all_guild_templates_from_db(
     guild_id: GuildId,
     pool: &sqlx::PgPool,
 ) -> Result<Arc<Vec<Arc<Template>>>, crate::Error> {

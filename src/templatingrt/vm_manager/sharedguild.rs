@@ -7,23 +7,25 @@ use tokio::sync::mpsc::UnboundedSender;
 
 #[derive(Clone)]
 /// A two-way binding between a guild id and its associated worker thread
-pub struct SharedGuild {
+/// 
+/// This allows for efficient tracking of guilds
+pub(super) struct SharedGuild {
     /// A record mapping a guild id to the thread its currently on
     guilds: Arc<StdRwLock<HashMap<GuildId, ThreadEntry>>>,
 
-    /// A record mapping a guild id to the thread its currently on
+    /// A record mapping a entry to the guilds it is associated with
     entries: Arc<StdRwLock<HashMap<ThreadEntry, Vec<GuildId>>>>,
 }
 
 impl SharedGuild {
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             guilds: StdRwLock::new(HashMap::new()).into(),
             entries: StdRwLock::new(HashMap::new()).into(),
         }
     }
 
-    pub fn add_guild(
+    pub(super) fn add_guild(
         &self,
         guild_id: GuildId,
         thread_entry: ThreadEntry,
@@ -43,7 +45,7 @@ impl SharedGuild {
         Ok(())
     }
 
-    pub fn remove_guild(&self, guild_id: GuildId) -> Result<(), crate::Error> {
+    pub(super) fn remove_guild(&self, guild_id: GuildId) -> Result<(), crate::Error> {
         let mut guilds = self.guilds.try_write().map_err(|e| e.to_string())?;
 
         let Some(thread_entry) = guilds.remove(&guild_id) else {
@@ -59,7 +61,7 @@ impl SharedGuild {
         Ok(())
     }
 
-    pub fn remove_thread_entry(&self, thread_entry: &ThreadEntry) -> Result<(), crate::Error> {
+    pub(super) fn remove_thread_entry(&self, thread_entry: &ThreadEntry) -> Result<(), crate::Error> {
         let mut entries = self.entries.try_write().map_err(|e| e.to_string())?;
 
         let tid = thread_entry.id();
@@ -82,15 +84,6 @@ impl SharedGuild {
         Ok(())
     }
 
-    pub fn get_thread_entry(&self, guild_id: GuildId) -> Result<Option<ThreadEntry>, crate::Error> {
-        Ok(self
-            .guilds
-            .try_read()
-            .map_err(|e| e.to_string())?
-            .get(&guild_id)
-            .cloned())
-    }
-
     pub fn get_handle(
         &self,
         guild_id: GuildId,
@@ -101,17 +94,5 @@ impl SharedGuild {
             .map_err(|e| e.to_string())?
             .get(&guild_id)
             .map(|x| x.handle().clone()))
-    }
-
-    pub fn get_thread_guilds(
-        &self,
-        thread_entry: &ThreadEntry,
-    ) -> Result<Option<Vec<GuildId>>, crate::Error> {
-        Ok(self
-            .entries
-            .try_read()
-            .map_err(|e| e.to_string())?
-            .get(thread_entry)
-            .cloned())
     }
 }

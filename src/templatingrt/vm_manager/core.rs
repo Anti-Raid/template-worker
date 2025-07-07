@@ -1,4 +1,5 @@
 use super::client::{LuaVmAction, LuaVmResult};
+use crate::templatingrt::cache::get_all_guild_templates_from_db;
 use crate::templatingrt::primitives::ctxprovider::TemplateContextProvider;
 use crate::templatingrt::state::GuildState;
 use crate::templatingrt::template::Template;
@@ -6,6 +7,7 @@ use crate::templatingrt::MAX_TEMPLATES_EXECUTION_TIME;
 use crate::templatingrt::MAX_TEMPLATES_RETURN_WAIT_TIME;
 use crate::templatingrt::MAX_TEMPLATE_MEMORY_USAGE;
 use crate::CONFIG;
+use hyper::StatusCode;
 use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::primitives::event::Event;
 use khronos_runtime::require::FilesystemWrapper;
@@ -174,27 +176,7 @@ impl LuaVmResult {
         };
 
         if let Some(error_channel) = template.error_channel {
-            let Some(channel) = crate::sandwich::channel(
-                &guild_state.serenity_context.cache,
-                &guild_state.serenity_context.http,
-                &guild_state.reqwest_client,
-                Some(template.guild_id),
-                error_channel,
-            )
-            .await?
-            else {
-                return self._log_error_to_main_server(guild_state, template, error).await;
-            };
-
-            let Some(guild_channel) = channel.guild() else {
-                return Ok(());
-            };
-
-            if guild_channel.guild_id != template.guild_id {
-                return Ok(());
-            }
-
-            guild_channel
+            let err = error_channel
                 .send_message(
                     &guild_state.serenity_context.http,
                     serenity::all::CreateMessage::new()
@@ -212,7 +194,34 @@ impl LuaVmResult {
                             .into(),
                         )]),
                 )
-                .await?;
+                .await;
+
+            // Check for a 404
+            if let Err(e) = err {
+                match e {
+                    serenity::Error::Http(e) => {
+                        if let Some(s) = e.status_code() {
+                            if s == StatusCode::NOT_FOUND {
+                                // Remove the error channel
+                                sqlx::query(
+                                    "UPDATE templates SET error_channel = NULL WHERE name =$1 AND guild_id = $2",
+                                )
+                                .bind(&template.name)
+                                .bind(template.guild_id.to_string())
+                                .execute(&guild_state.pool)
+                                .await?;
+
+                                // Refresh cache without regenerating
+                                get_all_guild_templates_from_db(
+                                    template.guild_id,
+                                    &guild_state.pool,
+                                ).await?;
+                            }
+                        }
+                    },
+                    _ => {}
+                }
+            }
         } else {
             // If no error channel is set, log to the main server
             self._log_error_to_main_server(guild_state, template, error).await?;

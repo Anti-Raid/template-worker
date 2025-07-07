@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serenity::all::GuildChannel;
@@ -15,6 +17,12 @@ pub struct DispatchEventAndWaitQuery {
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct ExecuteLuaVmActionOpts {
     pub wait_timeout: Option<std::time::Duration>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ExecuteLuaVmActionResponse {
+    pub data: crate::templatingrt::MultiLuaVmResultHandle,
+    pub time_taken: Duration,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

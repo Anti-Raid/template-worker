@@ -682,7 +682,6 @@ impl DiscordProvider for ArDiscordProvider {
         &self,
     ) -> serenity::Result<serenity::model::prelude::PartialGuild, crate::Error> {
         Ok(crate::sandwich::guild(
-            &self.guild_state.serenity_context.cache,
             &self.guild_state.serenity_context.http,
             &self.guild_state.reqwest_client,
             self.guild_id,
@@ -696,7 +695,6 @@ impl DiscordProvider for ArDiscordProvider {
         user_id: serenity::all::UserId,
     ) -> serenity::Result<Option<serenity::all::Member>, crate::Error> {
         Ok(crate::sandwich::member_in_guild(
-            &self.guild_state.serenity_context.cache,
             &self.guild_state.serenity_context.http,
             &self.guild_state.reqwest_client,
             self.guild_id,
@@ -710,7 +708,6 @@ impl DiscordProvider for ArDiscordProvider {
         &self,
     ) -> serenity::Result<Vec<serenity::all::GuildChannel>, crate::Error> {
         let channels = crate::sandwich::guild_channels(
-            &self.guild_state.serenity_context.cache,
             &self.guild_state.serenity_context.http,
             &self.guild_state.reqwest_client,
             self.guild_id,
@@ -726,7 +723,6 @@ impl DiscordProvider for ArDiscordProvider {
     ) -> serenity::Result<ExtractMap<serenity::all::RoleId, serenity::all::Role>, crate::Error>
     {
         let roles = crate::sandwich::guild_roles(
-            &self.guild_state.serenity_context.cache,
             &self.guild_state.serenity_context.http,
             &self.guild_state.reqwest_client,
             self.guild_id,
@@ -755,7 +751,6 @@ impl DiscordProvider for ArDiscordProvider {
         }
 
         let channel = crate::sandwich::channel(
-            &self.guild_state.serenity_context.cache,
             &self.guild_state.serenity_context.http,
             &self.guild_state.reqwest_client,
             Some(self.guild_id),

@@ -1,10 +1,10 @@
 use crate::dispatch::dispatch_scoped_and_wait;
 use crate::dispatch::DispatchResult;
+use crate::http::types::ExecuteLuaVmActionResponse;
 use crate::templatingrt::cache::regenerate_deferred;
 use crate::templatingrt::CreateGuildState;
 use crate::templatingrt::POOL;
 use crate::templatingrt::{cache::regenerate_cache, MAX_TEMPLATES_RETURN_WAIT_TIME};
-use crate::vmbench::{benchmark_vm as benchmark_vm_impl, FireBenchmark};
 use antiraid_types::ar_event::AntiraidEvent;
 use antiraid_types::ar_event::GetSettingsEvent;
 use antiraid_types::ar_event::SettingExecuteEvent;
@@ -60,7 +60,6 @@ pub fn create(
             post(dispatch_event_and_wait),
         )
         .route("/healthcheck", post(|| async { Json(()) }))
-        .route("/benchmark-vm/:guild_id", post(benchmark_vm))
         .route(
             "/settings/:guild_id/:user_id",
             get(get_settings_for_guild_user),
@@ -69,8 +68,11 @@ pub fn create(
             "/settings/:guild_id/:user_id",
             post(execute_setting_for_guild_user),
         )
+        .route("/ping-all-threads", post(ping_all_threads))
         .route("/threads-count", get(get_threads_count))
         .route("/clear-inactive-guilds", post(clear_inactive_guilds))
+        .route("/remove_unused_threads", post(remove_unused_threads))
+        .route("/close-thread/:tid", post(close_thread))
         .route(
             "/execute-luavmaction/:guild_id",
             post(execute_lua_vm_action),
@@ -157,28 +159,18 @@ async fn get_threads_count(State(AppData { .. }): State<AppData>) -> Response<us
     Ok(Json(count))
 }
 
-/// Benchmarks a VM
-async fn benchmark_vm(
-    State(AppData {
-        data,
-        serenity_context,
-        ..
-    }): State<AppData>,
-    Path(guild_id): Path<serenity::all::GuildId>,
-) -> Response<FireBenchmark> {
-    let bvm = benchmark_vm_impl(
-        guild_id,
-        CreateGuildState {
-            pool: data.pool.clone(),
-            serenity_context,
-            reqwest_client: data.reqwest.clone(),
-            object_store: data.object_store.clone(),
-        },
-    )
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+/// Ping all threads returning a list of threads which responded
+async fn ping_all_threads(
+    State(AppData { .. }): State<AppData>,
+) -> Response<Vec<u64>> {
+    let Ok(hm) = crate::templatingrt::POOL.ping().await else {
+        return Err((
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to start ping".to_string(),
+        ));
+    };
 
-    Ok(Json(bvm))
+    Ok(Json(hm))
 }
 
 /// Flush out inactive guilds
@@ -195,6 +187,34 @@ async fn clear_inactive_guilds(
     Ok(Json(hm))
 }
 
+/// Flush out unused threads
+async fn remove_unused_threads(
+    State(AppData { .. }): State<AppData>,
+) -> Response<Vec<u64>> {
+    let Ok(hm) = crate::templatingrt::POOL.remove_unused_threads().await else {
+        return Err((
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to start unused thread clear".to_string(),
+        ));
+    };
+
+    Ok(Json(hm))
+}
+
+/// Closes a thread in the pool
+#[axum::debug_handler]
+async fn close_thread(
+    State(AppData { .. }): State<AppData>,
+    Path(tid): Path<u64>,
+) -> Response<()> {
+    crate::templatingrt::POOL
+        .close_thread(tid)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(()))
+}
+
 /// Execute a lua vm action on a guild
 #[axum::debug_handler]
 async fn execute_lua_vm_action(
@@ -206,7 +226,8 @@ async fn execute_lua_vm_action(
     Path(guild_id): Path<serenity::all::GuildId>,
     Query(opts): Query<ExecuteLuaVmActionOpts>,
     Json(action): Json<crate::templatingrt::LuaVmAction>,
-) -> Response<crate::templatingrt::MultiLuaVmResultHandle> {
+) -> Response<ExecuteLuaVmActionResponse> {
+    let start_instant = std::time::Instant::now();
     let handle = execute(
         guild_id,
         CreateGuildState {
@@ -244,7 +265,12 @@ async fn execute_lua_vm_action(
         }
     };
 
-    Ok(Json(result_handle))
+    let elapsed = start_instant.elapsed();
+
+    Ok(Json(ExecuteLuaVmActionResponse {
+        data: result_handle,
+        time_taken: elapsed,
+    }))
 }
 
 /// Get thread pool metrics given tid
@@ -391,7 +417,6 @@ async fn base_guild_user_info(
 ) -> Response<BaseGuildUserInfo> {
     let bot_user_id = serenity_context.cache.current_user().id;
     let guild = crate::sandwich::guild(
-        &serenity_context.cache,
         &serenity_context.http,
         &data.reqwest,
         guild_id,
@@ -406,7 +431,6 @@ async fn base_guild_user_info(
 
     // Next fetch the member and bot_user
     let member: serenity::model::prelude::Member = match crate::sandwich::member_in_guild(
-        &serenity_context.cache,
         &serenity_context.http,
         &data.reqwest,
         guild_id,
@@ -427,7 +451,6 @@ async fn base_guild_user_info(
     };
 
     let bot_user: serenity::model::prelude::Member = match crate::sandwich::member_in_guild(
-        &serenity_context.cache,
         &serenity_context.http,
         &data.reqwest,
         guild_id,
@@ -449,7 +472,6 @@ async fn base_guild_user_info(
 
     // Fetch the channels
     let channels = crate::sandwich::guild_channels(
-        &serenity_context.cache,
         &serenity_context.http,
         &data.reqwest,
         guild_id,

@@ -109,7 +109,7 @@ impl ThreadEntry {
     }
 
     /// Initializes a new thread entry, starting it after creation
-    pub fn create(
+    pub(super) fn create(
         cgs: CreateGuildState, // all data needed by lua vm
         sg: SharedGuild,
     ) -> Result<Self, crate::Error> {

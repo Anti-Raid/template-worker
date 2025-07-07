@@ -13,7 +13,10 @@ use tokio::sync::mpsc::UnboundedSender;
 pub static POOL: LazyLock<Pool> = LazyLock::new(Pool::new_threadpool);
 
 /// Inner backer of the pool
-pub enum PoolBacker {
+/// 
+/// This is an internal structure used to allow for different pool implementations in the future
+/// without changing the public API of the `Pool` struct.
+pub(super) enum PoolBacker {
     ThreadPool(ThreadPool),
 }
 
@@ -23,14 +26,9 @@ pub struct Pool {
 }
 
 impl Pool {
-    /// Creates a new pool with the specified inner pool
-    pub fn new(backer: PoolBacker) -> Self {
-        Self { inner: backer }
-    }
-
     /// Creates a new pool backed by a thread pool distribution
     pub fn new_threadpool() -> Self {
-        Self::new(PoolBacker::ThreadPool(ThreadPool::new()))
+        Self { inner: PoolBacker::ThreadPool(ThreadPool::new()) }
     }
 
     /// Returns the number of worker process
@@ -58,6 +56,34 @@ impl Pool {
     ) -> Result<Option<UnboundedSender<ThreadRequest>>, crate::Error> {
         match &self.inner {
             PoolBacker::ThreadPool(tp) => tp.get_guild_if_exists(guild),
+        }
+    }
+
+    /// Ping all threads returning a list of threads which responded
+    pub async fn ping(
+        &self,
+    ) -> Result<Vec<u64>, crate::Error> {
+        match &self.inner {
+            PoolBacker::ThreadPool(tp) => {
+                let fu = FuturesUnordered::new();
+                let futs = tp.send_request(|te| {
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+
+                    let tid = te.id();
+                    Some((
+                        rx.map(move |_x| tid),
+                        ThreadRequest::Ping { tx },
+                    ))
+                })?;
+
+                for fut in futs {
+                    fu.push(fut);
+                }
+
+                let resp = fu.collect().await;
+
+                Ok(resp)
+            }
         }
     }
 
@@ -96,6 +122,13 @@ impl Pool {
     pub async fn remove_unused_threads(&self) -> Result<Vec<u64>, crate::Error> {
         match &self.inner {
             PoolBacker::ThreadPool(tp) => tp.remove_unused_threads().await,
+        }
+    }
+
+    /// Closes a thread in the pool
+    pub async fn close_thread(&self, id: u64) -> Result<(), crate::Error> {
+        match &self.inner {
+            PoolBacker::ThreadPool(tp) => tp.close_thread(id).await,
         }
     }
 

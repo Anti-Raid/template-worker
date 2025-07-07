@@ -10,7 +10,6 @@ mod objectstore;
 mod register;
 mod sandwich;
 mod templatingrt;
-mod vmbench;
 
 use crate::config::{CMD_ARGS, CONFIG};
 use crate::data::Data;

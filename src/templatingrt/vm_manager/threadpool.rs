@@ -9,7 +9,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 pub const DEFAULT_MAX_THREADS: usize = 100; // Maximum number of threads in the pool
 
-pub struct ThreadPool {
+pub(super) struct ThreadPool {
     /// The worker threads in the pool
     ///
     /// We can't use a binary heap here due to interior mutability of ordering [count]
@@ -24,7 +24,7 @@ pub struct ThreadPool {
 
 impl ThreadPool {
     /// Creates a new thread pool
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             threads: StdRwLock::new(Vec::new()),
             sg: SharedGuild::new(),
@@ -32,7 +32,7 @@ impl ThreadPool {
         }
     }
 
-    pub fn send_request<K>(
+    pub(super) fn send_request<K>(
         &self,
         req: impl Fn(&ThreadEntry) -> Option<(K, ThreadRequest)>,
     ) -> Result<Vec<K>, crate::Error> {
@@ -54,7 +54,7 @@ impl ThreadPool {
     }
 
     /// Remove broken threads from the pool
-    pub async fn remove_unused_threads(&self) -> Result<Vec<u64>, crate::Error> {
+    pub(super) async fn remove_unused_threads(&self) -> Result<Vec<u64>, crate::Error> {
         let (mut good_threads, old_threads) = {
             let mut threads = self
                 .threads
@@ -109,7 +109,7 @@ impl ThreadPool {
     }
 
     /// Adds a new thread to the pool
-    pub fn add_thread(&self, cgs: CreateGuildState) -> Result<(), crate::Error> {
+    pub(super) fn add_thread(&self, cgs: CreateGuildState) -> Result<(), crate::Error> {
         let mut threads = self
             .threads
             .try_write()
@@ -118,8 +118,56 @@ impl ThreadPool {
         Ok(())
     }
 
+    /// Close a thread in the pool
+    pub(super) async fn close_thread(&self, id: u64) -> Result<(), crate::Error> {
+        let mut got_entry = None;
+        {
+            let threads: std::sync::RwLockReadGuard<'_, Vec<ThreadEntry>> = self
+                .threads
+                .try_read()
+                .map_err(|_| "Failed to read lock threads for close_thread")?;
+
+            for th in threads.iter() {
+                if th.id() == id {
+                    got_entry = Some(th.clone());
+                }
+            }
+        }
+
+        if let Some(th) = got_entry {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            th.handle().send(ThreadRequest::CloseThread { tx: Some(tx) })?;
+            let r = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                rx,
+            ).await;
+
+            // Remove thread from pool
+            self.remove_thread(id)?;
+
+            match r {
+                Ok(Err(r)) => {
+                    return Err(format!(
+                        "Failed to close thread due to an error recieving data: {}",
+                        r
+                    ).into());
+                },
+                Ok(Ok(_)) => {
+                    return Ok(())
+                },
+                Err(_) => {
+                    return Err(
+                        "Failed to close thread due to timeout".into()
+                    );
+                }
+            }
+        }
+
+        Err("Thread not found".into())
+    }
+
     /// Removes a thread from the pool. This also removes all guild vms attached to said thread as well
-    pub fn remove_thread(&self, id: u64) -> Result<(), crate::Error> {
+    pub(super) fn remove_thread(&self, id: u64) -> Result<(), crate::Error> {
         let idx = {
             let threads = self
                 .threads
@@ -154,7 +202,7 @@ impl ThreadPool {
     }
 
     /// Returns the number of threads in the pool
-    pub fn threads_len(&self) -> Result<usize, crate::Error> {
+    pub(super) fn threads_len(&self) -> Result<usize, crate::Error> {
         Ok(self
             .threads
             .try_read()
@@ -165,7 +213,7 @@ impl ThreadPool {
     /// Adds a guild to the pool if it does not already exist in the pool
     ///
     /// If the guild already exists in the pool, return the handle
-    pub async fn get_guild(
+    pub(super) async fn get_guild(
         &self,
         guild: GuildId,
         cgs: CreateGuildState,
@@ -232,7 +280,7 @@ impl ThreadPool {
         return Ok(thread.handle().clone());
     }
 
-    pub fn get_guild_if_exists(
+    pub(super) fn get_guild_if_exists(
         &self,
         guild: GuildId,
     ) -> Result<Option<UnboundedSender<ThreadRequest>>, crate::Error> {

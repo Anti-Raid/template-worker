@@ -504,7 +504,6 @@ impl TemplateStore {
     async fn validate_error_channel(&self, channel_id: serenity::all::ChannelId) -> Result<(), crate::Error> {
         // Perform required checks
         let Some(channel) = crate::sandwich::channel(
-            &self.guild_state.serenity_context.cache,
             &self.guild_state.serenity_context.http,
             &self.guild_state.reqwest_client,
             Some(self.guild_state.guild_id),
@@ -525,7 +524,6 @@ impl TemplateStore {
         let bot_user_id = self.guild_state.serenity_context.cache.current_user().id;
 
         let bot_user = crate::sandwich::member_in_guild(
-            &self.guild_state.serenity_context.cache,
             &self.guild_state.serenity_context.http,
             &self.guild_state.reqwest_client,
             self.guild_state.guild_id,
@@ -539,7 +537,6 @@ impl TemplateStore {
         };
 
         let guild = crate::sandwich::guild(
-            &self.guild_state.serenity_context.cache,
             &self.guild_state.serenity_context.http,
             &self.guild_state.reqwest_client,
             self.guild_state.guild_id,

@@ -271,6 +271,7 @@ impl Template {
     }
 
     /// Creates a shop template string given name and version
+    #[allow(dead_code)]
     pub fn create_shop_template(template: &str, version: &str) -> String {
         format!("$shop/{}#{}", template, version)
     }
