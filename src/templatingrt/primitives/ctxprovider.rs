@@ -782,6 +782,10 @@ impl DiscordProvider for ArDiscordProvider {
         &self.guild_state.serenity_context.http
     }
 
+    fn serenity_cache(&self) -> Option<&serenity::cache::Cache> {
+        Some(&self.guild_state.serenity_context.cache)
+    }
+
     async fn edit_channel_permissions(
         &self,
         channel_id: serenity::all::ChannelId,

@@ -7,7 +7,7 @@ use rust_embed::Embed;
 
 /// To make uploads not need to upload all of ``templating-types`` and keep them up to date:
 #[derive(Embed, Debug)]
-#[folder = "$CARGO_MANIFEST_DIR/../../infra/templating-types"]
+#[folder = "$CARGO_MANIFEST_DIR/../../templating-types"]
 #[prefix = "templating-types/"]
 pub struct TemplatingTypes;
 
