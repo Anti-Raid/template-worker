@@ -1,4 +1,3 @@
-use crate::lockdowns::LockdownData;
 use crate::templatingrt::state::GuildState;
 use crate::templatingrt::template::Template;
 use botox::crypto::gen_random;
@@ -11,7 +10,6 @@ use khronos_runtime::traits::discordprovider::DiscordProvider;
 use khronos_runtime::traits::ir::kv::KvRecord;
 use khronos_runtime::traits::ir::ObjectMetadata;
 use khronos_runtime::traits::kvprovider::KVProvider;
-use khronos_runtime::traits::lockdownprovider::LockdownProvider;
 use khronos_runtime::traits::objectstorageprovider::ObjectStorageProvider;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use moka::future::Cache;
@@ -90,8 +88,6 @@ impl TemplateContextProvider {
 impl KhronosContext for TemplateContextProvider {
     type KVProvider = ArKVProvider;
     type DiscordProvider = ArDiscordProvider;
-    type LockdownDataStore = LockdownData;
-    type LockdownProvider = ArLockdownProvider;
     type DataStoreProvider = ArDataStoreProvider;
     type ObjectStorageProvider = ArObjectStorageProvider;
 
@@ -136,18 +132,6 @@ impl KhronosContext for TemplateContextProvider {
         Some(ArDiscordProvider {
             guild_id: self.guild_state.guild_id,
             guild_state: self.guild_state.clone(),
-        })
-    }
-
-    fn lockdown_provider(&self) -> Option<Self::LockdownProvider> {
-        Some(ArLockdownProvider {
-            guild_state: self.guild_state.clone(),
-            lockdown_data: Rc::new(LockdownData::new(
-                self.guild_state.serenity_context.cache.clone(),
-                self.guild_state.serenity_context.http.clone(),
-                self.guild_state.pool.clone(),
-                self.guild_state.reqwest_client.clone(),
-            )),
         })
     }
 
@@ -843,28 +827,6 @@ impl DiscordProvider for ArDiscordProvider {
         CHANNEL_CACHE.remove(&channel_id).await;
 
         Ok(chan)
-    }
-}
-
-#[derive(Clone)]
-pub struct ArLockdownProvider {
-    guild_state: Rc<GuildState>,
-    lockdown_data: Rc<LockdownData>,
-}
-
-impl LockdownProvider<LockdownData> for ArLockdownProvider {
-    fn attempt_action(&self, bucket: &str) -> serenity::Result<(), crate::Error> {
-        self.guild_state.ratelimits.lockdowns.check(bucket)
-    }
-
-    /// Returns a lockdown data store to be used with the lockdown library
-    fn lockdown_data_store(&self) -> &LockdownData {
-        &self.lockdown_data
-    }
-
-    /// Serenity HTTP client
-    fn serenity_http(&self) -> &serenity::http::Http {
-        &self.guild_state.serenity_context.http
     }
 }
 

@@ -5,7 +5,6 @@ mod event_handler;
 mod expiry_tasks;
 mod http;
 mod jobserver;
-mod lockdowns;
 mod objectstore;
 mod register;
 mod sandwich;

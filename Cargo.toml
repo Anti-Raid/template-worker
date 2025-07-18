@@ -24,7 +24,6 @@ indexmap = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 antiraid-types = { git = "https://github.com/anti-raid/antiraid-types" }
 khronos_runtime = { git = "https://github.com/anti-raid/khronos" }
-lockdowns = { git = "https://github.com/Anti-Raid/lockdowns" }
 gwevent = { git = "https://github.com/Anti-Raid/gwevent" }
 vfs = { git = "https://github.com/Anti-Raid/rust-vfs", features = ["embedded-fs"] }
 rust-embed = { version = "8.7.0", features = ["debug-embed", "interpolate-folder-path"] }

@@ -97,32 +97,6 @@ impl Ratelimits {
         })
     }
 
-    fn new_lockdowns_rl() -> Result<LuaRatelimits, crate::Error> {
-        // Create the global limit
-        let global_quota =
-            LuaRatelimits::create_quota(create_nonmax_u32(10)?, Duration::from_secs(60))?;
-
-        // TSL limit
-        let tsl_quota =
-            LuaRatelimits::create_quota(create_nonmax_u32(1)?, Duration::from_secs(60))?;
-
-        let global1 = DefaultKeyedRateLimiter::keyed(global_quota);
-        let global = vec![global1];
-
-        // Create the per-bucket limits
-        let tsl_lim1 = DefaultKeyedRateLimiter::keyed(tsl_quota);
-        // Create the clock
-        let clock = QuantaClock::default();
-
-        Ok(LuaRatelimits {
-            global,
-            per_bucket: indexmap::indexmap!(
-                "tsl".to_string() => vec![tsl_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
-            ),
-            clock,
-        })
-    }
-
     fn new_data_stores_rl() -> Result<LuaRatelimits, crate::Error> {
         // Create the global limit
         let global_quota =
@@ -165,9 +139,6 @@ pub struct Ratelimits {
     /// Stores the lua kv ratelimiters
     pub kv: LuaRatelimits,
 
-    /// Stores the lua lockdown ratelimiters
-    pub lockdowns: LuaRatelimits,
-
     /// Stores the data store ratelimiters
     pub data_stores: LuaRatelimits,
 
@@ -180,7 +151,6 @@ impl Ratelimits {
         Ok(Ratelimits {
             discord: Ratelimits::new_discord_rl()?,
             kv: Ratelimits::new_kv_rl()?,
-            lockdowns: Ratelimits::new_lockdowns_rl()?,
             data_stores: Ratelimits::new_data_stores_rl()?,
             object_storage: Ratelimits::new_object_storage_rl()?,
         })
