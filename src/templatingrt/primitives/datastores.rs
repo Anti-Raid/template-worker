@@ -11,11 +11,11 @@ use khronos_runtime::utils::khronos_value::{KhronosLazyValue, KhronosValue};
 use khronos_runtime::{to_struct, value};
 use serde_json::Value;
 use serenity::async_trait;
+use sqlx::Row;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::str::FromStr;
 use uuid::Uuid;
-use sqlx::Row;
 
 /// A data store to expose Anti-Raid's statistics (type in discord /"stats")
 pub struct StatsStore {
@@ -465,7 +465,6 @@ to_struct!(
     }
 );
 
-
 to_struct!(
     #[derive(Clone, Debug, Default)]
     pub struct CreateTemplate {
@@ -501,7 +500,10 @@ pub struct TemplateStore {
 
 impl TemplateStore {
     /// Validate the error channel provided for the template
-    async fn validate_error_channel(&self, channel_id: serenity::all::ChannelId) -> Result<(), crate::Error> {
+    async fn validate_error_channel(
+        &self,
+        channel_id: serenity::all::ChannelId,
+    ) -> Result<(), crate::Error> {
         // Perform required checks
         let Some(channel) = crate::sandwich::channel(
             &self.guild_state.serenity_context.http,
@@ -509,7 +511,8 @@ impl TemplateStore {
             Some(self.guild_state.guild_id),
             channel_id,
         )
-        .await? else {
+        .await?
+        else {
             return Err(format!("Could not find channel with id: {}", channel_id).into());
         };
 
@@ -518,7 +521,9 @@ impl TemplateStore {
         };
 
         if guild_channel.guild_id != self.guild_state.guild_id {
-            return Err(format!("Channel with id {} is not in the current guild", channel_id).into());
+            return Err(
+                format!("Channel with id {} is not in the current guild", channel_id).into(),
+            );
         }
 
         let bot_user_id = self.guild_state.serenity_context.cache.current_user().id;
@@ -547,9 +552,11 @@ impl TemplateStore {
         let permissions = guild.user_permissions_in(&guild_channel, &bot_user);
 
         if !permissions.contains(serenity::all::Permissions::SEND_MESSAGES) {
-            return Err(
-                format!("Bot does not have permission to `Send Messages` in channel with id: {}", channel_id).into()
-            );
+            return Err(format!(
+                "Bot does not have permission to `Send Messages` in channel with id: {}",
+                channel_id
+            )
+            .into());
         }
 
         Ok(())
@@ -557,8 +564,9 @@ impl TemplateStore {
 
     async fn validate_name(&self, name: &str) -> Result<(), crate::Error> {
         if name.starts_with("$shop/") {
-            let (shop_tname, shop_tversion) = crate::templatingrt::template::Template::parse_shop_template(name)
-                .map_err(|e| format!("Failed to parse shop template: {:?}", e))?;
+            let (shop_tname, shop_tversion) =
+                crate::templatingrt::template::Template::parse_shop_template(name)
+                    .map_err(|e| format!("Failed to parse shop template: {:?}", e))?;
 
             let shop_template_count =
                 sqlx::query("SELECT COUNT(*) FROM template_shop WHERE name = $1 AND version = $2")
@@ -580,14 +588,15 @@ impl TemplateStore {
     }
 
     async fn does_template_exist(&self, name: &str) -> Result<bool, crate::Error> {
-        let count = sqlx::query("SELECT COUNT(*) FROM guild_templates WHERE guild_id = $1 AND name = $2")
-            .bind(self.guild_state.guild_id.to_string())
-            .bind(name)
-            .fetch_one(&self.guild_state.pool)
-            .await
-            .map_err(|e| format!("Failed to check if template exists: {:?}", e))?
-            .try_get::<i64, _>(0)
-            .map_err(|e| format!("Failed to get count: {:?}", e))?;
+        let count =
+            sqlx::query("SELECT COUNT(*) FROM guild_templates WHERE guild_id = $1 AND name = $2")
+                .bind(self.guild_state.guild_id.to_string())
+                .bind(name)
+                .fetch_one(&self.guild_state.pool)
+                .await
+                .map_err(|e| format!("Failed to check if template exists: {:?}", e))?
+                .try_get::<i64, _>(0)
+                .map_err(|e| format!("Failed to get count: {:?}", e))?;
 
         Ok(count > 0)
     }
@@ -606,6 +615,7 @@ impl DataStoreImpl for TemplateStore {
     fn methods(&self) -> Vec<String> {
         vec![
             "list".to_string(),
+            "get".to_string(),
             "create".to_string(),
             "update".to_string(),
             "delete".to_string(),
@@ -633,7 +643,9 @@ impl DataStoreImpl for TemplateStore {
                                 name: template.name,
                                 events: template.events,
                                 error_channel: template.error_channel,
-                                content: KhronosLazyValue { data: template.content },
+                                content: KhronosLazyValue {
+                                    data: template.content,
+                                },
                                 language: template.language,
                                 allowed_caps: template.allowed_caps,
                                 created_at: template.created_at,
@@ -645,7 +657,50 @@ impl DataStoreImpl for TemplateStore {
                         Ok(value!(result))
                     })
                 })))
-            },
+            }
+            "get" => {
+                let guild_state_ref = self.guild_state.clone(); // reference to the guild state data
+                Some(DataStoreMethod::Async(Rc::new(move |v| {
+                    let guild_state = guild_state_ref.clone(); // satisfy rusts borrowing rules
+                    Box::pin(async move {
+                        let mut v = VecDeque::from(v);
+
+                        let Some(KhronosValue::Text(name)) = v.pop_front() else {
+                            return Err(
+                                "arg #1 to TemplateStore.get must be a string (name)".into()
+                            );
+                        };
+
+                        let templates: Option<TemplateData> = sqlx::query_as(
+                            "SELECT name, content, language, allowed_caps, events, error_channel, paused, created_at, last_updated_at FROM guild_templates WHERE guild_id = $1 AND name = $2",
+                        )
+                        .bind(guild_state.guild_id.to_string())
+                        .bind(name)
+                        .fetch_optional(&guild_state.pool)
+                        .await?;
+
+                        let Some(template) = templates else {
+                            return Ok(value!(KhronosValue::Null));
+                        };
+
+                        let template = Template {
+                            name: template.name,
+                            events: template.events,
+                            error_channel: template.error_channel,
+                            content: KhronosLazyValue {
+                                data: template.content,
+                            },
+                            language: template.language,
+                            allowed_caps: template.allowed_caps,
+                            created_at: template.created_at,
+                            updated_at: template.last_updated_at,
+                            paused: template.paused,
+                        };
+
+                        Ok(value!(template))
+                    })
+                })))
+            }
             "create" => {
                 let self_ref = self.clone(); // reference to the guild state data
                 Some(DataStoreMethod::Async(Rc::new(move |v| {
@@ -671,9 +726,10 @@ impl DataStoreImpl for TemplateStore {
                                 .parse()
                                 .map_err(|e| format!("Failed to parse error channel: {:?}", e))?;
 
-                            self_ref.validate_error_channel(channel_id).await.map_err(|e| {
-                                format!("Failed to validate error channel: {}", e)
-                            })?;
+                            self_ref
+                                .validate_error_channel(channel_id)
+                                .await
+                                .map_err(|e| format!("Failed to validate error channel: {}", e))?;
                         }
 
                         TemplateLanguage::from_str(&create_template.language)
@@ -732,9 +788,10 @@ impl DataStoreImpl for TemplateStore {
                                 .parse()
                                 .map_err(|e| format!("Failed to parse error channel: {:?}", e))?;
 
-                            self_ref.validate_error_channel(channel_id).await.map_err(|e| {
-                                format!("Failed to validate error channel: {}", e)
-                            })?;
+                            self_ref
+                                .validate_error_channel(channel_id)
+                                .await
+                                .map_err(|e| format!("Failed to validate error channel: {}", e))?;
                         }
 
                         TemplateLanguage::from_str(&create_template.language)
@@ -782,7 +839,10 @@ impl DataStoreImpl for TemplateStore {
                         let name: String = match name {
                             KhronosValue::Text(name) => {
                                 if name.is_empty() {
-                                    return Err("arg #1 of TemplateStore.delete must not be empty (name)".into());
+                                    return Err(
+                                        "arg #1 of TemplateStore.delete must not be empty (name)"
+                                            .into(),
+                                    );
                                 }
                                 name
                             }
@@ -823,4 +883,3 @@ impl DataStoreImpl for TemplateStore {
         }
     }
 }
-
