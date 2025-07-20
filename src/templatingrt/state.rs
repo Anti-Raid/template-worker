@@ -122,6 +122,23 @@ impl Ratelimits {
             clock,
         })
     }
+
+    fn new_http_rl() -> Result<LuaRatelimits, crate::Error> {
+        // Create the global limit
+        let global_quota =
+            LuaRatelimits::create_quota(create_nonmax_u32(3)?, Duration::from_secs(5))?;
+        let global1 = DefaultKeyedRateLimiter::keyed(global_quota);
+        let global = vec![global1];
+
+        // Create the clock
+        let clock = QuantaClock::default();
+
+        Ok(LuaRatelimits {
+            global,
+            per_bucket: indexmap::indexmap!(),
+            clock,
+        })
+    }
 }
 
 pub struct Ratelimits {
@@ -136,6 +153,9 @@ pub struct Ratelimits {
 
     /// Stores the object storage ratelimiters
     pub object_storage: LuaRatelimits,
+
+    /// Stores the http ratelimiters
+    pub http: LuaRatelimits,
 }
 
 impl Ratelimits {
@@ -145,6 +165,7 @@ impl Ratelimits {
             kv: Ratelimits::new_kv_rl()?,
             data_stores: Ratelimits::new_data_stores_rl()?,
             object_storage: Ratelimits::new_object_storage_rl()?,
+            http: Ratelimits::new_http_rl()?,
         })
     }
 }

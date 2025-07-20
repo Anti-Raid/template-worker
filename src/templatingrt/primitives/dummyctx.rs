@@ -3,6 +3,7 @@ use khronos_runtime::traits::context::{
 };
 use khronos_runtime::traits::datastoreprovider::{DataStoreImpl, DataStoreProvider};
 use khronos_runtime::traits::discordprovider::DiscordProvider;
+use khronos_runtime::traits::httpclientprovider::HTTPClientProvider;
 use khronos_runtime::traits::ir::kv::KvRecord;
 use khronos_runtime::traits::ir::ObjectMetadata;
 use khronos_runtime::traits::kvprovider::KVProvider;
@@ -46,6 +47,7 @@ impl KhronosContext for DummyProvider {
     type DiscordProvider = DummyDiscordProvider;
     type DataStoreProvider = DummyDataStoreProvider;
     type ObjectStorageProvider = DummyObjectStorageProvider;
+    type HTTPClientProvider = DummyHTTPClientProvider;
 
     fn data(&self) -> &ScriptData {
         &self.template_data
@@ -86,6 +88,10 @@ impl KhronosContext for DummyProvider {
     }
 
     fn objectstorage_provider(&self) -> Option<Self::ObjectStorageProvider> {
+        None
+    }
+
+    fn httpclient_provider(&self) -> Option<Self::HTTPClientProvider> {
         None
     }
 }
@@ -272,5 +278,14 @@ impl ObjectStorageProvider for DummyObjectStorageProvider {
 
     async fn delete_file(&self, _key: String) -> Result<(), khronos_runtime::Error> {
         unreachable!()
+    }
+}
+
+#[derive(Clone)]
+pub struct DummyHTTPClientProvider {}
+
+impl HTTPClientProvider for DummyHTTPClientProvider {
+    fn attempt_action(&self, _bucket: &str, _url: &str) -> Result<(), khronos_runtime::Error> {
+        Ok(())
     }
 }

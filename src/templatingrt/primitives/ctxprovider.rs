@@ -7,6 +7,7 @@ use khronos_runtime::traits::context::{
 };
 use khronos_runtime::traits::datastoreprovider::{DataStoreImpl, DataStoreProvider};
 use khronos_runtime::traits::discordprovider::DiscordProvider;
+use khronos_runtime::traits::httpclientprovider::HTTPClientProvider;
 use khronos_runtime::traits::ir::kv::KvRecord;
 use khronos_runtime::traits::ir::ObjectMetadata;
 use khronos_runtime::traits::kvprovider::KVProvider;
@@ -90,6 +91,7 @@ impl KhronosContext for TemplateContextProvider {
     type DiscordProvider = ArDiscordProvider;
     type DataStoreProvider = ArDataStoreProvider;
     type ObjectStorageProvider = ArObjectStorageProvider;
+    type HTTPClientProvider = ArHTTPClientProvider;
 
     fn data(&self) -> &ScriptData {
         &self.script_data
@@ -148,6 +150,10 @@ impl KhronosContext for TemplateContextProvider {
             guild_id: self.guild_state.guild_id,
             guild_state: self.guild_state.clone(),
         })
+    }
+
+    fn httpclient_provider(&self) -> Option<Self::HTTPClientProvider> {
+        None // Don't expose HTTP client provider in templates yet while its still being developed
     }
 }
 
@@ -960,5 +966,18 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
             .object_store
             .delete(&crate::objectstore::guild_bucket(self.guild_id), &key)
             .await?)
+    }
+}
+
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct ArHTTPClientProvider {
+    guild_id: serenity::all::GuildId,
+    guild_state: Rc<GuildState>,
+}
+
+impl HTTPClientProvider for ArHTTPClientProvider {
+    fn attempt_action(&self, bucket: &str, _url: &str) -> Result<(), khronos_runtime::Error> {
+        self.guild_state.ratelimits.http.check(bucket)
     }
 }

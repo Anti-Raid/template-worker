@@ -68,14 +68,14 @@ impl LuaVmAction {
 
                 let Ok(used_u64) = used.try_into() else {
                     log::error!("Memory usage is too large to fit into u64, returning 0");
-                    
+
                     let _ = callback.send(vec![(
                         "_".to_string(),
                         LuaVmResult::Ok {
                             result_val: KhronosValue::UnsignedInteger(0),
                         },
                     )]);
-                    
+
                     return;
                 };
 
@@ -89,16 +89,15 @@ impl LuaVmAction {
             LuaVmAction::SetMemoryLimit { limit } => {
                 let result = match tis_ref.runtime().set_memory_limit(limit) {
                     Ok(limit) => {
-
                         let limit_u64 = limit.try_into().unwrap_or_else(|_| {
                             log::error!("Memory limit is too large to fit into u64, returning 0");
                             0
                         });
-                        
+
                         LuaVmResult::Ok {
                             result_val: KhronosValue::UnsignedInteger(limit_u64),
                         }
-                    },
+                    }
                     Err(e) => LuaVmResult::LuaError { err: e.to_string() },
                 };
 
@@ -138,28 +137,28 @@ impl LuaVmResult {
         template: &Template,
         error: String,
     ) -> Result<(), crate::Error> {
-    // Send to main server
-    crate::CONFIG
-        .meta
-        .default_error_channel
-        .send_message(
-            &guild_state.serenity_context.http,
-            serenity::all::CreateMessage::new()
-                .embed(
-                    serenity::all::CreateEmbed::new()
-                        .title("Error executing template")
-                        .field("Error", error, false)
-                        .field("Template", template.name.clone(), false),
-                )
-                .components(vec![serenity::all::CreateActionRow::Buttons(
-                    vec![serenity::all::CreateButton::new_link(
-                        &CONFIG.meta.support_server_invite,
+        // Send to main server
+        crate::CONFIG
+            .meta
+            .default_error_channel
+            .send_message(
+                &guild_state.serenity_context.http,
+                serenity::all::CreateMessage::new()
+                    .embed(
+                        serenity::all::CreateEmbed::new()
+                            .title("Error executing template")
+                            .field("Error", error, false)
+                            .field("Template", template.name.clone(), false),
                     )
-                    .label("Support Server")]
-                    .into(),
-                )]),
-        )
-        .await?;
+                    .components(vec![serenity::all::CreateActionRow::Buttons(
+                        vec![serenity::all::CreateButton::new_link(
+                            &CONFIG.meta.support_server_invite,
+                        )
+                        .label("Support Server")]
+                        .into(),
+                    )]),
+            )
+            .await?;
 
         Ok(())
     }
@@ -215,16 +214,18 @@ impl LuaVmResult {
                                 get_all_guild_templates_from_db(
                                     template.guild_id,
                                     &guild_state.pool,
-                                ).await?;
+                                )
+                                .await?;
                             }
                         }
-                    },
+                    }
                     _ => {}
                 }
             }
         } else {
             // If no error channel is set, log to the main server
-            self._log_error_to_main_server(guild_state, template, error).await?;
+            self._log_error_to_main_server(guild_state, template, error)
+                .await?;
         }
 
         Ok(())
@@ -232,7 +233,7 @@ impl LuaVmResult {
 }
 
 /// Configures the khronos runtime.
-pub(super) fn configure_runtime_manager() -> LuaResult<KhronosRuntimeManager> {
+pub(super) async fn configure_runtime_manager() -> LuaResult<KhronosRuntimeManager> {
     let mut rt = KhronosRuntime::new(
         RuntimeCreateOpts {
             disable_task_lib: false,
@@ -249,7 +250,8 @@ pub(super) fn configure_runtime_manager() -> LuaResult<KhronosRuntimeManager> {
             Ok(LuaVmState::Continue)
         }),
         None::<(fn(&Lua, LuaThread) -> Result<(), LuaError>, fn() -> ())>,
-    )?;
+    )
+    .await?;
 
     rt.set_memory_limit(MAX_TEMPLATE_MEMORY_USAGE)?;
 
@@ -355,9 +357,7 @@ pub async fn dispatch_event_to_template(
         }
     };
 
-    LuaVmResult::Ok {
-        result_val: value,
-    }
+    LuaVmResult::Ok { result_val: value }
 }
 
 pub async fn dispatch_event_to_multiple_templates(

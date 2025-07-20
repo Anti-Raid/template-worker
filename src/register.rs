@@ -111,6 +111,7 @@ fn register() -> Result<RegisterResult, crate::Error> {
                     }),
                     None::<(fn(&Lua, LuaThread) -> Result<(), LuaError>, fn() -> ())>,
                 )
+                .await
                 .expect("Failed to create KhronosRuntime");
 
                 rt.sandbox().expect("Failed to create sandbox");
@@ -147,8 +148,9 @@ fn register() -> Result<RegisterResult, crate::Error> {
                     .into_khronos_value(&subisolate)
                     .expect("Failed to convert result to serde_json_value");
 
-                let result: RegisterResult = result.into_value()
-                .expect("Failed to deserialize RegisterResult");
+                let result: RegisterResult = result
+                    .into_value()
+                    .expect("Failed to deserialize RegisterResult");
 
                 // Store the result in the shared Arc<RwLock>
                 let mut result_lock = ref_a.write().unwrap();

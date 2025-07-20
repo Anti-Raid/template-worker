@@ -217,7 +217,7 @@ impl ThreadEntry {
                                                     }
                                                 });
 
-                                            let tis_ref = match configure_runtime_manager() {
+                                            let tis_ref = match configure_runtime_manager().await {
                                                 Ok(tis) => tis,
                                                 Err(e) => {
                                                     log::error!(
