@@ -1,8 +1,10 @@
 use crate::config::CONFIG;
+use crate::dispatch::{parse_event, KhronosValueMapper};
 use crate::jobserver;
 use crate::templatingrt::cache::{DeferredCacheRegenMode, DEFERRED_CACHE_REGENS};
 use crate::templatingrt::state::GuildState;
 use crate::templatingrt::template::TemplateLanguage;
+use crate::templatingrt::{KhronosValueResponse, MAX_TEMPLATES_RETURN_WAIT_TIME};
 use antiraid_types::ar_event::AntiraidEvent;
 use chrono::Utc;
 use indexmap::IndexMap;
@@ -619,6 +621,7 @@ impl DataStoreImpl for TemplateStore {
             "create".to_string(),
             "update".to_string(),
             "delete".to_string(),
+            "start".to_string(), // Start a template with a OnStartup
         ]
     }
 
@@ -876,6 +879,57 @@ impl DataStoreImpl for TemplateStore {
                             .await;
 
                         Ok(value!(KhronosValue::Null))
+                    })
+                })))
+            }
+            "start" => {
+                let self_ref = self.clone(); // reference to the guild state data
+                Some(DataStoreMethod::Async(Rc::new(move |v| {
+                    let self_ref = self_ref.clone(); // satisfy rusts borrowing rules
+                    Box::pin(async move {
+                        let mut v = VecDeque::from(v);
+
+                        let Some(name) = v.pop_front() else {
+                            return Err("arg #1 of TemplateStore.start is missing (name)".into());
+                        };
+
+                        let name: String = match name {
+                            KhronosValue::Text(name) => {
+                                if name.is_empty() {
+                                    return Err(
+                                        "arg #1 of TemplateStore.start must not be empty (name)"
+                                            .into(),
+                                    );
+                                }
+                                name
+                            }
+                            _ => {
+                                return Err(
+                                    "arg #1 to TemplateStore.start must be a string (name)".into(),
+                                )
+                            }
+                        };
+
+                        if !self_ref.does_template_exist(&name).await? {
+                            return Err("Template does not exist".into());
+                        }
+
+                        let v = crate::dispatch::dispatch_to_template_and_wait::<KhronosValueResponse>(
+                            &self_ref.guild_state.serenity_context,
+                            &crate::data::Data {
+                                pool: self_ref.guild_state.pool.clone(),
+                                reqwest: self_ref.guild_state.reqwest_client.clone(),
+                                object_store: self_ref.guild_state.object_store.clone(),
+                            },
+                            parse_event(&AntiraidEvent::OnStartup(vec![]))?,
+                            self_ref.guild_state.guild_id,
+                            MAX_TEMPLATES_RETURN_WAIT_TIME,
+                            &name
+                        )
+                        .await
+                        .map_err(|e| format!("Failed to start template: {:?}", e))?;
+
+                        KhronosValueMapper(v).into_khronos_value()
                     })
                 })))
             }

@@ -180,6 +180,31 @@ pub async fn get_templates_with_event(
     }
 }
 
+pub async fn get_templates_by_name(
+    guild_id: GuildId,
+    name: &str,
+) -> Vec<Arc<Template>> {
+    if let Some(templates) = TEMPLATES_CACHE.get(&guild_id).await {
+        // `templates` should have $BUILTINS injected into it, so this is a simple for loop
+        let mut matching_templates = Vec::with_capacity(1);
+        for template in templates.iter() {
+            if template.name == name {
+                matching_templates.push(template.clone());
+            }
+        }
+        return matching_templates;
+    } else {
+        if USE_BUILTINS {
+            if BUILTINS.name == name {
+                let mut templates = Vec::with_capacity(1);
+                templates.push(BUILTINS.clone());
+                return templates;
+            }
+        }
+        return Vec::with_capacity(0);
+    }
+}
+
 pub async fn get_templates_with_event_scoped(
     guild_id: GuildId,
     event: &CreateEvent,

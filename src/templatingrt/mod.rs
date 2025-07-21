@@ -4,6 +4,7 @@ pub mod state;
 pub mod template;
 mod vm_manager;
 
+use khronos_runtime::utils::khronos_value::KhronosValue;
 pub use state::CreateGuildState;
 pub use vm_manager::{
     LuaVmAction, LuaVmResult, ThreadClearInactiveGuilds, ThreadMetrics, ThreadRequest, POOL,
@@ -64,12 +65,40 @@ pub struct LuaVmResultHandle {
     pub template_name: String,
 }
 
+pub trait IntoResponse
+where Self: Sized {
+    fn into_response(value: KhronosValue) -> Result<Self, crate::Error>;
+    fn into_response_without_types(value: KhronosValue) -> Result<Self, crate::Error>;
+}
+
+pub struct KhronosValueResponse(pub KhronosValue);
+
+impl IntoResponse for KhronosValueResponse {
+    fn into_response(value: KhronosValue) -> Result<Self, crate::Error> {
+        Ok(KhronosValueResponse(value))
+    }
+
+    fn into_response_without_types(value: KhronosValue) -> Result<Self, crate::Error> {
+        Ok(KhronosValueResponse(value))
+    }
+}
+
+impl<T: serde::de::DeserializeOwned> IntoResponse for T {
+    fn into_response(value: KhronosValue) -> Result<Self, crate::Error> {
+        value.into_value::<T>()
+    }
+
+    fn into_response_without_types(value: KhronosValue) -> Result<Self, crate::Error> {
+        value.into_value_untyped::<T>()
+    }
+}
+
 impl LuaVmResultHandle {
     /// Convert the result to a response if possible, returning an error if the result is an error
-    pub fn into_response<T: serde::de::DeserializeOwned>(self) -> Result<T, crate::Error> {
+    pub fn into_response<T: IntoResponse>(self) -> Result<T, crate::Error> {
         match self.result {
             LuaVmResult::Ok { result_val } => {
-                let res = result_val.into_value::<T>();
+                let res = T::into_response(result_val);
                 res
             }
             LuaVmResult::LuaError { err } => Err(format!("Lua error: {}", err).into()),
@@ -78,10 +107,10 @@ impl LuaVmResultHandle {
     }
 
     /// Convert the result to a response if possible, returning an error if the result is an error
-    pub fn into_response_without_types<T: serde::de::DeserializeOwned>(self) -> Result<T, crate::Error> {
+    pub fn into_response_without_types<T: IntoResponse>(self) -> Result<T, crate::Error> {
         match self.result {
             LuaVmResult::Ok { result_val } => {
-                let res = result_val.into_value_untyped::<T>();
+                let res = T::into_response_without_types(result_val);
                 res
             }
             LuaVmResult::LuaError { err } => Err(format!("Lua error: {}", err).into()),

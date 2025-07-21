@@ -1,10 +1,14 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::data::Data;
-use crate::templatingrt::cache::{get_templates_with_event, get_templates_with_event_scoped};
-use crate::templatingrt::{execute, CreateGuildState, LuaVmAction};
+use crate::templatingrt::cache::{get_templates_with_event, get_templates_with_event_scoped, get_templates_by_name};
+use crate::templatingrt::{IntoResponse, KhronosValueResponse};
+use crate::templatingrt::{execute, CreateGuildState, LuaVmAction, template::Template};
 use antiraid_types::ar_event::AntiraidEvent;
+use indexmap::IndexMap;
 use khronos_runtime::primitives::event::CreateEvent;
+use khronos_runtime::utils::khronos_value::KhronosValue;
 use serenity::all::{Context, FullEvent, GuildId, Interaction};
 
 #[inline]
@@ -139,26 +143,15 @@ pub async fn dispatch(
     Ok(())
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type", content = "data")]
-pub enum DispatchResult<T> {
-    Ok(T),
-    Err(String),
-}
-
 /// Dispatches a template event to all templates, waiting for the response and returning it
-pub async fn dispatch_and_wait<T: serde::de::DeserializeOwned>(
+pub async fn dispatch_to_and_wait<T: IntoResponse>(
     ctx: &Context,
     data: &Data,
     event: CreateEvent,
     guild_id: GuildId,
     wait_timeout: std::time::Duration,
+    templates: Vec<Arc<Template>>,
 ) -> Result<HashMap<String, DispatchResult<T>>, crate::Error> {
-    let matching = get_templates_with_event(guild_id, &event).await;
-    if matching.is_empty() {
-        return Ok(HashMap::new());
-    };
-
     let handle = execute(
         guild_id,
         CreateGuildState {
@@ -169,7 +162,7 @@ pub async fn dispatch_and_wait<T: serde::de::DeserializeOwned>(
         },
         LuaVmAction::DispatchEvent {
             event,
-            templates: matching,
+            templates,
         },
     )
     .await?;
@@ -201,6 +194,68 @@ pub async fn dispatch_and_wait<T: serde::de::DeserializeOwned>(
     }
 
     Ok(results)
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", content = "data")]
+pub enum DispatchResult<T> {
+    Ok(T),
+    Err(String),
+}
+
+#[allow(dead_code)]
+impl DispatchResult<KhronosValue> {
+    pub fn into_khronos_value(self) -> Result<KhronosValue, crate::Error> {
+        match self {
+            DispatchResult::Ok(value) => Ok(value),
+            DispatchResult::Err(e) => Err(e.into()),
+        }
+    }
+}
+
+impl DispatchResult<KhronosValueResponse> {
+    pub fn into_khronos_value(self) -> Result<KhronosValue, crate::Error> {
+        match self {
+            DispatchResult::Ok(value) => Ok(value.0),
+            DispatchResult::Err(e) => Err(e.into()),
+        }
+    }
+}
+
+/// Simple helper to convert a dispatch result of KhronosValueResponse into a KhronosValue
+pub struct KhronosValueMapper(pub HashMap<String, DispatchResult<KhronosValueResponse>>);
+
+impl KhronosValueMapper {
+    pub fn into_khronos_value(self) -> Result<KhronosValue, crate::Error> {
+        let mut result = IndexMap::with_capacity(self.0.len());
+        for (key, value) in self.0 {
+            result.insert(key, value.into_khronos_value()?);
+        }
+        Ok(KhronosValue::Map(result))
+    }
+}
+
+/// Dispatches a template event to all templates, waiting for the response and returning it
+pub async fn dispatch_and_wait<T: IntoResponse>(
+    ctx: &Context,
+    data: &Data,
+    event: CreateEvent,
+    guild_id: GuildId,
+    wait_timeout: std::time::Duration,
+) -> Result<HashMap<String, DispatchResult<T>>, crate::Error> {
+    let matching = get_templates_with_event(guild_id, &event).await;
+    if matching.is_empty() {
+        return Ok(HashMap::new());
+    };
+
+    dispatch_to_and_wait(
+        ctx,
+        data,
+        event,
+        guild_id,
+        wait_timeout,
+        matching,
+    ).await
 }
 
 #[allow(dead_code)]
@@ -236,7 +291,7 @@ pub async fn dispatch_scoped(
 }
 
 /// Dispatches a template event to all templates, waiting for the response and returning it
-pub async fn dispatch_scoped_and_wait<T: serde::de::DeserializeOwned>(
+pub async fn dispatch_scoped_and_wait<T: IntoResponse>(
     ctx: &Context,
     data: &Data,
     event: CreateEvent,
@@ -249,46 +304,36 @@ pub async fn dispatch_scoped_and_wait<T: serde::de::DeserializeOwned>(
         return Ok(HashMap::new());
     };
 
-    let handle = execute(
+    dispatch_to_and_wait(
+        ctx,
+        data,
+        event,
         guild_id,
-        CreateGuildState {
-            serenity_context: ctx.clone(),
-            pool: data.pool.clone(),
-            reqwest_client: data.reqwest.clone(),
-            object_store: data.object_store.clone(),
-        },
-        LuaVmAction::DispatchEvent {
-            event,
-            templates: matching,
-        },
-    )
-    .await?;
+        wait_timeout,
+        matching,
+    ).await
+}
 
-    let result_handle = match handle.wait_timeout(wait_timeout).await {
-        Ok(Some(action)) => action,
-        Ok(None) => return Err("Timed out while waiting for response".into()),
-        Err(e) => return Err(e.to_string().into()),
+/// Dispatches a template event to all templates, waiting for the response and returning it
+pub async fn dispatch_to_template_and_wait<T: IntoResponse>(
+    ctx: &Context,
+    data: &Data,
+    event: CreateEvent,
+    guild_id: GuildId,
+    wait_timeout: std::time::Duration,
+    template_name: &str,
+) -> Result<HashMap<String, DispatchResult<T>>, crate::Error> {
+    let matching = get_templates_by_name(guild_id, template_name).await;
+    if matching.is_empty() {
+        return Ok(HashMap::new());
     };
 
-    let mut results = HashMap::with_capacity(result_handle.results.len());
-
-    for result in result_handle.results {
-        let name = result.template_name.clone();
-
-        if let Some(e) = result.lua_error() {
-            results.insert(name, DispatchResult::Err(e.to_string()));
-            continue;
-        }
-
-        match result.into_response_without_types::<T>() {
-            Ok(value) => {
-                results.insert(name, DispatchResult::Ok(value));
-            }
-            Err(e) => {
-                results.insert(name, DispatchResult::Err(e.to_string()));
-            }
-        }
-    }
-
-    Ok(results)
+    dispatch_to_and_wait(
+        ctx,
+        data,
+        event,
+        guild_id,
+        wait_timeout,
+        matching,
+    ).await
 }
