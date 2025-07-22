@@ -119,6 +119,7 @@ fn register() -> Result<RegisterResult, crate::Error> {
                 let subisolate = KhronosIsolate::new_subisolate(
                     rt,
                     FilesystemWrapper::new(crate::templatingrt::cache::BUILTINS.content.0.clone()),
+                    true // Enable safeenv
                 )
                 .expect("Failed to create KhronosIsolate");
 

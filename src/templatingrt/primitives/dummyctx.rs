@@ -4,6 +4,7 @@ use khronos_runtime::traits::context::{
 use khronos_runtime::traits::datastoreprovider::{DataStoreImpl, DataStoreProvider};
 use khronos_runtime::traits::discordprovider::DiscordProvider;
 use khronos_runtime::traits::httpclientprovider::HTTPClientProvider;
+use khronos_runtime::traits::httpserverprovider::HTTPServerProvider;
 use khronos_runtime::traits::ir::kv::KvRecord;
 use khronos_runtime::traits::ir::ObjectMetadata;
 use khronos_runtime::traits::kvprovider::KVProvider;
@@ -48,6 +49,7 @@ impl KhronosContext for DummyProvider {
     type DataStoreProvider = DummyDataStoreProvider;
     type ObjectStorageProvider = DummyObjectStorageProvider;
     type HTTPClientProvider = DummyHTTPClientProvider;
+    type HTTPServerProvider = DummyHTTPServerProvider;
 
     fn data(&self) -> &ScriptData {
         &self.template_data
@@ -92,6 +94,10 @@ impl KhronosContext for DummyProvider {
     }
 
     fn httpclient_provider(&self) -> Option<Self::HTTPClientProvider> {
+        None
+    }
+
+    fn httpserver_provider(&self) -> Option<Self::HTTPServerProvider> {
         None
     }
 }
@@ -287,5 +293,14 @@ pub struct DummyHTTPClientProvider {}
 impl HTTPClientProvider for DummyHTTPClientProvider {
     fn attempt_action(&self, _bucket: &str, _url: &str) -> Result<(), khronos_runtime::Error> {
         Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct DummyHTTPServerProvider {}
+
+impl HTTPServerProvider for DummyHTTPServerProvider {
+    fn attempt_action(&self, _bucket: &str, _path: String) -> Result<(), khronos_runtime::Error> {
+        Err("Internal Error: unreachable code: HTTP server provider not implemented for templates".into())
     }
 }

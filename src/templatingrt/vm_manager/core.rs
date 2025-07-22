@@ -286,6 +286,7 @@ pub async fn dispatch_event_to_template(
             match KhronosIsolate::new_subisolate(
                 manager.runtime().clone(),
                 FilesystemWrapper::new(template.content.0.clone()),
+                false // TODO: Allow safeenv optimization one day
             ) {
                 Ok(isolate) => {
                     break isolate;

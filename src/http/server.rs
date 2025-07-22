@@ -54,36 +54,36 @@ pub fn create(
 ) -> axum::routing::IntoMakeService<Router> {
     let router = Router::new()
         .layer(tower_http::trace::TraceLayer::new_for_http())
-        .route("/dispatch-event/:guild_id", post(dispatch_event))
+        .route("/dispatch-event/{guild_id}", post(dispatch_event))
         .route(
-            "/dispatch-event/:guild_id/@wait",
+            "/dispatch-event/{guild_id}/@wait",
             post(dispatch_event_and_wait),
         )
         .route("/healthcheck", post(|| async { Json(()) }))
         .route(
-            "/settings/:guild_id/:user_id",
+            "/settings/{guild_id}/{user_id}",
             get(get_settings_for_guild_user),
         )
         .route(
-            "/settings/:guild_id/:user_id",
+            "/settings/{guild_id}/{user_id}",
             post(execute_setting_for_guild_user),
         )
         .route("/ping-all-threads", post(ping_all_threads))
         .route("/threads-count", get(get_threads_count))
         .route("/clear-inactive-guilds", post(clear_inactive_guilds))
         .route("/remove_unused_threads", post(remove_unused_threads))
-        .route("/close-thread/:tid", post(close_thread))
+        .route("/close-thread/{tid}", post(close_thread))
         .route(
-            "/execute-luavmaction/:guild_id",
+            "/execute-luavmaction/{guild_id}",
             post(execute_lua_vm_action),
         )
-        .route("/get-vm-metrics-by-tid/:tid", get(get_vm_metrics_by_tid))
+        .route("/get-vm-metrics-by-tid/{tid}", get(get_vm_metrics_by_tid))
         .route("/get-vm-metrics-for-all", get(get_vm_metrics_for_all))
         // Given a list of guild ids, return a set of 0s and 1s indicating whether each guild exists in cache [GuildsExist]
         .route("/guilds-exist", get(guilds_exist))
         // Returns basic user/guild information [BaseGuildUserInfo]
         .route(
-            "/base-guild-user-info/:guild_id/:user_id",
+            "/base-guild-user-info/{guild_id}/{user_id}",
             get(base_guild_user_info),
         )
         // Returns the bots state [BotState]
