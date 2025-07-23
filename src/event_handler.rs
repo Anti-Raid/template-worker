@@ -4,7 +4,7 @@ use crate::http::init::{start_rpc_server, CreateRpcServerBind, CreateRpcServerOp
 use crate::templatingrt::cache::{get_all_guild_templates, get_all_guilds_with_templates};
 use antiraid_types::ar_event::AntiraidEvent;
 use async_trait::async_trait;
-use serenity::all::Framework;
+use serenity::all::{EventHandler, IEvent};
 use serenity::gateway::client::Context;
 
 static ONCE: std::sync::Once = std::sync::Once::new();
@@ -12,9 +12,14 @@ static ONCE: std::sync::Once = std::sync::Once::new();
 pub struct EventFramework {}
 
 #[async_trait]
-impl Framework for EventFramework {
-    async fn dispatch(&self, ctx: &Context, event: &serenity::all::FullEvent) {
-        if let serenity::all::FullEvent::Ready { .. } = event {
+impl EventHandler for EventFramework {
+    async fn dispatch(&self, ctx: &Context, event: &IEvent) {
+        if event.ty == "GUILD_CREATE" {
+            // Ignore guild create events
+            return;
+        }
+
+        if event.ty == "READY" {
             ONCE.call_once(|| {
                 let ctx1 = ctx.clone();
                 let data1 = ctx.data::<crate::data::Data>();

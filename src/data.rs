@@ -5,6 +5,7 @@ use std::sync::Arc;
 /// This struct stores base/standard command data, which is stored and accessible in all command invocations
 #[derive(Clone)]
 pub struct Data {
+    pub current_user: serenity::all::CurrentUser,
     pub pool: sqlx::PgPool,
     pub reqwest: reqwest::Client,
     pub object_store: Arc<ObjectStore>,

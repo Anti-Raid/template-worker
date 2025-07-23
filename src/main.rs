@@ -15,9 +15,10 @@ use crate::data::Data;
 use crate::event_handler::EventFramework;
 use crate::templatingrt::cache::setup;
 use log::{error, info};
-use serenity::all::HttpBuilder;
+use serenity::all::{ApplicationId, HttpBuilder};
 use sqlx::postgres::PgPoolOptions;
 use std::io::Write;
+use std::str::FromStr;
 use std::{sync::Arc, time::Duration};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>; // This is constant and should be copy pasted
@@ -51,8 +52,9 @@ async fn main() {
 
     info!("Proxy URL: {}", proxy_url);
 
+    let token = serenity::all::Token::from_str(&CONFIG.discord_auth.token).expect("Failed to validate token");
     let http = Arc::new(
-        HttpBuilder::new(&CONFIG.discord_auth.token)
+        HttpBuilder::new(token.clone())
             .proxy(proxy_url)
             .ratelimiter_disabled(true)
             .build(),
@@ -68,7 +70,7 @@ async fn main() {
     intents.remove(serenity::all::GatewayIntents::DIRECT_MESSAGE_TYPING); // Don't care about typing
     intents.remove(serenity::all::GatewayIntents::DIRECT_MESSAGES); // Don't care about DMs
 
-    let client_builder = serenity::all::ClientBuilder::new_with_http(http, intents);
+    let client_builder = serenity::all::ClientBuilder::new_with_http(token, http, intents);
 
     info!("Connecting to database");
 
@@ -84,6 +86,12 @@ async fn main() {
         .build()
         .expect("Could not initialize reqwest client");
 
+    let current_user = sandwich::current_user(&reqwest)
+        .await
+        .expect("Failed to get current user");
+
+    let current_user_id = current_user.id;
+
     let data = Data {
         object_store: Arc::new(
             CONFIG
@@ -93,16 +101,15 @@ async fn main() {
         ),
         pool: pg_pool.clone(),
         reqwest,
+        current_user
     };
 
     let mut client = client_builder
         .data(Arc::new(data))
-        .framework(EventFramework {})
+        .event_handler(EventFramework {})
         .wait_time_between_shard_start(Duration::from_secs(0)) // Disable wait time between shard start due to Sandwich
         .await
         .expect("Error creating client");
-
-    client.cache.set_max_messages(10000);
 
     info!("Getting registration data from builtins");
 
@@ -110,16 +117,9 @@ async fn main() {
 
     println!("Register data: {:?}", data);
 
+    client.http.set_application_id(ApplicationId::new(current_user_id.get()));
+
     if CMD_ARGS.register_commands_only {
-        let app_id = client
-            .http
-            .get_current_application_info()
-            .await
-            .expect("Failed to get application info")
-            .id;
-
-        client.http.set_application_id(app_id);
-
         client
             .http
             .create_global_commands(&data.commands)

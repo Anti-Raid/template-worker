@@ -195,13 +195,6 @@ impl DiscordProvider for DummyDiscordProvider {
         Ok(())
     }
 
-    async fn get_channel(
-        &self,
-        _channel_id: serenity::all::ChannelId,
-    ) -> serenity::Result<serenity::all::GuildChannel, crate::Error> {
-        unreachable!()
-    }
-
     fn guild_id(&self) -> serenity::all::GuildId {
         unreachable!()
     }

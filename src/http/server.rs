@@ -386,7 +386,6 @@ pub(crate) async fn guilds_exist(
 
     for guild in guilds {
         let has_guild = crate::sandwich::has_guild(
-            &serenity_context.cache,
             &serenity_context.http,
             &data.reqwest,
             guild,
@@ -415,7 +414,7 @@ async fn base_guild_user_info(
     }): State<AppData>,
     Path((guild_id, user_id)): Path<(serenity::all::GuildId, serenity::all::UserId)>,
 ) -> Response<BaseGuildUserInfo> {
-    let bot_user_id = serenity_context.cache.current_user().id;
+    let bot_user_id = data.current_user.id;
     let guild = crate::sandwich::guild(
         &serenity_context.http,
         &data.reqwest,

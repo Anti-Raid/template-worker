@@ -1,7 +1,6 @@
 use crate::templatingrt::state::GuildState;
 use crate::templatingrt::template::Template;
-use botox::crypto::gen_random;
-use botox::ExtractMap;
+use extract_map::ExtractMap;
 use khronos_runtime::traits::context::{
     CompatibilityFlags, KhronosContext, Limitations, ScriptData,
 };
@@ -15,12 +14,18 @@ use khronos_runtime::traits::kvprovider::KVProvider;
 use khronos_runtime::traits::objectstorageprovider::ObjectStorageProvider;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use moka::future::Cache;
+use rand::distr::{Alphanumeric, SampleString};
 use sqlx::Row;
 use std::sync::LazyLock;
 use std::{rc::Rc, sync::Arc};
 
+/// Returns a random string of length ``length``
+fn gen_random(length: usize) -> String {
+    Alphanumeric.sample_string(&mut rand::rng(), length)
+}
+
 /// Internal short-lived channel cache
-pub static CHANNEL_CACHE: LazyLock<Cache<serenity::all::ChannelId, serenity::all::GuildChannel>> =
+pub static CHANNEL_CACHE: LazyLock<Cache<serenity::all::GenericChannelId, serenity::all::Channel>> =
     LazyLock::new(|| {
         Cache::builder()
             .time_to_idle(std::time::Duration::from_secs(30))
@@ -73,7 +78,7 @@ impl TemplateContextProvider {
                 shop_name: template_data.shop_name.clone(),
                 shop_owner: template_data.shop_owner,
                 events: template_data.events.clone(),
-                error_channel: template_data.error_channel,
+                error_channel: template_data.error_channel.map(|x| x.widen()),
                 lang: template_data.lang.to_string(),
                 allowed_caps: template_data.allowed_caps.clone(),
                 created_by: None,
@@ -118,10 +123,10 @@ impl KhronosContext for TemplateContextProvider {
     fn current_user(&self) -> Option<serenity::all::CurrentUser> {
         Some(
             self.guild_state
-                .serenity_context
-                .cache
-                .current_user()
-                .clone(),
+            .serenity_context
+            .data::<crate::Data>()
+            .current_user
+            .clone()
         )
     }
 
@@ -731,14 +736,18 @@ impl DiscordProvider for ArDiscordProvider {
 
     async fn get_channel(
         &self,
-        channel_id: serenity::all::ChannelId,
-    ) -> serenity::Result<serenity::all::GuildChannel, crate::Error> {
+        channel_id: serenity::all::GenericChannelId,
+    ) -> serenity::Result<serenity::all::Channel, crate::Error> {
         {
             // Check cache first
             let cached_channel = CHANNEL_CACHE.get(&channel_id).await;
 
             if let Some(cached_channel) = cached_channel {
-                if cached_channel.guild_id != self.guild_id {
+                let Some(guild_id) = cached_channel.guild_id() else {
+                    return Err("Channel not in guild".into());
+                };
+
+                if guild_id != self.guild_id {
                     return Err("Channel not in guild".into());
                 }
 
@@ -759,15 +768,15 @@ impl DiscordProvider for ArDiscordProvider {
             return Err("Channel not found".into());
         };
 
-        let Some(guild_channel) = channel.guild() else {
+        let Some(guild_id) = channel.guild_id() else {
             return Err("Channel not in guild".into());
         };
 
-        if guild_channel.guild_id != self.guild_id {
+        if guild_id != self.guild_id {
             return Err("Channel not in guild".into());
         }
 
-        Ok(guild_channel)
+        Ok(channel)
     }
 
     fn guild_id(&self) -> serenity::all::GuildId {
@@ -778,13 +787,9 @@ impl DiscordProvider for ArDiscordProvider {
         &self.guild_state.serenity_context.http
     }
 
-    fn serenity_cache(&self) -> Option<&serenity::cache::Cache> {
-        Some(&self.guild_state.serenity_context.cache)
-    }
-
     async fn edit_channel_permissions(
         &self,
-        channel_id: serenity::all::ChannelId,
+        channel_id: serenity::all::GenericChannelId,
         target_id: serenity::all::TargetId,
         data: impl serde::Serialize,
         audit_log_reason: Option<&str>,
@@ -792,7 +797,7 @@ impl DiscordProvider for ArDiscordProvider {
         self.guild_state
             .serenity_context
             .http
-            .create_permission(channel_id, target_id, &data, audit_log_reason)
+            .create_permission(channel_id.expect_channel(), target_id, &data, audit_log_reason)
             .await
             .map_err(|e| format!("Failed to edit channel permissions: {}", e))?;
 
@@ -804,10 +809,10 @@ impl DiscordProvider for ArDiscordProvider {
 
     async fn edit_channel(
         &self,
-        channel_id: serenity::all::ChannelId,
+        channel_id: serenity::all::GenericChannelId,
         map: impl serde::Serialize,
         audit_log_reason: Option<&str>,
-    ) -> Result<serenity::model::channel::GuildChannel, crate::Error> {
+    ) -> Result<serenity::model::channel::Channel, crate::Error> {
         let chan = self
             .guild_state
             .serenity_context
@@ -824,7 +829,7 @@ impl DiscordProvider for ArDiscordProvider {
 
     async fn delete_channel(
         &self,
-        channel_id: serenity::all::ChannelId,
+        channel_id: serenity::all::GenericChannelId,
         audit_log_reason: Option<&str>,
     ) -> Result<serenity::model::channel::Channel, crate::Error> {
         let chan = self

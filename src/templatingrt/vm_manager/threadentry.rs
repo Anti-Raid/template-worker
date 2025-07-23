@@ -100,7 +100,7 @@ impl ThreadEntry {
                 // Generate a random id for the thread entry
                 use rand::Rng;
 
-                rand::thread_rng().gen()
+                rand::rng().random()
             },
             count: Arc::new(AtomicUsize::new(0)),
             tx,

@@ -9,92 +9,49 @@ use antiraid_types::ar_event::AntiraidEvent;
 use indexmap::IndexMap;
 use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::utils::khronos_value::KhronosValue;
-use serenity::all::{Context, FullEvent, GuildId, Interaction};
-
-#[inline]
-const fn not_audit_loggable_event() -> &'static [&'static str] {
-    &[
-        "CACHE_READY",         // Internal
-        "RATELIMIT",           // Internal
-        "GUILD_CREATE",        // Internal
-        "GUILD_MEMBERS_CHUNK", // Internal
-    ]
-}
+use serenity::all::{Context, IEvent, GuildId};
 
 pub async fn discord_event_dispatch(
-    event: &FullEvent,
+    event: &IEvent,
     serenity_context: &Context,
 ) -> Result<(), crate::Error> {
-    let data = serenity_context.data::<Data>();
-
-    let Some(guild_id) = gwevent::core::get_event_guild_id(event) else {
-        return Ok(());
-    };
-
-    let event_snake_name = event.snake_case_name();
-    if not_audit_loggable_event().contains(&event_snake_name) {
+    if event.ty == "GUILD_CREATE" {
+        // Ignore guild create events
         return Ok(());
     }
 
-    let user_id = gwevent::core::get_event_user_id(event);
+    let data = serenity_context.data::<Data>();
 
-    let event_data = match event {
-        FullEvent::GuildAuditLogEntryCreate { .. } => serde_json::to_value(event)?,
-        FullEvent::InteractionCreate { interaction } => {
-            match interaction {
-                Interaction::Ping(_) => return Ok(()),
-                Interaction::Command(_) | Interaction::Autocomplete(_) => {
-                    let mut value = serde_json::to_value(interaction)?;
-
-                    // Inject in type
-                    if let serde_json::Value::Object(ref mut map) = value {
-                        let typ: u8 = interaction.kind().0;
-                        map.insert("type".to_string(), serde_json::Value::Number(typ.into()));
-                    }
-
-                    serde_json::json!({
-                        "InteractionCreate": {
-                            "interaction": value
-                        }
-                    })
-                }
-                _ => {
-                    let mut value = serde_json::to_value(interaction)?; // Allow Component+Modal interactions to freely passed through
-
-                    // Inject in type
-                    if let serde_json::Value::Object(ref mut map) = value {
-                        let typ: u8 = interaction.kind().0;
-                        map.insert("type".to_string(), serde_json::Value::Number(typ.into()));
-                    }
-
-                    serde_json::json!({
-                        "InteractionCreate": {
-                            "interaction": value
-                        }
-                    })
-                }
-            }
-        }
-        // Ignore ourselves as well as interaction creates that are reserved
-        _ => {
-            if let Some(user_id) = user_id {
-                if user_id == serenity_context.cache.current_user().id {
+    let guild_id = match event.sandwich_edt {
+        Some(ref edt) => {
+            /*if let Some(user_id) = edt.user_id {
+                if user_id == data.current_user.id {
                     return Ok(());
                 }
-            }
+            }*/ // Unsure on whether ignoring ourselves is desirable or not
 
-            serde_json::to_value(event)?
-        }
+            match edt.guild_id {
+                Some(guild_id) => guild_id,
+                None => return Ok(()), // No guild ID, nothing to do
+            }
+        },
+        None => return Ok(()), // No EventDispatchIdentifier from Sandwich-Daemon, nothing to do
     };
+
+
+    let event_data = serde_json::from_str(event.data.get())?;
 
     dispatch(
         serenity_context,
         &data,
         CreateEvent::new(
             "Discord".to_string(),
-            event.snake_case_name().to_uppercase(),
+            if event.ty.as_str() == "MESSAGE_CREATE" {
+                "MESSAGE".to_string() // Message events are called MESSAGE and not MESSAGE_CREATE in AntiRaid for backwards compatibility
+            } else {
+                event.ty.clone()
+            },
             event_data,
-            user_id.map(|u| u.to_string()),
         ),
         guild_id,
     )
@@ -107,7 +64,6 @@ pub fn parse_event(event: &AntiraidEvent) -> Result<CreateEvent, crate::Error> {
         "AntiRaid".to_string(),
         event.to_string(),
         event.to_value()?,
-        event.author(),
     ))
 }
 

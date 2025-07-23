@@ -16,7 +16,8 @@ serde_json = "1.0"
 serde_yaml = "0.9"
 scc = "2"
 governor = "0.6"
-rand = "0.8"
+extract_map = { version = "0.3", features = ["serde"] }
+rand = "0.9"
 chrono = { version = "0.4", features = ["serde"]}
 clap = { version = "4.5.16", features = ["derive"] }
 moka = { version = "0.12", features = ["future", "futures-util", "sync"] }
@@ -24,7 +25,6 @@ indexmap = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 antiraid-types = { git = "https://github.com/anti-raid/antiraid-types" }
 khronos_runtime = { git = "https://github.com/anti-raid/khronos" }
-gwevent = { git = "https://github.com/Anti-Raid/gwevent" }
 vfs = { git = "https://github.com/Anti-Raid/rust-vfs", features = ["embedded-fs"] }
 rust-embed = { version = "8.7.0", features = ["debug-embed", "interpolate-folder-path"] }
 futures = "0.3"
@@ -54,7 +54,3 @@ features = ["sync", "macros", "rt-multi-thread", "tracing"]
 git = "https://github.com/Anti-Raid/serenity"
 branch = "next"
 features = ["model", "http", "cache", "rustls_backend", "unstable"]
-
-[dependencies.botox]
-git = "https://github.com/Anti-Raid/botox"
-branch = "main"

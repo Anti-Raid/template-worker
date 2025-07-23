@@ -131,6 +131,41 @@ impl LuaVmResult {
         }
     }
 
+    fn _error_message(
+        &self,
+        template: &Template,
+        error: String,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "embeds": [
+                {
+                    "title": "Error executing template",
+                    "description": error,
+                    "fields": [
+                        {
+                            "name": "Template",
+                            "value": template.name.clone(),
+                            "inline": false
+                        }
+                    ],
+                }
+            ],
+            "components": [
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 2,
+                            "style": 1,
+                            "label": "Support Server",
+                            "url": CONFIG.meta.support_server_invite.to_string(),
+                        }
+                    ]
+                }
+            ],
+        })
+    }
+
     async fn _log_error_to_main_server(
         &self,
         guild_state: &GuildState,
@@ -138,27 +173,14 @@ impl LuaVmResult {
         error: String,
     ) -> Result<(), crate::Error> {
         // Send to main server
-        crate::CONFIG
+        guild_state.serenity_context.http.send_message(
+            crate::CONFIG
             .meta
-            .default_error_channel
-            .send_message(
-                &guild_state.serenity_context.http,
-                serenity::all::CreateMessage::new()
-                    .embed(
-                        serenity::all::CreateEmbed::new()
-                            .title("Error executing template")
-                            .field("Error", error, false)
-                            .field("Template", template.name.clone(), false),
-                    )
-                    .components(vec![serenity::all::CreateActionRow::Buttons(
-                        vec![serenity::all::CreateButton::new_link(
-                            &CONFIG.meta.support_server_invite,
-                        )
-                        .label("Support Server")]
-                        .into(),
-                    )]),
-            )
-            .await?;
+            .default_error_channel.widen(),
+            Vec::with_capacity(0),
+            &self._error_message(template, error),
+        )
+        .await?;
 
         Ok(())
     }
@@ -175,25 +197,12 @@ impl LuaVmResult {
         };
 
         if let Some(error_channel) = template.error_channel {
-            let err = error_channel
-                .send_message(
-                    &guild_state.serenity_context.http,
-                    serenity::all::CreateMessage::new()
-                        .embed(
-                            serenity::all::CreateEmbed::new()
-                                .title("Error executing template")
-                                .field("Error", error, false)
-                                .field("Template", template.name.clone(), false),
-                        )
-                        .components(vec![serenity::all::CreateActionRow::Buttons(
-                            vec![serenity::all::CreateButton::new_link(
-                                &CONFIG.meta.support_server_invite,
-                            )
-                            .label("Support Server")]
-                            .into(),
-                        )]),
-                )
-                .await;
+            let err = guild_state.serenity_context.http.send_message(
+                error_channel.widen(),
+                Vec::with_capacity(0),
+                &self._error_message(template, error),
+            )
+            .await;
 
             // Check for a 404
             if let Err(e) = err {

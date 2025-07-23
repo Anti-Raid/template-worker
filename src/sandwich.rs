@@ -3,19 +3,39 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::HashMap;
 
+/// Returns the current user from Sandwich
+pub async fn current_user(
+    reqwest_client: &reqwest::Client,
+) -> Result<serenity::all::CurrentUser, Error> {
+    let url = format!(
+        "{}/antiraid/api/current-user",
+        crate::CONFIG.meta.sandwich_http_api
+    );
+
+    #[derive(Serialize, Deserialize)]
+    struct Resp {
+        ok: bool,
+        data: Option<serenity::all::CurrentUser>,
+        error: Option<String>,
+    }
+
+    let resp = reqwest_client.get(&url).send().await?.json::<Resp>().await?;
+
+    if resp.ok {
+        resp.data.ok_or_else(|| "No current user found".into())
+    } else {
+        Err(resp.error.unwrap_or_else(|| "Unknown error".to_string()).into())
+    }
+}
+
 /// Checks if anti-raid is in a server or not
 /// Fetches a guild while handling all the pesky errors serenity normally has
 /// with caching
 pub async fn has_guild(
-    cache: &serenity::all::Cache,
     http: &serenity::http::Http,
     reqwest_client: &reqwest::Client,
     guild_id: serenity::all::GuildId,
 ) -> Result<bool, Error> {
-    if cache.guilds().contains(&guild_id) {
-        return Ok(true);
-    }
-
     #[derive(serde::Serialize, serde::Deserialize, Debug)]
     struct Resp {
         ok: bool,
@@ -153,7 +173,9 @@ pub async fn guild(
     Ok(res)
 }
 
-/// Faster version of botox member in guild that also takes into account the sandwich proxy layer
+/// Returns a member in a guild using sandwich proxy
+/// If the member is not found in the sandwich proxy, it will fetch it from the HTTP
+/// API and update the sandwich proxy with the member data  
 pub async fn member_in_guild(
     http: &serenity::http::Http,
     reqwest_client: &reqwest::Client,
@@ -202,7 +224,6 @@ pub async fn member_in_guild(
         }
     }
 
-    // Last resort, use botox to fetch from http and then update sandwich as well
     let member = match http.get_member(guild_id, user_id).await {
         Ok(mem) => mem,
         Err(e) => match e {
@@ -415,7 +436,7 @@ pub async fn channel(
     http: &serenity::http::Http,
     reqwest_client: &reqwest::Client,
     guild_id: Option<serenity::model::id::GuildId>,
-    channel_id: serenity::model::id::ChannelId,
+    channel_id: serenity::model::id::GenericChannelId,
 ) -> Result<Option<serenity::all::Channel>, Error> {
     let url = match guild_id {
         Some(guild_id) => format!(
