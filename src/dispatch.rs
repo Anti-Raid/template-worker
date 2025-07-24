@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::data::Data;
 use crate::templatingrt::cache::{get_templates_with_event, get_templates_with_event_scoped, get_templates_by_name};
 use crate::templatingrt::{IntoResponse, KhronosValueResponse};
-use crate::templatingrt::{execute, CreateGuildState, LuaVmAction, template::Template};
+use crate::templatingrt::{fire, execute, CreateGuildState, LuaVmAction, template::Template};
 use antiraid_types::ar_event::AntiraidEvent;
 use indexmap::IndexMap;
 use khronos_runtime::primitives::event::CreateEvent;
@@ -65,6 +65,7 @@ pub fn parse_event(event: &AntiraidEvent) -> Result<CreateEvent, crate::Error> {
     ))
 }
 
+/// Dispatch without waiting for a response
 pub async fn dispatch(
     ctx: &Context,
     data: &Data,
@@ -79,7 +80,7 @@ pub async fn dispatch(
         return Ok(());
     };
 
-    execute(
+    fire(
         guild_id,
         CreateGuildState {
             serenity_context: ctx.clone(),
@@ -92,12 +93,10 @@ pub async fn dispatch(
             templates: matching,
         },
     )
-    .await?;
-
-    Ok(())
+    .await
 }
 
-/// Dispatches a template event to all templates, waiting for the response and returning it
+/// Dispatches a template event to all templates, waiting for as many responses as possible and returning it
 pub async fn dispatch_to_and_wait<T: IntoResponse>(
     ctx: &Context,
     data: &Data,
@@ -121,11 +120,7 @@ pub async fn dispatch_to_and_wait<T: IntoResponse>(
     )
     .await?;
 
-    let result_handle = match handle.wait_timeout(wait_timeout).await {
-        Ok(Some(action)) => action,
-        Ok(None) => return Err("Timed out while waiting for response".into()),
-        Err(e) => return Err(e.to_string().into()),
-    };
+    let result_handle = handle.wait_timeout(wait_timeout).await?;
 
     let mut results = HashMap::with_capacity(result_handle.results.len());
 

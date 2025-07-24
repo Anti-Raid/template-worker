@@ -299,17 +299,14 @@ pub async fn regenerate_cache(
     // Send a message to stop VMs running potentially outdated code
     let mut resync = false;
     if let Some(vm) = crate::templatingrt::POOL.get_guild_if_exists(guild_id)? {
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         vm.send(ThreadRequest::Dispatch {
-            callback: tx,
+            callback: Some(tx),
             action: LuaVmAction::Stop {},
             guild_id,
         })?;
         let handle = RenderTemplateHandle { rx };
-        let Some(mvmr) = handle.wait_timeout(MAX_TEMPLATES_RETURN_WAIT_TIME).await? else {
-            return Err("Timed out waiting for templates to clear from VMs".into());
-        };
-
+        let mvmr = handle.wait_timeout(MAX_TEMPLATES_RETURN_WAIT_TIME).await?;
         for result in mvmr.results {
             if result.is_error() {
                 return Err(format!("Failed to clear cache in VM: {:?}", result.result).into());

@@ -44,7 +44,7 @@ pub enum ThreadRequest {
     Dispatch {
         guild_id: GuildId, // id of discord server
         action: LuaVmAction,
-        callback: Sender<Vec<(String, LuaVmResult)>>,
+        callback: Option<UnboundedSender<(String, LuaVmResult)>>,
     },
     /// Diagnostic message to check if a vm is alive or not
     Ping { tx: Sender<()> },

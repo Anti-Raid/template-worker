@@ -246,24 +246,15 @@ async fn execute_lua_vm_action(
         )
     })?;
 
-    let result_handle = match handle
+    let result_handle = handle
         .wait_timeout(opts.wait_timeout.unwrap_or(MAX_TEMPLATES_RETURN_WAIT_TIME))
         .await
-    {
-        Ok(Some(action)) => action,
-        Ok(None) => {
-            return Err((
-                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-                "Timed out while waiting for response".into(),
-            ))
-        }
-        Err(e) => {
-            return Err((
+        .map_err(|e| {
+            (
                 reqwest::StatusCode::INTERNAL_SERVER_ERROR,
                 e.to_string().into(),
-            ))
-        }
-    };
+            )
+        })?;
 
     let elapsed = start_instant.elapsed();
 

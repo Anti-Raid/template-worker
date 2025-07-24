@@ -29,7 +29,6 @@ vfs = { git = "https://github.com/Anti-Raid/rust-vfs", features = ["embedded-fs"
 rust-embed = { version = "8.7.0", features = ["debug-embed", "interpolate-folder-path"] }
 futures = "0.3"
 dashmap = { version = "6", features = ["serde", "inline", "rayon"] }
-
 console-subscriber = "0.4"
 
 # http

@@ -19,8 +19,25 @@ pub const MAX_TEMPLATES_EXECUTION_TIME: std::time::Duration =
 pub const MAX_TEMPLATES_RETURN_WAIT_TIME: std::time::Duration = std::time::Duration::from_secs(60); // 60 seconds maximum execution time
 
 pub const MAX_SERVER_INACTIVITY: std::time::Duration = std::time::Duration::from_secs(600); // 10 minutes till vm marked as inactive
-// pub const MAX_SERVER_INACTIVITY_CHECK_TIME: std::time::Duration =
-//    std::time::Duration::from_secs(60 * 15); // Check for inactive servers every 15 minutes
+
+/// Fires an event to all templates associated to a server
+/// without waiting for the result.
+pub async fn fire(
+    guild_id: GuildId,
+    state: CreateGuildState,
+    action: LuaVmAction,
+) -> Result<(), crate::Error> {
+    let lua = POOL.get_guild(guild_id, state).await?;
+
+    lua.send(ThreadRequest::Dispatch {
+        guild_id,
+        action,
+        callback: None,
+    })
+    .map_err(|e| format!("Could not fire event to Lua thread: {}", e))?;
+
+    Ok(())
+}
 
 /// Dispatches an event to all templates associated to a server
 pub async fn execute(
@@ -30,12 +47,12 @@ pub async fn execute(
 ) -> Result<RenderTemplateHandle, crate::Error> {
     let lua = POOL.get_guild(guild_id, state).await?;
 
-    let (tx, rx) = tokio::sync::oneshot::channel();
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
     lua.send(ThreadRequest::Dispatch {
         guild_id,
         action,
-        callback: tx,
+        callback: Some(tx),
     })
     .map_err(|e| format!("Could not send event to Lua thread: {}", e))?;
 
@@ -146,45 +163,53 @@ impl LuaVmResultHandle {
 
 /// A handle to allow waiting for a template to render
 pub struct RenderTemplateHandle {
-    rx: tokio::sync::oneshot::Receiver<Vec<(String, LuaVmResult)>>,
+    rx: tokio::sync::mpsc::UnboundedReceiver<(String, LuaVmResult)>,
 }
 
 impl RenderTemplateHandle {
     #[allow(dead_code)]
     /// Wait for the template to render
-    pub async fn wait(self) -> Result<MultiLuaVmResultHandle, crate::Error> {
-        let res = self.rx.await?;
-        let res = res
-            .into_iter()
-            .map(|(name, result)| LuaVmResultHandle {
+    pub async fn wait(mut self) -> Result<MultiLuaVmResultHandle, crate::Error> {
+        let mut results = Vec::new();
+        while let Some((template_name, result)) = self.rx.recv().await {
+            results.push(LuaVmResultHandle {
                 result,
-                template_name: name,
-            })
-            .collect::<Vec<_>>();
-
-        Ok(MultiLuaVmResultHandle { results: res })
+                template_name,
+            });
+        }
+        
+        Ok(MultiLuaVmResultHandle { results })
     }
 
     /// Wait for the template to render with a timeout
     ///
     /// Returns `None` if the timeout is reached
     pub async fn wait_timeout(
-        self,
+        mut self,
         timeout: std::time::Duration,
-    ) -> Result<Option<MultiLuaVmResultHandle>, crate::Error> {
-        match tokio::time::timeout(timeout, self.rx).await {
-            Ok(Ok(res)) => {
-                let res = res
-                    .into_iter()
-                    .map(|(name, result)| LuaVmResultHandle {
-                        result,
-                        template_name: name,
-                    })
-                    .collect::<Vec<_>>();
-                Ok(Some(MultiLuaVmResultHandle { results: res }))
+    ) -> Result<MultiLuaVmResultHandle, crate::Error> {
+        let mut results = Vec::new();
+        let mut interval = tokio::time::interval(timeout);
+        loop {
+            tokio::select! {
+                res = self.rx.recv() => {
+                    match res {
+                        Some((template_name, result)) => {
+                            results.push(LuaVmResultHandle {
+                                result,
+                                template_name,
+                            });
+                        }
+                        None => break, // Channel closed
+                    }
+                }
+                _ = interval.tick() => {
+                    log::warn!("Timeout reached while waiting for Lua VM results");
+                    break;
+                }
             }
-            Ok(Err(e)) => Err(format!("Could not receive data from Lua thread: {}", e).into()),
-            Err(_) => Ok(None),
         }
+
+        Ok(MultiLuaVmResultHandle { results })
     }
 }

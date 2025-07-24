@@ -21,7 +21,7 @@ use khronos_runtime::rt::{IsolateData, KhronosRuntimeManager as Krm};
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use std::rc::Rc;
 use std::sync::Arc;
-use tokio::sync::oneshot::Sender;
+use tokio::sync::mpsc::UnboundedSender;
 
 pub type KhronosRuntimeManager = Krm<CreatedKhronosContext>;
 
@@ -30,7 +30,7 @@ impl LuaVmAction {
         self,
         tis_ref: KhronosRuntimeManager,
         gs: Rc<GuildState>,
-        callback: Sender<Vec<(String, LuaVmResult)>>,
+        callback: Option<UnboundedSender<(String, LuaVmResult)>>,
     ) {
         match self {
             LuaVmAction::DispatchEvent { event, templates } => {
@@ -38,9 +38,7 @@ impl LuaVmAction {
                     log::info!("Found templates: {} {}", event.name(), templates.len());
                 }
 
-                let _ = callback.send(
-                    dispatch_event_to_multiple_templates(templates, event, &tis_ref, gs).await,
-                );
+                dispatch_event_to_multiple_templates(templates, event, &tis_ref, gs, callback).await
             }
             LuaVmAction::Stop {} => {
                 // Mark VM as broken
@@ -48,12 +46,14 @@ impl LuaVmAction {
                     log::error!("Failed to mark VM as broken: {}", e);
                 }
 
-                let _ = callback.send(vec![(
-                    "_".to_string(),
-                    LuaVmResult::Ok {
-                        result_val: KhronosValue::Null,
-                    },
-                )]);
+                if let Some(callback) = callback {
+                    let _ = callback.send((
+                        "_".to_string(),
+                        LuaVmResult::Ok {
+                            result_val: KhronosValue::Null,
+                        },
+                    ));
+                }
             }
             LuaVmAction::GetMemoryUsage {} => {
                 let used = tis_ref.runtime().memory_usage();
@@ -61,22 +61,26 @@ impl LuaVmAction {
                 let Ok(used_u64) = used.try_into() else {
                     log::error!("Memory usage is too large to fit into u64, returning 0");
 
-                    let _ = callback.send(vec![(
-                        "_".to_string(),
-                        LuaVmResult::Ok {
-                            result_val: KhronosValue::UnsignedInteger(0),
-                        },
-                    )]);
+                    if let Some(callback) = callback {
+                        let _ = callback.send((
+                            "_".to_string(),
+                            LuaVmResult::Ok {
+                                result_val: KhronosValue::UnsignedInteger(0),
+                            },
+                        ));
+                    }
 
                     return;
                 };
 
-                let _ = callback.send(vec![(
-                    "_".to_string(),
-                    LuaVmResult::Ok {
-                        result_val: KhronosValue::UnsignedInteger(used_u64),
-                    },
-                )]);
+                if let Some(callback) = callback {
+                    let _ = callback.send((
+                        "_".to_string(),
+                        LuaVmResult::Ok {
+                            result_val: KhronosValue::UnsignedInteger(used_u64),
+                        },
+                    ));
+                }
             }
             LuaVmAction::SetMemoryLimit { limit } => {
                 let result = match tis_ref.runtime().set_memory_limit(limit) {
@@ -93,17 +97,21 @@ impl LuaVmAction {
                     Err(e) => LuaVmResult::LuaError { err: e.to_string() },
                 };
 
-                let _ = callback.send(vec![("_".to_string(), result)]);
+                if let Some(callback) = callback {
+                    let _ = callback.send(("_".to_string(), result));
+                }
             }
             LuaVmAction::ClearCache {} => {
                 println!("Clearing cache in VM");
 
-                let _ = callback.send(vec![(
-                    "_".to_string(),
-                    LuaVmResult::Ok {
-                        result_val: KhronosValue::Null,
-                    },
-                )]);
+                if let Some(callback) = callback {
+                    let _ = callback.send((
+                        "_".to_string(),
+                        LuaVmResult::Ok {
+                            result_val: KhronosValue::Null,
+                        },
+                    ));
+                }
             }
             LuaVmAction::Panic {} => {
                 panic!("Panic() called");
@@ -261,12 +269,13 @@ pub(super) async fn configure_runtime_manager() -> LuaResult<KhronosRuntimeManag
     Ok(KhronosRuntimeManager::new(rt))
 }
 
-pub async fn dispatch_event_to_multiple_templates(
+async fn dispatch_event_to_multiple_templates(
     templates: Vec<Arc<Template>>,
     event: CreateEvent,
     manager: &KhronosRuntimeManager,
     guild_state: Rc<GuildState>,
-) -> Vec<(String, LuaVmResult)> {
+    callback: Option<UnboundedSender<(String, LuaVmResult)>>,
+) {
     /// Helper method to dispatch an event to a template
     async fn dispatch_event_to_template(
         template: Arc<Template>,
@@ -371,13 +380,17 @@ pub async fn dispatch_event_to_multiple_templates(
     log::debug!("Dispatching event to {} templates", templates.len());
 
     let mut set = tokio::task::JoinSet::new();
-    let t_len = templates.len();
 
     let event = match Event::from_create_event_with_runtime(manager.runtime(), event) {
         Ok(event) => event,
         Err(e) => {
             log::error!("Failed to create event: {}", e);
-            return vec![("_".to_string(), LuaVmResult::LuaError { err: e.to_string() })];
+
+            if let Some(callback) = callback {
+                let _ = callback.send(("_".to_string(), LuaVmResult::LuaError { err: e.to_string() }));
+            }
+
+            return;
         }
     };
 
@@ -393,19 +406,19 @@ pub async fn dispatch_event_to_multiple_templates(
         });
     }
 
-    let mut results = Vec::with_capacity(t_len);
-    while let Ok(Some(result)) =
-        tokio::time::timeout(MAX_TEMPLATES_RETURN_WAIT_TIME, set.join_next()).await
-    {
-        match result {
-            Ok((name, result)) => {
-                results.push((name, result));
-            }
-            Err(e) => {
-                log::error!("Failed to dispatch event to template: {}", e);
+    // Send results if we need to 
+    if let Some(callback) = callback {
+        while let Ok(Some(result)) =
+            tokio::time::timeout(MAX_TEMPLATES_RETURN_WAIT_TIME, set.join_next()).await
+        {
+            match result {
+                Ok((name, result)) => {
+                    let _ = callback.send((name, result));
+                }
+                Err(e) => {
+                    log::error!("Failed to dispatch event to template: {}", e);
+                }
             }
         }
     }
-
-    results
 }
