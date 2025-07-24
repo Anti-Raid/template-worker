@@ -420,5 +420,16 @@ async fn dispatch_event_to_multiple_templates(
                 }
             }
         }
+    } else {
+        loop {
+            match set.join_next().await {
+                Some(Err(e)) => {
+                    log::error!("Failed to join task: {}", e);
+                    break;
+                },
+                None => break,
+                _ => {}
+            }
+        }
     }
 }
