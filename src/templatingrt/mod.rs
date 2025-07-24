@@ -190,6 +190,7 @@ impl RenderTemplateHandle {
     ) -> Result<MultiLuaVmResultHandle, crate::Error> {
         let mut results = Vec::new();
         let mut interval = tokio::time::interval(timeout);
+        let mut first_tick = true;
         loop {
             tokio::select! {
                 res = self.rx.recv() => {
@@ -204,8 +205,12 @@ impl RenderTemplateHandle {
                     }
                 }
                 _ = interval.tick() => {
-                    log::warn!("Timeout reached while waiting for Lua VM results");
-                    break;
+                    if first_tick {
+                        first_tick = false;
+                    } else {
+                        log::warn!("Timeout reached while waiting for Lua VM results");
+                        break;
+                    }
                 }
             }
         }
