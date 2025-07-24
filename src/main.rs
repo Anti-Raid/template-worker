@@ -56,21 +56,12 @@ async fn main() {
     let http = Arc::new(
         HttpBuilder::new(token.clone())
             .proxy(proxy_url)
-            .ratelimiter_disabled(true)
             .build(),
     );
 
     info!("HttpBuilder done");
 
-    let mut intents = serenity::all::GatewayIntents::all();
-
-    // Remove the really spammy intents
-    intents.remove(serenity::all::GatewayIntents::GUILD_PRESENCES); // Don't even have the privileged gateway intent for this
-    intents.remove(serenity::all::GatewayIntents::GUILD_MESSAGE_TYPING); // Don't care about typing
-    intents.remove(serenity::all::GatewayIntents::DIRECT_MESSAGE_TYPING); // Don't care about typing
-    intents.remove(serenity::all::GatewayIntents::DIRECT_MESSAGES); // Don't care about DMs
-
-    let client_builder = serenity::all::ClientBuilder::new_with_http(token, http, intents);
+    let client_builder = serenity::all::ClientBuilder::new_with_http(token, http);
 
     info!("Connecting to database");
 
@@ -91,6 +82,8 @@ async fn main() {
         .expect("Failed to get current user");
 
     let current_user_id = current_user.id;
+
+    info!("Current user: {} ({})", current_user.name, current_user_id);
 
     let data = Data {
         object_store: Arc::new(

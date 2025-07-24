@@ -42,14 +42,6 @@ impl LuaVmAction {
                     dispatch_event_to_multiple_templates(templates, event, &tis_ref, gs).await,
                 );
             }
-            LuaVmAction::DispatchInlineEvent { event, template } => {
-                let event = Event::from_create_event(&event);
-                let name = template.name.clone();
-                let result = dispatch_event_to_template(template, event, tis_ref, gs).await;
-
-                // Send back to the caller
-                let _ = callback.send(vec![(name, result)]);
-            }
             LuaVmAction::Stop {} => {
                 // Mark VM as broken
                 if let Err(e) = tis_ref.runtime().mark_broken(true) {
@@ -156,7 +148,7 @@ impl LuaVmResult {
                     "components": [
                         {
                             "type": 2,
-                            "style": 1,
+                            "style": 5,
                             "label": "Support Server",
                             "url": CONFIG.meta.support_server_invite.to_string(),
                         }
@@ -269,124 +261,133 @@ pub(super) async fn configure_runtime_manager() -> LuaResult<KhronosRuntimeManag
     Ok(KhronosRuntimeManager::new(rt))
 }
 
-/// Helper method to dispatch an event to a template
-pub async fn dispatch_event_to_template(
-    template: Arc<Template>,
-    event: Event,
-    manager: KhronosRuntimeManager,
-    guild_state: Rc<GuildState>,
-) -> LuaVmResult {
-    if manager.runtime().is_broken() {
-        return (LuaVmResult::VmBroken {})
-            .log_error_and_warn(&guild_state, &template)
-            .await;
-    }
-
-    // Get or create a subisolate
-    let (sub_isolate, created_context) = if let Some(sub_isolate) =
-        manager.get_sub_isolate(&template.name)
-    {
-        (sub_isolate.isolate, sub_isolate.data)
-    } else {
-        let mut attempts = 0;
-        let sub_isolate = loop {
-            // It may take a few attempts to create a subisolate successfully
-            // due to ongoing Lua VM operations
-            match KhronosIsolate::new_subisolate(
-                manager.runtime().clone(),
-                FilesystemWrapper::new(template.content.0.clone()),
-                false // TODO: Allow safeenv optimization one day
-            ) {
-                Ok(isolate) => {
-                    break isolate;
-                }
-                Err(e) => {
-                    log::error!("Failed to create subisolate: {}. This is an internal bug that should not happen", e);
-                    attempts += 1;
-                    if attempts >= 20 {
-                        return LuaVmResult::LuaError {
-                            err: format!("Failed to create subisolate: {}. This is an internal bug that should not happen", e),
-                        };
-                    }
-
-                    // Wait a bit before retrying
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    // Check if the runtime is broken
-                    if manager.runtime().is_broken() {
-                        return (LuaVmResult::VmBroken {})
-                            .log_error_and_warn(&guild_state, &template)
-                            .await;
-                    }
-                }
-            }
-        };
-
-        log::info!("Created subisolate for template {}", template.name);
-
-        let provider = TemplateContextProvider::new(guild_state.clone(), template.clone());
-
-        let created_context = match sub_isolate.create_context(provider) {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                return (LuaVmResult::LuaError { err: e.to_string() })
-                    .log_error_and_warn(&guild_state, &template)
-                    .await
-            }
-        };
-
-        let iso_data = IsolateData {
-            isolate: sub_isolate.clone(),
-            data: created_context.clone(),
-        };
-
-        manager.add_sub_isolate(template.name.clone(), iso_data);
-
-        (sub_isolate, created_context)
-    };
-
-    let spawn_result = match sub_isolate
-        .spawn_asset("/init.luau", "/init.luau", created_context, event)
-        .await
-    {
-        Ok(sr) => sr,
-        Err(e) => {
-            return (LuaVmResult::LuaError { err: e.to_string() })
-                .log_error_and_warn(&guild_state, &template)
-                .await;
-        }
-    };
-
-    let value = match spawn_result.into_khronos_value(&sub_isolate) {
-        Ok(v) => v,
-        Err(e) => {
-            return (LuaVmResult::LuaError {
-                err: format!("Failed to convert result to JSON: {}", e),
-            })
-            .log_error_and_warn(&guild_state, &template)
-            .await;
-        }
-    };
-
-    LuaVmResult::Ok { result_val: value }
-}
-
 pub async fn dispatch_event_to_multiple_templates(
     templates: Vec<Arc<Template>>,
     event: CreateEvent,
     manager: &KhronosRuntimeManager,
     guild_state: Rc<GuildState>,
 ) -> Vec<(String, LuaVmResult)> {
+    /// Helper method to dispatch an event to a template
+    async fn dispatch_event_to_template(
+        template: Arc<Template>,
+        event: Event,
+        manager: KhronosRuntimeManager,
+        guild_state: Rc<GuildState>,
+    ) -> LuaVmResult {
+        if manager.runtime().is_broken() {
+            return (LuaVmResult::VmBroken {})
+                .log_error_and_warn(&guild_state, &template)
+                .await;
+        }
+
+        // Get or create a subisolate
+        let (sub_isolate, created_context) = if let Some(sub_isolate) =
+            manager.get_sub_isolate(&template.name)
+        {
+            (sub_isolate.isolate, sub_isolate.data)
+        } else {
+            let mut attempts = 0;
+            let sub_isolate = loop {
+                // It may take a few attempts to create a subisolate successfully
+                // due to ongoing Lua VM operations
+                match KhronosIsolate::new_subisolate(
+                    manager.runtime().clone(),
+                    FilesystemWrapper::new(template.content.0.clone()),
+                    false // TODO: Allow safeenv optimization one day
+                ) {
+                    Ok(isolate) => {
+                        break isolate;
+                    }
+                    Err(e) => {
+                        log::error!("Failed to create subisolate: {}. This is an internal bug that should not happen", e);
+                        attempts += 1;
+                        if attempts >= 20 {
+                            return LuaVmResult::LuaError {
+                                err: format!("Failed to create subisolate: {}. This is an internal bug that should not happen", e),
+                            };
+                        }
+
+                        // Wait a bit before retrying
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        // Check if the runtime is broken
+                        if manager.runtime().is_broken() {
+                            return (LuaVmResult::VmBroken {})
+                                .log_error_and_warn(&guild_state, &template)
+                                .await;
+                        }
+                    }
+                }
+            };
+
+            log::info!("Created subisolate for template {}", template.name);
+
+            let provider = TemplateContextProvider::new(guild_state.clone(), template.clone());
+
+            let created_context = match sub_isolate.create_context(provider) {
+                Ok(ctx) => ctx,
+                Err(e) => {
+                    return (LuaVmResult::LuaError { err: e.to_string() })
+                        .log_error_and_warn(&guild_state, &template)
+                        .await
+                }
+            };
+
+            let iso_data = IsolateData {
+                isolate: sub_isolate.clone(),
+                data: created_context.clone(),
+            };
+
+            manager.add_sub_isolate(template.name.clone(), iso_data);
+
+            (sub_isolate, created_context)
+        };
+
+        let spawn_result = match sub_isolate
+            .spawn_asset("/init.luau", "/init.luau", created_context, event)
+            .await
+        {
+            Ok(sr) => sr,
+            Err(e) => {
+                return (LuaVmResult::LuaError { err: e.to_string() })
+                    .log_error_and_warn(&guild_state, &template)
+                    .await;
+            }
+        };
+
+        let value = match spawn_result.into_khronos_value(&sub_isolate) {
+            Ok(v) => v,
+            Err(e) => {
+                return (LuaVmResult::LuaError {
+                    err: format!("Failed to convert result to JSON: {}", e),
+                })
+                .log_error_and_warn(&guild_state, &template)
+                .await;
+            }
+        };
+
+        LuaVmResult::Ok { result_val: value }
+    }
+
     log::debug!("Dispatching event to {} templates", templates.len());
 
     let mut set = tokio::task::JoinSet::new();
     let t_len = templates.len();
+
+    let event = match Event::from_create_event_with_runtime(manager.runtime(), event) {
+        Ok(event) => event,
+        Err(e) => {
+            log::error!("Failed to create event: {}", e);
+            return vec![("_".to_string(), LuaVmResult::LuaError { err: e.to_string() })];
+        }
+    };
+
     for template in templates {
         let manager_ref = manager.clone();
         let gs = guild_state.clone();
-        let event = Event::from_create_event(&event);
+        let event_ref = event.clone();
         set.spawn_local(async move {
             let name = template.name.clone();
-            let result = dispatch_event_to_template(template, event, manager_ref, gs).await;
+            let result = dispatch_event_to_template(template, event_ref, manager_ref, gs).await;
 
             (name, result)
         });

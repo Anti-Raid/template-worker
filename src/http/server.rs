@@ -378,29 +378,16 @@ pub(crate) async fn execute_setting_for_guild_user(
 pub(crate) async fn guilds_exist(
     State(AppData {
         data,
-        serenity_context,
+        ..
     }): State<AppData>,
     Json(guilds): Json<Vec<serenity::all::GuildId>>,
-) -> Response<Vec<i32>> {
-    let mut guilds_exist = Vec::with_capacity(guilds.len());
-
-    for guild in guilds {
-        let has_guild = crate::sandwich::has_guild(
-            &serenity_context.http,
-            &data.reqwest,
-            guild,
-        )
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-        guilds_exist.push({
-            if has_guild {
-                1
-            } else {
-                0
-            }
-        });
-    }
+) -> Response<Vec<u8>> {
+    let guilds_exist = crate::sandwich::has_guilds(
+        &data.reqwest,
+        guilds,
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(guilds_exist))
 }

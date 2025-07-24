@@ -140,7 +140,8 @@ fn register() -> Result<RegisterResult, crate::Error> {
                         "/builtins.register.luau",
                         "/builtins.register.luau",
                         created_context,
-                        KEvent::from_create_event(&event),
+                        KEvent::from_create_event_with_runtime(&subisolate.inner(), event)
+                        .expect("Failed to create event"),
                     )
                     .await
                     .expect("Failed to spawn asset");

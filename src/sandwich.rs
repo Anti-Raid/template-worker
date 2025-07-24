@@ -28,84 +28,41 @@ pub async fn current_user(
     }
 }
 
-/// Checks if anti-raid is in a server or not
-/// Fetches a guild while handling all the pesky errors serenity normally has
-/// with caching
-pub async fn has_guild(
-    http: &serenity::http::Http,
+pub async fn has_guilds(
     reqwest_client: &reqwest::Client,
-    guild_id: serenity::all::GuildId,
-) -> Result<bool, Error> {
-    #[derive(serde::Serialize, serde::Deserialize, Debug)]
+    guilds: Vec<serenity::all::GuildId>,
+) -> Result<Vec<u8>, Error> {
+    #[derive(Serialize, Deserialize)]
     struct Resp {
         ok: bool,
-        data: Option<bool>,
+        data: Option<Vec<u8>>,
         error: Option<String>,
     }
 
-    // Check sandwich, it may be there
     let url = format!(
-        "{}/antiraid/api/state?col=derived.has_guild_id&id={}",
-        crate::CONFIG.meta.sandwich_http_api,
-        guild_id
+        "{}/antiraid/api/bulk-has-guild",
+        crate::CONFIG.meta.sandwich_http_api
     );
 
-    let resp = reqwest_client.get(&url).send().await?.json::<Resp>().await;
+    let resp = reqwest_client
+        .post(&url)
+        .json(&guilds)
+        .send()
+        .await?
+        .json::<Resp>()
+        .await?;
 
-    if let Ok(resp) = resp {
-        if resp.ok {
-            let Some(has_guild_id) = resp.data else {
-                return Err("Could not derive has_guild_id prop".into());
-            };
+    if resp.ok {
+        let Some(has_guild_id) = resp.data else {
+            return Err("Could not fetch guilds that are known to be in bots cache".into());
+        };
 
-            return Ok(has_guild_id);
-        } else {
-            log::warn!(
-                "Sandwich proxy returned error [has guild id]: {:?}",
-                resp.error
-            );
-        }
+        return Ok(has_guild_id);
     } else {
-        log::warn!(
-            "Sandwich proxy returned invalid resp [has guild id]: {:?}",
-            resp
+        return Err(
+            resp.error.unwrap_or_else(|| "Unknown error".to_string()).into(),
         );
-    }
-
-    // Last resort: check if the guild is in the list using HTTP
-    let guild_id_immediately_preceding = serenity::all::GuildId::new(guild_id.get() - 1);
-
-    let gi = match http
-        .get_guilds(
-            Some(serenity::all::GuildPagination::After(
-                guild_id_immediately_preceding,
-            )),
-            serenity::nonmax::NonMaxU8::new(3),
-        )
-        .await
-    {
-        Ok(gi) => gi,
-        Err(e) => match e {
-            serenity::Error::Http(e) => match e {
-                serenity::all::HttpError::UnsuccessfulRequest(er) => {
-                    return Err(format!("Failed to fetch guild info (http): {:?}", er).into());
-                }
-                _ => {
-                    return Err(
-                        format!("Failed to fetch guild info (non-http error): {:?}", e).into(),
-                    );
-                }
-            },
-            _ => {
-                return Err(format!("Failed to fetch member: {:?}", e).into());
-            }
-        },
-    };
-
-    // Check if the guild is in the list
-    let has_guild_id = gi.iter().any(|g| g.id == guild_id);
-
-    Ok(has_guild_id)
+    }    
 }
 
 /// Fetches a guild while handling all the pesky errors serenity normally has
@@ -152,7 +109,7 @@ pub async fn guild(
     }
 
     // Last resore: make the http call
-    let res = http.get_guild(guild_id).await?;
+    let res = http.get_guild_with_counts(guild_id).await?;
 
     // Save to sandwich
     let url = format!(

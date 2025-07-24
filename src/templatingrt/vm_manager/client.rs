@@ -13,11 +13,6 @@ pub enum LuaVmAction {
         event: CreateEvent,
         templates: Vec<Arc<Template>>,
     },
-    /// Dispatch a template event to an inline template
-    DispatchInlineEvent {
-        event: CreateEvent,
-        template: Arc<Template>,
-    },
     /// Stop the Lua VM entirely
     Stop {},
     /// Returns the memory usage of the Lua VM

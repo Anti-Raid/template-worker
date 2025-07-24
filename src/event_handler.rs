@@ -13,7 +13,7 @@ pub struct EventFramework {}
 
 #[async_trait]
 impl EventHandler for EventFramework {
-    async fn dispatch(&self, ctx: &Context, event: &IEvent) {
+    async fn dispatch(&self, ctx: &Context, event: IEvent) {
         if event.ty == "GUILD_CREATE" {
             // Ignore guild create events
             return;

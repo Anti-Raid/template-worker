@@ -122,20 +122,28 @@ pub async fn regenerate_deferred(
                 other_guilds,
                 flush_self,
             } => {
-                let ce = crate::dispatch::parse_event(&AntiraidEvent::OnStartup(vec![]))?;
-
                 if flush_self {
-                    crate::dispatch::dispatch(context, data, ce.clone(), guild_id)
-                        .await
-                        .map_err(|e| format!("Failed to dispatch OnStartup event: {:?}", e))?;
+                    crate::dispatch::dispatch(
+                        context, 
+                        data, 
+                        parse_event(&AntiraidEvent::OnStartup(vec![]))?, 
+                        guild_id
+                    )
+                    .await
+                    .map_err(|e| format!("Failed to dispatch OnStartup event: {:?}", e))?;
                 }
 
                 for other_guild in other_guilds {
                     regenerate_cache(context, data, other_guild).await?;
 
-                    crate::dispatch::dispatch(context, data, ce.clone(), other_guild)
-                        .await
-                        .map_err(|e| format!("Failed to dispatch OnStartup event: {:?}", e))?;
+                    crate::dispatch::dispatch(
+                        context, 
+                        data, 
+                        parse_event(&AntiraidEvent::OnStartup(vec![]))?,
+                        other_guild
+                    )
+                    .await
+                    .map_err(|e| format!("Failed to dispatch OnStartup event: {:?}", e))?;
                 }
             }
         }

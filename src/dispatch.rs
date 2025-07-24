@@ -12,7 +12,7 @@ use khronos_runtime::utils::khronos_value::KhronosValue;
 use serenity::all::{Context, IEvent, GuildId};
 
 pub async fn discord_event_dispatch(
-    event: &IEvent,
+    event: IEvent,
     serenity_context: &Context,
 ) -> Result<(), crate::Error> {
     if event.ty == "GUILD_CREATE" {
@@ -24,11 +24,11 @@ pub async fn discord_event_dispatch(
 
     let guild_id = match event.sandwich_edt {
         Some(ref edt) => {
-            /*if let Some(user_id) = edt.user_id {
+            if let Some(user_id) = edt.user_id {
                 if user_id == data.current_user.id {
                     return Ok(());
                 }
-            }*/ // Unsure on whether ignoring ourselves is desirable or not
+            }
 
             match edt.guild_id {
                 Some(guild_id) => guild_id,
@@ -39,19 +39,17 @@ pub async fn discord_event_dispatch(
     };
 
 
-    let event_data = serde_json::from_str(event.data.get())?;
-
     dispatch(
         serenity_context,
         &data,
-        CreateEvent::new(
+        CreateEvent::new_raw_value(
             "Discord".to_string(),
             if event.ty.as_str() == "MESSAGE_CREATE" {
                 "MESSAGE".to_string() // Message events are called MESSAGE and not MESSAGE_CREATE in AntiRaid for backwards compatibility
             } else {
-                event.ty.clone()
+                event.ty
             },
-            event_data,
+            event.data,
         ),
         guild_id,
     )
