@@ -1,7 +1,6 @@
 use crate::dispatch::dispatch_scoped_and_wait;
 use crate::dispatch::DispatchResult;
-use crate::http::types::ExecuteLuaVmActionResponse;
-use crate::templatingrt::cache::regenerate_deferred;
+use super::types::ExecuteLuaVmActionResponse;
 use crate::templatingrt::CreateGuildState;
 use crate::templatingrt::POOL;
 use crate::templatingrt::{cache::regenerate_cache, MAX_TEMPLATES_RETURN_WAIT_TIME};
@@ -356,10 +355,6 @@ pub(crate) async fn execute_setting_for_guild_user(
     )
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    regenerate_deferred(&serenity_context, &data, guild_id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(results))
 }

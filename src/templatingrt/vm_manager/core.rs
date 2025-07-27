@@ -1,5 +1,6 @@
 use super::client::{LuaVmAction, LuaVmResult};
 use crate::templatingrt::cache::get_all_guild_templates_from_db;
+use crate::templatingrt::cache::regenerate_deferred;
 use crate::templatingrt::primitives::ctxprovider::TemplateContextProvider;
 use crate::templatingrt::state::GuildState;
 use crate::templatingrt::template::Template;
@@ -432,4 +433,9 @@ async fn dispatch_event_to_multiple_templates(
             }
         }
     }
+
+    let data = guild_state.serenity_context.data::<crate::Data>();
+    if let Err(e) = regenerate_deferred(&guild_state.serenity_context, &data, guild_state.guild_id).await {
+        log::error!("Failed to regenerate deferred: {}", e);
+    };
 }

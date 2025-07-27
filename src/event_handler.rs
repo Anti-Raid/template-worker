@@ -1,6 +1,6 @@
 use crate::config::CONFIG;
 use crate::dispatch::{discord_event_dispatch, dispatch, parse_event};
-use crate::http::init::{start_rpc_server, CreateRpcServerBind, CreateRpcServerOptions};
+use crate::internalapi::init::{start_rpc_server, CreateRpcServerBind, CreateRpcServerOptions};
 use crate::templatingrt::cache::{get_all_guild_templates, get_all_guilds_with_templates};
 use antiraid_types::ar_event::AntiraidEvent;
 use async_trait::async_trait;
@@ -27,7 +27,7 @@ impl EventHandler for EventFramework {
                 tokio::task::spawn(async move {
                     log::info!("Starting RPC server");
 
-                    let rpc_server = crate::http::server::create(data1, &ctx1);
+                    let rpc_server = crate::internalapi::server::create(data1, &ctx1);
 
                     let opts = CreateRpcServerOptions {
                         bind: CreateRpcServerBind::Address(format!(

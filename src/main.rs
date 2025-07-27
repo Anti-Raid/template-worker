@@ -3,7 +3,7 @@ mod data;
 mod dispatch;
 mod event_handler;
 mod expiry_tasks;
-mod http;
+mod internalapi;
 mod jobserver;
 mod objectstore;
 mod register;
