@@ -1,9 +1,7 @@
 use super::template::Template;
 use super::{LuaVmAction, RenderTemplateHandle, ThreadRequest, MAX_TEMPLATES_RETURN_WAIT_TIME};
 use crate::data::Data;
-use crate::dispatch::parse_event;
 use crate::templatingrt::template::{DefaultableOverlayFS, TemplatingTypes};
-use antiraid_types::ar_event::AntiraidEvent;
 use khronos_runtime::primitives::event::CreateEvent;
 use moka::future::Cache;
 use rust_embed::Embed;
@@ -85,13 +83,9 @@ pub static TEMPLATES_CACHE: LazyLock<Cache<GuildId, Arc<Vec<Arc<Template>>>>> =
 #[derive(Debug, Clone)]
 #[allow(unused)]
 pub enum DeferredCacheRegenMode {
-    NoOnReady,
-    OnReady {
-        modified: Vec<String>,
-    },
+    FlushSingle {},
     FlushMultiple {
         other_guilds: Vec<GuildId>,
-        flush_self: bool,
     },
 }
 
@@ -111,39 +105,12 @@ pub async fn regenerate_deferred(
         regenerate_cache(context, data, guild_id).await?;
 
         match mode {
-            DeferredCacheRegenMode::NoOnReady => {}
-            DeferredCacheRegenMode::OnReady { modified } => {
-                let ce = crate::dispatch::parse_event(&AntiraidEvent::OnStartup(modified))?;
-                crate::dispatch::dispatch(context, data, ce, guild_id)
-                    .await
-                    .map_err(|e| format!("Failed to dispatch OnStartup event: {:?}", e))?;
-            }
+            DeferredCacheRegenMode::FlushSingle { } => {}
             DeferredCacheRegenMode::FlushMultiple {
                 other_guilds,
-                flush_self,
             } => {
-                if flush_self {
-                    crate::dispatch::dispatch(
-                        context, 
-                        data, 
-                        parse_event(&AntiraidEvent::OnStartup(vec![]))?, 
-                        guild_id
-                    )
-                    .await
-                    .map_err(|e| format!("Failed to dispatch OnStartup event: {:?}", e))?;
-                }
-
                 for other_guild in other_guilds {
                     regenerate_cache(context, data, other_guild).await?;
-
-                    crate::dispatch::dispatch(
-                        context, 
-                        data, 
-                        parse_event(&AntiraidEvent::OnStartup(vec![]))?,
-                        other_guild
-                    )
-                    .await
-                    .map_err(|e| format!("Failed to dispatch OnStartup event: {:?}", e))?;
                 }
             }
         }
@@ -153,6 +120,7 @@ pub async fn regenerate_deferred(
 }
 
 /// Gets all guilds with templates
+#[allow(dead_code)]
 pub fn get_all_guilds_with_templates() -> Vec<GuildId> {
     let mut guild_ids = Vec::new();
 
@@ -288,10 +256,10 @@ pub async fn regenerate_cache(
 ) -> Result<(), crate::Error> {
     println!("Clearing cache for guild {}", guild_id);
 
-    KEY_EXPIRIES.remove(&guild_id).await;
-
     // NOTE: if this call fails, bail out early and don't clear the cache to ensure old code at least runs
-    let templates = get_all_guild_templates_from_db(guild_id, &data.pool).await?;
+    get_all_guild_templates_from_db(guild_id, &data.pool).await?;
+
+    KEY_EXPIRIES.remove(&guild_id).await;
     get_all_guild_key_expiries_from_db(guild_id, &data.pool).await?;
 
     println!("Resyncing VMs");
@@ -319,17 +287,7 @@ pub async fn regenerate_cache(
     }
 
     if resync {
-        // Dispatch OnStartup events to all templates
-        let templates = templates.iter().map(|t| t.name.clone()).collect();
-        let create_event = match parse_event(&AntiraidEvent::OnStartup(templates)) {
-            Ok(e) => e,
-            Err(e) => {
-                log::error!("Error parsing event: {:?}", e);
-                return Ok(());
-            }
-        };
-
-        crate::dispatch::dispatch(context, data, create_event, guild_id).await?;
+        super::resume_dispatch::dispatch_resume_keys(context, data, guild_id).await?;
     }
 
     Ok(())
@@ -385,6 +343,7 @@ async fn get_all_templates_from_db(pool: &sqlx::PgPool) -> Result<(), crate::Err
     Ok(())
 }
 
+/// Gets all key expiries from the database and stores them in the cache
 async fn get_all_key_expiries_from_db(pool: &sqlx::PgPool) -> Result<(), crate::Error> {
     #[derive(sqlx::FromRow)]
     struct KeyExpiryPartial {

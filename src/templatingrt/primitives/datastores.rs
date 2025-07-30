@@ -5,7 +5,7 @@ use crate::templatingrt::cache::{DeferredCacheRegenMode, DEFERRED_CACHE_REGENS};
 use crate::templatingrt::state::GuildState;
 use crate::templatingrt::template::TemplateLanguage;
 use crate::templatingrt::{KhronosValueResponse, MAX_TEMPLATES_RETURN_WAIT_TIME};
-use antiraid_types::ar_event::AntiraidEvent;
+use antiraid_types::ar_event::{AntiraidEvent, KeyResumeEvent};
 use chrono::Utc;
 use indexmap::IndexMap;
 use khronos_runtime::traits::ir::{DataStoreImpl, DataStoreMethod};
@@ -812,9 +812,7 @@ impl DataStoreImpl for TemplateStore {
                         DEFERRED_CACHE_REGENS
                             .insert(
                                 self_ref.guild_state.guild_id,
-                                DeferredCacheRegenMode::OnReady {
-                                    modified: vec![create_template.name.to_string()],
-                                },
+                                DeferredCacheRegenMode::FlushSingle {},
                             )
                             .await;
 
@@ -874,9 +872,7 @@ impl DataStoreImpl for TemplateStore {
                         DEFERRED_CACHE_REGENS
                             .insert(
                                 self_ref.guild_state.guild_id,
-                                DeferredCacheRegenMode::OnReady {
-                                    modified: vec![create_template.name.to_string()],
-                                },
+                                DeferredCacheRegenMode::FlushSingle {},
                             )
                             .await;
 
@@ -928,9 +924,7 @@ impl DataStoreImpl for TemplateStore {
                         DEFERRED_CACHE_REGENS
                             .insert(
                                 self_ref.guild_state.guild_id,
-                                DeferredCacheRegenMode::OnReady {
-                                    modified: vec![name],
-                                },
+                                DeferredCacheRegenMode::FlushSingle {},
                             )
                             .await;
 
@@ -979,7 +973,11 @@ impl DataStoreImpl for TemplateStore {
                                 object_store: self_ref.guild_state.object_store.clone(),
                                 current_user: data.current_user.clone(),
                             },
-                            parse_event(&AntiraidEvent::OnStartup(vec![]))?,
+                            parse_event(&AntiraidEvent::KeyResume(KeyResumeEvent {
+                                id: "START_TEMPLATE".to_string(),
+                                key: "START_TEMPLATE".to_string(),
+                                scopes: vec![],
+                            }))?,
                             self_ref.guild_state.guild_id,
                             MAX_TEMPLATES_RETURN_WAIT_TIME,
                             &name

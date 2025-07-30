@@ -132,6 +132,7 @@ impl KVProvider for DummyKVProvider {
         _key: String,
         _data: KhronosValue,
         _expires_at: Option<chrono::DateTime<chrono::Utc>>,
+        _resume: bool,
     ) -> Result<(bool, String), crate::Error> {
         unreachable!()
     }
@@ -158,6 +159,7 @@ impl KVProvider for DummyKVProvider {
         _id: String,
         _data: KhronosValue,
         _expires_at: Option<chrono::DateTime<chrono::Utc>>,
+        _resume: bool,
     ) -> Result<(), khronos_runtime::Error> {
         unreachable!()
     }

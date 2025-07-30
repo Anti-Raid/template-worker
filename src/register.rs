@@ -1,4 +1,5 @@
 use antiraid_types::ar_event::AntiraidEvent;
+use antiraid_types::ar_event::KeyResumeEvent;
 use khronos_runtime::primitives::event::Event as KEvent;
 use khronos_runtime::require::FilesystemWrapper;
 use khronos_runtime::rt::mlua::prelude::*;
@@ -133,7 +134,11 @@ fn register() -> Result<RegisterResult, crate::Error> {
                     .expect("Failed to create context");
 
                 let event =
-                    parse_event(&AntiraidEvent::OnStartup(vec![])).expect("Failed to parse event");
+                    parse_event(&AntiraidEvent::KeyResume(KeyResumeEvent {
+                        id: "register_dummy_key_ID".to_string(),
+                        key: "register_dummy_key_KEY".to_string(),
+                        scopes: vec![],
+                    })).expect("Failed to parse event");
 
                 let spawn_result = subisolate
                     .spawn_asset(

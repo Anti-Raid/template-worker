@@ -3,6 +3,7 @@ pub mod primitives;
 pub mod state;
 pub mod template;
 mod vm_manager;
+pub mod resume_dispatch;
 
 use khronos_runtime::utils::khronos_value::KhronosValue;
 pub use state::CreateGuildState;

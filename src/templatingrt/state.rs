@@ -49,10 +49,45 @@ impl Ratelimits {
 
         // get_original_interaction_response
         let get_original_interaction_response_quota1 =
-            LuaRatelimits::create_quota(create_nonmax_u32(5)?, Duration::from_secs(10))?;
-
+            LuaRatelimits::create_quota(create_nonmax_u32(10)?, Duration::from_secs(3))?;
         let get_original_interaction_response_lim1 =
             DefaultKeyedRateLimiter::keyed(get_original_interaction_response_quota1);
+
+        // create_followup_message
+        let create_followup_message_quota1 =
+            LuaRatelimits::create_quota(create_nonmax_u32(10)?, Duration::from_secs(3))?;
+        let create_followup_message_lim1 =
+            DefaultKeyedRateLimiter::keyed(create_followup_message_quota1);
+        
+        // get_followup_message
+        let get_followup_message_quota1 =
+            LuaRatelimits::create_quota(create_nonmax_u32(10)?, Duration::from_secs(3))?;
+        let get_followup_message_lim1 =
+            DefaultKeyedRateLimiter::keyed(get_followup_message_quota1);
+
+        // edit_followup_message
+        let edit_followup_message_quota1 =
+            LuaRatelimits::create_quota(create_nonmax_u32(10)?, Duration::from_secs(3))?;
+        let edit_followup_message_lim1 =
+            DefaultKeyedRateLimiter::keyed(edit_followup_message_quota1);
+
+        // delete_followup_message
+        let delete_followup_message_quota1 =
+            LuaRatelimits::create_quota(create_nonmax_u32(10)?, Duration::from_secs(3))?;
+        let delete_followup_message_lim1 =
+            DefaultKeyedRateLimiter::keyed(delete_followup_message_quota1);
+
+        // edit_original_interaction_response
+        let edit_original_interaction_response_quota1 =
+            LuaRatelimits::create_quota(create_nonmax_u32(10)?, Duration::from_secs(3))?;
+        let edit_original_interaction_response_lim1 =
+            DefaultKeyedRateLimiter::keyed(edit_original_interaction_response_quota1);
+
+        // delete_original_interaction_response
+        let delete_original_interaction_response_quota1 =
+            LuaRatelimits::create_quota(create_nonmax_u32(10)?, Duration::from_secs(3))?;
+        let delete_original_interaction_response_lim1 =
+            DefaultKeyedRateLimiter::keyed(delete_original_interaction_response_quota1);
 
         // get_guild_commands
         let get_guild_commands_quota1 =
@@ -69,6 +104,20 @@ impl Ratelimits {
 
         Ok(LuaRatelimits {
             global,
+            global_ignore: LuaRatelimits::create_global_ignore(
+                vec![
+                    "antiraid_bulk_op".to_string(),
+                    "antiraid_bulk_op_wait".to_string(),
+                    "create_interaction_response".to_string(), // intentionally not ratelimited to allow for proper error handling / load handling
+                    "get_original_interaction_response".to_string(),
+                    "edit_original_interaction_response".to_string(),
+                    "delete_original_interaction_response".to_string(),
+                    "create_followup_message".to_string(),
+                    "get_followup_message".to_string(),
+                    "edit_followup_message".to_string(),
+                    "delete_followup_message".to_string(),
+                ]
+            )?,
             per_bucket: indexmap::indexmap!(
                 "antiraid_bulk_op".to_string() => vec![bulk_op_create_lim] as Vec<DefaultKeyedRateLimiter<()>>,
                 "antiraid_bulk_op_wait".to_string() => vec![bulk_op_wait_lim] as Vec<DefaultKeyedRateLimiter<()>>,
@@ -76,6 +125,12 @@ impl Ratelimits {
                 "kick".to_string() => vec![kick_lim1, kick_lim2] as Vec<DefaultKeyedRateLimiter<()>>,
                 "create_message".to_string() => vec![create_message_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
                 "get_original_interaction_response".to_string() => vec![get_original_interaction_response_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
+                "edit_original_interaction_response".to_string() => vec![edit_original_interaction_response_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
+                "delete_original_interaction_response".to_string() => vec![delete_original_interaction_response_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
+                "create_followup_message".to_string() => vec![create_followup_message_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
+                "get_followup_message".to_string() => vec![get_followup_message_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
+                "edit_followup_message".to_string() => vec![edit_followup_message_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
+                "delete_followup_message".to_string() => vec![delete_followup_message_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
                 "get_guild_commands".to_string() => vec![get_guild_commands_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
                 "create_guild_command".to_string() => vec![create_guild_command_lim1] as Vec<DefaultKeyedRateLimiter<()>>,
             ),
@@ -95,6 +150,7 @@ impl Ratelimits {
 
         Ok(LuaRatelimits {
             global,
+            global_ignore: LuaRatelimits::create_empty_global_ignore()?,
             per_bucket: indexmap::indexmap!(),
             clock,
         })
@@ -112,6 +168,7 @@ impl Ratelimits {
 
         Ok(LuaRatelimits {
             global,
+            global_ignore: LuaRatelimits::create_empty_global_ignore()?,
             per_bucket: indexmap::indexmap!(),
             clock,
         })
@@ -129,6 +186,7 @@ impl Ratelimits {
 
         Ok(LuaRatelimits {
             global,
+            global_ignore: LuaRatelimits::create_empty_global_ignore()?,
             per_bucket: indexmap::indexmap!(),
             clock,
         })
@@ -146,6 +204,7 @@ impl Ratelimits {
 
         Ok(LuaRatelimits {
             global,
+            global_ignore: LuaRatelimits::create_empty_global_ignore()?,
             per_bucket: indexmap::indexmap!(),
             clock,
         })

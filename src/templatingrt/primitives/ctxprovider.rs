@@ -160,7 +160,10 @@ impl KhronosContext for TemplateContextProvider {
     }
 
     fn httpclient_provider(&self) -> Option<Self::HTTPClientProvider> {
-        None // Don't expose HTTP client provider in templates yet while its still being developed
+        Some(ArHTTPClientProvider {
+            guild_id: self.guild_state.guild_id,
+            guild_state: self.guild_state.clone(),
+        })
     }
 
     fn httpserver_provider(&self) -> Option<Self::HTTPServerProvider> {
@@ -187,7 +190,7 @@ impl KVProvider for ArKVProvider {
 
         let rec = if scopes.is_empty() {
             sqlx::query(
-            "SELECT id, expires_at, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2",
+            "SELECT id, expires_at, scopes, value, created_at, last_updated_at, resume FROM guild_templates_kv WHERE guild_id = $1 AND key = $2",
             )
             .bind(self.guild_id.to_string())
             .bind(&key)
@@ -195,7 +198,7 @@ impl KVProvider for ArKVProvider {
             .await?
         } else {
             sqlx::query(
-                "SELECT id, expires_at, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
+            "SELECT id, expires_at, scopes, value, created_at, last_updated_at, resume FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
             )
             .bind(self.guild_id.to_string())
             .bind(&key)
@@ -223,12 +226,13 @@ impl KVProvider for ArKVProvider {
             created_at: Some(rec.try_get("created_at")?),
             last_updated_at: Some(rec.try_get("last_updated_at")?),
             expires_at: rec.try_get("expires_at")?,
+            resume: rec.try_get("resume").unwrap_or(false),
         }))
     }
 
     async fn get_by_id(&self, id: String) -> Result<Option<KvRecord>, crate::Error> {
         let rec = sqlx::query(
-            "SELECT key, expires_at, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND id = $2",
+            "SELECT key, expires_at, scopes, value, created_at, last_updated_at, resume FROM guild_templates_kv WHERE guild_id = $1 AND id = $2",
         )
         .bind(self.guild_id.to_string())
         .bind(id.clone())
@@ -254,6 +258,7 @@ impl KVProvider for ArKVProvider {
             created_at: Some(rec.try_get("created_at")?),
             last_updated_at: Some(rec.try_get("last_updated_at")?),
             expires_at: rec.try_get("expires_at")?,
+            resume: rec.try_get("resume").unwrap_or(false),
         }))
     }
 
@@ -282,6 +287,7 @@ ORDER BY scope",
         key: String,
         data: KhronosValue,
         expires_at: Option<chrono::DateTime<chrono::Utc>>,
+        resume: bool,
     ) -> Result<(bool, String), crate::Error> {
         // Shouldn't happen but scopes must be non-empty
         if scopes.is_empty() {
@@ -324,10 +330,11 @@ ORDER BY scope",
         let (exists, id) = if let Some(curr_id) = curr_id {
             // Update existing record
             sqlx::query(
-                "UPDATE guild_templates_kv SET value = $1, last_updated_at = NOW(), expires_at = $2 WHERE id = $3",
+                "UPDATE guild_templates_kv SET value = $1, last_updated_at = NOW(), expires_at = $2, resume = $3 WHERE id = $4",
             )
             .bind(serde_json::to_value(data)?)
             .bind(expires_at)
+            .bind(resume)
             .bind(&curr_id)
             .execute(&mut *tx)
             .await?;
@@ -337,7 +344,7 @@ ORDER BY scope",
             // Insert new record
             let id = gen_random(64);
             sqlx::query(
-                "INSERT INTO guild_templates_kv (id, guild_id, key, value, scopes, expires_at) VALUES ($1, $2, $3, $4, $5, $6)",
+                "INSERT INTO guild_templates_kv (id, guild_id, key, value, scopes, expires_at, resume) VALUES ($1, $2, $3, $4, $5, $6, $7)",
             )
             .bind(&id)
             .bind(self.guild_id.to_string())
@@ -345,6 +352,7 @@ ORDER BY scope",
             .bind(serde_json::to_value(data)?)
             .bind(scopes)
             .bind(expires_at)
+            .bind(resume)
             .execute(&mut *tx)
             .await?;
 
@@ -436,6 +444,7 @@ ORDER BY scope",
         id: String,
         data: KhronosValue,
         expires_at: Option<chrono::DateTime<chrono::Utc>>,
+        resume: bool,
     ) -> Result<(), khronos_runtime::Error> {
         // Check bytes length
         let data_str = serde_json::to_string(&data)?;
@@ -464,10 +473,11 @@ ORDER BY scope",
 
         // Update existing record
         sqlx::query(
-            "UPDATE guild_templates_kv SET value = $1, last_updated_at = NOW(), expires_at = $2 WHERE id = $3",
+            "UPDATE guild_templates_kv SET value = $1, last_updated_at = NOW(), expires_at = $2, resume = $3 WHERE id = $4",
         )
         .bind(serde_json::to_value(data)?)
         .bind(expires_at)
+        .bind(resume)
         .bind(&id)
         .execute(&mut *tx)
         .await?;
@@ -566,7 +576,7 @@ ORDER BY scope",
                 if scopes.is_empty() {
                     // no query, no scopes
                     sqlx::query(
-                    "SELECT id, key, value, expires_at, created_at, last_updated_at, scopes FROM guild_templates_kv WHERE guild_id = $1",
+                    "SELECT id, key, value, expires_at, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1",
                     )
                     .bind(self.guild_id.to_string())
                     .fetch_all(&self.guild_state.pool)
@@ -574,7 +584,7 @@ ORDER BY scope",
                 } else {
                     // no query, scopes
                     sqlx::query(
-                        "SELECT id, key, value, expires_at, created_at, last_updated_at, scopes FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2",
+                    "SELECT id, key, value, expires_at, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2",
                     )
                     .bind(self.guild_id.to_string())
                     .bind(scopes)
@@ -585,7 +595,7 @@ ORDER BY scope",
                 if scopes.is_empty() {
                     // query, no scopes
                     sqlx::query(
-                    "SELECT id, key, value, expires_at, created_at, last_updated_at, scopes FROM guild_templates_kv WHERE guild_id = $1 AND key ILIKE $2",
+                    "SELECT id, key, value, expires_at, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1 AND key ILIKE $2",
                     )
                     .bind(self.guild_id.to_string())
                     .bind(query)
@@ -594,7 +604,7 @@ ORDER BY scope",
                 } else {
                     // query, scopes
                     sqlx::query(
-                    "SELECT id, key, value, expires_at, created_at, last_updated_at, scopes FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2 AND key ILIKE $3",
+                    "SELECT id, key, value, expires_at, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2 AND key ILIKE $3",
                     )
                     .bind(self.guild_id.to_string())
                     .bind(scopes)
@@ -623,6 +633,7 @@ ORDER BY scope",
                 },
                 created_at: Some(rec.try_get("created_at")?),
                 last_updated_at: Some(rec.try_get("last_updated_at")?),
+                resume: rec.try_get("resume").unwrap_or(false),
             };
 
             records.push(record);

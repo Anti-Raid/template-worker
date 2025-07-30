@@ -1,9 +1,10 @@
 use crate::dispatch::dispatch_scoped_and_wait;
 use crate::dispatch::DispatchResult;
+use crate::templatingrt::cache::regenerate_cache;
 use super::types::ExecuteLuaVmActionResponse;
 use crate::templatingrt::CreateGuildState;
 use crate::templatingrt::POOL;
-use crate::templatingrt::{cache::regenerate_cache, MAX_TEMPLATES_RETURN_WAIT_TIME};
+use crate::templatingrt::MAX_TEMPLATES_RETURN_WAIT_TIME;
 use antiraid_types::ar_event::AntiraidEvent;
 use antiraid_types::ar_event::GetSettingsEvent;
 use antiraid_types::ar_event::SettingExecuteEvent;
@@ -58,6 +59,10 @@ pub fn create(
             "/dispatch-event/{guild_id}/@wait",
             post(dispatch_event_and_wait),
         )
+        .route(
+            "/regenerate-cache/{guild_id}",
+            post(regenerate_cache_api),
+        )
         .route("/healthcheck", post(|| async { Json(()) }))
         .route(
             "/settings/{guild_id}/{user_id}",
@@ -101,13 +106,6 @@ async fn dispatch_event(
     Path(guild_id): Path<serenity::all::GuildId>,
     Json(event): Json<AntiraidEvent>,
 ) -> Response<()> {
-    // Regenerate cache for guild if event is OnStartup
-    if let AntiraidEvent::OnStartup(_) = event {
-        regenerate_cache(&serenity_context, &data, guild_id)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    }
-
     let event = parse_event(&event).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
     dispatch(&serenity_context, &data, event, guild_id)
@@ -128,13 +126,6 @@ async fn dispatch_event_and_wait(
     Query(query): Query<DispatchEventAndWaitQuery>,
     Json(event): Json<AntiraidEvent>,
 ) -> Response<HashMap<String, DispatchResult<serde_json::Value>>> {
-    // Regenerate cache for guild if event is OnStartup
-    if let AntiraidEvent::OnStartup(_) = event {
-        regenerate_cache(&serenity_context, &data, guild_id)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    }
-
     let event = parse_event(&event).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
     let wait_timeout = match query.wait_timeout {
@@ -147,6 +138,21 @@ async fn dispatch_event_and_wait(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(results))
+}
+
+/// Regenerates the cache for a guild
+async fn regenerate_cache_api(
+    State(AppData {
+        data,
+        serenity_context,
+        ..
+    }): State<AppData>,
+    Path(guild_id): Path<serenity::all::GuildId>,
+) -> Response<()> {
+    regenerate_cache(&serenity_context, &data, guild_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(()))
 }
 
 /// Returns the number of threads running
