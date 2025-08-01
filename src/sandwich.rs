@@ -1,5 +1,6 @@
 use crate::Error;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::HashMap;
 
@@ -71,7 +72,7 @@ pub async fn guild(
     http: &serenity::http::Http,
     reqwest_client: &reqwest::Client,
     guild_id: serenity::model::id::GuildId,
-) -> Result<serenity::all::PartialGuild, Error> {    
+) -> Result<Value, Error> {    
     // Check sandwich, it may be there
     let url = format!(
         "{}/antiraid/api/state?col=guilds&id={}",
@@ -82,7 +83,7 @@ pub async fn guild(
     #[derive(serde::Serialize, serde::Deserialize, Debug)]
     struct Resp {
         ok: bool,
-        data: Option<serenity::all::PartialGuild>,
+        data: Option<Value>,
         error: Option<String>,
     }
 
@@ -108,7 +109,7 @@ pub async fn guild(
         );
     }
 
-    // Last resore: make the http call
+    // Last resort: make the http call
     let res = http.get_guild_with_counts(guild_id).await?;
 
     // Save to sandwich
@@ -138,7 +139,7 @@ pub async fn member_in_guild(
     reqwest_client: &reqwest::Client,
     guild_id: serenity::model::id::GuildId,
     user_id: serenity::model::id::UserId,
-) -> Result<Option<serenity::all::Member>, Error> {
+) -> Result<Option<Value>, Error> {
     let url = format!(
         "{}/antiraid/api/state?col=members&id={}&guild_id={}",
         crate::CONFIG.meta.sandwich_http_api,
@@ -149,7 +150,7 @@ pub async fn member_in_guild(
     #[derive(serde::Serialize, serde::Deserialize)]
     struct Resp {
         ok: bool,
-        data: Option<serenity::all::Member>,
+        data: Option<Value>,
         error: Option<String>,
     }
 
@@ -222,7 +223,7 @@ pub async fn guild_roles(
     http: &serenity::http::Http,
     reqwest_client: &reqwest::Client,
     guild_id: serenity::model::id::GuildId,
-) -> Result<Vec<serenity::all::Role>, Error> {
+) -> Result<Value, Error> {
     let url = format!(
         "{}/antiraid/api/state?col=guild_roles&id={}",
         crate::CONFIG.meta.sandwich_http_api,
@@ -232,7 +233,7 @@ pub async fn guild_roles(
     #[derive(serde::Serialize, serde::Deserialize)]
     struct Resp {
         ok: bool,
-        data: Option<Vec<serenity::all::Role>>,
+        data: Option<Value>,
         error: Option<String>,
     }
 
@@ -288,8 +289,6 @@ pub async fn guild_roles(
         },
     };
 
-    let roles = roles.into_iter().collect();
-
     // Update sandwich with a POST
     let resp = reqwest_client.post(&url).json(&roles).send().await?;
 
@@ -308,7 +307,7 @@ pub async fn guild_channels(
     http: &serenity::http::Http,
     reqwest_client: &reqwest::Client,
     guild_id: serenity::model::id::GuildId,
-) -> Result<Vec<serenity::all::GuildChannel>, Error> {
+) -> Result<Value, Error> {
     let url = format!(
         "{}/antiraid/api/state?col=guild_channels&id={}",
         crate::CONFIG.meta.sandwich_http_api,
@@ -318,7 +317,7 @@ pub async fn guild_channels(
     #[derive(serde::Serialize, serde::Deserialize)]
     struct Resp {
         ok: bool,
-        data: Option<Vec<serenity::all::GuildChannel>>,
+        data: Option<Value>,
         error: Option<String>,
     }
 
@@ -374,8 +373,6 @@ pub async fn guild_channels(
         },
     };
 
-    let channels = channels.into_iter().collect();
-
     // Update sandwich with a POST
     let resp = reqwest_client.post(&url).json(&channels).send().await?;
 
@@ -394,7 +391,7 @@ pub async fn channel(
     reqwest_client: &reqwest::Client,
     guild_id: Option<serenity::model::id::GuildId>,
     channel_id: serenity::model::id::GenericChannelId,
-) -> Result<Option<serenity::all::Channel>, Error> {
+) -> Result<Option<Value>, Error> {
     let url = match guild_id {
         Some(guild_id) => format!(
             "{}/antiraid/api/state?col=channels&id={}&guild_id={}",
@@ -412,7 +409,7 @@ pub async fn channel(
     #[derive(serde::Serialize, serde::Deserialize)]
     struct Resp {
         ok: bool,
-        data: Option<serenity::all::Channel>,
+        data: Option<Value>,
         error: Option<String>,
     }
 

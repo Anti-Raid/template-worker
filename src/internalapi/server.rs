@@ -394,7 +394,7 @@ async fn base_guild_user_info(
     Path((guild_id, user_id)): Path<(serenity::all::GuildId, serenity::all::UserId)>,
 ) -> Response<BaseGuildUserInfo> {
     let bot_user_id = data.current_user.id;
-    let guild = crate::sandwich::guild(
+    let guild_json = crate::sandwich::guild(
         &serenity_context.http,
         &data.reqwest,
         guild_id,
@@ -407,8 +407,11 @@ async fn base_guild_user_info(
         )
     })?;
 
+    let guild = serde_json::from_value::<serenity::all::PartialGuild>(guild_json)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
     // Next fetch the member and bot_user
-    let member: serenity::model::prelude::Member = match crate::sandwich::member_in_guild(
+    let member_json = match crate::sandwich::member_in_guild(
         &serenity_context.http,
         &data.reqwest,
         guild_id,
@@ -428,7 +431,10 @@ async fn base_guild_user_info(
         }
     };
 
-    let bot_user: serenity::model::prelude::Member = match crate::sandwich::member_in_guild(
+    let member = serde_json::from_value::<serenity::all::Member>(member_json)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let bot_user_json = match crate::sandwich::member_in_guild(
         &serenity_context.http,
         &data.reqwest,
         guild_id,
@@ -448,8 +454,11 @@ async fn base_guild_user_info(
         }
     };
 
+    let bot_user = serde_json::from_value::<serenity::all::Member>(bot_user_json)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
     // Fetch the channels
-    let channels = crate::sandwich::guild_channels(
+    let channels_json = crate::sandwich::guild_channels(
         &serenity_context.http,
         &data.reqwest,
         guild_id,
@@ -461,6 +470,9 @@ async fn base_guild_user_info(
             format!("Failed to get channels: {:#?}", e),
         )
     })?;
+
+    let channels = serde_json::from_value::<Vec<serenity::all::GuildChannel>>(channels_json)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let mut channels_with_permissions = Vec::with_capacity(channels.len());
 

@@ -1,6 +1,5 @@
 use crate::templatingrt::state::GuildState;
 use crate::templatingrt::template::Template;
-use extract_map::ExtractMap;
 use khronos_runtime::traits::context::{
     CompatibilityFlags, KhronosContext, Limitations, ScriptData,
 };
@@ -15,6 +14,7 @@ use khronos_runtime::traits::objectstorageprovider::ObjectStorageProvider;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use moka::future::Cache;
 use rand::distr::{Alphanumeric, SampleString};
+use serde_json::Value;
 use sqlx::Row;
 use std::sync::LazyLock;
 use std::{rc::Rc, sync::Arc};
@@ -25,7 +25,7 @@ fn gen_random(length: usize) -> String {
 }
 
 /// Internal short-lived channel cache
-pub static CHANNEL_CACHE: LazyLock<Cache<serenity::all::GenericChannelId, serenity::all::Channel>> =
+pub static CHANNEL_CACHE: LazyLock<Cache<serenity::all::GenericChannelId, Value>> =
     LazyLock::new(|| {
         Cache::builder()
             .time_to_idle(std::time::Duration::from_secs(30))
@@ -692,7 +692,7 @@ impl DiscordProvider for ArDiscordProvider {
 
     async fn get_guild(
         &self,
-    ) -> serenity::Result<serenity::model::prelude::PartialGuild, crate::Error> {
+    ) -> serenity::Result<Value, crate::Error> {
         Ok(crate::sandwich::guild(
             &self.guild_state.serenity_context.http,
             &self.guild_state.reqwest_client,
@@ -705,20 +705,26 @@ impl DiscordProvider for ArDiscordProvider {
     async fn get_guild_member(
         &self,
         user_id: serenity::all::UserId,
-    ) -> serenity::Result<Option<serenity::all::Member>, crate::Error> {
-        Ok(crate::sandwich::member_in_guild(
+    ) -> serenity::Result<Value, crate::Error> {
+        let member = crate::sandwich::member_in_guild(
             &self.guild_state.serenity_context.http,
             &self.guild_state.reqwest_client,
             self.guild_id,
             user_id,
         )
         .await
-        .map_err(|e| format!("Failed to fetch member information from sandwich: {}", e))?)
+        .map_err(|e| format!("Failed to fetch member information from sandwich: {}", e))?;
+
+        let Some(member) = member else {
+            return Ok(Value::Null);
+        };
+
+        return Ok(member)
     }
 
     async fn get_guild_channels(
         &self,
-    ) -> serenity::Result<Vec<serenity::all::GuildChannel>, crate::Error> {
+    ) -> serenity::Result<Value, crate::Error> {
         let channels = crate::sandwich::guild_channels(
             &self.guild_state.serenity_context.http,
             &self.guild_state.reqwest_client,
@@ -732,7 +738,7 @@ impl DiscordProvider for ArDiscordProvider {
 
     async fn get_guild_roles(
         &self,
-    ) -> serenity::Result<ExtractMap<serenity::all::RoleId, serenity::all::Role>, crate::Error>
+    ) -> serenity::Result<Value, crate::Error>
     {
         let roles = crate::sandwich::guild_roles(
             &self.guild_state.serenity_context.http,
@@ -742,24 +748,24 @@ impl DiscordProvider for ArDiscordProvider {
         .await
         .map_err(|e| format!("Failed to fetch role information from sandwich: {}", e))?;
 
-        Ok(roles.into_iter().collect())
+        Ok(roles)
     }
 
     async fn get_channel(
         &self,
         channel_id: serenity::all::GenericChannelId,
-    ) -> serenity::Result<serenity::all::Channel, crate::Error> {
+    ) -> serenity::Result<Value, crate::Error> {
         {
             // Check cache first
             let cached_channel = CHANNEL_CACHE.get(&channel_id).await;
 
             if let Some(cached_channel) = cached_channel {
-                let Some(guild_id) = cached_channel.guild_id() else {
-                    return Err("Channel not in guild".into());
+                let Some(Value::String(guild_id)) = cached_channel.get("guild_id") else {
+                    return Err(format!("Channel {channel_id} does not belong to a guild").into());
                 };
 
-                if guild_id != self.guild_id {
-                    return Err("Channel not in guild".into());
+                if guild_id != &self.guild_id.to_string() {
+                    return Err(format!("Channel {channel_id} does not belong to the guild").into());
                 }
 
                 return Ok(cached_channel);
@@ -779,12 +785,12 @@ impl DiscordProvider for ArDiscordProvider {
             return Err("Channel not found".into());
         };
 
-        let Some(guild_id) = channel.guild_id() else {
-            return Err("Channel not in guild".into());
+        let Some(Value::String(guild_id)) = channel.get("guild_id") else {
+            return Err(format!("Channel {channel_id} does not belong to a guild").into());
         };
 
-        if guild_id != self.guild_id {
-            return Err("Channel not in guild".into());
+        if guild_id != &self.guild_id.to_string() {
+            return Err(format!("Channel {channel_id} does not belong to the guild").into());
         }
 
         Ok(channel)
@@ -823,7 +829,7 @@ impl DiscordProvider for ArDiscordProvider {
         channel_id: serenity::all::GenericChannelId,
         map: impl serde::Serialize,
         audit_log_reason: Option<&str>,
-    ) -> Result<serenity::model::channel::Channel, crate::Error> {
+    ) -> Result<Value, crate::Error> {
         let chan = self
             .guild_state
             .serenity_context
@@ -842,7 +848,7 @@ impl DiscordProvider for ArDiscordProvider {
         &self,
         channel_id: serenity::all::GenericChannelId,
         audit_log_reason: Option<&str>,
-    ) -> Result<serenity::model::channel::Channel, crate::Error> {
+    ) -> Result<Value, crate::Error> {
         let chan = self
             .guild_state
             .serenity_context

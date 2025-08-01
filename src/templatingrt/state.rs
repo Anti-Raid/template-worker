@@ -23,10 +23,6 @@ impl Ratelimits {
             LuaRatelimits::create_quota(create_nonmax_u32(3)?, Duration::from_secs(1))?;
         let bulk_op_create_lim = DefaultKeyedRateLimiter::keyed(bulk_op_create_quota);
 
-        let bulk_op_wait_quota =
-            LuaRatelimits::create_quota(create_nonmax_u32(10)?, Duration::from_millis(200))?;
-        let bulk_op_wait_lim = DefaultKeyedRateLimiter::keyed(bulk_op_wait_quota);
-
         // Create the per-bucket limits
         let ban_quota1 =
             LuaRatelimits::create_quota(create_nonmax_u32(5)?, Duration::from_secs(30))?;
@@ -120,7 +116,6 @@ impl Ratelimits {
             )?,
             per_bucket: indexmap::indexmap!(
                 "antiraid_bulk_op".to_string() => vec![bulk_op_create_lim] as Vec<DefaultKeyedRateLimiter<()>>,
-                "antiraid_bulk_op_wait".to_string() => vec![bulk_op_wait_lim] as Vec<DefaultKeyedRateLimiter<()>>,
                 "ban".to_string() => vec![ban_lim1, ban_lim2] as Vec<DefaultKeyedRateLimiter<()>>,
                 "kick".to_string() => vec![kick_lim1, kick_lim2] as Vec<DefaultKeyedRateLimiter<()>>,
                 "create_message".to_string() => vec![create_message_lim1] as Vec<DefaultKeyedRateLimiter<()>>,

@@ -562,7 +562,7 @@ impl TemplateStore {
         channel_id: serenity::all::GenericChannelId,
     ) -> Result<(), crate::Error> {
         // Perform required checks
-        let Some(channel) = crate::sandwich::channel(
+        let Some(channel_json) = crate::sandwich::channel(
             &self.guild_state.serenity_context.http,
             &self.guild_state.reqwest_client,
             Some(self.guild_state.guild_id),
@@ -572,6 +572,9 @@ impl TemplateStore {
         else {
             return Err(format!("Could not find channel with id: {}", channel_id).into());
         };
+
+        let channel = serde_json::from_value::<serenity::all::Channel>(channel_json)
+            .map_err(|e| format!("Failed to parse channel: {}", e))?;
 
         let Some(guild_channel) = channel.guild() else {
             return Err(format!("Channel with id {} is not in a guild", channel_id).into());
@@ -595,17 +598,23 @@ impl TemplateStore {
         .await
         .map_err(|e| format!("Failed to get bot user: {}", e))?;
 
-        let Some(bot_user) = bot_user else {
+        let Some(bot_user_json) = bot_user else {
             return Err(format!("Could not find bot user: {}", bot_user_id).into());
         };
 
-        let guild = crate::sandwich::guild(
+        let bot_user = serde_json::from_value::<serenity::all::Member>(bot_user_json)
+            .map_err(|e| format!("Failed to parse bot user: {}", e))?;
+
+        let guild_json = crate::sandwich::guild(
             &self.guild_state.serenity_context.http,
             &self.guild_state.reqwest_client,
             self.guild_state.guild_id,
         )
         .await
         .map_err(|e| format!("Failed to get guild: {}", e))?;
+
+        let guild = serde_json::from_value::<serenity::all::PartialGuild>(guild_json)
+            .map_err(|e| format!("Failed to parse guild: {}", e))?;
 
         let permissions = guild.user_permissions_in(&guild_channel, &bot_user);
 
