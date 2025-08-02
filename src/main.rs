@@ -4,7 +4,6 @@ mod dispatch;
 mod event_handler;
 mod expiry_tasks;
 mod internalapi;
-mod jobserver;
 mod objectstore;
 mod register;
 mod sandwich;
@@ -18,7 +17,6 @@ use log::{error, info};
 use serenity::all::{ApplicationId, HttpBuilder};
 use sqlx::postgres::PgPoolOptions;
 use std::io::Write;
-use std::str::FromStr;
 use std::{sync::Arc, time::Duration};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>; // This is constant and should be copy pasted
@@ -52,7 +50,7 @@ async fn main() {
 
     info!("Proxy URL: {}", proxy_url);
 
-    let token = serenity::all::Token::from_str(&CONFIG.discord_auth.token).expect("Failed to validate token");
+    let token = serenity::all::SecretString::new(CONFIG.discord_auth.token.clone().into());
     let http = Arc::new(
         HttpBuilder::new(token.clone())
             .proxy(proxy_url)

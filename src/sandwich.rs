@@ -113,7 +113,7 @@ pub async fn guild(
     let res = http.get_guild_with_counts(guild_id).await?;
 
     // Save to sandwich
-    let url = format!(
+    /*let url = format!(
         "{}/antiraid/api/state?col=guilds&id={}",
         crate::CONFIG.meta.sandwich_http_api,
         guild_id
@@ -126,7 +126,7 @@ pub async fn guild(
             "Failed to update sandwich proxy with guild data: {:?}",
             resp.text().await
         );
-    }
+    }*/
 
     Ok(res)
 }
@@ -206,14 +206,14 @@ pub async fn member_in_guild(
     };
 
     // Update sandwich with a POST
-    let resp = reqwest_client.post(&url).json(&member).send().await?;
+    /*let resp = reqwest_client.post(&url).json(&member).send().await?;
 
     if !resp.status().is_success() {
         log::warn!(
             "Failed to update sandwich proxy with member data: {:?}",
             resp.text().await
         );
-    }
+    }*/
 
     Ok(Some(member))
 }
@@ -290,14 +290,14 @@ pub async fn guild_roles(
     };
 
     // Update sandwich with a POST
-    let resp = reqwest_client.post(&url).json(&roles).send().await?;
+    /*let resp = reqwest_client.post(&url).json(&roles).send().await?;
 
     if !resp.status().is_success() {
         log::warn!(
             "Failed to update sandwich proxy with channel data: {:?}",
             resp.text().await
         );
-    }
+    }*/
 
     Ok(roles)
 }
@@ -374,14 +374,14 @@ pub async fn guild_channels(
     };
 
     // Update sandwich with a POST
-    let resp = reqwest_client.post(&url).json(&channels).send().await?;
+    /*let resp = reqwest_client.post(&url).json(&channels).send().await?;
 
     if !resp.status().is_success() {
         log::warn!(
             "Failed to update sandwich proxy with channel data: {:?}",
             resp.text().await
         );
-    }
+    }*/
 
     Ok(channels)
 }
@@ -458,7 +458,7 @@ pub async fn channel(
     };
 
     // Update sandwich with a POST
-    let resp = reqwest_client
+    /*let resp = reqwest_client
         .post(&url)
         .timeout(std::time::Duration::from_secs(10))
         .json(&channel)
@@ -470,7 +470,7 @@ pub async fn channel(
             "Failed to update sandwich proxy with channel data: {:?}",
             resp.text().await
         );
-    }
+    }*/
 
     Ok(Some(channel))
 }

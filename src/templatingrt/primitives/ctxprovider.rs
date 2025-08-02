@@ -57,9 +57,6 @@ impl TemplateContextProvider {
             }),
             Rc::new(super::datastores::LinksStore {}),
             Rc::new(khronos_runtime::traits::ir::datastores::CopyDataStore {}),
-            Rc::new(super::datastores::JobServerStore {
-                guild_state: guild_state.clone(),
-            }),
             Rc::new(super::datastores::TemplateStore {
                 guild_state: guild_state.clone(),
             }),
