@@ -1,9 +1,14 @@
 use crate::api::auth::create_web_session;
 use crate::api::auth::create_web_user_from_oauth2;
+use crate::api::auth::delete_user_session;
+use crate::api::auth::get_user_sessions;
 use crate::api::auth::SessionType;
 use crate::api::extractors::AuthorizedUser;
 use crate::api::types::ApiConfig;
 use crate::api::types::AuthorizeRequest;
+use crate::api::types::GetStatusResponse;
+use crate::api::types::ShardConn;
+use crate::api::types::UserSessionList;
 use crate::dispatch::dispatch_scoped_and_wait;
 use crate::dispatch::DispatchResult;
 use crate::templatingrt::MAX_TEMPLATES_RETURN_WAIT_TIME;
@@ -15,6 +20,7 @@ use axum::{
     http::StatusCode,
 };
 use axum::Json;
+use chrono::Utc;
 use moka::future::Cache;
 use serenity::all::UserId;
 use std::sync::LazyLock;
@@ -23,7 +29,8 @@ use sqlx::Row;
 
 use super::types::{
     BaseGuildUserInfo, GuildChannelWithPermissions, SettingsOperationRequest, TwState,
-    DashboardGuild, DashboardGuildData, PartialUser, CreateUserSessionResponse, AuthorizedSession
+    DashboardGuild, DashboardGuildData, PartialUser, CreateUserSessionResponse, AuthorizedSession,
+    CreateUserSession
 };
 use crate::dispatch::{dispatch_and_wait, parse_event};
 use super::server::{AppData, ApiResponse, ApiError, ApiErrorCode}; 
@@ -113,11 +120,12 @@ pub(super) async fn get_user_guilds(
     AuthorizedUser { user_id, session_type, .. }: AuthorizedUser, // Internal endpoint
     Query(GetUserGuildsQuery { refresh }): Query<GetUserGuildsQuery>,
 ) -> ApiResponse<DashboardGuildData> {
-    if session_type != "login" {
+    // TODO: Remove this restriction once we properly refresh the access token upon expiry etc.
+    if session_type != "login" { 
         return Err((
             StatusCode::FORBIDDEN,
             Json(ApiError {
-                message: "This endpoint is restricted to only Discord Oauth2 login sessions".to_string(),
+                message: "This endpoint is restricted to only Discord Oauth2 login sessions for now.".to_string(),
                 code: ApiErrorCode::Restricted,
             }),
         ));
@@ -518,13 +526,81 @@ pub(super) async fn get_authorized_session(
         Json(
             AuthorizedSession {
                 user_id,
-                session_id,
+                id: session_id,
                 state,
-                session_type,
+                r#type: session_type,
             }
         )
     )
 }
+
+pub(super) async fn get_user_sessions_api(
+    State(AppData { data, .. }): State<AppData>,
+    AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
+) -> ApiResponse<UserSessionList> {
+    let sessions = get_user_sessions(&data.pool, &user_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get user sessions: {e:?}").into())))?;
+
+    Ok(Json(UserSessionList { sessions }))
+}
+
+pub(super) async fn create_user_session(
+    State(AppData { data, .. }): State<AppData>,
+    AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
+    Json(req): Json<CreateUserSession>,
+) -> ApiResponse<CreateUserSessionResponse> {
+    if req.r#type != "api" {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ApiError {
+                message: "Only 'api' session type is allowed".to_string(),
+                code: ApiErrorCode::Restricted,
+            }),
+        ));
+    }
+
+    // Panics when seconds is more than i64::MAX / 1_000 or less than -i64::MAX / 1_000 (in this context, this is the same as i64::MIN / 1_000 due to rounding).
+    if req.expiry <= 0 || req.expiry >= i64::MAX / 1_000 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiError {
+                message: format!("Expiry time must be between 0 and {}", i64::MAX / 1_000),
+                code: ApiErrorCode::InvalidToken,
+            }),
+        ));
+    }
+
+    let session = create_web_session(
+        &data.pool,
+        &user_id,
+        SessionType::Api {
+            expires_at: Utc::now() + chrono::Duration::seconds(req.expiry),
+        },
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to create session: {e:?}").into())))?;
+
+    Ok(Json(CreateUserSessionResponse {
+        user_id,
+        token: session.token,
+        session_id: session.session_id,
+        expiry: session.expires_at,
+        user: None,
+    }))
+}
+
+pub(super) async fn delete_user_session_api(
+    State(AppData { data, .. }): State<AppData>,
+    AuthorizedUser { user_id, .. }: AuthorizedUser,
+    Path(session_id): Path<String>, // Session ID to delete
+) -> ApiResponse<()> {
+    delete_user_session(&data.pool, &user_id, &session_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to delete user session: {e:?}").into())))?;
+
+    Ok(Json(()))
+} 
 
 static STATE_CACHE: std::sync::LazyLock<Arc<TwState>> = std::sync::LazyLock::new(|| {
     let state = TwState {
@@ -549,4 +625,47 @@ pub(super) async fn api_config(
         support_server_invite: 
         crate::CONFIG.meta.support_server_invite.clone(),
     })
+}
+
+static STATS_CACHE: std::sync::LazyLock<Cache<(), GetStatusResponse>> = std::sync::LazyLock::new(|| {
+    Cache::builder()
+        .time_to_live(std::time::Duration::from_secs(100)) // 1 minute
+        .build()
+});
+
+/// Returns the bot's stats
+pub(super) async fn get_bot_stats(
+    State(AppData { data, .. }): State<AppData>,
+) -> ApiResponse<GetStatusResponse> {
+    let stats = STATS_CACHE.get(&()).await;
+
+    if let Some(stats) = stats {
+        return Ok(Json(stats));
+    }
+
+    let sandwich_raw_stats = crate::sandwich::get_status(&data.reqwest)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get bot stats: {e:?}").into())))?;
+
+    let mut total_guilds = 0;
+    for shard in sandwich_raw_stats.shard_conns.values() {
+        total_guilds += shard.guilds;
+    }
+
+    let stats = GetStatusResponse {
+        shard_conns: sandwich_raw_stats.shard_conns.into_iter().map(|(id, shard)| {
+            (id, ShardConn {
+                status: shard.status,
+                real_latency: shard.real_latency,
+                guilds: shard.guilds,   
+                uptime: shard.uptime,
+                total_uptime: shard.total_uptime,
+            })
+        }).collect(),
+        total_guilds,
+    };
+
+    STATS_CACHE.insert((), stats.clone()).await;
+
+    Ok(Json(stats))
 }

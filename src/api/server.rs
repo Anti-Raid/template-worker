@@ -1,6 +1,6 @@
 use axum::{
     http::StatusCode,
-    routing::{get, post},
+    routing::{get, post, delete},
     Json, Router,
 };
 use std::sync::Arc;
@@ -89,13 +89,21 @@ pub fn create(
         //@ Auth
         // Creates a login token from a Discord OAuth2 login [CreateUserSession]
         .route("/oauth2", post(public_api::create_oauth2_session))
+        // Returns info about the current session of the user and the user's info itself
         .route("/sessions/@me", get(public_api::get_authorized_session)) // NOTE: Replaces webapi's /test-auth
+        // Gets the list of sessions the user has on AntiRaid
+        .route("/sessions", get(public_api::get_user_sessions_api))
+        // Creates a new user session
+        .route("/sessions", post(public_api::create_user_session))
+        // Deletes a user session
+        .route("/sessions/{session_id}", delete(public_api::delete_user_session_api))
         //@ Core
         // Returns the API configuration
         .route("/config", get(public_api::api_config))
         // Returns the bots state [BotState]
         .route("/bot-state", get(public_api::state))
-        // TODO: bot-stats, template-shop and template-shop/{name}
+        .route("/bot-stats", get(public_api::get_bot_stats))
+        // TODO: template-shop and template-shop/{name} will wait till shop is rereleased/open
 
         // Internal API routes (designated by /i/)
         

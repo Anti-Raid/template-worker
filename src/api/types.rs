@@ -96,6 +96,14 @@ pub struct AuthorizeRequest {
     pub redirect_uri: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Create a API user session
+pub struct CreateUserSession {
+    pub name: String,
+    pub r#type: String, // Currently must be 'api'
+    pub expiry: i64, // Expiry in seconds
+}
+
 /// Defines a CreateUserSessionResponse structure which is used to return session information
 /// after creation of a session
 /// 
@@ -128,9 +136,77 @@ pub struct PartialUser {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Represents an authorized session and its associated user
+/// 
+/// Note: this is *very* different from a UserSession and provides different/limited data
 pub struct AuthorizedSession {
+    /// User ID
     pub user_id: String,
-    pub session_id: String,
+    /// Session ID
+    pub id: String,
+    /// The state of the user
     pub state: String,
-    pub session_type: String,
+    /// The type of session
+    pub r#type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserSession {
+    /// The ID of the session
+    pub id: String,
+    /// The name of the session
+    pub name: Option<String>,
+    /// The ID of the user who created the session
+    pub user_id: String,
+    /// The time the session was created
+    pub created_at: DateTime<Utc>,
+    /// The type of session (e.g., "login", "api")
+    pub r#type: String,
+    /// The time the session expires
+    pub expiry: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserSessionList {
+    /// The list of user sessions
+    pub sessions: Vec<UserSession>,
+}
+
+/*
+type ShardConn struct {
+	Status      string `json:"status"`
+	RealLatency int64  `json:"real_latency"`
+	Guilds      int64  `json:"guilds"`
+	Uptime      int64  `json:"uptime"`
+	TotalUptime int64  `json:"total_uptime"`
+}
+
+type GetStatusResponse struct {
+	ShardConns  map[int64]ShardConn    `json:"shard_conns"`
+	TotalGuilds int64                  `json:"total_guilds"`
+}
+*/
+
+/// A shard connection (for bot statistics)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShardConn {
+    /// The status of the shard connection
+    pub status: String,
+    /// The real latency of the shard connection
+    pub real_latency: i64,
+    /// The number of guilds the shard is connected to
+    pub guilds: i64,
+    /// The uptime of the shard connection in seconds
+    pub uptime: i64,
+    /// The total uptime of the shard connection in seconds
+    pub total_uptime: i64,
+}
+
+/// A response containing the status of all shards
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetStatusResponse {
+    /// A map of shard group ID to shard connection information
+    pub shard_conns: std::collections::HashMap<i64, ShardConn>,
+    /// The total number of guilds the bot is connected to
+    pub total_guilds: i64,
 }

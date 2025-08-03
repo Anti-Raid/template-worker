@@ -68,6 +68,7 @@ impl FromRequestParts<AppData> for AuthorizedUser {
 
 /// This extractor checks if the user is authorized
 /// and is able to access internal endpoints
+#[allow(dead_code)]
 pub struct InternalEndpoint {
     pub user_id: String,
 }

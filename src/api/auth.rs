@@ -2,6 +2,8 @@ use chrono::{DateTime, Duration, Utc};
 use rand::distr::{Alphanumeric, SampleString};
 use sqlx::PgPool;
 
+use crate::api::types::UserSession;
+
 /// The response from checking web auth
 /// 
 /// This enum can be used to control API access
@@ -163,4 +165,49 @@ pub async fn create_web_session(
         token,
         expires_at: expiry,
     })
+}
+
+/// Returns the list of all sessions for a user
+pub async fn get_user_sessions(pool: &PgPool, user_id: &str) -> Result<Vec<UserSession>, crate::Error> {
+    #[derive(sqlx::FromRow)]
+    pub struct UserSessionRow {
+        pub id: uuid::Uuid,
+        pub name: Option<String>,
+        pub user_id: String,
+        pub created_at: DateTime<Utc>,
+        pub typ: String,
+        pub expiry: DateTime<Utc>,
+    }
+
+    let sessions: Vec<UserSessionRow> = sqlx::query_as(
+        "SELECT id, name, user_id, created_at, type AS typ, expiry FROM web_api_tokens WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    let user_sessions = sessions.into_iter().map(|s| UserSession {
+        id: s.id.to_string(),
+        name: s.name,
+        user_id: s.user_id,
+        created_at: s.created_at,
+        r#type: s.typ,
+        expiry: s.expiry,
+    }).collect();
+
+    Ok(user_sessions)
+}
+
+pub async fn delete_user_session(pool: &PgPool, user_id: &str, session_id: &str) -> Result<(), crate::Error> {
+    let res = sqlx::query("DELETE FROM web_api_tokens WHERE user_id = $1 AND id = $2")
+        .bind(user_id)
+        .bind(session_id)
+        .execute(pool)
+        .await?;
+
+    if res.rows_affected() == 0 {
+        return Err("No session found to delete".into());
+    }
+
+    Ok(())
 }
