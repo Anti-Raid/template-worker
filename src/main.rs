@@ -3,7 +3,7 @@ mod data;
 mod dispatch;
 mod event_handler;
 mod expiry_tasks;
-mod internalapi;
+mod api;
 mod objectstore;
 mod register;
 mod sandwich;

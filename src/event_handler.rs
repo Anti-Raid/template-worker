@@ -1,6 +1,6 @@
 use crate::config::CONFIG;
 use crate::dispatch::discord_event_dispatch;
-use crate::internalapi::init::{start_rpc_server, CreateRpcServerBind, CreateRpcServerOptions};
+use crate::api::init::{start_rpc_server, CreateRpcServerBind, CreateRpcServerOptions};
 use async_trait::async_trait;
 use serenity::all::{EventHandler, IEvent};
 use serenity::gateway::client::Context;
@@ -25,7 +25,7 @@ impl EventHandler for EventFramework {
                 tokio::task::spawn(async move {
                     log::info!("Starting RPC server");
 
-                    let rpc_server = crate::internalapi::server::create(data1, &ctx1);
+                    let rpc_server = crate::api::server::create(data1, &ctx1);
 
                     let opts = CreateRpcServerOptions {
                         bind: CreateRpcServerBind::Address(format!(
