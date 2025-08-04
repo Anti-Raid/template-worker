@@ -1,5 +1,5 @@
 use crate::data::Data;
-use antiraid_types::ar_event::AntiraidEvent;
+use crate::events::{KeyExpiryEvent, AntiraidEvent};
 use std::time::Duration;
 
 use crate::dispatch::{dispatch_scoped_and_wait, parse_event};
@@ -42,7 +42,7 @@ pub async fn key_expiry_task(ctx: serenity::all::client::Context) -> ! {
     let mut set = tokio::task::JoinSet::new();
     loop {
         for (guild_id, expired_task) in get_all_expired_keys() {
-            let event = AntiraidEvent::KeyExpiry(antiraid_types::ar_event::KeyExpiryEvent {
+            let event = AntiraidEvent::KeyExpiry(KeyExpiryEvent {
                 id: expired_task.id.clone(),
                 key: expired_task.key.clone(),
                 scopes: expired_task.scopes.clone(),

@@ -1,7 +1,7 @@
 use crate::data::Data;
-use antiraid_types::ar_event::AntiraidEvent;
+use crate::events::AntiraidEvent;
 use serenity::all::{GuildId, ParseIdError};
-use antiraid_types::ar_event::KeyResumeEvent;
+use crate::events::KeyResumeEvent;
 use crate::dispatch::{dispatch_scoped, parse_event};
 
 /// Dispatches resume keys for a guild

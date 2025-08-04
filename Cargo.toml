@@ -22,12 +22,14 @@ clap = { version = "4.5.16", features = ["derive"] }
 moka = { version = "0.12", features = ["future", "futures-util", "sync"] }
 indexmap = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["serde", "v4"] }
-antiraid-types = { git = "https://github.com/anti-raid/antiraid-types" }
 khronos_runtime = { git = "https://github.com/anti-raid/khronos" }
 vfs = { git = "https://github.com/Anti-Raid/rust-vfs", features = ["embedded-fs"] }
 rust-embed = { version = "8.7.0", features = ["debug-embed", "interpolate-folder-path"] }
 futures = "0.3"
 dashmap = { version = "6", features = ["serde", "inline", "rayon"] }
+
+# events
+strum = { version = "0.26", features = ["derive"] }
 
 # http
 axum = { version = "0.8.4", features = ["macros"] }
@@ -37,7 +39,7 @@ hyper-util = { version = "0.1", features = ["tokio", "server-auto", "http1"] }
 tower-service = "0.3"
 
 # openapi
-utoipa = { version = "5", features = ["chrono", "uuid"] }
+utoipa = { version = "5", features = ["chrono", "uuid", "indexmap"] }
 utoipa-axum = "0.2"
 
 # sandwich

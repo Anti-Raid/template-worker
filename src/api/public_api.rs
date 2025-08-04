@@ -8,16 +8,20 @@ use crate::api::types::ApiConfig;
 use crate::api::types::ApiCreateCommand;
 use crate::api::types::ApiCreateCommandOption;
 use crate::api::types::ApiCreateCommandOptionChoice;
+use crate::api::types::ApiPartialGuildChannel;
+use crate::api::types::ApiPartialRole;
 use crate::api::types::AuthorizeRequest;
 use crate::api::types::GetStatusResponse;
+use crate::api::types::GuildChannelWithPermissions;
+use crate::api::types::SettingDispatch;
+use crate::api::types::SettingExecuteDispatch;
 use crate::api::types::ShardConn;
 use crate::api::types::UserSessionList;
 use crate::dispatch::dispatch_scoped_and_wait;
-use crate::dispatch::DispatchResult;
+use crate::events::AntiraidEvent;
+use crate::events::GetSettingsEvent;
+use crate::events::SettingExecuteEvent;
 use crate::templatingrt::MAX_TEMPLATES_RETURN_WAIT_TIME;
-use antiraid_types::ar_event::AntiraidEvent;
-use antiraid_types::ar_event::GetSettingsEvent;
-use antiraid_types::ar_event::SettingExecuteEvent;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -31,7 +35,7 @@ use std::{collections::HashMap, sync::Arc};
 use sqlx::Row;
 
 use super::types::{
-    BaseGuildUserInfo, GuildChannelWithPermissions, SettingsOperationRequest, TwState,
+    BaseGuildUserInfo, SettingsOperationRequest, TwState,
     DashboardGuild, DashboardGuildData, PartialUser, CreateUserSessionResponse, AuthorizedSession,
     CreateUserSession
 };
@@ -48,7 +52,7 @@ pub(super) async fn get_settings_for_guild_user(
     State(AppData { ..}): State<AppData>,
     AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
     Path(guild_id): Path<serenity::all::GuildId>,
-) -> ApiResponse<HashMap<String, DispatchResult<Vec<antiraid_types::setting::Setting>>>> {
+) -> ApiResponse<SettingDispatch> {
     // Make a GetSetting event
     let user_id: UserId = user_id.parse()
         .map_err(|e: serenity::all::ParseIdError| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
@@ -66,7 +70,10 @@ pub(super) async fn get_settings_for_guild_user(
         MAX_TEMPLATES_RETURN_WAIT_TIME,
     )
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?
+    .into_iter()
+    .map(|(name, result)| (name, result.into()))
+    .collect::<HashMap<_, _>>();
 
     Ok(Json(results))
 }
@@ -80,7 +87,7 @@ pub(super) async fn execute_setting_for_guild_user(
     AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
     Path(guild_id): Path<serenity::all::GuildId>,
     Json(req): Json<SettingsOperationRequest>,
-) -> ApiResponse<HashMap<String, DispatchResult<serde_json::Value>>> {
+) -> ApiResponse<SettingExecuteDispatch> {
     let user_id: UserId = user_id.parse()
         .map_err(|e: serenity::all::ParseIdError| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
@@ -104,7 +111,10 @@ pub(super) async fn execute_setting_for_guild_user(
         MAX_TEMPLATES_RETURN_WAIT_TIME,
     )
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?
+    .into_iter()
+    .map(|(name, result)| (name, result.into()))
+    .collect::<HashMap<_, _>>();
 
     Ok(Json(results))
 }
@@ -360,7 +370,13 @@ pub(super) async fn base_guild_user_info(
         channels_with_permissions.push(GuildChannelWithPermissions {
             user: guild.user_permissions_in(channel, &member),
             bot: guild.user_permissions_in(channel, &bot_user),
-            channel: channel.clone(),
+            channel: ApiPartialGuildChannel {
+                id: channel.id.widen(),
+                name: channel.base.name.to_string(),
+                position: channel.position,
+                parent_id: channel.parent_id.map(|id| id.widen()),
+                r#type: channel.base.kind.0,
+            },
         });
     }
 
@@ -368,7 +384,14 @@ pub(super) async fn base_guild_user_info(
         name: guild.name.to_string(),
         icon: guild.icon_url(),
         owner_id: guild.owner_id.to_string(),
-        roles: guild.roles.into_iter().collect(),
+        roles: guild.roles.into_iter().map(|role| {
+            ApiPartialRole {
+                id: role.id,
+                name: role.name.to_string(),
+                position: role.position,
+                permissions: role.permissions,
+            }
+        }).collect(),
         user_roles: member.roles.to_vec(),
         bot_roles: bot_user.roles.to_vec(),
         channels: channels_with_permissions,

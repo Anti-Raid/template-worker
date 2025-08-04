@@ -3,7 +3,7 @@ use crate::templatingrt::cache::{DeferredCacheRegenMode, DEFERRED_CACHE_REGENS};
 use crate::templatingrt::state::GuildState;
 use crate::templatingrt::template::TemplateLanguage;
 use crate::templatingrt::{KhronosValueResponse, MAX_TEMPLATES_RETURN_WAIT_TIME};
-use antiraid_types::ar_event::{AntiraidEvent, KeyResumeEvent};
+use crate::events::{AntiraidEvent, KeyResumeEvent};
 use chrono::Utc;
 use indexmap::IndexMap;
 use khronos_runtime::traits::ir::{DataStoreImpl, DataStoreMethod};

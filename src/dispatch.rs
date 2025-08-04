@@ -5,7 +5,7 @@ use crate::data::Data;
 use crate::templatingrt::cache::{get_templates_with_event, get_templates_with_event_scoped, get_templates_by_name};
 use crate::templatingrt::{IntoResponse, KhronosValueResponse};
 use crate::templatingrt::{fire, execute, CreateGuildState, LuaVmAction, template::Template};
-use antiraid_types::ar_event::AntiraidEvent;
+use crate::events::AntiraidEvent;
 use indexmap::IndexMap;
 use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::utils::khronos_value::KhronosValue;
@@ -145,8 +145,7 @@ pub async fn dispatch_to_and_wait<T: IntoResponse>(
     Ok(results)
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type", content = "data")]
+#[derive(Debug, Clone)]
 pub enum DispatchResult<T> {
     Ok(T),
     Err(String),

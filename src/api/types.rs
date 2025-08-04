@@ -7,15 +7,16 @@ use khronos_runtime::utils::khronos_value::KhronosValue;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serenity::all::ChannelType;
-use serenity::all::GuildChannel;
+use serenity::all::GenericChannelId;
 use serenity::all::GuildId;
 use serenity::all::InstallationContext;
 use serenity::all::Permissions;
-use serenity::all::Role;
 use serenity::all::RoleId;
 use serenity::all::UserId;
 use serenity::all::CommandOptionType;
 use serenity::all::CommandType;
+
+use crate::dispatch::DispatchResult;
 
 /// Query parameters for dispatch_event_and_wait
 #[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
@@ -35,23 +36,61 @@ pub struct ExecuteLuaVmActionResponse {
     pub time_taken: Duration,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 pub struct GuildChannelWithPermissions {
+    #[schema(value_type = String)]
+    /// User permissions
     pub user: Permissions,
+    #[schema(value_type = String)]
+    /// Bot permissions
     pub bot: Permissions,
-    pub channel: GuildChannel,
+    /// Channel data
+    pub channel: ApiPartialGuildChannel,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
+pub struct ApiPartialGuildChannel {
+    #[schema(value_type = String)]
+    /// The ID of the channel
+    pub id: GenericChannelId,
+    /// The name of the channel
+    pub name: String,
+    /// The position of the channel in the guild
+    pub position: u16,
+    /// The ID of the parent channel, if any
+    #[schema(value_type = Option<String>)]
+    pub parent_id: Option<GenericChannelId>,
+    #[schema(value_type = u8)]
+    /// The type of the channel
+    pub r#type: u8,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
+pub struct ApiPartialRole {
+    #[schema(value_type = String)]
+    /// The ID of the role
+    pub id: RoleId,
+    /// The name of the role
+    pub name: String,
+    /// The position of the role in the guild
+    pub position: i16,
+    /// Permissions of the role
+    #[schema(value_type = String)]
+    pub permissions: Permissions,
+}
+
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct BaseGuildUserInfo {
     pub owner_id: String,
     pub name: String,
     pub icon: Option<String>,
     /// List of all roles in the server
-    pub roles: Vec<Role>,
+    pub roles: Vec<ApiPartialRole>,
     /// List of roles the user has
+    #[schema(value_type = Vec<String>)]
     pub user_roles: Vec<RoleId>,
     /// List of roles the bot has
+    #[schema(value_type = Vec<String>)]
     pub bot_roles: Vec<RoleId>,
     /// List of all channels in the server
     pub channels: Vec<GuildChannelWithPermissions>,
@@ -276,3 +315,22 @@ pub enum ApiLuaVmResult {
     LuaError { err: String },
     VmBroken {},
 }
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(tag = "type", content = "data")]
+pub enum ApiDispatchResult<T> {
+    Ok(T),
+    Err(String),
+}
+
+impl<T> From<DispatchResult<T>> for ApiDispatchResult<T> {
+    fn from(value: DispatchResult<T>) -> Self {
+        match value {
+            DispatchResult::Ok(data) => ApiDispatchResult::Ok(data),
+            DispatchResult::Err(err) => ApiDispatchResult::Err(err),
+        }
+    }
+}
+
+pub type SettingDispatch = HashMap<String, ApiDispatchResult<Vec<crate::events::Setting>>>;
+pub type SettingExecuteDispatch = HashMap<String, ApiDispatchResult<serde_json::Value>>;

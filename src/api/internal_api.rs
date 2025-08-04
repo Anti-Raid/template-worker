@@ -6,13 +6,13 @@ use axum::{
     Json,
 };
 use super::server::AppData;
-use crate::{api::types::{ApiLuaVmResult, ApiLuaVmResultHandle}, dispatch::DispatchResult, templatingrt::LuaVmResult};
+use crate::{api::types::{ApiDispatchResult, ApiLuaVmResult, ApiLuaVmResultHandle}, templatingrt::LuaVmResult};
 use crate::templatingrt::cache::regenerate_cache;
 use super::types::ExecuteLuaVmActionResponse;
 use crate::templatingrt::CreateGuildState;
 use crate::templatingrt::POOL;
 use crate::templatingrt::MAX_TEMPLATES_RETURN_WAIT_TIME;
-use antiraid_types::ar_event::AntiraidEvent;
+use crate::events::AntiraidEvent;
 use super::extractors::InternalEndpoint;
 use super::server::ApiResponse;
 use super::types::{DispatchEventAndWaitQuery, ExecuteLuaVmActionOpts};
@@ -50,7 +50,7 @@ pub(super) async fn dispatch_event_and_wait(
     Path(guild_id): Path<serenity::all::GuildId>,
     Query(query): Query<DispatchEventAndWaitQuery>,
     Json(event): Json<AntiraidEvent>,
-) -> ApiResponse<HashMap<String, DispatchResult<serde_json::Value>>> {
+) -> ApiResponse<HashMap<String, ApiDispatchResult<serde_json::Value>>> {
     let event = parse_event(&event).map_err(|e| (StatusCode::BAD_REQUEST, Json(e.to_string().into())))?;
 
     let wait_timeout = match query.wait_timeout {
@@ -60,7 +60,10 @@ pub(super) async fn dispatch_event_and_wait(
 
     let results = dispatch_and_wait(&serenity_context, &data, event, guild_id, wait_timeout)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?
+        .into_iter()
+        .map(|(name, result)| (name, result.into()))
+        .collect::<HashMap<_, _>>();
 
     Ok(Json(results))
 }

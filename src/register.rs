@@ -1,5 +1,5 @@
-use antiraid_types::ar_event::AntiraidEvent;
-use antiraid_types::ar_event::KeyResumeEvent;
+use crate::events::AntiraidEvent;
+use crate::events::KeyResumeEvent;
 use khronos_runtime::primitives::event::Event as KEvent;
 use khronos_runtime::require::FilesystemWrapper;
 use khronos_runtime::rt::mlua::prelude::*;
