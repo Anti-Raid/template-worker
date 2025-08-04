@@ -1,4 +1,5 @@
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema, ts_rs::TS)]
+#[ts(export)]
 #[serde(tag = "type")]
 pub enum ColumnType {
     /// A single valued column (scalar)
@@ -19,7 +20,8 @@ pub enum ColumnType {
 }
 
 /// Note: this is merely a hint used for styling the website
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema, ts_rs::TS)]
+#[ts(export)]
 #[serde(tag = "type")]
 pub enum InnerWidget {
     Info {
@@ -39,7 +41,8 @@ pub enum InnerWidget {
 }
 
 /// Note: this is merely a hint used for styling the website
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema, ts_rs::TS)]
+#[ts(export)]
 #[serde(tag = "type")]
 pub enum InnerColumnType {
     String {
@@ -61,7 +64,8 @@ pub enum InnerColumnType {
     },
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema, ts_rs::TS)]
+#[ts(export)]
 pub struct Column {
     /// The ID of the column on the database
     pub id: String,
@@ -92,7 +96,8 @@ pub struct Column {
     pub readonly: Vec<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema, ts_rs::TS)]
+#[ts(export)]
 pub struct Setting {
     /// The ID of the option
     pub id: String,
@@ -134,7 +139,8 @@ pub struct Setting {
     pub title_template: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema, ts_rs::TS)]
+#[ts(export)]
 pub struct Footer {
     /// The text to display in the footer of the setting as a whole
     pub end_text: String,

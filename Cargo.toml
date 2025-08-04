@@ -42,6 +42,9 @@ tower-service = "0.3"
 utoipa = { version = "5", features = ["chrono", "uuid", "indexmap", "axum_extras"] }
 utoipa-axum = "0.2"
 
+# ts
+ts-rs = { version = "11", features = ["serde-json-impl", "chrono-impl", "uuid-impl", "indexmap-impl"] }
+
 # sandwich
 serde_repr = "0.1"
 

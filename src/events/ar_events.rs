@@ -1,18 +1,23 @@
 use serde_json::Value;
 use strum::{IntoStaticStr, VariantNames};
+use ts_rs::TS;
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema, TS)]
+#[ts(export)]
 pub struct GetSettingsEvent {
     #[schema(value_type = String)]
+    #[ts(as = "String")]
     pub author: serenity::all::UserId,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema, TS)]
+#[ts(export)]
 pub struct SettingExecuteEvent {
     /// The ID of the setting being executed
     pub id: String,
     /// The author of the event
     #[schema(value_type = String)]
+    #[ts(as = "String")]
     pub author: serenity::all::UserId,
     /// The operation being performed on the setting
     pub op: String,
@@ -20,22 +25,25 @@ pub struct SettingExecuteEvent {
     pub fields: Value,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema, TS)]
+#[ts(export)]
 pub struct KeyExpiryEvent {
     pub id: String,
     pub key: String,
     pub scopes: Vec<String>,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema, TS)]
+#[ts(export)]
 pub struct KeyResumeEvent {
     pub id: String,
     pub key: String,
     pub scopes: Vec<String>,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, IntoStaticStr, VariantNames, utoipa::ToSchema)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, IntoStaticStr, VariantNames, utoipa::ToSchema, TS)]
 #[must_use]
+#[ts(export)]
 pub enum AntiraidEvent {
     /// Fired when a key expires within the key-value store
     KeyExpiry(KeyExpiryEvent),
