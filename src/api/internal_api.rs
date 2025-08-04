@@ -6,7 +6,7 @@ use axum::{
     Json,
 };
 use super::server::AppData;
-use crate::dispatch::DispatchResult;
+use crate::{api::types::{ApiLuaVmResult, ApiLuaVmResultHandle}, dispatch::DispatchResult, templatingrt::LuaVmResult};
 use crate::templatingrt::cache::regenerate_cache;
 use super::types::ExecuteLuaVmActionResponse;
 use crate::templatingrt::CreateGuildState;
@@ -199,10 +199,25 @@ pub(super) async fn execute_lua_vm_action(
             )
         })?;
 
+    // Convert results to API format
+    let mut results_api = Vec::with_capacity(result_handle.results.len());
+
+    for result in result_handle.results {
+        let api_result = ApiLuaVmResultHandle {
+            template_name: result.template_name,
+            result: match result.result {
+                LuaVmResult::Ok { result_val } => ApiLuaVmResult::Ok { result: result_val },
+                LuaVmResult::LuaError { err } => ApiLuaVmResult::LuaError { err },
+                LuaVmResult::VmBroken { } => ApiLuaVmResult::VmBroken { },
+            }
+        };
+        results_api.push(api_result);
+    }
+
     let elapsed = start_instant.elapsed();
 
     Ok(Json(ExecuteLuaVmActionResponse {
-        data: result_handle,
+        results: results_api,
         time_taken: elapsed,
     }))
 }

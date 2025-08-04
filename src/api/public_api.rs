@@ -5,6 +5,9 @@ use crate::api::auth::get_user_sessions;
 use crate::api::auth::SessionType;
 use crate::api::extractors::AuthorizedUser;
 use crate::api::types::ApiConfig;
+use crate::api::types::ApiCreateCommand;
+use crate::api::types::ApiCreateCommandOption;
+use crate::api::types::ApiCreateCommandOptionChoice;
 use crate::api::types::AuthorizeRequest;
 use crate::api::types::GetStatusResponse;
 use crate::api::types::ShardConn;
@@ -603,8 +606,52 @@ pub(super) async fn delete_user_session_api(
 } 
 
 static STATE_CACHE: std::sync::LazyLock<Arc<TwState>> = std::sync::LazyLock::new(|| {
+    fn command_option_choice_into_api_command_option_choice(
+        choice: crate::register::CreateCommandOptionChoice,
+    ) -> ApiCreateCommandOptionChoice {
+        ApiCreateCommandOptionChoice {
+            name: choice.name,
+            name_localizations: choice.name_localizations,
+            value: choice.value,
+        }
+    }
+    
+    fn command_option_into_api_command_option(option: crate::register::CreateCommandOption) -> ApiCreateCommandOption {
+        ApiCreateCommandOption {
+            kind: option.kind,
+            name: option.name,
+            name_localizations: option.name_localizations,
+            description: option.description,
+            description_localizations: option.description_localizations,
+            required: option.required,
+            options: option.options.into_iter().map(command_option_into_api_command_option).collect(),
+            channel_types: option.channel_types,
+            min_value: option.min_value,
+            max_value: option.max_value,
+            min_length: option.min_length,
+            max_length: option.max_length,
+            choices: option.choices.into_iter().map(command_option_choice_into_api_command_option_choice).collect(),
+            autocomplete: option.autocomplete
+        }
+    }
+    
+    fn command_into_api_command(command: crate::register::CreateCommand) -> ApiCreateCommand {
+        ApiCreateCommand {
+            kind: command.kind,
+            name: command.name,
+            name_localizations: command.name_localizations,
+            description: command.description,
+            description_localizations: command.description_localizations,
+            integration_types: command.integration_types,
+            nsfw: command.nsfw,
+            options: command.options.into_iter().map(command_option_into_api_command_option).collect(),
+        }
+    }
+    
     let state = TwState {
-        commands: crate::register::REGISTER.commands.clone(),
+        commands: crate::register::REGISTER.commands.iter()
+            .map(|cmd| command_into_api_command(cmd.clone()))
+            .collect(),
     };
 
     Arc::new(state)
