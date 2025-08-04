@@ -17,7 +17,6 @@ impl FromRequestParts<AppData> for AuthorizedUser {
     async fn from_request_parts(parts: &mut axum::http::request::Parts, state: &AppData) -> Result<Self, Self::Rejection> {
         let token = parts.headers.get("Authorization")
             .and_then(|h| h.to_str().ok())
-            .and_then(|s| s.strip_prefix("Bearer "))
             .ok_or_else(|| (
                 axum::http::StatusCode::UNAUTHORIZED, 
                 Json(ApiError { 
@@ -79,7 +78,6 @@ impl FromRequestParts<AppData> for InternalEndpoint {
     async fn from_request_parts(parts: &mut axum::http::request::Parts, state: &AppData) -> Result<Self, Self::Rejection> {
         let token = parts.headers.get("Authorization")
             .and_then(|h| h.to_str().ok())
-            .and_then(|s| s.strip_prefix("Bearer "))
             .ok_or_else(|| (
                 axum::http::StatusCode::UNAUTHORIZED, 
                 Json(ApiError { 

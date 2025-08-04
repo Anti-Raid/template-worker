@@ -122,7 +122,7 @@ pub struct BaseGuildUserInfo {
 #[ts(export)]
 pub struct SettingsOperationRequest {
     pub fields: Value,
-    pub op: String,
+    pub operation: String,
     pub setting: String,
 }
 

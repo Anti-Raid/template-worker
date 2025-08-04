@@ -135,6 +135,7 @@ const LOGIN_EXPIRY_TIME: Duration = Duration::seconds(3600);
 pub async fn create_web_session(
     pool: &PgPool, 
     user_id: &str, 
+    name: Option<String>,
     session_type: SessionType,
 ) -> Result<ICreatedWebSession, crate::Error> {
     // Generate a new session ID
@@ -151,12 +152,13 @@ pub async fn create_web_session(
     };
 
     let new_session: NewSession = sqlx::query_as(
-        "INSERT INTO web_api_tokens (user_id, type, token, expiry) VALUES ($1, $2, $3, $4) RETURNING id AS session_id",
+        "INSERT INTO web_api_tokens (user_id, type, token, expiry, name) VALUES ($1, $2, $3, $4, $5) RETURNING id AS session_id",
     )
     .bind(user_id)
     .bind(session_type)
     .bind(&token)
     .bind(expiry)
+    .bind(name)
     .fetch_one(pool)
     .await?;
 
@@ -199,9 +201,14 @@ pub async fn get_user_sessions(pool: &PgPool, user_id: &str) -> Result<Vec<UserS
 }
 
 pub async fn delete_user_session(pool: &PgPool, user_id: &str, session_id: &str) -> Result<(), crate::Error> {
+    let session_id_uuid = match uuid::Uuid::parse_str(session_id) {
+        Ok(uuid) => uuid,
+        Err(_) => return Err("Invalid session ID format".into()),
+    };
+    
     let res = sqlx::query("DELETE FROM web_api_tokens WHERE user_id = $1 AND id = $2")
         .bind(user_id)
-        .bind(session_id)
+        .bind(session_id_uuid)
         .execute(pool)
         .await?;
 

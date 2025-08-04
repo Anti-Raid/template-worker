@@ -169,7 +169,7 @@ pub(super) async fn execute_setting_for_guild_user(
         return Err((StatusCode::NOT_FOUND, Json("Guild to get settings for does not have the bot?".into())));
     }
 
-    let op = req.op;
+    let op = req.operation;
 
     // Make a ExecuteSetting event
     let event = parse_event(&AntiraidEvent::ExecuteSetting(SettingExecuteEvent {
@@ -276,7 +276,7 @@ pub(super) async fn get_user_guilds(
             };
 
             let resp = data.reqwest.get(format!("{}/api/v10/users/@me/guilds", crate::CONFIG.meta.proxy))
-            .header("Authorization", access_token)
+            .header("Authorization", format!("Bearer {access_token}"))
             .send()
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
@@ -646,6 +646,7 @@ pub(super) async fn create_oauth2_session(
     let session = create_web_session(
         &data.pool,
         &user_info.id,
+        None, // No name for the session
         SessionType::Login,
     )
         .await
@@ -767,6 +768,7 @@ pub(super) async fn create_user_session(
     let session = create_web_session(
         &data.pool,
         &user_id,
+        Some(req.name),
         SessionType::Api {
             expires_at: Utc::now() + chrono::Duration::seconds(req.expiry),
         },
@@ -915,7 +917,7 @@ static STATS_CACHE: std::sync::LazyLock<Cache<(), GetStatusResponse>> = std::syn
     tag = "Public API",
     path = "/bot-stats",
     responses(
-        (status = 200, description = "The bot's state", body = TwState),
+        (status = 200, description = "The bot's state", body = GetStatusResponse),
         (status = 400, description = "API Error", body = ApiError),
     )
 )]
