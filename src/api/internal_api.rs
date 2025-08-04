@@ -6,7 +6,7 @@ use axum::{
     Json,
 };
 use super::server::AppData;
-use crate::{api::types::{ApiDispatchResult, ApiLuaVmResult, ApiLuaVmResultHandle}, templatingrt::LuaVmResult};
+use crate::{api::types::{ApiDispatchResult, ApiGuildId, ApiLuaVmAction, ApiLuaVmResult, ApiLuaVmResultHandle, ApiThreadClearInactiveGuilds, ApiThreadMetrics}, templatingrt::LuaVmResult};
 use crate::templatingrt::cache::regenerate_cache;
 use super::types::ExecuteLuaVmActionResponse;
 use crate::templatingrt::CreateGuildState;
@@ -14,19 +14,30 @@ use crate::templatingrt::POOL;
 use crate::templatingrt::MAX_TEMPLATES_RETURN_WAIT_TIME;
 use crate::events::AntiraidEvent;
 use super::extractors::InternalEndpoint;
-use super::server::ApiResponse;
+use super::server::{ApiResponse, ApiError};
 use super::types::{DispatchEventAndWaitQuery, ExecuteLuaVmActionOpts};
 use crate::dispatch::{dispatch, dispatch_and_wait, parse_event};
 use crate::templatingrt::execute;
 
+/// Dispatch Event
+/// 
 /// Dispatches a new event
+#[utoipa::path(
+    post, 
+    tag = "Internal API",
+    path = "/i/dispatch-event/{guild_id}",
+    responses(
+        (status = 204, description = "Event dispatched successfully"),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 pub(super) async fn dispatch_event(
     State(AppData {
         data,
         serenity_context,
         ..
     }): State<AppData>,
-    InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
+    InternalEndpoint { .. }: InternalEndpoint,
     Path(guild_id): Path<serenity::all::GuildId>,
     Json(event): Json<AntiraidEvent>,
 ) -> ApiResponse<()> {
@@ -39,7 +50,20 @@ pub(super) async fn dispatch_event(
     Ok(Json(()))
 }
 
+type DispatchResponse = HashMap<String, ApiDispatchResult<serde_json::Value>>;
+
+/// Dispatch Event And Wait
+/// 
 /// Dispatches a new event and waits for a response
+#[utoipa::path(
+    post, 
+    tag = "Internal API",
+    path = "/i/dispatch-event/{guild_id}/@wait",
+    responses(
+        (status = 200, description = "Event dispatched successfully", body = DispatchResponse),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 pub(super) async fn dispatch_event_and_wait(
     State(AppData {
         data,
@@ -50,7 +74,7 @@ pub(super) async fn dispatch_event_and_wait(
     Path(guild_id): Path<serenity::all::GuildId>,
     Query(query): Query<DispatchEventAndWaitQuery>,
     Json(event): Json<AntiraidEvent>,
-) -> ApiResponse<HashMap<String, ApiDispatchResult<serde_json::Value>>> {
+) -> ApiResponse<DispatchResponse> {
     let event = parse_event(&event).map_err(|e| (StatusCode::BAD_REQUEST, Json(e.to_string().into())))?;
 
     let wait_timeout = match query.wait_timeout {
@@ -68,7 +92,18 @@ pub(super) async fn dispatch_event_and_wait(
     Ok(Json(results))
 }
 
+/// Regenerate Guild Cache
+///
 /// Regenerates the cache for a guild
+#[utoipa::path(
+    post, 
+    tag = "Internal API",
+    path = "/i/regenerate-cache/{guild_id}",
+    responses(
+        (status = 204, description = "Cache regenerated successfully"),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 pub(super) async fn regenerate_cache_api(
     State(AppData {
         data,
@@ -88,7 +123,18 @@ pub(super) async fn regenerate_cache_api(
     Ok(Json(()))
 }
 
+/// Get Thread Count
+///
 /// Returns the number of threads running
+#[utoipa::path(
+    get, 
+    tag = "Internal API",
+    path = "/i/threads-count",
+    responses(
+        (status = 200, description = "The number of threads", body = usize),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 pub(super) async fn get_threads_count(
     State(AppData { .. }): State<AppData>,
     InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
@@ -100,7 +146,18 @@ pub(super) async fn get_threads_count(
     Ok(Json(count))
 }
 
+/// Ping All Threads
+/// 
 /// Ping all threads returning a list of threads which responded
+#[utoipa::path(
+    post, 
+    tag = "Internal API",
+    path = "/i/ping-all-threads",
+    responses(
+        (status = 200, description = "The number of threads", body = Vec<u64>),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 pub(super) async fn ping_all_threads(
     State(AppData { .. }): State<AppData>,
     InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
@@ -115,11 +172,22 @@ pub(super) async fn ping_all_threads(
     Ok(Json(hm))
 }
 
+/// Clear Inactive Guilds
+/// 
 /// Flush out inactive guilds
+#[utoipa::path(
+    post, 
+    tag = "Internal API",
+    path = "/i/clear-inactive-guilds",
+    responses(
+        (status = 200, description = "The cleared guilds data", body = Vec<ApiThreadClearInactiveGuilds>),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 pub(super) async fn clear_inactive_guilds(
     State(AppData { .. }): State<AppData>,
     InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
-) -> ApiResponse<Vec<crate::templatingrt::ThreadClearInactiveGuilds>> {
+) -> ApiResponse<Vec<ApiThreadClearInactiveGuilds>> {
     let Ok(hm) = crate::templatingrt::POOL.clear_inactive_guilds().await else {
         return Err((
             reqwest::StatusCode::INTERNAL_SERVER_ERROR,
@@ -127,10 +195,28 @@ pub(super) async fn clear_inactive_guilds(
         ));
     };
 
+    let hm = hm.into_iter()
+        .map(|data| ApiThreadClearInactiveGuilds {
+            tid: data.tid,
+            cleared: data.cleared,
+        })
+        .collect::<Vec<_>>();
+
     Ok(Json(hm))
 }
 
-/// Flush out unused threads
+/// Remove Unused Threads
+/// 
+/// Remove unused threads from the thread pool returning a list of thread IDs of the removed threads
+#[utoipa::path(
+    post, 
+    tag = "Internal API",
+    path = "/i/remove-unused-threads",
+    responses(
+        (status = 200, description = "The list of thread IDs of the removed threads", body = Vec<u64>),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 pub(super) async fn remove_unused_threads(
     State(AppData { .. }): State<AppData>,
     InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
@@ -145,7 +231,18 @@ pub(super) async fn remove_unused_threads(
     Ok(Json(hm))
 }
 
+/// Close Thread
+/// 
 /// Closes a thread in the pool
+#[utoipa::path(
+    post, 
+    tag = "Internal API",
+    path = "/i/close-thread",
+    responses(
+        (status = 204, description = "The ID of the thread that was closed"),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 #[axum::debug_handler]
 pub(super) async fn close_thread(
     State(AppData { .. }): State<AppData>,
@@ -160,7 +257,18 @@ pub(super) async fn close_thread(
     Ok(Json(()))
 }
 
-/// Execute a lua vm action on a guild
+/// Execute Lua VM Action
+/// 
+/// Execute a Lua VM action on a guild
+#[utoipa::path(
+    post, 
+    tag = "Internal API",
+    path = "/i/execute-luavmaction",
+    responses(
+        (status = 200, description = "The response from the thread regarding the operation", body = ExecuteLuaVmActionResponse),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 #[axum::debug_handler]
 pub(super) async fn execute_lua_vm_action(
     State(AppData {
@@ -171,7 +279,7 @@ pub(super) async fn execute_lua_vm_action(
     InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
     Path(guild_id): Path<serenity::all::GuildId>,
     Query(opts): Query<ExecuteLuaVmActionOpts>,
-    Json(action): Json<crate::templatingrt::LuaVmAction>,
+    Json(action): Json<ApiLuaVmAction>,
 ) -> ApiResponse<ExecuteLuaVmActionResponse> {
     let start_instant = std::time::Instant::now();
     let handle = execute(
@@ -182,7 +290,7 @@ pub(super) async fn execute_lua_vm_action(
             reqwest_client: data.reqwest.clone(),
             object_store: data.object_store.clone(),
         },
-        action,
+        action.into(),
     )
     .await
     .map_err(|e| {
@@ -225,13 +333,24 @@ pub(super) async fn execute_lua_vm_action(
     }))
 }
 
-/// Get thread pool metrics given tid
+/// Get VM Metrics By TID
+/// 
+/// Get thread pool metrics given Thread ID
+#[utoipa::path(
+    post, 
+    tag = "Internal API",
+    path = "/i/get-vm-metrics-by-tid/{tid}",
+    responses(
+        (status = 200, description = "The list of all thread metrics where the thread ID matches the VM", body = Vec<ApiThreadMetrics>),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 #[axum::debug_handler]
 pub(super) async fn get_vm_metrics_by_tid(
     State(AppData { ..}): State<AppData>,
     InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
     Path(tid): Path<u64>,
-) -> ApiResponse<Vec<crate::templatingrt::ThreadMetrics>> {
+) -> ApiResponse<Vec<ApiThreadMetrics>> {
     let metrics = crate::templatingrt::POOL
         .get_vm_metrics_by_tid(tid)
         .await
@@ -240,17 +359,31 @@ pub(super) async fn get_vm_metrics_by_tid(
                 reqwest::StatusCode::INTERNAL_SERVER_ERROR,
                 Json(e.to_string().into()),
             )
-        })?;
+        })?
+        .into_iter()
+        .map(ApiThreadMetrics::from)
+        .collect::<Vec<_>>();
 
     Ok(Json(metrics))
 }
 
-/// Get thread pool metrics given tid
+/// Get All VM Metrics
+/// 
+/// Get all thread pool metrics
+#[utoipa::path(
+    post, 
+    tag = "Internal API",
+    path = "/i/get-vm-metrics-for-all",
+    responses(
+        (status = 200, description = "The list of all thread metrics", body = Vec<ApiThreadMetrics>),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 #[axum::debug_handler]
 pub(super) async fn get_vm_metrics_for_all(
     State(AppData { ..}): State<AppData>,
     InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
-) -> ApiResponse<Vec<crate::templatingrt::ThreadMetrics>> {
+) -> ApiResponse<Vec<ApiThreadMetrics>> {
     let metrics = crate::templatingrt::POOL
         .get_vm_metrics_for_all()
         .await
@@ -259,12 +392,26 @@ pub(super) async fn get_vm_metrics_for_all(
                 reqwest::StatusCode::INTERNAL_SERVER_ERROR,
                 Json(e.to_string().into()),
             )
-        })?;
+        })?
+        .into_iter()
+        .map(ApiThreadMetrics::from)
+        .collect::<Vec<_>>();
 
     Ok(Json(metrics))
 }
 
+/// Guilds Exist
+/// 
 /// Given a list of guild ids, return a set of 0s and 1s indicating whether each guild exists in cache
+#[utoipa::path(
+    post, 
+    tag = "Internal API",
+    path = "/i/guilds-exist",
+    responses(
+        (status = 200, description = "The list of which guilds exist", body = Vec<u8>),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 #[axum::debug_handler]
 pub(super) async fn guilds_exist(
     State(AppData {
@@ -272,11 +419,11 @@ pub(super) async fn guilds_exist(
         ..
     }): State<AppData>,
     InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
-    Json(guilds): Json<Vec<serenity::all::GuildId>>,
+    Json(guilds): Json<Vec<ApiGuildId>>,
 ) -> ApiResponse<Vec<u8>> {
     let guilds_exist = crate::sandwich::has_guilds(
         &data.reqwest,
-        guilds,
+        guilds.into_iter().map(|g| g.into()).collect::<Vec<_>>(),
     )
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;

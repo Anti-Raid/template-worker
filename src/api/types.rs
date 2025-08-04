@@ -17,6 +17,9 @@ use serenity::all::CommandOptionType;
 use serenity::all::CommandType;
 
 use crate::dispatch::DispatchResult;
+use crate::templatingrt::LuaVmAction;
+use crate::templatingrt::ThreadGuildVmMetrics;
+use crate::templatingrt::ThreadMetrics;
 
 /// Query parameters for dispatch_event_and_wait
 #[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
@@ -334,3 +337,108 @@ impl<T> From<DispatchResult<T>> for ApiDispatchResult<T> {
 
 pub type SettingDispatch = HashMap<String, ApiDispatchResult<Vec<crate::events::Setting>>>;
 pub type SettingExecuteDispatch = HashMap<String, ApiDispatchResult<serde_json::Value>>;
+
+/// A single thread's clear inactive guilds response
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct ApiThreadClearInactiveGuilds {
+    pub tid: u64,
+    #[schema(value_type = HashMap<String, Option<String>>)]
+    pub cleared: HashMap<GuildId, Option<String>>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+/// An action that can be performed on the Lua VM
+pub enum ApiLuaVmAction {
+    /// Stop the Lua VM entirely
+    Stop {},
+    /// Returns the memory usage of the Lua VM
+    GetMemoryUsage {},
+    /// Set the memory limit of the Lua VM
+    SetMemoryLimit { limit: usize },
+    /// Clear the cache of all subisolates (isloate -> own environment/global state in same luau vm)
+    /// Each server has a khronos runtime to manage luau vm; each runtime is
+    /// split into multiple subisolates where every template gets it's own subisolate
+    /// (isolated env -> can't access variables across vm's)
+    ClearCache {},
+    /// Panic. Only useful for testing/debugging
+    Panic {},
+}
+
+impl From<ApiLuaVmAction> for LuaVmAction {
+    fn from(action: ApiLuaVmAction) -> Self {
+        match action {
+            ApiLuaVmAction::Stop {} => LuaVmAction::Stop {},
+            ApiLuaVmAction::GetMemoryUsage {} => LuaVmAction::GetMemoryUsage {},
+            ApiLuaVmAction::SetMemoryLimit { limit } => LuaVmAction::SetMemoryLimit { limit },
+            ApiLuaVmAction::ClearCache {} => LuaVmAction::ClearCache {},
+            ApiLuaVmAction::Panic {} => LuaVmAction::Panic {},
+        }
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct ApiThreadGuildVmMetrics {
+    /// Used memory
+    pub used_memory: usize,
+    /// Memory limit for the Luau VM
+    pub memory_limit: usize,
+    /// Number of luau threads
+    pub num_threads: i64,
+    /// Maximum luau threads
+    pub max_threads: i64,
+}
+
+impl From<ThreadGuildVmMetrics> for ApiThreadGuildVmMetrics {
+    fn from(metrics: ThreadGuildVmMetrics) -> Self {
+        ApiThreadGuildVmMetrics {
+            used_memory: metrics.used_memory,
+            memory_limit: metrics.memory_limit,
+            num_threads: metrics.num_threads,
+            max_threads: metrics.max_threads,
+        }
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct ApiThreadMetrics {
+    /// Metrics for each guild
+    #[schema(value_type = HashMap<String, ApiThreadGuildVmMetrics>)]
+    pub vm_metrics: HashMap<GuildId, ApiThreadGuildVmMetrics>,
+    /// The thread ID
+    #[schema(value_type = u64)]
+    pub tid: u64,
+}
+
+impl From<ThreadMetrics> for ApiThreadMetrics {
+    fn from(metrics: ThreadMetrics) -> Self {
+        ApiThreadMetrics {
+            vm_metrics: metrics
+                .vm_metrics
+                .into_iter()
+                .map(|(guild_id, guild_metrics)| (guild_id, guild_metrics.into()))
+                .collect(),
+            tid: metrics.tid,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Copy)]
+pub struct ApiGuildId(pub GuildId);
+
+impl From<ApiGuildId> for GuildId {
+    fn from(guild_id: ApiGuildId) -> Self {
+        guild_id.0
+    }
+}
+
+impl utoipa::ToSchema for ApiGuildId {
+    fn name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("GuildId")
+    }
+}
+
+impl utoipa::PartialSchema for ApiGuildId {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        utoipa::schema!(#[inline] String).into()
+    }
+}

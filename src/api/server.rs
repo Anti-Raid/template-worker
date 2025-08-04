@@ -7,7 +7,7 @@ use std::sync::Arc;
 use super::internal_api;
 use super::public_api;
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 pub enum ApiErrorCode {
     InternalAuthError,
     NoAuthToken,
@@ -17,7 +17,7 @@ pub enum ApiErrorCode {
     Restricted
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 pub struct ApiError {
     pub message: String,
     pub code: ApiErrorCode

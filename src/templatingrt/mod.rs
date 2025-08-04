@@ -8,7 +8,7 @@ pub mod resume_dispatch;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 pub use state::CreateGuildState;
 pub use vm_manager::{
-    LuaVmAction, LuaVmResult, ThreadClearInactiveGuilds, ThreadMetrics, ThreadRequest, POOL,
+    LuaVmAction, LuaVmResult, ThreadMetrics, ThreadGuildVmMetrics, ThreadRequest, POOL,
 };
 
 use serenity::all::GuildId;

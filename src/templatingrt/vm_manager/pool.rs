@@ -161,7 +161,7 @@ impl Pool {
         }
     }
 
-    /// Get VM metrics for all
+    /// Get VM metrics for the thread with the given ID
     pub async fn get_vm_metrics_by_tid(
         &self,
         o_tid: u64,

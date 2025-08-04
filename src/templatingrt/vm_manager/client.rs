@@ -5,7 +5,7 @@ use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::Khro
 use std::sync::Arc;
 
 /// Tells what action the thread should apply to the guild
-#[derive(serde::Serialize, serde::Deserialize)]
+//#[derive(serde::Serialize, serde::Deserialize)]
 pub enum LuaVmAction {
     /// Dispatch a template event to all templates
     /// template is a script that can be run on a server based on events
