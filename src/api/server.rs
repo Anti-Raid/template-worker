@@ -65,52 +65,25 @@ pub fn create(
     data: Arc<crate::data::Data>,
     ctx: &serenity::all::Context,
 ) -> axum::routing::IntoMakeService<Router> {
-    /*
-        // Internal API routes (designated by /i/)
-        
-        .route("/i/dispatch-event/{guild_id}", post(internal_api::dispatch_event))
-        .route(
-            "/i/dispatch-event/{guild_id}/@wait",
-            post(internal_api::dispatch_event_and_wait),
-        )
-        .route(
-            "/i/regenerate-cache/{guild_id}",
-            post(internal_api::regenerate_cache_api),
-        )
-        .route("/i/ping-all-threads", post(internal_api::ping_all_threads))
-        .route("/i/threads-count", get(internal_api::get_threads_count))
-        .route("/i/clear-inactive-guilds", post(internal_api::clear_inactive_guilds))
-        .route("/i/remove_unused_threads", post(internal_api::remove_unused_threads))
-        .route("/i/close-thread/{tid}", post(internal_api::close_thread))
-        .route(
-            "/i/execute-luavmaction/{guild_id}",
-            post(internal_api::execute_lua_vm_action),
-        )
-        .route("/i/get-vm-metrics-by-tid/{tid}", get(internal_api::get_vm_metrics_by_tid))
-        .route("/i/get-vm-metrics-for-all", get(internal_api::get_vm_metrics_for_all))
-        // Given a list of guild ids, return a set of 0s and 1s indicating whether each guild exists in cache [GuildsExist]
-        .route("/i/guilds-exist", get(internal_api::guilds_exist));
-     */
-
     let (internal_router, internal_openapi) = OpenApiRouter::new()
-            .routes(
-                routes!(
-                    internal_api::dispatch_event,
-                    internal_api::dispatch_event_and_wait,
-                    internal_api::regenerate_cache_api,
-                    internal_api::get_threads_count,
-                    internal_api::ping_all_threads,
-                    internal_api::clear_inactive_guilds,
-                    internal_api::remove_unused_threads,
-                    internal_api::close_thread,
-                    internal_api::execute_lua_vm_action,
-                    internal_api::get_vm_metrics_by_tid,
-                    internal_api::get_vm_metrics_for_all,
-                    internal_api::guilds_exist,
-                )
+        .routes(
+            routes!(
+                internal_api::dispatch_event,
+                internal_api::dispatch_event_and_wait,
+                internal_api::regenerate_cache_api,
+                internal_api::get_threads_count,
+                internal_api::ping_all_threads,
+                internal_api::clear_inactive_guilds,
+                internal_api::remove_unused_threads,
+                internal_api::close_thread,
+                internal_api::execute_lua_vm_action,
+                internal_api::get_vm_metrics_by_tid,
+                internal_api::get_vm_metrics_for_all,
+                internal_api::guilds_exist,
             )
-            .with_state::<AppData>(AppData::new(data.clone(), ctx))
-            .split_for_parts();
+        )
+        .with_state::<AppData>(AppData::new(data.clone(), ctx))
+        .split_for_parts();
 
     let (public_router, public_openapi) = OpenApiRouter::new()
             .route("/healthcheck", post(|| async { Json(()) }))
