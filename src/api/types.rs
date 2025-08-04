@@ -27,13 +27,14 @@ use crate::templatingrt::ThreadMetrics;
 #[ts(export)]
 pub struct DispatchEventAndWaitQuery {
     /// Wait duration in milliseconds
+    #[ts(type = "number?")]
     pub wait_timeout: Option<u64>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema, TS)]
 #[ts(export)]
 pub struct ExecuteLuaVmActionOpts {
-    #[ts(as = "Option<u64>")]
+    #[ts(as = "Option<u32>")]
     pub wait_timeout: Option<std::time::Duration>,
 }
 
@@ -41,7 +42,7 @@ pub struct ExecuteLuaVmActionOpts {
 #[ts(export)]
 pub struct ExecuteLuaVmActionResponse {
     pub results: Vec<ApiLuaVmResultHandle>,
-    #[ts(as = "u64")]
+    #[ts(as = "u32")]
     pub time_taken: Duration,
 }
 
@@ -178,6 +179,7 @@ pub struct AuthorizeRequest {
 pub struct CreateUserSession {
     pub name: String,
     pub r#type: String, // Currently must be 'api'
+    #[ts(type = "number")]
     pub expiry: i64, // Expiry in seconds
 }
 
@@ -261,12 +263,16 @@ pub struct ShardConn {
     /// The status of the shard connection
     pub status: String,
     /// The real latency of the shard connection
+    #[ts(type = "number")]
     pub real_latency: i64,
     /// The number of guilds the shard is connected to
+    #[ts(type = "number")]
     pub guilds: i64,
     /// The uptime of the shard connection in seconds
+    #[ts(type = "number")]
     pub uptime: i64,
     /// The total uptime of the shard connection in seconds
+    #[ts(type = "number")]
     pub total_uptime: i64,
 }
 
@@ -275,8 +281,10 @@ pub struct ShardConn {
 #[ts(export)]
 pub struct GetStatusResponse {
     /// A map of shard group ID to shard connection information
-    pub shard_conns: std::collections::HashMap<i64, ShardConn>,
+    #[ts(as = "HashMap<i32, ShardConn>")]
+    pub shard_conns: HashMap<i64, ShardConn>,
     /// The total number of guilds the bot is connected to
+    #[ts(type = "number")]
     pub total_guilds: i64,
 }
 
@@ -324,11 +332,11 @@ pub struct ApiCreateCommandOption {
     pub channel_types: Vec<ChannelType>,
     #[serde(default)]
     #[schema(value_type = u64)]
-    #[ts(as = "Option<u64>")]
+    #[ts(as = "Option<u32>")]
     pub min_value: Option<serde_json::Number>,
     #[serde(default)]
     #[schema(value_type = Option<u64>)]
-    #[ts(as = "Option<u64>")]
+    #[ts(as = "Option<u32>")]
     pub max_value: Option<serde_json::Number>,
     #[serde(default)]
     pub min_length: Option<u16>,
@@ -383,13 +391,35 @@ impl<T> From<DispatchResult<T>> for ApiDispatchResult<T> {
     }
 }
 
+/// New type purely for documentation purposes
+#[derive(utoipa::ToSchema)]
+#[allow(dead_code)]
+pub struct SettingDispatchDocType(
+    pub HashMap<
+        String, 
+        ApiDispatchResult<Vec<crate::events::Setting>>
+    >
+);
+
 pub type SettingDispatch = HashMap<String, ApiDispatchResult<Vec<crate::events::Setting>>>;
+
+/// New type purely for documentation purposes
+#[derive(utoipa::ToSchema)]
+#[allow(dead_code)]
+pub struct SettingExecuteDispatchDocType(
+    pub HashMap<
+        String, 
+        ApiDispatchResult<serde_json::Value>
+    >
+);
+
 pub type SettingExecuteDispatch = HashMap<String, ApiDispatchResult<serde_json::Value>>;
 
 /// A single thread's clear inactive guilds response
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema, TS)]
 #[ts(export)]
 pub struct ApiThreadClearInactiveGuilds {
+    #[ts(type = "number")]
     pub tid: u64,
     #[schema(value_type = HashMap<String, Option<String>>)]
     #[ts(as = "HashMap<String, Option<String>>")]
@@ -405,7 +435,7 @@ pub enum ApiLuaVmAction {
     /// Returns the memory usage of the Lua VM
     GetMemoryUsage {},
     /// Set the memory limit of the Lua VM
-    SetMemoryLimit { limit: usize },
+    SetMemoryLimit { #[ts(type = "number")] limit: usize },
     /// Clear the cache of all subisolates (isloate -> own environment/global state in same luau vm)
     /// Each server has a khronos runtime to manage luau vm; each runtime is
     /// split into multiple subisolates where every template gets it's own subisolate
@@ -431,12 +461,16 @@ impl From<ApiLuaVmAction> for LuaVmAction {
 #[ts(export)]
 pub struct ApiThreadGuildVmMetrics {
     /// Used memory
+    #[ts(type = "number")]
     pub used_memory: usize,
     /// Memory limit for the Luau VM
+    #[ts(type = "number")]
     pub memory_limit: usize,
     /// Number of luau threads
+    #[ts(type = "number")]
     pub num_threads: i64,
     /// Maximum luau threads
+    #[ts(type = "number")]
     pub max_threads: i64,
 }
 
@@ -460,6 +494,7 @@ pub struct ApiThreadMetrics {
     pub vm_metrics: HashMap<GuildId, ApiThreadGuildVmMetrics>,
     /// The thread ID
     #[schema(value_type = u64)]
+    #[ts(type = "number")]
     pub tid: u64,
 }
 
@@ -473,26 +508,5 @@ impl From<ThreadMetrics> for ApiThreadMetrics {
                 .collect(),
             tid: metrics.tid,
         }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Copy)]
-pub struct ApiGuildId(pub GuildId);
-
-impl From<ApiGuildId> for GuildId {
-    fn from(guild_id: ApiGuildId) -> Self {
-        guild_id.0
-    }
-}
-
-impl utoipa::ToSchema for ApiGuildId {
-    fn name() -> std::borrow::Cow<'static, str> {
-        std::borrow::Cow::Borrowed("GuildId")
-    }
-}
-
-impl utoipa::PartialSchema for ApiGuildId {
-    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
-        utoipa::schema!(#[inline] String).into()
     }
 }

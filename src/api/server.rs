@@ -3,7 +3,9 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 use utoipa_axum::{router::OpenApiRouter, routes};
+use utoipa_swagger_ui::SwaggerUi;
 use std::sync::Arc;
 use super::internal_api;
 use super::public_api;
@@ -16,7 +18,8 @@ pub enum ApiErrorCode {
     InvalidToken,
     InternalError,
     Restricted,
-    NotFound
+    NotFound,
+    BadRequest
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
@@ -66,7 +69,7 @@ pub fn create(
     data: Arc<crate::data::Data>,
     ctx: &serenity::all::Context,
 ) -> axum::routing::IntoMakeService<Router> {
-    let (internal_router, internal_openapi) = OpenApiRouter::new()
+    let (internal_router, mut internal_openapi) = OpenApiRouter::new()
         .routes(routes!(internal_api::dispatch_event))
         .routes(routes!(internal_api::dispatch_event_and_wait))
         .routes(routes!(internal_api::regenerate_cache_api))
@@ -82,7 +85,17 @@ pub fn create(
         .with_state::<AppData>(AppData::new(data.clone(), ctx))
         .split_for_parts();
 
-    let (public_router, public_openapi) = OpenApiRouter::new()
+    // Add InternalAuth
+    if let Some(comps) = internal_openapi.components.as_mut() {
+        comps.security_schemes.insert(
+            "InternalAuth".to_string(),
+            SecurityScheme::ApiKey(ApiKey::Header(
+                ApiKeyValue::with_description("Authorization", "API token. Note that user must have root access to use this API")
+            )),
+        );
+    }
+
+    let (public_router, mut public_openapi) = OpenApiRouter::new()
         .routes(routes!(public_api::get_settings_for_guild_user))
         .routes(routes!(public_api::execute_setting_for_guild_user))
         .routes(routes!(public_api::get_user_guilds))
@@ -98,18 +111,42 @@ pub fn create(
         .with_state::<AppData>(AppData::new(data.clone(), ctx))
         .split_for_parts();
 
+    // Add PublicAuth
+    if let Some(comps) = public_openapi.components.as_mut() {
+        comps.security_schemes.insert(
+            "PublicAuth".to_string(),
+            SecurityScheme::ApiKey(ApiKey::Header(
+                ApiKeyValue::with_description("Authorization", "API token. This API is public but requires authentication")
+            )),
+        );
+    }
+
     let router = Router::new()
-        .layer(tower_http::trace::TraceLayer::new_for_http())
         .merge(internal_router)
         .merge(public_router)
         .route("/healthcheck", post(|| async { Json(()) }))
-        .route("/i/openapi", get(|| async { Json(internal_openapi) }))
-        .route("/openapi", get(|| async { Json(public_openapi) }))
+        .merge(
+            SwaggerUi::new("/docs")
+            .url("/openapi", public_openapi)
+        )
+        .merge(SwaggerUi::new("/i/docs").url("/i/openapi", internal_openapi))
         .fallback(
             get(|| async { (StatusCode::NOT_FOUND, Json(ApiError {
                 message: "Not Found".to_string(),
                 code: ApiErrorCode::NotFound,
             })) })
+        )
+        .layer(tower_http::cors::CorsLayer::very_permissive())
+        .layer(
+            tower_http::trace::TraceLayer::new_for_http()
+            .make_span_with(|req: &axum::http::Request<_>| {
+                tracing::info_span!(
+                    "http_request",
+                    method = %req.method(),
+                    uri = %req.uri(),
+                    version = ?req.version(),
+                )
+            })
         );
 
     let router: Router<()> = router.with_state(AppData::new(data, ctx));

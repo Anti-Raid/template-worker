@@ -9,7 +9,6 @@ use crate::api::types::ApiConfig;
 use crate::api::types::ApiCreateCommand;
 use crate::api::types::ApiCreateCommandOption;
 use crate::api::types::ApiCreateCommandOptionChoice;
-use crate::api::types::ApiGuildId;
 use crate::api::types::ApiPartialGuildChannel;
 use crate::api::types::ApiPartialRole;
 use crate::api::types::AuthorizeRequest;
@@ -39,7 +38,7 @@ use sqlx::Row;
 use super::types::{
     BaseGuildUserInfo, SettingsOperationRequest, TwState,
     DashboardGuild, DashboardGuildData, PartialUser, CreateUserSessionResponse, AuthorizedSession,
-    CreateUserSession
+    CreateUserSession, SettingDispatchDocType, SettingExecuteDispatchDocType
 };
 use crate::dispatch::{dispatch_and_wait, parse_event};
 use super::server::{AppData, ApiResponse, ApiError, ApiErrorCode}; 
@@ -82,8 +81,11 @@ async fn check_guild_has_bot(
     security(
         ("UserAuth" = []) 
     ),
+    params(
+        ("guild_id" = String, description = "The ID of the guild to get the user info for")
+    ),
     responses(
-        (status = 200, description = "Settings for the guild", body = SettingDispatch),
+        (status = 200, description = "Settings for the guild", body = SettingDispatchDocType),
         (status = 400, description = "API Error", body = ApiError),
     )
 )]
@@ -94,13 +96,11 @@ pub(super) async fn get_settings_for_guild_user(
         ..
     }): State<AppData>,
     AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
-    Path(guild_id): Path<ApiGuildId>,
+    Path(guild_id): Path<serenity::all::GuildId>,
 ) -> ApiResponse<SettingDispatch> {
     // Make a GetSetting event
     let user_id: UserId = user_id.parse()
         .map_err(|e: serenity::all::ParseIdError| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
-
-    let guild_id = guild_id.into();
 
     // Ensure the bot is in the guild
     check_guild_has_bot(&data, guild_id).await?;
@@ -138,8 +138,11 @@ pub(super) async fn get_settings_for_guild_user(
     security(
         ("UserAuth" = []) 
     ),
+    params(
+        ("guild_id" = String, description = "The ID of the guild to get the user info for")
+    ),
     responses(
-        (status = 200, description = "Settings for the guild", body = SettingDispatch),
+        (status = 200, description = "Settings for the guild", body = SettingExecuteDispatchDocType),
         (status = 400, description = "API Error", body = ApiError),
     )
 )]
@@ -149,14 +152,11 @@ pub(super) async fn execute_setting_for_guild_user(
         data,
     }): State<AppData>,
     AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
-    Path(guild_id): Path<ApiGuildId>,
+    Path(guild_id): Path<serenity::all::GuildId>,
     Json(req): Json<SettingsOperationRequest>,
 ) -> ApiResponse<SettingExecuteDispatch> {
     let user_id: UserId = user_id.parse()
         .map_err(|e: serenity::all::ParseIdError| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
-
-    // Ensure the bot is in the guild
-    let guild_id = guild_id.into();
 
     // Ensure the bot is in the guild
     check_guild_has_bot(&data, guild_id).await?;
@@ -372,6 +372,9 @@ pub(super) async fn get_user_guilds(
     security(
         ("UserAuth" = []) 
     ),
+    params(
+        ("guild_id" = String, description = "The ID of the guild to get the user info for")
+    ),
     responses(
         (status = 200, description = "Basic data about the guild", body = BaseGuildUserInfo),
         (status = 400, description = "API Error", body = ApiError),
@@ -384,11 +387,10 @@ pub(super) async fn base_guild_user_info(
         ..
     }): State<AppData>,
     AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
-    Path(guild_id): Path<ApiGuildId>,
+    Path(guild_id): Path<serenity::all::GuildId>,
 ) -> ApiResponse<BaseGuildUserInfo> {
     let user_id: UserId = user_id.parse()
         .map_err(|e: serenity::all::ParseIdError| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
-    let guild_id = guild_id.into();
 
     let bot_user_id = data.current_user.id;
     let guild_json = crate::sandwich::guild(
@@ -913,7 +915,7 @@ static STATS_CACHE: std::sync::LazyLock<Cache<(), GetStatusResponse>> = std::syn
     tag = "Public API",
     path = "/bot-stats",
     responses(
-        (status = 200, description = "The bot's statistics", body = GetStatusResponse),
+        (status = 200, description = "The bot's state", body = TwState),
         (status = 400, description = "API Error", body = ApiError),
     )
 )]

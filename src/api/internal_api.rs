@@ -6,7 +6,7 @@ use axum::{
     Json,
 };
 use super::server::AppData;
-use crate::{api::types::{ApiDispatchResult, ApiGuildId, ApiLuaVmAction, ApiLuaVmResult, ApiLuaVmResultHandle, ApiThreadClearInactiveGuilds, ApiThreadMetrics}, templatingrt::LuaVmResult};
+use crate::{api::types::{ApiDispatchResult, ApiLuaVmAction, ApiLuaVmResult, ApiLuaVmResultHandle, ApiThreadClearInactiveGuilds, ApiThreadMetrics}, templatingrt::LuaVmResult};
 use crate::templatingrt::cache::regenerate_cache;
 use super::types::ExecuteLuaVmActionResponse;
 use crate::templatingrt::CreateGuildState;
@@ -28,6 +28,9 @@ use crate::templatingrt::execute;
     path = "/i/dispatch-event/{guild_id}",
     security(
         ("InternalAuth" = []) 
+    ),
+    params(
+        ("guild_id" = String, description = "The ID of the guild to dispatch the event to")
     ),
     responses(
         (status = 204, description = "Event dispatched successfully"),
@@ -64,6 +67,9 @@ type DispatchResponse = HashMap<String, ApiDispatchResult<serde_json::Value>>;
     path = "/i/dispatch-event/{guild_id}/@wait",
     security(
         ("InternalAuth" = []) 
+    ),
+    params(
+        ("guild_id" = String, description = "The ID of the guild to dispatch the event to")
     ),
     responses(
         (status = 200, description = "Event dispatched successfully", body = DispatchResponse),
@@ -107,6 +113,9 @@ pub(super) async fn dispatch_event_and_wait(
     path = "/i/regenerate-cache/{guild_id}",
     security(
         ("InternalAuth" = []) 
+    ),
+    params(
+        ("guild_id" = String, description = "The ID of the guild to regenerate the cache for")
     ),
     responses(
         (status = 204, description = "Cache regenerated successfully"),
@@ -443,6 +452,7 @@ pub(super) async fn get_vm_metrics_for_all(
     security(
         ("InternalAuth" = []) 
     ),
+    request_body = Vec<String>,
     responses(
         (status = 200, description = "The list of which guilds exist where 0 means not existing and 1 means existing in cache", body = Vec<u8>),
         (status = 400, description = "API Error", body = ApiError),
@@ -455,11 +465,11 @@ pub(super) async fn guilds_exist(
         ..
     }): State<AppData>,
     InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
-    Json(guilds): Json<Vec<ApiGuildId>>,
+    Json(guilds): Json<Vec<serenity::all::GuildId>>,
 ) -> ApiResponse<Vec<u8>> {
     let guilds_exist = crate::sandwich::has_guilds(
         &data.reqwest,
-        guilds.into_iter().map(|g| g.into()).collect::<Vec<_>>(),
+        guilds,
     )
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;

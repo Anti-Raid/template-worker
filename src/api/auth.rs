@@ -105,7 +105,7 @@ pub async fn check_web_auth(
 pub async fn create_web_user_from_oauth2(pool: &PgPool, user_id: &str, access_token: &str) -> Result<(), crate::Error> {
     // Insert the user into the database
     sqlx::query(
-        "INSERT INTO web_api_users (user_id, access_token) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET access_token = EXCLUDED.access_token",
+        "INSERT INTO users (user_id, access_token) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET access_token = EXCLUDED.access_token",
     )
     .bind(&user_id)
     .bind(access_token)
