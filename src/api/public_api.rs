@@ -4,10 +4,12 @@ use crate::api::auth::delete_user_session;
 use crate::api::auth::get_user_sessions;
 use crate::api::auth::SessionType;
 use crate::api::extractors::AuthorizedUser;
+use crate::api::server::ApiResponseError;
 use crate::api::types::ApiConfig;
 use crate::api::types::ApiCreateCommand;
 use crate::api::types::ApiCreateCommandOption;
 use crate::api::types::ApiCreateCommandOptionChoice;
+use crate::api::types::ApiGuildId;
 use crate::api::types::ApiPartialGuildChannel;
 use crate::api::types::ApiPartialRole;
 use crate::api::types::AuthorizeRequest;
@@ -42,20 +44,66 @@ use super::types::{
 use crate::dispatch::{dispatch_and_wait, parse_event};
 use super::server::{AppData, ApiResponse, ApiError, ApiErrorCode}; 
 
-/// Gets the settings for a guild given a user
+static BOT_HAS_GUILD_CACHE: LazyLock<Cache<serenity::all::GuildId, ()>> = LazyLock::new(|| {
+    Cache::builder()
+        .time_to_live(std::time::Duration::from_secs(120)) // 2 minutes
+        .build()
+});
+
+/// Helper function to check if the bot is in a guild
+async fn check_guild_has_bot(
+    data: &crate::data::Data,
+    guild_id: serenity::all::GuildId,
+) -> Result<(), ApiResponseError> {
+    if !BOT_HAS_GUILD_CACHE.contains_key(&guild_id) {
+        let guild_exists = crate::sandwich::has_guilds(&data.reqwest, vec![guild_id])
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
+
+        if guild_exists.is_empty() || guild_exists[0] == 0 {
+            return Err((StatusCode::NOT_FOUND, Json("Guild to get settings for does not have the bot?".into())));
+        }
+
+        BOT_HAS_GUILD_CACHE.insert(guild_id, ()).await;
+    }
+
+    Ok(())
+}
+
+/// Get Settings For Guild User
+/// 
+/// Gets the settings for a guild given a user. Note that it is perfectly
+/// allowed for the user to not be in the guild itself (e.g. ban appeal type settings
+/// in the future)
+#[utoipa::path(
+    get, 
+    tag = "Public API",
+    path = "/guilds/{guild_id}/settings",
+    security(
+        ("UserAuth" = []) 
+    ),
+    responses(
+        (status = 200, description = "Settings for the guild", body = SettingDispatch),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 pub(super) async fn get_settings_for_guild_user(
     State(AppData {
         serenity_context,
         data,
         ..
     }): State<AppData>,
-    State(AppData { ..}): State<AppData>,
     AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
-    Path(guild_id): Path<serenity::all::GuildId>,
+    Path(guild_id): Path<ApiGuildId>,
 ) -> ApiResponse<SettingDispatch> {
     // Make a GetSetting event
     let user_id: UserId = user_id.parse()
         .map_err(|e: serenity::all::ParseIdError| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
+
+    let guild_id = guild_id.into();
+
+    // Ensure the bot is in the guild
+    check_guild_has_bot(&data, guild_id).await?;
 
     let event = parse_event(&AntiraidEvent::GetSettings(GetSettingsEvent {
         author: user_id,
@@ -78,18 +126,48 @@ pub(super) async fn get_settings_for_guild_user(
     Ok(Json(results))
 }
 
-/// Executes a setting for a guild given a user
+/// Execute Setting For User
+///
+/// Executes a setting for a guild given a user. Note that it is perfectly
+/// allowed for the user to not be in the guild itself (e.g. ban appeal type settings
+/// in the future)
+#[utoipa::path(
+    post, 
+    tag = "Public API",
+    path = "/guilds/{guild_id}/settings",
+    security(
+        ("UserAuth" = []) 
+    ),
+    responses(
+        (status = 200, description = "Settings for the guild", body = SettingDispatch),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 pub(super) async fn execute_setting_for_guild_user(
     State(AppData {
         serenity_context,
         data,
     }): State<AppData>,
     AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
-    Path(guild_id): Path<serenity::all::GuildId>,
+    Path(guild_id): Path<ApiGuildId>,
     Json(req): Json<SettingsOperationRequest>,
 ) -> ApiResponse<SettingExecuteDispatch> {
     let user_id: UserId = user_id.parse()
         .map_err(|e: serenity::all::ParseIdError| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
+
+    // Ensure the bot is in the guild
+    let guild_id = guild_id.into();
+
+    // Ensure the bot is in the guild
+    check_guild_has_bot(&data, guild_id).await?;
+
+    let guild_exists = crate::sandwich::has_guilds(&data.reqwest, vec![guild_id])
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
+
+    if guild_exists.is_empty() || guild_exists[0] == 0 {
+        return Err((StatusCode::NOT_FOUND, Json("Guild to get settings for does not have the bot?".into())));
+    }
 
     let op = req.op;
 
@@ -107,7 +185,7 @@ pub(super) async fn execute_setting_for_guild_user(
         &data,
         event,
         &[req.setting],
-        guild_id,
+        guild_id.into(),
         MAX_TEMPLATES_RETURN_WAIT_TIME,
     )
     .await
@@ -119,12 +197,26 @@ pub(super) async fn execute_setting_for_guild_user(
     Ok(Json(results))
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, utoipa::ToSchema)]
 pub(super) struct GetUserGuildsQuery {
     refresh: Option<bool>,
 }
 
+/// Get User Guilds
+/// 
 /// Returns information about a user's guilds
+#[utoipa::path(
+    get, 
+    tag = "Public API",
+    path = "/users/@me/guilds",
+    security(
+        ("UserAuth" = []) 
+    ),
+    responses(
+        (status = 200, description = "The list of the users servers along with which one the bot is in", body = DashboardGuildData),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 pub(super) async fn get_user_guilds(
         State(AppData {
         data,
@@ -270,7 +362,21 @@ pub(super) async fn get_user_guilds(
     }))
 }
 
+/// Base Guild User Info
+/// 
 /// Returns basic user/guild information
+#[utoipa::path(
+    get, 
+    tag = "Public API",
+    path = "/users/@me/guilds/{guild_id}",
+    security(
+        ("UserAuth" = []) 
+    ),
+    responses(
+        (status = 200, description = "Basic data about the guild", body = BaseGuildUserInfo),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 pub(super) async fn base_guild_user_info(
     State(AppData {
         data,
@@ -278,10 +384,11 @@ pub(super) async fn base_guild_user_info(
         ..
     }): State<AppData>,
     AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
-    Path(guild_id): Path<serenity::all::GuildId>,
+    Path(guild_id): Path<ApiGuildId>,
 ) -> ApiResponse<BaseGuildUserInfo> {
     let user_id: UserId = user_id.parse()
         .map_err(|e: serenity::all::ParseIdError| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
+    let guild_id = guild_id.into();
 
     let bot_user_id = data.current_user.id;
     let guild_json = crate::sandwich::guild(
@@ -407,7 +514,18 @@ static OAUTH2_CODE_CACHE: LazyLock<Cache<String, ()>> = LazyLock::new(|| {
         .build()
 });
 
+/// Create OAuth2 Session
+/// 
 /// Creates a login token from a Discord OAuth2 login 
+#[utoipa::path(
+    post, 
+    tag = "Public API",
+    path = "/oauth2",
+    responses(
+        (status = 200, description = "The created session", body = CreateUserSessionResponse),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 pub(super) async fn create_oauth2_session(
     State(AppData {
         data,
@@ -544,6 +662,21 @@ pub(super) async fn create_oauth2_session(
     ) 
 }
 
+/// Get Authorized Session
+/// 
+/// Returns data about both the user and the user's authorized session
+#[utoipa::path(
+    get, 
+    tag = "Public API",
+    path = "/sessions/@me",
+    security(
+        ("UserAuth" = []) 
+    ),
+    responses(
+        (status = 200, description = "The authorized session + user data", body = AuthorizedSession),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 pub(super) async fn get_authorized_session(
     State(AppData { .. }): State<AppData>,
     AuthorizedUser { user_id, session_id, state, session_type, .. }: AuthorizedUser, // Internal endpoint
@@ -560,6 +693,22 @@ pub(super) async fn get_authorized_session(
     )
 }
 
+/// Get User Sessions
+/// 
+/// Returns a list of sessions for the user. Note that session tokens are not returned
+/// for security reasons.
+#[utoipa::path(
+    get, 
+    tag = "Public API",
+    path = "/sessions",
+    security(
+        ("UserAuth" = []) 
+    ),
+    responses(
+        (status = 200, description = "List of user sessions", body = UserSessionList),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 pub(super) async fn get_user_sessions_api(
     State(AppData { data, .. }): State<AppData>,
     AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
@@ -571,6 +720,22 @@ pub(super) async fn get_user_sessions_api(
     Ok(Json(UserSessionList { sessions }))
 }
 
+/// Create User Session
+/// 
+/// Creates a new user session. Currently only API tokens can be generated
+/// using this endpoint
+#[utoipa::path(
+    post, 
+    tag = "Public API",
+    path = "/sessions",
+    security(
+        ("UserAuth" = []) 
+    ),
+    responses(
+        (status = 200, description = "The created session", body = CreateUserSessionResponse),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 pub(super) async fn create_user_session(
     State(AppData { data, .. }): State<AppData>,
     AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
@@ -616,6 +781,21 @@ pub(super) async fn create_user_session(
     }))
 }
 
+/// Delete User Session
+///
+/// Deletes a user session by its session ID assuming it is owned by the user. This is useful for logging out a user or deleting unknown/malicious sessions.
+#[utoipa::path(
+    delete, 
+    tag = "Public API",
+    path = "/sessions/{session_id}",
+    security(
+        ("UserAuth" = []) 
+    ),
+    responses(
+        (status = 204, description = "The session was deleted successfully"),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 pub(super) async fn delete_user_session_api(
     State(AppData { data, .. }): State<AppData>,
     AuthorizedUser { user_id, .. }: AuthorizedUser,
@@ -680,12 +860,34 @@ static STATE_CACHE: std::sync::LazyLock<Arc<TwState>> = std::sync::LazyLock::new
     Arc::new(state)
 });
 
-/// Returns a list of modules [Modules]
+/// Get Bot State
+/// 
+/// Returns the list of core/builtin commands of the bot
+#[utoipa::path(
+    get, 
+    tag = "Public API",
+    path = "/bot-state",
+    responses(
+        (status = 200, description = "The bot's state", body = TwState),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 pub(super) async fn state() -> Json<Arc<TwState>> {
     Json(STATE_CACHE.clone())
 }
 
+/// Get API Configuration
+/// 
 /// Returns the base API configuration
+#[utoipa::path(
+    get, 
+    tag = "Public API",
+    path = "/config",
+    responses(
+        (status = 200, description = "The base API configuration", body = ApiConfig),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 pub(super) async fn api_config(
     State(AppData { data, .. }): State<AppData>
 ) -> Json<ApiConfig> {
@@ -703,7 +905,18 @@ static STATS_CACHE: std::sync::LazyLock<Cache<(), GetStatusResponse>> = std::syn
         .build()
 });
 
+/// Get Bot Stats
+/// 
 /// Returns the bot's stats
+#[utoipa::path(
+    get, 
+    tag = "Public API",
+    path = "/bot-stats",
+    responses(
+        (status = 200, description = "The bot's statistics", body = GetStatusResponse),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
 pub(super) async fn get_bot_stats(
     State(AppData { data, .. }): State<AppData>,
 ) -> ApiResponse<GetStatusResponse> {

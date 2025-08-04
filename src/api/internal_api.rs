@@ -26,6 +26,9 @@ use crate::templatingrt::execute;
     post, 
     tag = "Internal API",
     path = "/i/dispatch-event/{guild_id}",
+    security(
+        ("InternalAuth" = []) 
+    ),
     responses(
         (status = 204, description = "Event dispatched successfully"),
         (status = 400, description = "API Error", body = ApiError),
@@ -59,6 +62,9 @@ type DispatchResponse = HashMap<String, ApiDispatchResult<serde_json::Value>>;
     post, 
     tag = "Internal API",
     path = "/i/dispatch-event/{guild_id}/@wait",
+    security(
+        ("InternalAuth" = []) 
+    ),
     responses(
         (status = 200, description = "Event dispatched successfully", body = DispatchResponse),
         (status = 400, description = "API Error", body = ApiError),
@@ -99,6 +105,9 @@ pub(super) async fn dispatch_event_and_wait(
     post, 
     tag = "Internal API",
     path = "/i/regenerate-cache/{guild_id}",
+    security(
+        ("InternalAuth" = []) 
+    ),
     responses(
         (status = 204, description = "Cache regenerated successfully"),
         (status = 400, description = "API Error", body = ApiError),
@@ -130,6 +139,9 @@ pub(super) async fn regenerate_cache_api(
     get, 
     tag = "Internal API",
     path = "/i/threads-count",
+    security(
+        ("InternalAuth" = []) 
+    ),
     responses(
         (status = 200, description = "The number of threads", body = usize),
         (status = 400, description = "API Error", body = ApiError),
@@ -153,6 +165,9 @@ pub(super) async fn get_threads_count(
     post, 
     tag = "Internal API",
     path = "/i/ping-all-threads",
+    security(
+        ("InternalAuth" = []) 
+    ),
     responses(
         (status = 200, description = "The number of threads", body = Vec<u64>),
         (status = 400, description = "API Error", body = ApiError),
@@ -179,6 +194,9 @@ pub(super) async fn ping_all_threads(
     post, 
     tag = "Internal API",
     path = "/i/clear-inactive-guilds",
+    security(
+        ("InternalAuth" = []) 
+    ),
     responses(
         (status = 200, description = "The cleared guilds data", body = Vec<ApiThreadClearInactiveGuilds>),
         (status = 400, description = "API Error", body = ApiError),
@@ -212,6 +230,9 @@ pub(super) async fn clear_inactive_guilds(
     post, 
     tag = "Internal API",
     path = "/i/remove-unused-threads",
+    security(
+        ("InternalAuth" = []) 
+    ),
     responses(
         (status = 200, description = "The list of thread IDs of the removed threads", body = Vec<u64>),
         (status = 400, description = "API Error", body = ApiError),
@@ -238,6 +259,9 @@ pub(super) async fn remove_unused_threads(
     post, 
     tag = "Internal API",
     path = "/i/close-thread",
+    security(
+        ("InternalAuth" = []) 
+    ),
     responses(
         (status = 204, description = "The ID of the thread that was closed"),
         (status = 400, description = "API Error", body = ApiError),
@@ -264,6 +288,9 @@ pub(super) async fn close_thread(
     post, 
     tag = "Internal API",
     path = "/i/execute-luavmaction",
+    security(
+        ("InternalAuth" = []) 
+    ),
     responses(
         (status = 200, description = "The response from the thread regarding the operation", body = ExecuteLuaVmActionResponse),
         (status = 400, description = "API Error", body = ApiError),
@@ -340,6 +367,9 @@ pub(super) async fn execute_lua_vm_action(
     post, 
     tag = "Internal API",
     path = "/i/get-vm-metrics-by-tid/{tid}",
+    security(
+        ("InternalAuth" = []) 
+    ),
     responses(
         (status = 200, description = "The list of all thread metrics where the thread ID matches the VM", body = Vec<ApiThreadMetrics>),
         (status = 400, description = "API Error", body = ApiError),
@@ -374,6 +404,9 @@ pub(super) async fn get_vm_metrics_by_tid(
     post, 
     tag = "Internal API",
     path = "/i/get-vm-metrics-for-all",
+    security(
+        ("InternalAuth" = []) 
+    ),
     responses(
         (status = 200, description = "The list of all thread metrics", body = Vec<ApiThreadMetrics>),
         (status = 400, description = "API Error", body = ApiError),
@@ -407,8 +440,11 @@ pub(super) async fn get_vm_metrics_for_all(
     post, 
     tag = "Internal API",
     path = "/i/guilds-exist",
+    security(
+        ("InternalAuth" = []) 
+    ),
     responses(
-        (status = 200, description = "The list of which guilds exist", body = Vec<u8>),
+        (status = 200, description = "The list of which guilds exist where 0 means not existing and 1 means existing in cache", body = Vec<u8>),
         (status = 400, description = "API Error", body = ApiError),
     )
 )]
