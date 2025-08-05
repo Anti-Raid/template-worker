@@ -14,7 +14,7 @@ use crate::dispatch::parse_event;
 pub type TemplateResult = Result<KhronosValue, crate::Error>;
 
 /// A WorkerDispatch manages the dispatching of events to a Luau VM
-/// (and nothing else)
+/// with some utility methods
 #[derive(Clone)]
 pub struct WorkerDispatch {
     /// VM Manager for the worker
@@ -124,6 +124,20 @@ impl WorkerDispatch {
                 log::error!("Failed to dispatch initiate resume key event for guild {guild_id}: {e}");
             }
         }
+
+        Ok(())
+    }
+
+    /// Helper method to regenerate the template cache for a guild. This refetches the templates
+    /// into cache
+    /// 
+    /// This is mainly useful during a deferred cache regeneration in which we need to be able to
+    /// regenerate the cache+VM 
+    pub async fn regenerate_cache(&self, pool: &sqlx::PgPool, id: Id) -> Result<(), crate::Error> {
+        self.cache.regenerate_templates_for(pool, id).await?; // Regenerate templates
+        self.cache.regenerate_key_expiries_for(pool, id).await?; // Regenerate key expiries too
+        self.vm_manager.remove_vm_for(id)?; // Remove the VM to force recreation 
+        self.dispatch_resume_keys(id).await?; // Dispatch resume keys after reload
 
         Ok(())
     }

@@ -11,7 +11,6 @@
 //! - WorkerVmManager: Stores the Luau VM's per guild/user and handles the creation and retrieval of VMs within a worker
 //! - WorkerDispatcher: Dispatches events to the Luau VM's in a worker
 //! - WorkerCacheData: Caches data such as templates and key expiries for a worker
-//! - WorkerCache: Extends WorkerCacheData with VM management such as tenant cache regeneration 
 //! - VMContext: Provides a TemplateConextProvider for the AntiRaid Khronos Luau Runtime [internal]
 //! - Worker: Encapsulates a WorkerVmManager, WorkerDispatcher, and WorkerCache for easy use
 
@@ -21,6 +20,5 @@ pub mod workerstate;
 pub mod limits;
 pub mod vmcontext;
 pub mod workercachedata;
-pub mod workercache;
 pub mod builtins;
 pub mod worker;

@@ -2,7 +2,6 @@ use crate::worker::workerstate::WorkerState;
 
 use super::workervmmanager::WorkerVmManager;
 use super::workerdispatch::WorkerDispatch;
-use super::workercache::WorkerCache;
 use super::workercachedata::WorkerCacheData;
 
 /// Worker provides a full easy-to-develop-on structure including VM management, 
@@ -12,8 +11,6 @@ pub struct Worker {
     pub vm_manager: WorkerVmManager,
     /// The event dispatcher
     pub dispatch: WorkerDispatch,
-    /// The cache
-    pub cache: WorkerCache,
 }
 
 impl Worker {
@@ -23,12 +20,10 @@ impl Worker {
     ) -> Self {
         let vm_manager = WorkerVmManager::new(state.clone());
         let dispatch = WorkerDispatch::new(vm_manager.clone(), state.clone(), cache.clone());
-        let cache = WorkerCache::new(cache, vm_manager.clone(), dispatch.clone());
 
         Self {
             vm_manager,
             dispatch,
-            cache,
         }
     }
 }
