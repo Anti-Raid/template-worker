@@ -9,6 +9,7 @@ mod register;
 mod sandwich;
 mod templatingrt;
 mod events;
+mod worker;
 
 use crate::config::{CMD_ARGS, CONFIG};
 use crate::data::Data;
