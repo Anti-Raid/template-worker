@@ -31,6 +31,7 @@ pub struct VmData {
 /// 
 /// 1. A WorkerVmManager is *not* thread safe
 /// 2. A WorkerVmManager only manages the VMs for a single worker and nothing more 
+#[derive(Clone)]
 pub struct WorkerVmManager {
     /// The state all VMs in the WorkerVmManager share
     worker_state: WorkerState,

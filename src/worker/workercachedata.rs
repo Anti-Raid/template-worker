@@ -2,13 +2,12 @@ use std::{collections::HashMap, hash::Hash, sync::Arc};
 
 use crate::templatingrt::template::Template;
 
-use super::builtins::{BUILTINS_NAME, USE_BUILTINS, BUILTINS_ARC_VEC, BUILTINS};
+use super::builtins::{BUILTINS_NAME, USE_BUILTINS, BUILTINS};
 use super::workervmmanager::Id;
 
 use khronos_runtime::primitives::event::CreateEvent;
 use moka::future::Cache;
 use serenity::all::GuildId;
-use serenity::model::id;
 
 #[derive(Clone)]
 struct CacheEntry<K, V> 

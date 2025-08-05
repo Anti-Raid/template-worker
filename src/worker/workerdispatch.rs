@@ -1,25 +1,131 @@
 use std::sync::Arc;
 
 use khronos_runtime::{primitives::event::{CreateEvent, Event}, require::FilesystemWrapper, rt::{IsolateData, KhronosIsolate}, utils::khronos_value::KhronosValue};
+use serenity::all::{GuildId, ParseIdError};
 use std::time::Duration;
-use crate::templatingrt::template::Template;
+use crate::{templatingrt::template::Template, worker::{workercachedata::WorkerCacheData, workerstate::WorkerState}};
 use super::workervmmanager::{Id, WorkerVmManager, VmData};
 use super::limits::MAX_TEMPLATES_RETURN_WAIT_TIME;
 use super::vmcontext::TemplateContextProvider;
+use crate::events::{AntiraidEvent, KeyResumeEvent};
+use crate::dispatch::parse_event;
 
 /// The result from a template execution
-type TemplateResult = Result<KhronosValue, crate::Error>;
+pub type TemplateResult = Result<KhronosValue, crate::Error>;
 
 /// A WorkerDispatch manages the dispatching of events to a Luau VM
 /// (and nothing else)
+#[derive(Clone)]
 pub struct WorkerDispatch {
-    vm_manager: WorkerVmManager
+    /// VM Manager for the worker
+    vm_manager: WorkerVmManager,
+    /// Worker State
+    state: WorkerState,
+    /// Worker Cache Data (needed for dispatching resume keys)
+    cache: WorkerCacheData,
 }
 
 impl WorkerDispatch {
     /// Creates a new WorkerDispatch with the given WorkerVmManager
-    pub fn new(vm_manager: WorkerVmManager) -> Self {
-        Self { vm_manager }
+    pub fn new(vm_manager: WorkerVmManager, state: WorkerState, cache: WorkerCacheData) -> Self {
+        Self { vm_manager, state, cache }
+    }
+
+    /// Helper method to dispatch an scoped event to the right templates given a tenant ID and an event
+    pub async fn dispatch_scoped_event_to_templates(&self, id: Id, event: CreateEvent, scopes: &[String]) -> Result<Vec<(String, TemplateResult)>, crate::Error> {
+        let templates = self.cache.get_templates_with_event_scoped(id, &event, scopes).await;
+        self.dispatch_event(id, event, templates).await
+    }
+
+    /// Dispatches resume keys to a tenant
+    pub async fn dispatch_resume_keys(&self, id: Id) -> Result<(), crate::Error> {
+        match id {
+            Id::GuildId(guild_id) => {
+                self.dispatch_resume_keys_for_guild(guild_id).await
+            }
+        }
+    }
+
+    /// Dispatches resume keys for a guild
+    async fn dispatch_resume_keys_for_guild(&self, guild_id: GuildId) -> Result<(), crate::Error> {
+        #[derive(sqlx::FromRow)]
+        struct KeyResumePartial {
+            id: String,
+            key: String,
+            scopes: Vec<String>,
+        }
+
+        let partials: Vec<KeyResumePartial> =
+            sqlx::query_as("SELECT id, key, scopes FROM guild_templates_kv WHERE resume = true AND guild_id = $1")
+                .bind(guild_id.to_string())
+                .fetch_all(&self.state.pool)
+                .await?;
+
+        for partial in partials {
+            let scopes = partial.scopes.clone();
+            log::info!(
+                "Dispatching key resume event for key: {} and scopes {:?}",
+                partial.key,
+                partial.scopes
+            );
+
+            let event = AntiraidEvent::KeyResume(KeyResumeEvent {
+                id: partial.id,
+                key: partial.key,
+                scopes: partial.scopes,
+            });
+
+            let tevent = parse_event(&event)?;
+
+            if let Err(e) = self.dispatch_scoped_event_to_templates(Id::GuildId(guild_id), tevent, &scopes).await {
+                log::error!("Failed to dispatch initiate resume key event for guild {guild_id}: {e}");
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Dispatches resume keys for all tenants
+    /// 
+    /// Currently only supports guild tenants
+    pub async fn dispatch_resume_keys_to_all(&self) -> Result<(), crate::Error> {
+        #[derive(sqlx::FromRow)]
+        struct KeyResumePartial {
+            id: String,
+            key: String,
+            scopes: Vec<String>,
+            guild_id: String
+        }
+
+        let partials: Vec<KeyResumePartial> =
+            sqlx::query_as("SELECT guild_id, id, key, scopes FROM guild_templates_kv WHERE resume = true")
+                .fetch_all(&self.state.pool)
+                .await?;
+
+        for partial in partials {
+            let guild_id: GuildId = partial.guild_id.parse().map_err(|e: ParseIdError| e.to_string())?;
+            let scopes = partial.scopes.clone();
+            log::info!(
+                "Dispatching key resume event for key: {} and scopes {:?} in guild {}",
+                partial.key,
+                partial.scopes,
+                guild_id
+            );
+
+            let event = AntiraidEvent::KeyResume(KeyResumeEvent {
+                id: partial.id,
+                key: partial.key,
+                scopes: partial.scopes,
+            });
+
+            let tevent = parse_event(&event)?;
+
+            if let Err(e) = self.dispatch_scoped_event_to_templates(Id::GuildId(guild_id), tevent, &scopes).await {
+                log::error!("Failed to dispatch initiate resume key event for guild {guild_id}: {e}");
+            }
+        }
+
+        Ok(())
     }
 
     /// Dispatches an event to the appropriate VM based on the tenant ID without waiting for a response
@@ -273,6 +379,7 @@ impl WorkerDispatch {
             }
         }
 
+        // TODO: Support deferred cache regen
         /*let data = vm_data.state.serenity_context.data::<crate::Data>();
         if let Err(e) = regenerate_deferred(&vm_data.state.serenity_context, &data, guild_state.guild_id).await {
             log::error!("Failed to regenerate deferred: {}", e);

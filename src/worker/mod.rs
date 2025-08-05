@@ -2,13 +2,18 @@
 //! 
 //! **Note: Workers are a work in progress and are not yet fully implemented.**
 //! 
-//! A worker is the base unit for work such as dispatching events to Luau VM's in AntiRaid
+//! A worker is the base unit for work such as dispatching events to Luau VM's in AntiRaid. 
 //! 
-//! There are currently two layer in a worker construct:
+//! Note that workers must be paired with a distribution mechanism such as a thread or process pool
 //! 
-//! - WorkerVMManager: Stores the Luau VM's per guild/user and handles the creation and retrieval of VMs within a worker
+//! There are currently multiple layers in a worker construct:
+//! 
+//! - WorkerVmManager: Stores the Luau VM's per guild/user and handles the creation and retrieval of VMs within a worker
 //! - WorkerDispatcher: Dispatches events to the Luau VM's in a worker
 //! - WorkerCacheData: Caches data such as templates and key expiries for a worker
+//! - WorkerCache: Extends WorkerCacheData with VM management such as tenant cache regeneration 
+//! - VMContext: Provides a TemplateConextProvider for the AntiRaid Khronos Luau Runtime [internal]
+//! - Worker: Encapsulates a WorkerVmManager, WorkerDispatcher, and WorkerCache for easy use
 
 pub mod workerdispatch;
 pub mod workervmmanager;
@@ -18,3 +23,4 @@ pub mod vmcontext;
 pub mod workercachedata;
 pub mod workercache;
 pub mod builtins;
+pub mod worker;
