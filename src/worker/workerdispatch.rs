@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use khronos_runtime::{primitives::event::{CreateEvent, Event}, require::FilesystemWrapper, rt::{mlua::Result as LuaResult, IsolateData, KhronosIsolate}, utils::khronos_value::KhronosValue};
+use khronos_runtime::{primitives::event::{CreateEvent, Event}, require::FilesystemWrapper, rt::{IsolateData, KhronosIsolate}, utils::khronos_value::KhronosValue};
 use std::time::Duration;
 use crate::templatingrt::template::Template;
 use super::workervmmanager::{Id, WorkerVmManager, VmData};
@@ -11,6 +11,7 @@ use super::vmcontext::TemplateContextProvider;
 type TemplateResult = Result<KhronosValue, crate::Error>;
 
 /// A WorkerDispatch manages the dispatching of events to a Luau VM
+/// (and nothing else)
 pub struct WorkerDispatch {
     vm_manager: WorkerVmManager
 }
@@ -26,27 +27,123 @@ impl WorkerDispatch {
         let vm_data = self.vm_manager.get_vm_for(id).await
             .map_err(|e| format!("Failed to get VM for ID {id:?}: {e}"))?;
 
-        let res = self.dispatch_event_to_templates(templates, event, vm_data, id).await;
-
-        match res {
-            Ok(r) => Ok(r),
-            Err(e) => {
-                self.log_error(id, e.to_string()).await;
-                Err(e)
-            }
-        }
+        self.dispatch_event_to_templates(templates, event, &vm_data, id).await
     }
 
-    /// Logs an error
-    async fn log_error(&self, id: Id, error: String) {
-        // TODO: Implement error logging to Discord
+    /// Returns an Discord error message for a template error
+    fn error_message(
+        template: &Template,
+        error: String,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "embeds": [
+                {
+                    "title": "Error executing template",
+                    "description": error,
+                    "fields": [
+                        {
+                            "name": "Template",
+                            "value": template.name.clone(),
+                            "inline": false
+                        }
+                    ],
+                }
+            ],
+            "components": [
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 2,
+                            "style": 5,
+                            "label": "Support Server",
+                            "url": crate::CONFIG.meta.support_server_invite.to_string(),
+                        },
+                    ]
+                }
+            ],
+        })
+    }
+
+    /// Helper method to log a template error to the main server
+    async fn log_error_to_main_server(
+        vm_data: &VmData,
+        template: &Template,
+        error: String,
+    ) -> Result<(), crate::Error> {
+        // Send to main server
+        vm_data.state.serenity_context.http.send_message(
+            crate::CONFIG.meta.default_error_channel.widen(),
+            Vec::with_capacity(0),
+            &Self::error_message(template, error),
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    async fn log_error(
+        vm_data: &VmData,
+        template: &Template,
+        error: String,
+    ) -> Result<(), crate::Error> {
+        let error = format!("```lua\n{}```", error.replace('`', "\\`"));
+
+        if let Some(error_channel) = template.error_channel {
+            let err = vm_data.state.serenity_context.http.send_message(
+                error_channel.widen(),
+                Vec::with_capacity(0),
+                &Self::error_message(template, error),
+            )
+            .await;
+
+            // Check for a 404
+            if let Err(e) = err {
+                match e {
+                    serenity::Error::Http(e) => {
+                        if let Some(s) = e.status_code() {
+                            if s == reqwest::StatusCode::NOT_FOUND {
+                                // Remove the error channel
+                                match sqlx::query(
+                                    "UPDATE templates SET error_channel = NULL WHERE name =$1 AND guild_id = $2",
+                                )
+                                .bind(&template.name)
+                                .bind(template.guild_id.to_string())
+                                .execute(&vm_data.state.pool)
+                                .await {
+                                    Ok(_) => {
+                                        // TODO: Add the cache stuff back in once worker cache API is done being reimplemented
+                                        // Refresh cache without regenerating
+                                        /*get_all_guild_templates_from_db(
+                                            template.guild_id,
+                                            &guild_state.pool,
+                                        )
+                                        .await?;*/
+                                    },
+                                    Err(e) => {
+                                        log::error!("Failed to remove error channel for template {}: {}", template.name, e);
+                                    }
+                                };
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        } else {
+            // If no error channel is set, log to the main server
+            Self::log_error_to_main_server(vm_data, template, error)
+                .await?;
+        }
+
+        Ok(())
     }
 
     /// Helper method to dispatch an event to a single template
     async fn dispatch_event_to_template(
-        template: Arc<Template>,
+        template: &Arc<Template>,
         event: Event,
-        vm_data: VmData,
+        vm_data: &VmData,
         id: Id,
     ) -> Result<KhronosValue, crate::Error> {
         if vm_data.runtime_manager.runtime().is_broken() {
@@ -90,7 +187,7 @@ impl WorkerDispatch {
 
             log::info!("Created subisolate for template {}", template.name);
 
-            let provider = TemplateContextProvider::new(vm_data.state, template.clone(), id);
+            let provider = TemplateContextProvider::new(vm_data.state.clone(), template.clone(), id);
 
             let created_context = match sub_isolate.create_context(provider) {
                 Ok(ctx) => ctx,
@@ -129,7 +226,7 @@ impl WorkerDispatch {
         &self,
         templates: Vec<Arc<Template>>,
         event: CreateEvent,
-        vm_data: VmData,
+        vm_data: &VmData,
         id: Id,
     ) -> Result<Vec<(String, TemplateResult)>, crate::Error> {        
         if vm_data.runtime_manager.runtime().is_broken() {
@@ -149,7 +246,14 @@ impl WorkerDispatch {
             let event_ref = event.clone();
             set.spawn_local(async move {
                 let name = template.name.clone();
-                let result = Self::dispatch_event_to_template(template, event_ref, vm_ref, id).await;
+                let result = Self::dispatch_event_to_template(&template, event_ref, &vm_ref, id).await;
+
+                if let Err(ref e) = result {
+                    // Log the error
+                    if let Err(e) = Self::log_error(&vm_ref, &template, e.to_string()).await {
+                        log::error!("Failed to log error for template {}: {}", template.name, e);
+                    }
+                }
 
                 (name, result)
             });
