@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use khronos_runtime::{primitives::event::{CreateEvent, Event}, require::FilesystemWrapper, rt::{IsolateData, KhronosIsolate}, utils::khronos_value::KhronosValue};
 use std::time::Duration;
-use crate::{templatingrt::template::Template, worker::{workercachedata::{DeferredCacheRegenerationMode, WorkerCacheData}, workerstate::WorkerState}};
+use super::template::Template;
+use crate::{worker::{workercachedata::{DeferredCacheRegenerationMode, WorkerCacheData}, workerstate::WorkerState}};
 use super::workervmmanager::{Id, WorkerVmManager, VmData};
 use super::limits::MAX_TEMPLATES_RETURN_WAIT_TIME;
 use super::vmcontext::TemplateContextProvider;

@@ -1,6 +1,6 @@
 use std::{hash::Hash, sync::Arc};
 
-use crate::templatingrt::template::Template;
+use super::template::Template;
 
 use super::builtins::{USE_BUILTINS, BUILTINS};
 use super::workervmmanager::Id;

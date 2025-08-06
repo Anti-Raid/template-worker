@@ -1,7 +1,7 @@
 use rust_embed::Embed;
 use std::sync::{Arc, LazyLock};
 
-use crate::templatingrt::template::{DefaultableOverlayFS, Template, TemplatingTypes};
+use super::template::{DefaultableOverlayFS, Template, TemplatingTypes};
 
 /// Builtins
 #[derive(Embed, Debug)]

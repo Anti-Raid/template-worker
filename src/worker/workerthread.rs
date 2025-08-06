@@ -23,10 +23,43 @@ enum WorkerThreadMessage {
     }
 }
 
+/// CreatedWorkerThreadMessage is a wrapper around WorkerThreadMessage 
+/// that is 'public'. Not usable outside of this file though
+pub struct CreatedWorkerThreadMessage(pub(self) WorkerThreadMessage);
+
 pub trait PushableMessage {
     type Response: Send + Sync + 'static;
 
-    fn into_message(self, tx: Option<OneShotSender<Self::Response>>) -> WorkerThreadMessage;
+    fn into_message(self, tx: Option<OneShotSender<Self::Response>>) -> CreatedWorkerThreadMessage;
+}
+
+pub struct DispatchEvent {
+    /// The id of the template to dispatch the event to 
+    pub id: Id,
+    /// The event to dispatch
+    pub event: CreateEvent,
+    /// The scopes to dispatch the event to, if any
+    pub scopes: Option<Vec<String>>,
+}
+
+impl PushableMessage for DispatchEvent {
+    type Response = DispatchTemplateResult;
+
+    fn into_message(self, tx: Option<OneShotSender<Self::Response>>) -> CreatedWorkerThreadMessage {
+        match self.scopes {
+            Some(scopes) => CreatedWorkerThreadMessage(WorkerThreadMessage::DispatchScopedEvent {
+                id: self.id,
+                event: self.event,
+                scopes,
+                tx,
+            }),
+            None => CreatedWorkerThreadMessage(WorkerThreadMessage::DispatchEvent {
+                id: self.id,
+                event: self.event,
+                tx,
+            }),
+        }
+    }
 }
 
 /// WorkerThread provides a simple thread implementation in which a ``Worker`` runs in its own thread with messages
@@ -101,7 +134,7 @@ impl WorkerThread {
     pub async fn send<T: PushableMessage>(&self, msg: T) -> Result<T::Response, crate::Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let msg = msg.into_message(Some(tx));
-        self.tx.send(msg)
+        self.tx.send(msg.0)
             .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
         rx.await.map_err(|e| format!("Failed to receive response from worker thread: {e}").into())
     }
@@ -111,7 +144,7 @@ impl WorkerThread {
     pub async fn send_timeout<T: PushableMessage>(&self, msg: T, duration: Duration) -> Result<T::Response, crate::Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let msg = msg.into_message(Some(tx));
-        self.tx.send(msg)
+        self.tx.send(msg.0)
             .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
 
         tokio::select! {
@@ -122,9 +155,9 @@ impl WorkerThread {
 
     /// Sends a message to the worker thread
     pub async fn send_nowait<T: PushableMessage>(&self, msg: T) -> Result<(), crate::Error> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, _rx) = tokio::sync::oneshot::channel();
         let msg = msg.into_message(Some(tx));
-        self.tx.send(msg)
+        self.tx.send(msg.0)
             .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
         Ok(())
     }

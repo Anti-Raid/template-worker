@@ -1,6 +1,6 @@
 use super::workerstate::WorkerState;
 use super::workervmmanager::Id;
-use crate::templatingrt::template::Template;
+use super::template::Template;
 use crate::worker::workercachedata::WorkerCacheData;
 use khronos_runtime::traits::context::{
     CompatibilityFlags, KhronosContext, Limitations, ScriptData,

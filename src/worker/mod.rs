@@ -14,6 +14,8 @@
 //! - VMContext + vmdatastores.rs: Provides a TemplateConextProvider for the AntiRaid Khronos Luau Runtime [internal]
 //! - Worker: Encapsulates a WorkerVmManager, WorkerDispatcher, and WorkerCache for easy use
 //! - WorkerDB: Provides database related code to the worker system
+//! - WorkerThread: Allows spinning up a worker thread that can be used to run the worker system
+//! - Template: Represents a template that can be executed in a worker
 
 pub mod workerdispatch;
 pub mod workervmmanager;
@@ -26,3 +28,4 @@ pub mod builtins;
 pub mod worker;
 pub mod workerdb;
 pub mod workerthread;
+pub mod template;

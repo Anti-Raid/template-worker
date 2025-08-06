@@ -3,7 +3,7 @@ use chrono::{Utc, DateTime};
 
 use super::workerstate::WorkerState;
 use super::workervmmanager::Id;
-use crate::templatingrt::template::Template;
+use super::template::Template;
 use super::builtins::{BUILTINS_NAME, USE_BUILTINS, BUILTINS};
 
 type ArcVec<T> = Arc<Vec<Arc<T>>>;
