@@ -3,7 +3,7 @@ use std::sync::Arc;
 use khronos_runtime::{primitives::event::{CreateEvent, Event}, require::FilesystemWrapper, rt::{IsolateData, KhronosIsolate}, utils::khronos_value::KhronosValue};
 use std::time::Duration;
 use super::template::Template;
-use crate::worker::{keyexpirychannel::KeyExpiryChannel, workercachedata::{DeferredCacheRegenerationMode, WorkerCacheData}, workerstate::WorkerState};
+use crate::worker::{keyexpirychannel::KeyExpiryChannel, workercachedata::{DeferredCacheRegenerationMode, WorkerCacheData}, workerfilter::WorkerFilter, workerstate::WorkerState};
 use super::workervmmanager::{Id, WorkerVmManager, VmData};
 use super::limits::MAX_TEMPLATES_RETURN_WAIT_TIME;
 use super::vmcontext::TemplateContextProvider;
@@ -27,14 +27,16 @@ pub struct WorkerDispatch {
     cache: WorkerCacheData,
     /// Worker Database
     db: WorkerDB,
+    /// Worker filter
+    filter: WorkerFilter,
     /// Key expiry channel
     key_expiry_chan: KeyExpiryChannel,
 }
 
 impl WorkerDispatch {
     /// Creates a new WorkerDispatch with the given WorkerVmManager
-    pub fn new(vm_manager: WorkerVmManager, state: WorkerState, cache: WorkerCacheData, db: WorkerDB, key_expiry_chan: KeyExpiryChannel) -> Self {
-        let dispatch = Self { vm_manager, state, cache, db, key_expiry_chan };
+    pub fn new(vm_manager: WorkerVmManager, state: WorkerState, cache: WorkerCacheData, db: WorkerDB, key_expiry_chan: KeyExpiryChannel, filter: WorkerFilter) -> Self {
+        let dispatch = Self { vm_manager, state, cache, db, key_expiry_chan, filter };
 
         // Fire resume keys on creation
         let self_ref = dispatch.clone();
@@ -63,6 +65,10 @@ impl WorkerDispatch {
     pub async fn dispatch_resume_keys(&self) -> Result<(), crate::Error> {
         let resumes_map = self.db.get_resume_keys().await?;
         for (id, resumes) in resumes_map {
+            if !self.filter.is_allowed(id) {
+                continue;
+            }
+            
             for resume in resumes {
                 log::info!(
                     "Dispatching key resume event for key: {} and scopes {:?} in ID {id:?}",
