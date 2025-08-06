@@ -1,6 +1,7 @@
 use super::workerstate::WorkerState;
 use super::workervmmanager::Id;
 use crate::templatingrt::template::Template;
+use crate::worker::workercachedata::WorkerCacheData;
 use khronos_runtime::traits::context::{
     CompatibilityFlags, KhronosContext, Limitations, ScriptData,
 };
@@ -52,25 +53,29 @@ pub struct TemplateContextProvider {
 impl TemplateContextProvider {
     fn datastores(
         state: WorkerState,
+        cache: WorkerCacheData,
+        id: Id,
         _template_data: Arc<Template>,
     ) -> Vec<Rc<dyn DataStoreImpl>> {
         vec![
-            /*Rc::new(super::datastores::StatsStore {
+            Rc::new(super::vmdatastores::StatsStore {
                 state: state.clone(),
             }),
-            Rc::new(super::datastores::LinksStore {}),
+            Rc::new(super::vmdatastores::LinksStore {}),
             Rc::new(khronos_runtime::traits::ir::datastores::CopyDataStore {}),
-            Rc::new(super::datastores::TemplateStore {
-                state: state.clone(),
-            }),*/
+            Rc::new(super::vmdatastores::TemplateStore {
+                state,
+                cache,
+                id
+            }),
         ]
     }
 
     /// Creates a new `TemplateContextProvider` with the given template data
-    pub fn new(state: WorkerState, template_data: Arc<Template>, id: Id) -> Self {
+    pub fn new(state: WorkerState, template_data: Arc<Template>, cache: WorkerCacheData, id: Id) -> Self {
         Self {
             id,
-            datastores: Self::datastores(state.clone(), template_data.clone()),
+            datastores: Self::datastores(state.clone(), cache, id, template_data.clone()),
             state,
             script_data: Arc::new(ScriptData {
                 guild_id: Some(template_data.guild_id),

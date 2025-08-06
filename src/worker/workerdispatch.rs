@@ -253,6 +253,7 @@ impl WorkerDispatch {
         template: &Arc<Template>,
         event: Event,
         vm_data: &VmData,
+        cache: WorkerCacheData,
         id: Id,
     ) -> Result<KhronosValue, crate::Error> {
         if vm_data.runtime_manager.runtime().is_broken() {
@@ -296,7 +297,7 @@ impl WorkerDispatch {
 
             log::info!("Created subisolate for template {}", template.name);
 
-            let provider = TemplateContextProvider::new(vm_data.state.clone(), template.clone(), id);
+            let provider = TemplateContextProvider::new(vm_data.state.clone(), template.clone(), cache, id);
 
             let created_context = match sub_isolate.create_context(provider) {
                 Ok(ctx) => ctx,
@@ -352,10 +353,11 @@ impl WorkerDispatch {
 
         for template in templates {
             let vm_ref = vm_data.clone();
+            let cache_ref = self.cache.clone();
             let event_ref = event.clone();
             set.spawn_local(async move {
                 let name = template.name.clone();
-                let result = Self::dispatch_event_to_template(&template, event_ref, &vm_ref, id).await;
+                let result = Self::dispatch_event_to_template(&template, event_ref, &vm_ref, cache_ref, id).await;
 
                 if let Err(ref e) = result {
                     // Log the error
