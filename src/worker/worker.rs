@@ -17,13 +17,13 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn new_full(
+    pub fn new(
         cache: WorkerCacheData, // The cache data, this can be shared across workers if needed (e.g. threadpool worker)
         state: WorkerState,
     ) -> Self {
         let db = cache.db().clone();
         let vm_manager = WorkerVmManager::new(state.clone());
-        let dispatch = WorkerDispatch::new(vm_manager.clone(), state.clone(), cache.clone(), db.clone());
+        let dispatch = WorkerDispatch::new(vm_manager.clone(), state, cache, db.clone());
 
         Self {
             vm_manager,

@@ -12,6 +12,7 @@ use super::workerdb::WorkerDB;
 
 /// The result from a template execution
 pub type TemplateResult = Result<KhronosValue, crate::Error>;
+pub type DispatchTemplateResult = Result<Vec<(String, TemplateResult)>, crate::Error>;
 
 /// A WorkerDispatch manages the dispatching of events to a Luau VM
 /// with some utility methods
@@ -31,6 +32,12 @@ impl WorkerDispatch {
     /// Creates a new WorkerDispatch with the given WorkerVmManager
     pub fn new(vm_manager: WorkerVmManager, state: WorkerState, cache: WorkerCacheData, db: WorkerDB) -> Self {
         Self { vm_manager, state, cache, db }
+    }
+
+    /// Helper method to dispatch an scoped event to the right templates given a tenant ID and an event
+    pub async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> Result<Vec<(String, TemplateResult)>, crate::Error> {
+        let templates = self.cache.get_templates_with_event(id, &event).await;
+        self.dispatch_event(id, event, templates).await
     }
 
     /// Helper method to dispatch an scoped event to the right templates given a tenant ID and an event
@@ -132,11 +139,11 @@ impl WorkerDispatch {
     }
 
     /// Dispatches an event to the appropriate VM based on the tenant ID without waiting for a response
-    pub async fn dispatch_event(&self, id: Id, event: CreateEvent, templates: Vec<Arc<Template>>) -> Result<Vec<(String, TemplateResult)>, crate::Error> {
+    pub async fn dispatch_event(&self, id: Id, event: CreateEvent, templates: Vec<Arc<Template>>) -> DispatchTemplateResult {
         let vm_data = self.vm_manager.get_vm_for(id).await
             .map_err(|e| format!("Failed to get VM for ID {id:?}: {e}"))?;
 
-        self.dispatch_event_to_templates(templates, event, &vm_data, id).await
+        self.dispatch_event_to_templates_impl(templates, event, &vm_data, id).await
     }
 
     /// Returns an Discord error message for a template error
@@ -249,7 +256,7 @@ impl WorkerDispatch {
     }
 
     /// Helper method to dispatch an event to a single template
-    async fn dispatch_event_to_template(
+    async fn dispatch_event_to_template_impl(
         template: &Arc<Template>,
         event: Event,
         vm_data: &VmData,
@@ -339,7 +346,7 @@ impl WorkerDispatch {
     }
 
     /// Dispatches an event to templates and returns the results
-    async fn dispatch_event_to_templates(
+    async fn dispatch_event_to_templates_impl(
         &self,
         templates: Vec<Arc<Template>>,
         event: CreateEvent,
@@ -364,7 +371,7 @@ impl WorkerDispatch {
             let event_ref = event.clone();
             set.spawn_local(async move {
                 let name = template.name.clone();
-                let result = Self::dispatch_event_to_template(&template, event_ref, &vm_ref, cache_ref, id).await;
+                let result = Self::dispatch_event_to_template_impl(&template, event_ref, &vm_ref, cache_ref, id).await;
 
                 if let Err(ref e) = result {
                     // Log the error
