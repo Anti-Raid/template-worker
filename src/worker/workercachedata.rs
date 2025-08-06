@@ -34,8 +34,8 @@ where K: Send + Sync + Eq + Hash + 'static,
         self.data.insert(key, value).await;
     }
 
-    async fn remove(&self, key: &K) {
-        self.data.invalidate(key).await;
+    async fn remove(&self, key: &K) -> Option<V> {
+        self.data.remove(key).await
     }
 
     fn iter(&self) -> impl Iterator<Item = (Arc<K>, V)> + use<'_, K, V> {
@@ -44,6 +44,19 @@ where K: Send + Sync + Eq + Hash + 'static,
 }
 
 type ArcVec<T> = Arc<Vec<Arc<T>>>;
+
+#[derive(Debug, Clone)]
+#[allow(unused)]
+pub enum DeferredCacheRegenerationMode {
+    /// Only need to regenerate cache for the single tenant (ourselves)
+    FlushSelf {},
+    /// Need to regenerate cache for multiple tenants due to shared data update (template shop etc.)
+    /// 
+    /// Needed as an update to a template on the template shop may affect multiple guilds
+    FlushOthers {
+        others: Vec<Id>,
+    },
+}
 
 /// WorkerCacheData stores cache related data for templates and associated data (like key expiries)
 /// 
@@ -54,7 +67,8 @@ type ArcVec<T> = Arc<Vec<Arc<T>>>;
 pub struct WorkerCacheData {
     db: WorkerDB,
     templates: CacheEntry<Id, ArcVec<Template>>, // Maps template names to their associated keys
-    key_expiries: CacheEntry<Id, ArcVec<KeyExpiry>>, // Maps guild id to key expiries
+    key_expiries: CacheEntry<Id, ArcVec<KeyExpiry>>, // Maps id to key expiries
+    deferred_cache_regens: CacheEntry<Id, DeferredCacheRegenerationMode>, // Maps id to deferred cache regeneration mode
 }
 
 impl WorkerCacheData {
@@ -66,6 +80,7 @@ impl WorkerCacheData {
             db,
             templates: CacheEntry::new(),
             key_expiries: CacheEntry::new(),
+            deferred_cache_regens: CacheEntry::new(),
         };
 
         // Setup initial cache from database
@@ -195,6 +210,16 @@ impl WorkerCacheData {
         // Store the key expiries in the cache
         self.key_expiries.insert(id, key_expiries).await;
         Ok(())
+    }
+
+    /// Sets a deferred cache regeneration mode for a tenant
+    pub async fn set_deferred_cache_regeneration(&self, id: Id, mode: DeferredCacheRegenerationMode) {
+        self.deferred_cache_regens.insert(id, mode).await;
+    }
+
+    /// Gets and removes the deferred cache regeneration mode for a tenant
+    pub async fn take_deferred_cache_regeneration(&self, id: &Id) -> Option<DeferredCacheRegenerationMode> {
+        self.deferred_cache_regens.remove(id).await
     }
 }
 

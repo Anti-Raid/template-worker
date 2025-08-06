@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use khronos_runtime::{primitives::event::{CreateEvent, Event}, require::FilesystemWrapper, rt::{IsolateData, KhronosIsolate}, utils::khronos_value::KhronosValue};
-use serenity::all::{GuildId, ParseIdError};
 use std::time::Duration;
-use crate::{templatingrt::template::Template, worker::{workercachedata::WorkerCacheData, workerstate::WorkerState}};
+use crate::{templatingrt::template::Template, worker::{workercachedata::{DeferredCacheRegenerationMode, WorkerCacheData}, workerstate::WorkerState}};
 use super::workervmmanager::{Id, WorkerVmManager, VmData};
 use super::limits::MAX_TEMPLATES_RETURN_WAIT_TIME;
 use super::vmcontext::TemplateContextProvider;
@@ -99,8 +98,27 @@ impl WorkerDispatch {
         Ok(())
     }
 
+    // Perform a deferred cache regeneration for a tenant
+    pub async fn regenerate_deferred_cache_for(&self, id: Id, mode: DeferredCacheRegenerationMode) -> Result<(), crate::Error> {
+        match mode {
+            DeferredCacheRegenerationMode::FlushSelf {} => {
+                log::info!("Performing deferred cache regeneration for ID {id:?}");
+                self.regenerate_cache(id).await?;
+            },
+            DeferredCacheRegenerationMode::FlushOthers { others } => {
+                log::info!("Performing deferred cache regeneration for ID {id:?} and others: {:?}", others);
+
+                for id in others {
+                    log::info!("Performing deferred cache regeneration for other tenant ID {id:?}");
+                    self.regenerate_cache(id).await?;
+                }
+            },
+        }
+        Ok(())
+    }
+
     /// Helper method to regenerate the template cache for a guild. This refetches the templates
-    /// into cache
+    /// into cache and reloads any existing VM for the guild.
     /// 
     /// This is mainly useful during a deferred cache regeneration in which we need to be able to
     /// regenerate the cache+VM 
@@ -364,11 +382,12 @@ impl WorkerDispatch {
             }
         }
 
-        // TODO: Support deferred cache regen
-        /*let data = vm_data.state.serenity_context.data::<crate::Data>();
-        if let Err(e) = regenerate_deferred(&vm_data.state.serenity_context, &data, guild_state.guild_id).await {
-            log::error!("Failed to regenerate deferred: {}", e);
-        };*/
+        if let Some(mode) = self.cache.take_deferred_cache_regeneration(&id).await {
+            log::info!("Detected deferred cache regeneration for ID {id:?}, performing now");
+            if let Err(e) = self.regenerate_deferred_cache_for(id, mode).await {
+                log::error!("Failed to perform deferred cache regeneration for ID {id:?}: {e}");
+            }
+        }
 
         Ok(results)
     }
