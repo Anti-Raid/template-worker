@@ -25,3 +25,4 @@ pub mod workercachedata;
 pub mod builtins;
 pub mod worker;
 pub mod workerdb;
+pub mod workerthread;

@@ -3,6 +3,7 @@ use serenity::all::GuildId;
 use std::cell::RefCell;
 use std::{cell::Cell, collections::HashMap, rc::Rc};
 use khronos_runtime::rt::mlua::prelude::*;
+use super::limits::{LuaKVConstraints, Ratelimits};
 
 use super::workerstate::WorkerState;
 use super::limits::{
@@ -23,6 +24,8 @@ pub struct VmData {
     pub state: WorkerState,
     pub runtime_manager: RuntimeManager,
     pub thread_count: Rc<Cell<usize>>,
+    pub kv_constraints: LuaKVConstraints,
+    pub ratelimits: Rc<Ratelimits>,
 }
 
 /// A WorkerVmManager manages the state and VMs for a worker
@@ -68,6 +71,8 @@ impl WorkerVmManager {
             state: self.worker_state.clone(),
             runtime_manager,
             thread_count: Cell::new(0).into(),
+            kv_constraints: LuaKVConstraints::default(),
+            ratelimits: Ratelimits::new().map_err(|e| LuaError::external(e.to_string()))?.into(),
         };
 
         let mut vm_guard = self.vms.borrow_mut();

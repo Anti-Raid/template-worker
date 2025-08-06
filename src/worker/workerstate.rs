@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use super::limits::{LuaKVConstraints, Ratelimits};
 
 #[derive(Clone)]
 /// Represents the state of the worker, which includes the serenity context, reqwest client, object store, and database pool
@@ -8,9 +7,6 @@ pub struct WorkerState {
     pub reqwest_client: reqwest::Client,
     pub object_store: Arc<crate::objectstore::ObjectStore>,
     pub pool: sqlx::PgPool,
-
-    pub kv_constraints: LuaKVConstraints,
-    pub ratelimits: Arc<Ratelimits>,
 }
 
 impl WorkerState {
@@ -26,8 +22,12 @@ impl WorkerState {
             reqwest_client,
             object_store,
             pool,
-            kv_constraints: LuaKVConstraints::default(),
-            ratelimits: Arc::new(Ratelimits::new()?),
         })
     }
 }
+
+// Assert that WorkerThread is Send + Sync + Clone
+const _: () = {
+    const fn assert_send_sync_clone<T: Send + Sync + Clone>() {}
+    assert_send_sync_clone::<WorkerState>();
+};

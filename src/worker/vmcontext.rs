@@ -20,6 +20,7 @@ use serde_json::Value;
 use sqlx::Row;
 use std::sync::LazyLock;
 use std::{rc::Rc, sync::Arc};
+use super::limits::{LuaKVConstraints, Ratelimits};
 
 /// Returns a random string of length ``length``
 fn gen_random(length: usize) -> String {
@@ -48,6 +49,12 @@ pub struct TemplateContextProvider {
 
     /// Script data
     script_data: Arc<ScriptData>,
+
+    /// The KV constraints for this template
+    kv_constraints: LuaKVConstraints,
+    
+    /// The ratelimits of the VM
+    ratelimits: Rc<Ratelimits>,
 }
 
 impl TemplateContextProvider {
@@ -72,7 +79,14 @@ impl TemplateContextProvider {
     }
 
     /// Creates a new `TemplateContextProvider` with the given template data
-    pub fn new(state: WorkerState, template_data: Arc<Template>, cache: WorkerCacheData, id: Id) -> Self {
+    pub fn new(
+        state: WorkerState, 
+        template_data: Arc<Template>, 
+        cache: WorkerCacheData, 
+        id: Id,
+        kv_constraints: LuaKVConstraints,
+        ratelimits: Rc<Ratelimits>,
+    ) -> Self {
         Self {
             id,
             datastores: Self::datastores(state.clone(), cache, id, template_data.clone()),
@@ -94,6 +108,8 @@ impl TemplateContextProvider {
                 compatibility_flags: CompatibilityFlags::empty(),
             }),
             template_data,
+            kv_constraints,
+            ratelimits,
         }
     }
 }
@@ -143,6 +159,8 @@ impl KhronosContext for TemplateContextProvider {
         Some(ArKVProvider {
             guild_id: self.guild_id()?,
             state: self.state.clone(),
+            kv_constraints: self.kv_constraints.clone(),
+            ratelimits: self.ratelimits.clone(),
         })
     }
 
@@ -150,6 +168,7 @@ impl KhronosContext for TemplateContextProvider {
         Some(ArDiscordProvider {
             guild_id: self.guild_id()?,
             state: self.state.clone(),
+            ratelimits: self.ratelimits.clone(),
         })
     }
 
@@ -158,6 +177,7 @@ impl KhronosContext for TemplateContextProvider {
             guild_id: self.guild_id()?,
             state: self.state.clone(),
             datastores: self.datastores.clone(),
+            ratelimits: self.ratelimits.clone(),
         })
     }
 
@@ -165,6 +185,8 @@ impl KhronosContext for TemplateContextProvider {
         Some(ArObjectStorageProvider {
             guild_id: self.guild_id()?,
             state: self.state.clone(),
+            kv_constraints: self.kv_constraints.clone(),
+            ratelimits: self.ratelimits.clone(),
         })
     }
 
@@ -172,6 +194,7 @@ impl KhronosContext for TemplateContextProvider {
         Some(ArHTTPClientProvider {
             guild_id: self.guild_id()?,
             state: self.state.clone(),
+            ratelimits: self.ratelimits.clone(),
         })
     }
 
@@ -184,16 +207,18 @@ impl KhronosContext for TemplateContextProvider {
 pub struct ArKVProvider {
     guild_id: serenity::all::GuildId,
     state: WorkerState,
+    kv_constraints: LuaKVConstraints,
+    ratelimits: Rc<Ratelimits>,
 }
 
 impl KVProvider for ArKVProvider {
     fn attempt_action(&self, _scope: &[String], bucket: &str) -> Result<(), crate::Error> {
-        self.state.ratelimits.kv.check(bucket)
+        self.ratelimits.kv.check(bucket)
     }
 
     async fn get(&self, scopes: &[String], key: String) -> Result<Option<KvRecord>, crate::Error> {
         // Check key length
-        if key.len() > self.state.kv_constraints.max_key_length {
+        if key.len() > self.kv_constraints.max_key_length {
             return Err("Key length too long".into());
         }
 
@@ -304,14 +329,14 @@ ORDER BY scope",
         }
 
         // Check key length
-        if key.len() > self.state.kv_constraints.max_key_length {
+        if key.len() > self.kv_constraints.max_key_length {
             return Err("Key length too long".into());
         }
 
         // Check bytes length
         let data_str = serde_json::to_string(&data)?;
 
-        if data_str.len() > self.state.kv_constraints.max_value_bytes {
+        if data_str.len() > self.kv_constraints.max_value_bytes {
             return Err("Value length too long".into());
         }
 
@@ -389,7 +414,7 @@ ORDER BY scope",
         expires_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<(), khronos_runtime::Error> {
         // Check key length
-        if key.len() > self.state.kv_constraints.max_key_length {
+        if key.len() > self.kv_constraints.max_key_length {
             return Err("Key length too long".into());
         }
 
@@ -458,7 +483,7 @@ ORDER BY scope",
         // Check bytes length
         let data_str = serde_json::to_string(&data)?;
 
-        if data_str.len() > self.state.kv_constraints.max_value_bytes {
+        if data_str.len() > self.kv_constraints.max_value_bytes {
             return Err("Value length too long".into());
         }
 
@@ -507,7 +532,7 @@ ORDER BY scope",
 
     async fn delete(&self, scopes: &[String], key: String) -> Result<(), crate::Error> {
         // Check key length
-        if key.len() > self.state.kv_constraints.max_key_length {
+        if key.len() > self.kv_constraints.max_key_length {
             return Err("Key length too long".into());
         }
 
@@ -575,7 +600,7 @@ ORDER BY scope",
 
     async fn find(&self, scopes: &[String], query: String) -> Result<Vec<KvRecord>, crate::Error> {
         // Check key length
-        if query.len() > self.state.kv_constraints.max_key_length {
+        if query.len() > self.kv_constraints.max_key_length {
             return Err("Query length too long".into());
         }
 
@@ -653,7 +678,7 @@ ORDER BY scope",
 
     async fn exists(&self, scopes: &[String], key: String) -> Result<bool, crate::Error> {
         // Check key length
-        if key.len() > self.state.kv_constraints.max_key_length {
+        if key.len() > self.kv_constraints.max_key_length {
             return Err("Key length too long".into());
         }
 
@@ -692,11 +717,12 @@ ORDER BY scope",
 pub struct ArDiscordProvider {
     guild_id: serenity::all::GuildId,
     state: WorkerState,
+    ratelimits: Rc<Ratelimits>,
 }
 
 impl DiscordProvider for ArDiscordProvider {
     fn attempt_action(&self, bucket: &str) -> serenity::Result<(), crate::Error> {
-        self.state.ratelimits.discord.check(bucket)
+        self.ratelimits.discord.check(bucket)
     }
 
     async fn get_guild(
@@ -879,12 +905,12 @@ pub struct ArDataStoreProvider {
     guild_id: serenity::all::GuildId,
     state: WorkerState,
     datastores: Vec<Rc<dyn DataStoreImpl>>,
+    ratelimits: Rc<Ratelimits>,
 }
 
 impl DataStoreProvider for ArDataStoreProvider {
     fn attempt_action(&self, method: &str, bucket: &str) -> Result<(), khronos_runtime::Error> {
-        self.state
-            .ratelimits
+        self.ratelimits
             .data_stores
             .check(&format!("{}:{}", method, bucket))
     }
@@ -909,12 +935,14 @@ impl DataStoreProvider for ArDataStoreProvider {
 #[derive(Clone)]
 pub struct ArObjectStorageProvider {
     guild_id: serenity::all::GuildId,
+    ratelimits: Rc<Ratelimits>,
     state: WorkerState,
+    kv_constraints: LuaKVConstraints,
 }
 
 impl ObjectStorageProvider for ArObjectStorageProvider {
     fn attempt_action(&self, bucket: &str) -> Result<(), khronos_runtime::Error> {
-        self.state.ratelimits.object_storage.check(bucket)
+        self.ratelimits.object_storage.check(bucket)
     }
 
     fn bucket_name(&self) -> String {
@@ -978,14 +1006,13 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
     async fn upload_file(&self, key: String, data: Vec<u8>) -> Result<(), khronos_runtime::Error> {
         if key.len()
             > self
-                .state
                 .kv_constraints
                 .max_object_storage_path_length
         {
             return Err("Path length too long".into());
         }
 
-        if data.len() > self.state.kv_constraints.max_object_storage_bytes {
+        if data.len() > self.kv_constraints.max_object_storage_bytes {
             return Err("Data too large".into());
         }
 
@@ -1011,11 +1038,12 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
 pub struct ArHTTPClientProvider {
     guild_id: serenity::all::GuildId,
     state: WorkerState,
+    ratelimits: Rc<Ratelimits>,
 }
 
 impl HTTPClientProvider for ArHTTPClientProvider {
     fn attempt_action(&self, bucket: &str, _url: &str) -> Result<(), khronos_runtime::Error> {
-        self.state.ratelimits.http.check(bucket)
+        self.ratelimits.http.check(bucket)
     }
 }
 
