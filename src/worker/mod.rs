@@ -13,6 +13,7 @@
 //! - WorkerCacheData: Caches data such as templates and key expiries for a worker
 //! - VMContext: Provides a TemplateConextProvider for the AntiRaid Khronos Luau Runtime [internal]
 //! - Worker: Encapsulates a WorkerVmManager, WorkerDispatcher, and WorkerCache for easy use
+//! - WorkerDB: Provides database related code to the worker system
 
 pub mod workerdispatch;
 pub mod workervmmanager;
@@ -22,3 +23,4 @@ pub mod vmcontext;
 pub mod workercachedata;
 pub mod builtins;
 pub mod worker;
+pub mod workerdb;

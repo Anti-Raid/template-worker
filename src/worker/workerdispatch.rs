@@ -9,6 +9,7 @@ use super::limits::MAX_TEMPLATES_RETURN_WAIT_TIME;
 use super::vmcontext::TemplateContextProvider;
 use crate::events::{AntiraidEvent, KeyResumeEvent};
 use crate::dispatch::parse_event;
+use super::workerdb::WorkerDB;
 
 /// The result from a template execution
 pub type TemplateResult = Result<KhronosValue, crate::Error>;
@@ -21,14 +22,16 @@ pub struct WorkerDispatch {
     vm_manager: WorkerVmManager,
     /// Worker State
     state: WorkerState,
-    /// Worker Cache Data (needed for dispatching resume keys)
+    /// Worker Cache Data (needed for cache regen handling)
     cache: WorkerCacheData,
+    /// Worker Database
+    db: WorkerDB,
 }
 
 impl WorkerDispatch {
     /// Creates a new WorkerDispatch with the given WorkerVmManager
-    pub fn new(vm_manager: WorkerVmManager, state: WorkerState, cache: WorkerCacheData) -> Self {
-        Self { vm_manager, state, cache }
+    pub fn new(vm_manager: WorkerVmManager, state: WorkerState, cache: WorkerCacheData, db: WorkerDB) -> Self {
+        Self { vm_manager, state, cache, db }
     }
 
     /// Helper method to dispatch an scoped event to the right templates given a tenant ID and an event
@@ -37,92 +40,60 @@ impl WorkerDispatch {
         self.dispatch_event(id, event, templates).await
     }
 
-    /// Dispatches resume keys to a tenant
-    pub async fn dispatch_resume_keys(&self, id: Id) -> Result<(), crate::Error> {
-        match id {
-            Id::GuildId(guild_id) => {
-                self.dispatch_resume_keys_for_guild(guild_id).await
+    /// Dispatches resume keys for all tenants
+    pub async fn dispatch_resume_keys(&self) -> Result<(), crate::Error> {
+        let resumes_map = self.db.get_resume_keys().await?;
+        for (id, resumes) in resumes_map {
+            for resume in resumes {
+                log::info!(
+                    "Dispatching key resume event for key: {} and scopes {:?} in ID {id:?}",
+                    resume.key,
+                    resume.scopes
+                );
+
+                let event = AntiraidEvent::KeyResume(KeyResumeEvent {
+                    id: resume.id,
+                    key: resume.key,
+                    scopes: resume.scopes.clone(),
+                });
+
+                let tevent = parse_event(&event)?;
+
+                let self_ref = self.clone();
+                tokio::task::spawn_local(async move {
+                    if let Err(e) = self_ref.dispatch_scoped_event_to_templates(id, tevent, &resume.scopes).await {
+                        log::error!("Failed to dispatch initiate resume key event for ID {id:?}: {e}");
+                    }
+                });
             }
         }
-    }
-
-    /// Dispatches resume keys for a guild
-    async fn dispatch_resume_keys_for_guild(&self, guild_id: GuildId) -> Result<(), crate::Error> {
-        #[derive(sqlx::FromRow)]
-        struct KeyResumePartial {
-            id: String,
-            key: String,
-            scopes: Vec<String>,
-        }
-
-        let partials: Vec<KeyResumePartial> =
-            sqlx::query_as("SELECT id, key, scopes FROM guild_templates_kv WHERE resume = true AND guild_id = $1")
-                .bind(guild_id.to_string())
-                .fetch_all(&self.state.pool)
-                .await?;
-
-        for partial in partials {
-            let scopes = partial.scopes.clone();
-            log::info!(
-                "Dispatching key resume event for key: {} and scopes {:?}",
-                partial.key,
-                partial.scopes
-            );
-
-            let event = AntiraidEvent::KeyResume(KeyResumeEvent {
-                id: partial.id,
-                key: partial.key,
-                scopes: partial.scopes,
-            });
-
-            let tevent = parse_event(&event)?;
-
-            if let Err(e) = self.dispatch_scoped_event_to_templates(Id::GuildId(guild_id), tevent, &scopes).await {
-                log::error!("Failed to dispatch initiate resume key event for guild {guild_id}: {e}");
-            }
-        }
-
         Ok(())
     }
 
-    /// Dispatches resume keys for all tenants
-    /// 
-    /// Currently only supports guild tenants
-    pub async fn dispatch_resume_keys_to_all(&self) -> Result<(), crate::Error> {
-        #[derive(sqlx::FromRow)]
-        struct KeyResumePartial {
-            id: String,
-            key: String,
-            scopes: Vec<String>,
-            guild_id: String
-        }
-
-        let partials: Vec<KeyResumePartial> =
-            sqlx::query_as("SELECT guild_id, id, key, scopes FROM guild_templates_kv WHERE resume = true")
-                .fetch_all(&self.state.pool)
-                .await?;
-
-        for partial in partials {
-            let guild_id: GuildId = partial.guild_id.parse().map_err(|e: ParseIdError| e.to_string())?;
-            let scopes = partial.scopes.clone();
+    /// Dispatches resume keys to a tenant
+    pub async fn dispatch_resume_keys_for(&self, id: Id) -> Result<(), crate::Error> {
+        let resumes = self.db.get_resume_keys_for(id).await?;
+        for resume in resumes {
             log::info!(
-                "Dispatching key resume event for key: {} and scopes {:?} in guild {}",
-                partial.key,
-                partial.scopes,
-                guild_id
+                "Dispatching key resume event for key: {} and scopes {:?}",
+                resume.key,
+                resume.scopes
             );
 
             let event = AntiraidEvent::KeyResume(KeyResumeEvent {
-                id: partial.id,
-                key: partial.key,
-                scopes: partial.scopes,
+                id: resume.id,
+                key: resume.key,
+                scopes: resume.scopes.clone(),
             });
 
             let tevent = parse_event(&event)?;
 
-            if let Err(e) = self.dispatch_scoped_event_to_templates(Id::GuildId(guild_id), tevent, &scopes).await {
-                log::error!("Failed to dispatch initiate resume key event for guild {guild_id}: {e}");
-            }
+            let self_ref = self.clone();
+            tokio::task::spawn_local(async move {
+                if let Err(e) = self_ref.dispatch_scoped_event_to_templates(id, tevent, &resume.scopes).await {
+                    log::error!("Failed to dispatch initiate resume key event for ID {id:?}: {e}");
+                }
+            });
         }
 
         Ok(())
@@ -133,11 +104,11 @@ impl WorkerDispatch {
     /// 
     /// This is mainly useful during a deferred cache regeneration in which we need to be able to
     /// regenerate the cache+VM 
-    pub async fn regenerate_cache(&self, pool: &sqlx::PgPool, id: Id) -> Result<(), crate::Error> {
-        self.cache.regenerate_templates_for(pool, id).await?; // Regenerate templates
-        self.cache.regenerate_key_expiries_for(pool, id).await?; // Regenerate key expiries too
+    pub async fn regenerate_cache(&self, id: Id) -> Result<(), crate::Error> {
+        self.cache.repopulate_templates_for(id).await?; // Regenerate templates
+        self.cache.repopulate_key_expiries_for(id).await?; // Regenerate key expiries too
         self.vm_manager.remove_vm_for(id)?; // Remove the VM to force recreation 
-        self.dispatch_resume_keys(id).await?; // Dispatch resume keys after reload
+        self.dispatch_resume_keys_for(id).await?; // Dispatch resume keys after reload
 
         Ok(())
     }
