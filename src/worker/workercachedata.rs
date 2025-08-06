@@ -151,20 +151,18 @@ impl WorkerCacheData {
         }
     }
 
-    /// Returns all currently expired keys for a tenant
-    pub fn get_all_expired_keys(&self) -> Vec<(Id, Arc<KeyExpiry>)> {
-        let mut expired = Vec::new();
+    /// Returns all currently key expiries
+    pub fn get_all_key_expiries(&self) -> Vec<(Id, Arc<KeyExpiry>)> {
+        let mut keys = Vec::new();
 
         let now = chrono::Utc::now();
         for (id, expiries) in self.key_expiries.iter() {
             for expiry in expiries.iter() {
-                if expiry.expires_at <= now {
-                    expired.push((*id, expiry.clone()));
-                }
+                keys.push((*id, expiry.clone()));
             }
         }
 
-        expired
+        keys
     }
 
     /// Populates the templates cache from the database

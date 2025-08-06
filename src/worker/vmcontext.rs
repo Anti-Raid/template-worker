@@ -1,6 +1,7 @@
 use super::workerstate::WorkerState;
 use super::workervmmanager::Id;
 use super::template::Template;
+use crate::worker::keyexpirychannel::KeyExpiryChannel;
 use crate::worker::workercachedata::WorkerCacheData;
 use khronos_runtime::traits::context::{
     CompatibilityFlags, KhronosContext, Limitations, ScriptData,
@@ -55,6 +56,9 @@ pub struct TemplateContextProvider {
     
     /// The ratelimits of the VM
     ratelimits: Rc<Ratelimits>,
+
+    /// The key expiry channel of the worker
+    key_expiry_chan: KeyExpiryChannel,
 }
 
 impl TemplateContextProvider {
@@ -86,6 +90,7 @@ impl TemplateContextProvider {
         id: Id,
         kv_constraints: LuaKVConstraints,
         ratelimits: Rc<Ratelimits>,
+        key_expiry_chan: KeyExpiryChannel,
     ) -> Self {
         Self {
             id,
@@ -110,6 +115,7 @@ impl TemplateContextProvider {
             template_data,
             kv_constraints,
             ratelimits,
+            key_expiry_chan,
         }
     }
 }
@@ -161,6 +167,7 @@ impl KhronosContext for TemplateContextProvider {
             state: self.state.clone(),
             kv_constraints: self.kv_constraints.clone(),
             ratelimits: self.ratelimits.clone(),
+            key_expiry_chan: self.key_expiry_chan.clone(),
         })
     }
 
@@ -209,6 +216,7 @@ pub struct ArKVProvider {
     state: WorkerState,
     kv_constraints: LuaKVConstraints,
     ratelimits: Rc<Ratelimits>,
+    key_expiry_chan: KeyExpiryChannel,
 }
 
 impl KVProvider for ArKVProvider {
@@ -397,11 +405,7 @@ ORDER BY scope",
 
         if curr_expiry != expires_at {
             // Regenerate the cache if the expiry has changed
-            crate::templatingrt::cache::get_all_guild_key_expiries_from_db(
-                self.guild_id,
-                &self.state.pool,
-            )
-            .await?;
+            self.key_expiry_chan.repopulate()?;
         }
 
         Ok((exists, id))
@@ -440,11 +444,7 @@ ORDER BY scope",
         }
 
         // Regenerate the cache in any case
-        crate::templatingrt::cache::get_all_guild_key_expiries_from_db(
-            self.guild_id,
-            &self.state.pool,
-        )
-        .await?;
+        self.key_expiry_chan.repopulate()?;
 
         Ok(())
     }
@@ -464,11 +464,7 @@ ORDER BY scope",
         .await?;
 
         // Regenerate the cache in any case
-        crate::templatingrt::cache::get_all_guild_key_expiries_from_db(
-            self.guild_id,
-            &self.state.pool,
-        )
-        .await?;
+        self.key_expiry_chan.repopulate()?;
 
         Ok(())
     }
@@ -520,11 +516,7 @@ ORDER BY scope",
 
         if curr_expiry != expires_at {
             // Regenerate the cache if the expiry has changed
-            crate::templatingrt::cache::get_all_guild_key_expiries_from_db(
-                self.guild_id,
-                &self.state.pool,
-            )
-            .await?;
+            self.key_expiry_chan.repopulate()?;
         }
 
         Ok(())
@@ -560,11 +552,7 @@ ORDER BY scope",
 
             if expires_at.is_some() {
                 // Regenerate the cache if the key has an expiry set
-                crate::templatingrt::cache::get_all_guild_key_expiries_from_db(
-                    self.guild_id,
-                    &self.state.pool,
-                )
-                .await?;
+                self.key_expiry_chan.repopulate()?;
 
                 break; // No need to continue if we found at least one expiry
             }
@@ -587,11 +575,7 @@ ORDER BY scope",
 
             if expires_at.is_some() {
                 // Regenerate the cache if the key has an expiry set
-                crate::templatingrt::cache::get_all_guild_key_expiries_from_db(
-                    self.guild_id,
-                    &self.state.pool,
-                )
-                .await?;
+                self.key_expiry_chan.repopulate()?;
             }
         }
 

@@ -7,6 +7,8 @@ pub const MAX_TEMPLATE_MEMORY_USAGE: usize = 1024 * 1024 * 20; // 20MB maximum m
 pub const MAX_VM_THREAD_STACK_SIZE: usize = 1024 * 1024 * 20; // 20MB maximum memory
 pub const MAX_TEMPLATES_EXECUTION_TIME: Duration = Duration::from_secs(60 * 10); // 10 minute maximum execution time
 pub const MAX_TEMPLATES_RETURN_WAIT_TIME: Duration = Duration::from_secs(60); // 60 seconds maximum execution time
+pub const MAX_EXTENDS: i64 = 12; // Maximum number of times a key expiry can be extended due to a failure in its handling
+pub const EXTEND_EXPIRY_BY: Duration = Duration::from_secs(60 * 60); // 1 hour
 
 pub fn create_nonmax_u32(value: u32) -> Result<NonZeroU32, crate::Error> {
     Ok(NonZeroU32::new(value).ok_or("Value must be non-zero")?)

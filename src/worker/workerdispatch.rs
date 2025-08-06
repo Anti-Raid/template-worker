@@ -3,7 +3,7 @@ use std::sync::Arc;
 use khronos_runtime::{primitives::event::{CreateEvent, Event}, require::FilesystemWrapper, rt::{IsolateData, KhronosIsolate}, utils::khronos_value::KhronosValue};
 use std::time::Duration;
 use super::template::Template;
-use crate::{worker::{workercachedata::{DeferredCacheRegenerationMode, WorkerCacheData}, workerstate::WorkerState}};
+use crate::worker::{keyexpirychannel::KeyExpiryChannel, workercachedata::{DeferredCacheRegenerationMode, WorkerCacheData}, workerstate::WorkerState};
 use super::workervmmanager::{Id, WorkerVmManager, VmData};
 use super::limits::MAX_TEMPLATES_RETURN_WAIT_TIME;
 use super::vmcontext::TemplateContextProvider;
@@ -27,12 +27,24 @@ pub struct WorkerDispatch {
     cache: WorkerCacheData,
     /// Worker Database
     db: WorkerDB,
+    /// Key expiry channel
+    key_expiry_chan: KeyExpiryChannel,
 }
 
 impl WorkerDispatch {
     /// Creates a new WorkerDispatch with the given WorkerVmManager
-    pub fn new(vm_manager: WorkerVmManager, state: WorkerState, cache: WorkerCacheData, db: WorkerDB) -> Self {
-        Self { vm_manager, state, cache, db }
+    pub fn new(vm_manager: WorkerVmManager, state: WorkerState, cache: WorkerCacheData, db: WorkerDB, key_expiry_chan: KeyExpiryChannel) -> Self {
+        let dispatch = Self { vm_manager, state, cache, db, key_expiry_chan };
+
+        // Fire resume keys on creation
+        let self_ref = dispatch.clone();
+        tokio::task::spawn_local(async move {
+            if let Err(e) = self_ref.dispatch_resume_keys().await {
+                log::error!("Failed to dispatch resume keys on WorkerDispatch creation: {}", e);
+            }
+        });
+
+        dispatch
     }
 
     /// Helper method to dispatch an scoped event to the right templates given a tenant ID and an event
@@ -132,7 +144,6 @@ impl WorkerDispatch {
     /// regenerate the cache+VM 
     pub async fn regenerate_cache(&self, id: Id) -> Result<(), crate::Error> {
         self.cache.repopulate_templates_for(id).await?; // Regenerate templates
-        self.cache.repopulate_key_expiries_for(id).await?; // Regenerate key expiries too
         self.vm_manager.remove_vm_for(id)?; // Remove the VM to force recreation 
         self.dispatch_resume_keys_for(id).await?; // Dispatch resume keys after reload
 
@@ -262,6 +273,7 @@ impl WorkerDispatch {
         event: Event,
         vm_data: &VmData,
         cache: WorkerCacheData,
+        key_expiry_chan: KeyExpiryChannel,
         id: Id,
     ) -> Result<KhronosValue, crate::Error> {
         if vm_data.runtime_manager.runtime().is_broken() {
@@ -310,8 +322,9 @@ impl WorkerDispatch {
                 template.clone(), 
                 cache, 
                 id,
-                vm_data.kv_constraints.clone(),
-                vm_data.ratelimits.clone()
+                vm_data.kv_constraints,
+                vm_data.ratelimits.clone(),
+                key_expiry_chan
             );
 
             let created_context = match sub_isolate.create_context(provider) {
@@ -370,9 +383,10 @@ impl WorkerDispatch {
             let vm_ref = vm_data.clone();
             let cache_ref = self.cache.clone();
             let event_ref = event.clone();
+            let key_expiry_chan = self.key_expiry_chan.clone();
             set.spawn_local(async move {
                 let name = template.name.clone();
-                let result = Self::dispatch_event_to_template_impl(&template, event_ref, &vm_ref, cache_ref, id).await;
+                let result = Self::dispatch_event_to_template_impl(&template, event_ref, &vm_ref, cache_ref, key_expiry_chan, id).await;
 
                 if let Err(ref e) = result {
                     // Log the error
