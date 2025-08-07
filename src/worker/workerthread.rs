@@ -84,6 +84,7 @@ impl PushableMessage for RegenerateCache {
 
 /// WorkerThread provides a simple thread implementation in which a ``Worker`` runs in its own thread with messages
 /// sent to it over a channel
+#[allow(unused)]
 pub struct WorkerThread {
     /// The tx channel for sending messages to the worker thread
     tx: UnboundedSender<WorkerThreadMessage>,
@@ -108,7 +109,7 @@ impl WorkerThread {
 
     fn create_thread(id: usize, cache: WorkerCacheData, state: WorkerState, filter: WorkerFilter, mut rx: UnboundedReceiver<WorkerThreadMessage>) -> Result<JoinHandle<()>, crate::Error> {
         std::thread::Builder::new()
-            .name(format!("lua-vm-threadpool-{}", id))
+            .name(format!("lua-vm-threadpool-{id}"))
             .stack_size(MAX_VM_THREAD_STACK_SIZE)
             .spawn(move || {
                 let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
@@ -155,6 +156,7 @@ impl WorkerThread {
     }
 
     /// Returns the ID of the worker thread
+    #[allow(dead_code)]
     pub fn id(&self) -> usize { self.id }
 
     /// Sends a message to the worker thread
@@ -169,6 +171,7 @@ impl WorkerThread {
 
     /// Sends a message to the worker thread 
     /// and wait for a response with a timeout
+    #[allow(dead_code)]
     pub async fn send_timeout<T: PushableMessage>(&self, msg: T, duration: Duration) -> Result<T::Response, crate::Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let msg = msg.into_message(Some(tx));

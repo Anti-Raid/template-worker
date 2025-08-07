@@ -4,11 +4,13 @@ use std::fmt::Debug;
 /// 
 /// This is useful in workers as workers should live until the program exits
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct StaticRef<T: 'static> {
     data: &'static T,
     _phantom: std::marker::PhantomData<*const ()>,
 }
 
+#[allow(dead_code)]
 impl<T: 'static> StaticRef<T> {
     /// Creates a new StaticRef from a static reference
     pub const fn from_static(data: &'static T) -> Self {
@@ -49,10 +51,12 @@ impl<T: 'static> std::ops::Deref for StaticRef<T> {
 /// 
 /// This is useful in workers as workers should live until the program exits
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct SyncStaticRef<T: 'static> {
     data: &'static T,
 }
 
+#[allow(dead_code)]
 impl<T: 'static> SyncStaticRef<T> {
     /// Creates a new SyncStaticRef from a static reference
     pub const fn from_static(data: &'static T) -> Self {

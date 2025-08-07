@@ -139,7 +139,6 @@ impl KhronosContext for TemplateContextProvider {
     fn guild_id(&self) -> Option<serenity::all::GuildId> {
         match self.id {
             Id::GuildId(gid) => Some(gid),
-            _ => None,
         }
     }
 

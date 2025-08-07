@@ -9,6 +9,7 @@ pub struct Data {
     pub current_user: serenity::all::CurrentUser,
     pub pool: sqlx::PgPool,
     pub reqwest: reqwest::Client,
+    #[allow(dead_code)]
     pub object_store: Arc<ObjectStore>,
     pub worker: Arc<dyn WorkerLike + Send + Sync>,
 }

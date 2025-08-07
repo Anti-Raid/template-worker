@@ -6,6 +6,7 @@ use super::workervmmanager::Id;
 
 /// WorkerLike defines a base trait for structures that can be used as Workers in template-worker
 #[async_trait::async_trait]
+#[allow(unused)]
 pub trait WorkerLike {
     /// Returns the worker's ID, if present
     /// 

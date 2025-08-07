@@ -15,6 +15,7 @@ use super::workerfilter::WorkerFilter;
 /// the Discord Id sharding formula:
 /// 
 /// shard_id = (guild_id >> 22) % num_shards
+#[allow(dead_code)]
 pub struct WorkerThreadPool {
     /// The threads in the pool
     threads: Vec<WorkerThread>,
@@ -64,6 +65,7 @@ impl WorkerThreadPool {
     }
 
     /// Returns the number of threads in the pool
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.threads.len()
     }

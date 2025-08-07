@@ -1,7 +1,7 @@
 use khronos_runtime::rt::{CreatedKhronosContext, KhronosRuntime, KhronosRuntimeInterruptData, KhronosRuntimeManager, RuntimeCreateOpts};
 use serenity::all::GuildId;
 use std::cell::RefCell;
-use std::{cell::Cell, collections::HashMap, rc::Rc};
+use std::{collections::HashMap, rc::Rc};
 use khronos_runtime::rt::mlua::prelude::*;
 use super::limits::{LuaKVConstraints, Ratelimits};
 
@@ -23,7 +23,6 @@ pub enum Id {
 pub struct VmData {
     pub state: WorkerState,
     pub runtime_manager: RuntimeManager,
-    pub thread_count: Rc<Cell<usize>>,
     pub kv_constraints: LuaKVConstraints,
     pub ratelimits: Rc<Ratelimits>,
 }
@@ -70,7 +69,6 @@ impl WorkerVmManager {
         let vmd = VmData {
             state: self.worker_state.clone(),
             runtime_manager,
-            thread_count: Cell::new(0).into(),
             kv_constraints: LuaKVConstraints::default(),
             ratelimits: Ratelimits::new().map_err(|e| LuaError::external(e.to_string()))?.into(),
         };
@@ -94,16 +92,19 @@ impl WorkerVmManager {
     
 
     /// Returns the number of VMs managed by this WorkerVmManager
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.vms.borrow().len()
     }
 
     /// Returns true if there are no VMs managed by this WorkerVmManager
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.vms.borrow().is_empty()
     }
 
     /// Returns a list of all tenant IDs for which VMs are managed by this WorkerVmManager
+    #[allow(dead_code)]
     pub fn keys(&self) -> Vec<Id> {
         self.vms.borrow().keys().cloned().collect()
     }

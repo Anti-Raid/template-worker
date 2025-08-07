@@ -92,6 +92,7 @@ pub fn parse_response<T: IntoResponse>(response: DispatchTemplateResult) -> Resu
     }
 }
 
+#[allow(unused)]
 pub trait IntoResponse
 where Self: Sized {
     fn into_response(value: KhronosValue) -> Result<Self, crate::Error>;
