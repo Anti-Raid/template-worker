@@ -5,6 +5,7 @@ use std::time::Duration;
 use std::{panic::AssertUnwindSafe, thread::JoinHandle};
 
 use crate::worker::limits::MAX_VM_THREAD_STACK_SIZE;
+use crate::worker::workerlike::WorkerLike;
 use super::{workercachedata::WorkerCacheData, workerstate::WorkerState, worker::Worker, workervmmanager::Id, workerdispatch::DispatchTemplateResult, workerfilter::WorkerFilter};
 
 /// WorkerThreadMessage is the message type that is sent to the worker thread
@@ -158,6 +159,25 @@ impl WorkerThread {
         self.tx.send(msg.0)
             .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl WorkerLike for WorkerThread {
+    async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> DispatchTemplateResult {
+        self.send(DispatchEvent {
+            id,
+            event,
+            scopes: None,
+        }).await?
+    }
+
+    async fn dispatch_scoped_event_to_templates(&self, id: Id, event: CreateEvent, scopes: Vec<String>) -> DispatchTemplateResult {
+        self.send(DispatchEvent {
+            id,
+            event,
+            scopes: Some(scopes),
+        }).await?
     }
 }
 

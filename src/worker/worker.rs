@@ -39,7 +39,7 @@ impl Worker {
         let key_expiry_chan = KeyExpiryChannel::new(cache.clone(), filter.clone());
         
         // This will automatically fire key resumption tasks to all keys with resume flag upon creation
-        // of this structure
+        // of this structure (in addition to providing dispatch services)
         let dispatch = WorkerDispatch::new(vm_manager.clone(), state, cache.clone(), db.clone(), key_expiry_chan.clone(), filter.clone());
 
         // This will automatically start a task to handle expiring keys

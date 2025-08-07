@@ -19,6 +19,7 @@
 //! - WorkerLike: While not a proper structure, WorkerLike defines the basic needs for a Worker unit
 //! - WorkerFilter: Allows filtering automatic event dispatches within a worker based on tenant ID and worker ID
 //! - KeyExpiryChannel: Provides a channel for key expiries to be sent to the worker system while supporting on-demand repopulation on key expiry changes
+//! - KeyExpiry: Provides a task that handles key expiries and dispatches them to the worker system
 
 pub mod workerdispatch;
 pub mod workervmmanager;
@@ -36,3 +37,4 @@ pub mod keyexpiry;
 pub mod keyexpirychannel;
 pub mod workerlike;
 pub mod workerfilter;
+pub mod workerthreadpool;
