@@ -37,26 +37,6 @@ impl EventHandler for EventFramework {
 
                     start_rpc_server(opts, rpc_server).await;
                 });
-
-                // Fire KeyResume event
-                let ctx2 = ctx.clone();
-                tokio::task::spawn(async move {
-                    log::info!("Firing KeyResume event if needed");
-
-                    let data = ctx2.data::<crate::data::Data>();
-                    if let Err(e) = crate::templatingrt::resume_dispatch::dispatch_resume_keys_to_all(
-                        &ctx2,
-                        &data,
-                    ).await {
-                        log::error!("Error dispatching resume keys: {:?}", e);
-                    }
-                });
-
-                // Start up the key expiry task
-                let ctx3 = ctx.clone();
-                tokio::task::spawn(async move {
-                    crate::expiry_tasks::key_expiry_task(ctx3).await;
-                });
             });
         }
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use khronos_runtime::{primitives::event::{CreateEvent, Event}, require::FilesystemWrapper, rt::{IsolateData, KhronosIsolate}, utils::khronos_value::KhronosValue};
 use std::time::Duration;
 use super::template::Template;
-use crate::worker::{keyexpirychannel::KeyExpiryChannel, workercachedata::{DeferredCacheRegenerationMode, WorkerCacheData}, workerfilter::WorkerFilter, workerstate::WorkerState};
+use crate::worker::{keyexpirychannel::KeyExpiryChannel, workercachedata::{DeferredCacheRegenerationMode, WorkerCacheData}, workerfilter::WorkerFilter};
 use super::workervmmanager::{Id, WorkerVmManager, VmData};
 use super::limits::MAX_TEMPLATES_RETURN_WAIT_TIME;
 use super::vmcontext::TemplateContextProvider;
@@ -21,8 +21,6 @@ pub type DispatchTemplateResult = Result<Vec<(String, TemplateResult)>, crate::E
 pub struct WorkerDispatch {
     /// VM Manager for the worker
     vm_manager: WorkerVmManager,
-    /// Worker State
-    state: WorkerState,
     /// Worker Cache Data (needed for cache regen handling)
     cache: WorkerCacheData,
     /// Worker Database
@@ -35,8 +33,8 @@ pub struct WorkerDispatch {
 
 impl WorkerDispatch {
     /// Creates a new WorkerDispatch with the given WorkerVmManager
-    pub fn new(vm_manager: WorkerVmManager, state: WorkerState, cache: WorkerCacheData, db: WorkerDB, key_expiry_chan: KeyExpiryChannel, filter: WorkerFilter) -> Self {
-        let dispatch = Self { vm_manager, state, cache, db, key_expiry_chan, filter };
+    pub fn new(vm_manager: WorkerVmManager, cache: WorkerCacheData, db: WorkerDB, key_expiry_chan: KeyExpiryChannel, filter: WorkerFilter) -> Self {
+        let dispatch = Self { vm_manager, cache, db, key_expiry_chan, filter };
 
         // Fire resume keys on creation
         let self_ref = dispatch.clone();
@@ -206,7 +204,7 @@ impl WorkerDispatch {
         error: String,
     ) -> Result<(), crate::Error> {
         // Send to main server
-        vm_data.state.serenity_context.http.send_message(
+        vm_data.state.serenity_http.send_message(
             crate::CONFIG.meta.default_error_channel.widen(),
             Vec::with_capacity(0),
             &Self::error_message(template, error),
@@ -224,7 +222,7 @@ impl WorkerDispatch {
         let error = format!("```lua\n{}```", error.replace('`', "\\`"));
 
         if let Some(error_channel) = template.error_channel {
-            let err = vm_data.state.serenity_context.http.send_message(
+            let err = vm_data.state.serenity_http.send_message(
                 error_channel.widen(),
                 Vec::with_capacity(0),
                 &Self::error_message(template, error),

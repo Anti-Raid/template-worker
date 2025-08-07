@@ -39,6 +39,4 @@ pub static BUILTINS: LazyLock<Arc<Template>> = LazyLock::new(|| {
 
     Arc::new(templ)
 });
-pub static BUILTINS_ARC_VEC: LazyLock<Arc<Vec<Arc<Template>>>> =
-    LazyLock::new(|| Arc::new(vec![BUILTINS.clone()]));
 pub const USE_BUILTINS: bool = true;

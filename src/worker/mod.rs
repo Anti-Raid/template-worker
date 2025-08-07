@@ -20,6 +20,7 @@
 //! - WorkerFilter: Allows filtering automatic event dispatches within a worker based on tenant ID and worker ID
 //! - KeyExpiryChannel: Provides a channel for key expiries to be sent to the worker system while supporting on-demand repopulation on key expiry changes
 //! - KeyExpiry: Provides a task that handles key expiries and dispatches them to the worker system
+//! - WorkerThreadPool: Provides a thread pool for workers based on Discord's sharding formulapub mod, allowing for multiple worker threads to be spawned and used concurrently
 
 pub mod workerdispatch;
 pub mod workervmmanager;
@@ -38,3 +39,4 @@ pub mod keyexpirychannel;
 pub mod workerlike;
 pub mod workerfilter;
 pub mod workerthreadpool;
+pub mod staticref;

@@ -18,11 +18,11 @@ use crate::api::types::SettingDispatch;
 use crate::api::types::SettingExecuteDispatch;
 use crate::api::types::ShardConn;
 use crate::api::types::UserSessionList;
-use crate::dispatch::dispatch_scoped_and_wait;
+use crate::dispatch::parse_response;
 use crate::events::AntiraidEvent;
 use crate::events::GetSettingsEvent;
 use crate::events::SettingExecuteEvent;
-use crate::templatingrt::MAX_TEMPLATES_RETURN_WAIT_TIME;
+use crate::worker::workervmmanager::Id;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -40,7 +40,7 @@ use super::types::{
     DashboardGuild, DashboardGuildData, PartialUser, CreateUserSessionResponse, AuthorizedSession,
     CreateUserSession, SettingDispatchDocType, SettingExecuteDispatchDocType
 };
-use crate::dispatch::{dispatch_and_wait, parse_event};
+use crate::dispatch::parse_event;
 use super::server::{AppData, ApiResponse, ApiError, ApiErrorCode}; 
 
 static BOT_HAS_GUILD_CACHE: LazyLock<Cache<serenity::all::GuildId, ()>> = LazyLock::new(|| {
@@ -91,7 +91,6 @@ async fn check_guild_has_bot(
 )]
 pub(super) async fn get_settings_for_guild_user(
     State(AppData {
-        serenity_context,
         data,
         ..
     }): State<AppData>,
@@ -110,14 +109,13 @@ pub(super) async fn get_settings_for_guild_user(
     }))
     .map_err(|e| (StatusCode::BAD_REQUEST, Json(e.to_string().into())))?;
 
-    let results = dispatch_and_wait(
-        &serenity_context,
-        &data,
-        event,
-        guild_id,
-        MAX_TEMPLATES_RETURN_WAIT_TIME,
+    let results = parse_response(
+        data.worker.dispatch_event_to_templates(
+            Id::GuildId(guild_id),
+            event,
+        )
+        .await
     )
-    .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?
     .into_iter()
     .map(|(name, result)| (name, result.into()))
@@ -148,8 +146,8 @@ pub(super) async fn get_settings_for_guild_user(
 )]
 pub(super) async fn execute_setting_for_guild_user(
     State(AppData {
-        serenity_context,
         data,
+        ..
     }): State<AppData>,
     AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
     Path(guild_id): Path<serenity::all::GuildId>,
@@ -180,15 +178,14 @@ pub(super) async fn execute_setting_for_guild_user(
     }))
     .map_err(|e| (StatusCode::BAD_REQUEST, Json(e.to_string().into())))?;
 
-    let results = dispatch_scoped_and_wait::<serde_json::Value>(
-        &serenity_context,
-        &data,
-        event,
-        &[req.setting],
-        guild_id.into(),
-        MAX_TEMPLATES_RETURN_WAIT_TIME,
+    let results = parse_response(
+        data.worker.dispatch_scoped_event_to_templates(
+            Id::GuildId(guild_id),
+            event,
+            vec![req.setting],
+        )
+        .await
     )
-    .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?
     .into_iter()
     .map(|(name, result)| (name, result.into()))

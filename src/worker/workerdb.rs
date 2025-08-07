@@ -1,7 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 use chrono::{Utc, DateTime};
 
-use super::limits::MAX_EXTENDS;
 use super::workerstate::WorkerState;
 use super::workervmmanager::Id;
 use super::template::Template;
@@ -242,39 +241,5 @@ impl WorkerDB {
         }
 
         Ok(())
-    }
-
-    /// Extend expiry of keys with the given ID
-    /// due to an error in their handling
-    pub async fn extend_key_expiry(&self, id: Id, kv_id: &str, new_expiry: chrono::DateTime<chrono::Utc>) -> Result<(), crate::Error> {
-        match id {
-            Id::GuildId(guild_id) => {
-                let mut tx = self.state.pool.begin().await?;
-
-                // Check expiry_event_call_attempts
-                let attempts: i64 = sqlx::query_scalar(
-                    "SELECT expiry_event_call_attempts FROM guild_templates_kv WHERE guild_id = $1 AND id = $2",
-                )
-                .bind(guild_id.to_string())
-                .bind(kv_id)
-                .fetch_one(&mut *tx)
-                .await?;
-
-                if attempts >= MAX_EXTENDS {
-                    return Err(format!("Key expiry with ID {id:?} has exceeded maximum extend attempts").into());
-                }
-
-                sqlx::query("UPDATE guild_templates_kv SET expires_at = $1, expiry_event_call_attempts = expiry_event_call_attempts + 1 WHERE guild_id = $2 AND id = $3")
-                    .bind(new_expiry)
-                    .bind(guild_id.to_string())
-                    .bind(kv_id)
-                    .execute(&mut *tx)
-                    .await?;
-
-                tx.commit().await?;
-
-                Ok(())
-            }
-        }
     }
 }

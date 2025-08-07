@@ -1,11 +1,8 @@
 use std::rc::Rc;
 
-use chrono::{DateTime, Utc};
-
 use crate::dispatch::parse_event;
 use crate::events::{AntiraidEvent, KeyExpiryEvent};
 
-use super::limits::EXTEND_EXPIRY_BY;
 use super::workerdb::WorkerDB;
 use super::workercachedata::WorkerCacheData;
 use super::workervmmanager::Id;
@@ -72,13 +69,6 @@ impl WorkerKeyExpiry {
         Ok(())
     }
 
-    /// Extend the expiry of a key expiry in the database and cache
-    async fn extend_key_expiry(&self, id: Id, kv_id: &str, new_expiry: DateTime<Utc>) -> Result<(), crate::Error> {
-        self.db.extend_key_expiry(id, kv_id, new_expiry).await?;
-        self.cache.repopulate_key_expiries_for(id).await?;
-        self.key_expiry_chan.repopulate()?;
-        Ok(())
-    }
     
     async fn run(&self) {
         let mut subscriber = self.key_expiry_chan.subscribe().expect("Failed to subscribe to key expiry channel");
@@ -101,28 +91,14 @@ impl WorkerKeyExpiry {
 
             let self_ref = self.clone();
             set.spawn_local(async move {
-                match self_ref.dispatch.dispatch_scoped_event_to_templates(id, create_event, &data.scopes).await {
-                    Ok(_) => {
-                        log::info!("Expiring key: {}", data.key);
-                        match self_ref.remove_key_expiry(id, &data.id).await {
-                            Ok(_) => {}
-                            Err(e) => {
-                                log::error!("Error removing key expiry: {e:?}");
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let new_expiry = chrono::Utc::now() + EXTEND_EXPIRY_BY;
-                        match self_ref.extend_key_expiry(id, &data.id, new_expiry)
-                            .await
-                        {
-                            Ok(_) => {}
-                            Err(e) => {
-                                log::error!("Error removing key expiry: {e:?}");
-                            }
-                        }
+                if let Err(e) = self_ref.dispatch.dispatch_scoped_event_to_templates(id, create_event, &data.scopes).await {
+                    log::error!("Error in key expiry: {:?}", e);
+                }
 
-                        log::error!("Error in key expiry: {:?}", e);
+                match self_ref.remove_key_expiry(id, &data.id).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        log::error!("Error removing key expiry: {e:?}");
                     }
                 }
             });

@@ -20,7 +20,11 @@ enum WorkerThreadMessage {
         event: CreateEvent,
         scopes: Vec<String>,
         tx: Option<OneShotSender<DispatchTemplateResult>>,
-    }
+    },
+    RegenerateCache {
+        id: Id,
+        tx: Option<OneShotSender<Result<(), crate::Error>>>,
+    },
 }
 
 /// CreatedWorkerThreadMessage is a wrapper around WorkerThreadMessage 
@@ -59,6 +63,22 @@ impl PushableMessage for DispatchEvent {
                 tx,
             }),
         }
+    }
+}
+
+pub struct RegenerateCache {
+    /// The id of the template to regenerate the cache for
+    pub id: Id,
+}
+
+impl PushableMessage for RegenerateCache {
+    type Response = Result<(), crate::Error>;
+
+    fn into_message(self, tx: Option<OneShotSender<Self::Response>>) -> CreatedWorkerThreadMessage {
+        CreatedWorkerThreadMessage(WorkerThreadMessage::RegenerateCache {
+            id: self.id,
+            tx,
+        })
     }
 }
 
@@ -115,6 +135,12 @@ impl WorkerThread {
                                         let _ = tx.send(res);
                                     }
                                 }
+                                WorkerThreadMessage::RegenerateCache { id, tx } => {
+                                    let res = worker.dispatch.regenerate_cache(id).await;
+                                    if let Some(tx) = tx {
+                                        let _ = tx.send(res);
+                                    }
+                                }
                             }
                         }
                     });
@@ -127,6 +153,9 @@ impl WorkerThread {
             })
             .map_err(|e| format!("Failed to spawn worker thread: {e}").into())
     }
+
+    /// Returns the ID of the worker thread
+    pub fn id(&self) -> usize { self.id }
 
     /// Sends a message to the worker thread
     /// and waits for a response
@@ -164,6 +193,10 @@ impl WorkerThread {
 
 #[async_trait::async_trait]
 impl WorkerLike for WorkerThread {
+    fn id(&self) -> usize {
+        self.id
+    }
+
     async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> DispatchTemplateResult {
         self.send(DispatchEvent {
             id,
@@ -178,6 +211,18 @@ impl WorkerLike for WorkerThread {
             event,
             scopes: Some(scopes),
         }).await?
+    }
+
+    async fn dispatch_event_to_templates_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
+        self.send_nowait(DispatchEvent {
+            id,
+            event,
+            scopes: None,
+        }).await
+    }
+
+    async fn regenerate_cache(&self, id: Id) -> Result<(), crate::Error> {
+        self.send(RegenerateCache { id }).await?
     }
 }
 

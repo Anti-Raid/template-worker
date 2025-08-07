@@ -1,4 +1,4 @@
-use crate::templatingrt::template::TemplateLanguage;
+use super::template::{TemplateLanguage};
 use crate::events::AntiraidEvent;
 use crate::worker::workercachedata::{DeferredCacheRegenerationMode, WorkerCacheData};
 use khronos_runtime::traits::ir::{DataStoreImpl, DataStoreMethod};
@@ -250,7 +250,7 @@ impl TemplateStore {
             Id::GuildId(guild_id) => {
                 // Perform required checks
                 let Some(channel_json) = crate::sandwich::channel(
-                    &self.state.serenity_context.http,
+                    &self.state.serenity_http,
                     &self.state.reqwest_client,
                     Some(guild_id),
                     channel_id,
@@ -273,11 +273,10 @@ impl TemplateStore {
                     );
                 }
 
-                let data = self.state.serenity_context.data::<crate::Data>();
-                let bot_user_id = data.current_user.id;
+                let bot_user_id = self.state.current_user.id;
 
                 let bot_user = crate::sandwich::member_in_guild(
-                    &self.state.serenity_context.http,
+                    &self.state.serenity_http,
                     &self.state.reqwest_client,
                     guild_id,
                     bot_user_id,
@@ -293,7 +292,7 @@ impl TemplateStore {
                     .map_err(|e| format!("Failed to parse bot user: {}", e))?;
 
                 let guild_json = crate::sandwich::guild(
-                    &self.state.serenity_context.http,
+                    &self.state.serenity_http,
                     &self.state.reqwest_client,
                     guild_id,
                 )
@@ -321,7 +320,7 @@ impl TemplateStore {
     async fn validate_name(&self, name: &str) -> Result<(), crate::Error> {
         if name.starts_with("$shop/") {
             let (shop_tname, shop_tversion) =
-                crate::templatingrt::template::Template::parse_shop_template(name)
+                super::template::Template::parse_shop_template(name)
                     .map_err(|e| format!("Failed to parse shop template: {:?}", e))?;
 
             let shop_template_count =

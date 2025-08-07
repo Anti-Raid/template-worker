@@ -1,9 +1,7 @@
 use std::collections::HashMap;
-use std::time::Duration;
 
 use chrono::DateTime;
 use chrono::Utc;
-use khronos_runtime::utils::khronos_value::KhronosValue;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serenity::all::ChannelType;
@@ -18,33 +16,6 @@ use serenity::all::CommandType;
 use ts_rs::TS;
 
 use crate::dispatch::DispatchResult;
-use crate::templatingrt::LuaVmAction;
-use crate::templatingrt::ThreadGuildVmMetrics;
-use crate::templatingrt::ThreadMetrics;
-
-/// Query parameters for dispatch_event_and_wait
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
-pub struct DispatchEventAndWaitQuery {
-    /// Wait duration in milliseconds
-    #[ts(type = "number?")]
-    pub wait_timeout: Option<u64>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
-pub struct ExecuteLuaVmActionOpts {
-    #[ts(as = "Option<u32>")]
-    pub wait_timeout: Option<std::time::Duration>,
-}
-
-#[derive(Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
-pub struct ExecuteLuaVmActionResponse {
-    pub results: Vec<ApiLuaVmResultHandle>,
-    #[ts(as = "u32")]
-    pub time_taken: Duration,
-}
 
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema, TS)]
 #[ts(export)]
@@ -355,25 +326,6 @@ pub struct ApiCreateCommandOptionChoice {
     pub value: Value,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
-pub struct ApiLuaVmResultHandle {
-    pub result: ApiLuaVmResult,
-    pub template_name: String,
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
-pub enum ApiLuaVmResult {
-    Ok { 
-        #[schema(value_type = serde_json::Value)]
-        #[ts(as = "serde_json::Value")]
-        result: KhronosValue 
-    }, // any result can be a json enum
-    LuaError { err: String },
-    VmBroken {},
-}
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema, TS)]
 #[ts(export)]
 #[serde(tag = "type", content = "data")]
@@ -414,99 +366,3 @@ pub struct SettingExecuteDispatchDocType(
 );
 
 pub type SettingExecuteDispatch = HashMap<String, ApiDispatchResult<serde_json::Value>>;
-
-/// A single thread's clear inactive guilds response
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
-pub struct ApiThreadClearInactiveGuilds {
-    #[ts(type = "number")]
-    pub tid: u64,
-    #[schema(value_type = HashMap<String, Option<String>>)]
-    #[ts(as = "HashMap<String, Option<String>>")]
-    pub cleared: HashMap<GuildId, Option<String>>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
-/// An action that can be performed on the Lua VM
-pub enum ApiLuaVmAction {
-    /// Stop the Lua VM entirely
-    Stop {},
-    /// Returns the memory usage of the Lua VM
-    GetMemoryUsage {},
-    /// Set the memory limit of the Lua VM
-    SetMemoryLimit { #[ts(type = "number")] limit: usize },
-    /// Clear the cache of all subisolates (isloate -> own environment/global state in same luau vm)
-    /// Each server has a khronos runtime to manage luau vm; each runtime is
-    /// split into multiple subisolates where every template gets it's own subisolate
-    /// (isolated env -> can't access variables across vm's)
-    ClearCache {},
-    /// Panic. Only useful for testing/debugging
-    Panic {},
-}
-
-impl From<ApiLuaVmAction> for LuaVmAction {
-    fn from(action: ApiLuaVmAction) -> Self {
-        match action {
-            ApiLuaVmAction::Stop {} => LuaVmAction::Stop {},
-            ApiLuaVmAction::GetMemoryUsage {} => LuaVmAction::GetMemoryUsage {},
-            ApiLuaVmAction::SetMemoryLimit { limit } => LuaVmAction::SetMemoryLimit { limit },
-            ApiLuaVmAction::ClearCache {} => LuaVmAction::ClearCache {},
-            ApiLuaVmAction::Panic {} => LuaVmAction::Panic {},
-        }
-    }
-}
-
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
-pub struct ApiThreadGuildVmMetrics {
-    /// Used memory
-    #[ts(type = "number")]
-    pub used_memory: usize,
-    /// Memory limit for the Luau VM
-    #[ts(type = "number")]
-    pub memory_limit: usize,
-    /// Number of luau threads
-    #[ts(type = "number")]
-    pub num_threads: i64,
-    /// Maximum luau threads
-    #[ts(type = "number")]
-    pub max_threads: i64,
-}
-
-impl From<ThreadGuildVmMetrics> for ApiThreadGuildVmMetrics {
-    fn from(metrics: ThreadGuildVmMetrics) -> Self {
-        ApiThreadGuildVmMetrics {
-            used_memory: metrics.used_memory,
-            memory_limit: metrics.memory_limit,
-            num_threads: metrics.num_threads,
-            max_threads: metrics.max_threads,
-        }
-    }
-}
-
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
-pub struct ApiThreadMetrics {
-    /// Metrics for each guild
-    #[schema(value_type = HashMap<String, ApiThreadGuildVmMetrics>)]
-    #[ts(as = "HashMap<String, ApiThreadGuildVmMetrics>")]
-    pub vm_metrics: HashMap<GuildId, ApiThreadGuildVmMetrics>,
-    /// The thread ID
-    #[schema(value_type = u64)]
-    #[ts(type = "number")]
-    pub tid: u64,
-}
-
-impl From<ThreadMetrics> for ApiThreadMetrics {
-    fn from(metrics: ThreadMetrics) -> Self {
-        ApiThreadMetrics {
-            vm_metrics: metrics
-                .vm_metrics
-                .into_iter()
-                .map(|(guild_id, guild_metrics)| (guild_id, guild_metrics.into()))
-                .collect(),
-            tid: metrics.tid,
-        }
-    }
-}

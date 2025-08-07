@@ -54,7 +54,7 @@ impl WorkerThreadPool {
         WorkerFilter::new(closure)
     }
 
-    /// Returns a reference to the WorkerThread for a given tenant ID
+    /// Returns a reference to the WorkerThread in the pool for a given tenant ID
     pub fn get_thread_for(&self, id: Id) -> &WorkerThread {
         let index = match id {
             // This is safe as AntiRaid workers does not currently support 32 bit platforms
@@ -62,10 +62,19 @@ impl WorkerThreadPool {
         };
         &self.threads[index]
     }
+
+    /// Returns the number of threads in the pool
+    pub fn len(&self) -> usize {
+        self.threads.len()
+    }
 }
 
 #[async_trait::async_trait]
 impl WorkerLike for WorkerThreadPool {
+    fn id(&self) -> usize {
+        0 // For a pool, return 0
+    }
+
     async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> DispatchTemplateResult {
         self.get_thread_for(id).send(DispatchEvent {
             id,
@@ -80,6 +89,22 @@ impl WorkerLike for WorkerThreadPool {
             event,
             scopes: Some(scopes),
         }).await?
+    }
+
+    async fn dispatch_event_to_templates_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
+        self.get_thread_for(id).send_nowait(DispatchEvent {
+            id,
+            event,
+            scopes: None,
+        }).await
+    }
+
+    async fn regenerate_cache(&self, id: Id) -> Result<(), crate::Error> {
+        self.get_thread_for(id).regenerate_cache(id).await
+    }
+
+    fn len(&self) -> usize {
+        self.threads.len()
     }
 }
 

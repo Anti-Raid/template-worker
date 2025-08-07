@@ -112,17 +112,6 @@ impl WorkerCacheData {
         }).await
     }
 
-    /// Gets all templates matching the name given
-    pub async fn get_templates_by_name(
-        &self,
-        id: Id,
-        name: &str,
-    ) -> Vec<Arc<Template>> {
-        self.get_templates_by_predicate(id, |template| {
-            template.name == name
-        }).await
-    }
-
     /// Gets all templates matching the event given by `CreateEvent` and the scopes
     pub async fn get_templates_with_event_scoped(
         &self,
@@ -155,7 +144,6 @@ impl WorkerCacheData {
     pub fn get_all_key_expiries(&self) -> Vec<(Id, Arc<KeyExpiry>)> {
         let mut keys = Vec::new();
 
-        let now = chrono::Utc::now();
         for (id, expiries) in self.key_expiries.iter() {
             for expiry in expiries.iter() {
                 keys.push((*id, expiry.clone()));

@@ -1,6 +1,4 @@
-use crate::events::AntiraidEvent;
-use crate::events::KeyResumeEvent;
-use khronos_runtime::primitives::event::Event as KEvent;
+use crate::worker::limits::MAX_VM_THREAD_STACK_SIZE;
 use khronos_runtime::require::FilesystemWrapper;
 use khronos_runtime::rt::mlua::prelude::*;
 use khronos_runtime::rt::KhronosIsolate;
@@ -15,10 +13,6 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::RwLock;
 use std::time::Duration;
-
-use crate::dispatch::parse_event;
-use crate::templatingrt::primitives::dummyctx::DummyProvider;
-use crate::templatingrt::MAX_VM_THREAD_STACK_SIZE;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateCommand {
@@ -119,34 +113,24 @@ fn register() -> Result<RegisterResult, crate::Error> {
 
                 let subisolate = KhronosIsolate::new_subisolate(
                     rt,
-                    FilesystemWrapper::new(crate::templatingrt::cache::BUILTINS.content.0.clone()),
+                    FilesystemWrapper::new(crate::worker::builtins::BUILTINS.content.0.clone()),
                     true // Enable safeenv
                 )
                 .expect("Failed to create KhronosIsolate");
 
-                tokio::task::yield_now().await;
-
-                // Create dummy context with BuiltinsRegisterDataStore
-                let provider = DummyProvider::new(vec![]);
-
-                let created_context = subisolate
-                    .create_context(provider)
-                    .expect("Failed to create context");
-
-                let event =
-                    parse_event(&AntiraidEvent::KeyResume(KeyResumeEvent {
-                        id: "register_dummy_key_ID".to_string(),
-                        key: "register_dummy_key_KEY".to_string(),
-                        scopes: vec![],
-                    })).expect("Failed to parse event");
+                let code = subisolate
+                    .asset_manager()
+                    .get_file("/builtins.register.luau".to_string())
+                    .expect("Failed to get asset file");
+                let code = String::from_utf8(code)
+                    .expect("Failed to convert asset file to string");
 
                 let spawn_result = subisolate
-                    .spawn_asset(
+                    .spawn_script(
                         "/builtins.register.luau",
                         "/builtins.register.luau",
-                        created_context,
-                        KEvent::from_create_event_with_runtime(&subisolate.inner(), event)
-                        .expect("Failed to create event"),
+                        &code,
+                        khronos_runtime::rt::mlua::MultiValue::with_capacity(0)
                     )
                     .await
                     .expect("Failed to spawn asset");

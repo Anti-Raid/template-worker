@@ -153,10 +153,8 @@ impl KhronosContext for TemplateContextProvider {
 
     fn current_user(&self) -> Option<serenity::all::CurrentUser> {
         Some(
-            self.state
-            .serenity_context
-            .data::<crate::Data>()
-            .current_user
+            (*self.state
+            .current_user)
             .clone()
         )
     }
@@ -713,7 +711,7 @@ impl DiscordProvider for ArDiscordProvider {
         &self,
     ) -> serenity::Result<Value, crate::Error> {
         Ok(crate::sandwich::guild(
-            &self.state.serenity_context.http,
+            &self.state.serenity_http,
             &self.state.reqwest_client,
             self.guild_id,
         )
@@ -726,7 +724,7 @@ impl DiscordProvider for ArDiscordProvider {
         user_id: serenity::all::UserId,
     ) -> serenity::Result<Value, crate::Error> {
         let member = crate::sandwich::member_in_guild(
-            &self.state.serenity_context.http,
+            &self.state.serenity_http,
             &self.state.reqwest_client,
             self.guild_id,
             user_id,
@@ -745,7 +743,7 @@ impl DiscordProvider for ArDiscordProvider {
         &self,
     ) -> serenity::Result<Value, crate::Error> {
         let channels = crate::sandwich::guild_channels(
-            &self.state.serenity_context.http,
+            &self.state.serenity_http,
             &self.state.reqwest_client,
             self.guild_id,
         )
@@ -760,7 +758,7 @@ impl DiscordProvider for ArDiscordProvider {
     ) -> serenity::Result<Value, crate::Error>
     {
         let roles = crate::sandwich::guild_roles(
-            &self.state.serenity_context.http,
+            &self.state.serenity_http,
             &self.state.reqwest_client,
             self.guild_id,
         )
@@ -792,7 +790,7 @@ impl DiscordProvider for ArDiscordProvider {
         }
 
         let channel = crate::sandwich::channel(
-            &self.state.serenity_context.http,
+            &self.state.serenity_http,
             &self.state.reqwest_client,
             Some(self.guild_id),
             channel_id,
@@ -820,7 +818,7 @@ impl DiscordProvider for ArDiscordProvider {
     }
 
     fn serenity_http(&self) -> &serenity::http::Http {
-        &self.state.serenity_context.http
+        &self.state.serenity_http
     }
 
     async fn edit_channel_permissions(
@@ -831,8 +829,7 @@ impl DiscordProvider for ArDiscordProvider {
         audit_log_reason: Option<&str>,
     ) -> Result<(), khronos_runtime::Error> {
         self.state
-            .serenity_context
-            .http
+            .serenity_http
             .create_permission(channel_id.expect_channel(), target_id, &data, audit_log_reason)
             .await
             .map_err(|e| format!("Failed to edit channel permissions: {}", e))?;
@@ -851,8 +848,7 @@ impl DiscordProvider for ArDiscordProvider {
     ) -> Result<Value, crate::Error> {
         let chan = self
             .state
-            .serenity_context
-            .http
+            .serenity_http
             .edit_channel(channel_id, &map, audit_log_reason)
             .await
             .map_err(|e| format!("Failed to edit channel: {}", e))?;
@@ -870,8 +866,7 @@ impl DiscordProvider for ArDiscordProvider {
     ) -> Result<Value, crate::Error> {
         let chan = self
             .state
-            .serenity_context
-            .http
+            .serenity_http
             .delete_channel(channel_id, audit_log_reason)
             .await
             .map_err(|e| format!("Failed to delete channel: {}", e))?;

@@ -1,4 +1,5 @@
 use crate::objectstore::ObjectStore;
+use crate::worker::workerlike::WorkerLike;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -9,6 +10,7 @@ pub struct Data {
     pub pool: sqlx::PgPool,
     pub reqwest: reqwest::Client,
     pub object_store: Arc<ObjectStore>,
+    pub worker: Arc<dyn WorkerLike + Send + Sync>,
 }
 
 impl Debug for Data {

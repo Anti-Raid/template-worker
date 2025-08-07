@@ -2,19 +2,20 @@ mod config;
 mod data;
 mod dispatch;
 mod event_handler;
-mod expiry_tasks;
 mod api;
 mod objectstore;
 mod register;
 mod sandwich;
-mod templatingrt;
 mod events;
 mod worker;
 
 use crate::config::{CMD_ARGS, CONFIG};
 use crate::data::Data;
 use crate::event_handler::EventFramework;
-use crate::templatingrt::cache::setup;
+use crate::worker::workercachedata::WorkerCacheData;
+use crate::worker::workerdb::WorkerDB;
+use crate::worker::workerstate::WorkerState;
+use crate::worker::workerthreadpool::WorkerThreadPool;
 use log::{error, info};
 use serenity::all::{ApplicationId, HttpBuilder};
 use sqlx::postgres::PgPoolOptions;
@@ -61,7 +62,7 @@ async fn main() {
 
     info!("HttpBuilder done");
 
-    let client_builder = serenity::all::ClientBuilder::new_with_http(token, http);
+    let client_builder = serenity::all::ClientBuilder::new_with_http(token, http.clone());
 
     info!("Connecting to database");
 
@@ -85,16 +86,40 @@ async fn main() {
 
     info!("Current user: {} ({})", current_user.name, current_user_id);
 
+    let object_storage = Arc::new(
+        CONFIG
+            .object_storage
+            .build()
+            .expect("Could not initialize object store"),
+    );
+
+    let worker_state = WorkerState::new(
+        http,
+        reqwest.clone(),
+        object_storage.clone(),
+        pg_pool.clone(),
+        Arc::new(current_user.clone()),
+    ).expect("Failed to create worker state");
+
+    let worker_cache_data = WorkerCacheData::new(
+        WorkerDB::new(worker_state.clone())
+    )
+    .await
+    .expect("Failed to create worker cache data");
+
+    let worker_pool = WorkerThreadPool::new(
+        worker_cache_data.clone(),
+        worker_state.clone(),
+        30, // TODO: Allow this to be configured
+    )
+    .expect("Failed to create worker thread pool");
+
     let data = Data {
-        object_store: Arc::new(
-            CONFIG
-                .object_storage
-                .build()
-                .expect("Could not initialize object store"),
-        ),
+        object_store: object_storage,
         pool: pg_pool.clone(),
         reqwest,
-        current_user
+        current_user,
+        worker: Arc::new(worker_pool),
     };
 
     let mut client = client_builder
@@ -121,12 +146,6 @@ async fn main() {
 
         return;
     }
-
-    info!("Setting up template cache");
-
-    setup(&pg_pool)
-        .await
-        .expect("Failed to setup template cache");
 
     if let Some(shard_count) = CMD_ARGS.shard_count {
         if let Some(ref shards) = CMD_ARGS.shards {
