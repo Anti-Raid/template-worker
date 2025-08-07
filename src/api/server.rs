@@ -64,6 +64,15 @@ impl AppData {
 pub type ApiResponseError = (StatusCode, Json<ApiError>);
 pub type ApiResponse<T> = Result<Json<T>, ApiResponseError>;
 
+async fn logger(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    log::info!("Received request: method = {}, path={}", request.method(), request.uri().path());
+
+    let response = next.run(request).await;
+    response
+}
 
 pub fn create(
     data: Arc<crate::data::Data>,
@@ -133,15 +142,7 @@ pub fn create(
         )
         .layer(tower_http::cors::CorsLayer::very_permissive())
         .layer(
-            tower_http::trace::TraceLayer::new_for_http()
-            .make_span_with(|req: &axum::http::Request<_>| {
-                tracing::info_span!(
-                    "http_request",
-                    method = %req.method(),
-                    uri = %req.uri(),
-                    version = ?req.version(),
-                )
-            })
+            axum::middleware::from_fn(logger)
         );
 
     let router: Router<()> = router.with_state(AppData::new(data, ctx));

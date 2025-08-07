@@ -65,7 +65,6 @@ impl WorkerKeyExpiry {
     /// NOTE: This does not repopulate the key expiry channel as it is not needed in the cases this is called
     async fn remove_key_expiry(&self, id: Id, kv_id: &str) -> Result<(), crate::Error> {
         self.db.remove_key_expiry(id, kv_id).await?;
-        self.cache.repopulate_key_expiries_for(id).await?;
         Ok(())
     }
 

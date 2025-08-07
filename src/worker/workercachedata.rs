@@ -4,7 +4,7 @@ use super::template::Template;
 
 use super::builtins::{USE_BUILTINS, BUILTINS};
 use super::workervmmanager::Id;
-use super::workerdb::{WorkerDB, KeyExpiry};
+use super::workerdb::WorkerDB;
 
 use khronos_runtime::primitives::event::CreateEvent;
 use moka::future::Cache;
@@ -67,7 +67,6 @@ pub enum DeferredCacheRegenerationMode {
 pub struct WorkerCacheData {
     db: WorkerDB,
     templates: CacheEntry<Id, ArcVec<Template>>, // Maps template names to their associated keys
-    key_expiries: CacheEntry<Id, ArcVec<KeyExpiry>>, // Maps id to key expiries
     deferred_cache_regens: CacheEntry<Id, DeferredCacheRegenerationMode>, // Maps id to deferred cache regeneration mode
 }
 
@@ -79,7 +78,6 @@ impl WorkerCacheData {
         let data = Self {
             db,
             templates: CacheEntry::new(),
-            key_expiries: CacheEntry::new(),
             deferred_cache_regens: CacheEntry::new(),
         };
 
@@ -92,7 +90,6 @@ impl WorkerCacheData {
     /// Sets up the initial template and key expiry cache
     pub async fn setup(&self) -> Result<(), crate::Error> {
         self.populate_templates().await?;
-        self.populate_key_expiries().await?;
         Ok(())
     }
 
@@ -140,36 +137,12 @@ impl WorkerCacheData {
         }
     }
 
-    /// Returns all currently key expiries
-    pub fn get_all_key_expiries(&self) -> Vec<(Id, Arc<KeyExpiry>)> {
-        let mut keys = Vec::new();
-
-        for (id, expiries) in self.key_expiries.iter() {
-            for expiry in expiries.iter() {
-                keys.push((*id, expiry.clone()));
-            }
-        }
-
-        keys
-    }
-
     /// Populates the templates cache from the database
     pub async fn populate_templates(&self) -> Result<(), crate::Error> {
         let templates = self.db.get_templates().await?;
 
         for (id, templates) in templates {
             self.templates.insert(id, templates).await;
-        }
-
-        Ok(())
-    }
-
-    /// Gets all key expiries from the database and stores them in the cache
-    pub async fn populate_key_expiries(&self) -> Result<(), crate::Error> {
-        let expiries = self.db.get_key_expiries().await?;
-
-        for (id, expiries) in expiries {
-            self.key_expiries.insert(id, Arc::new(expiries)).await;
         }
 
         Ok(())
@@ -184,17 +157,6 @@ impl WorkerCacheData {
 
         // Store the templates in the cache
         self.templates.insert(id, templates).await;
-        Ok(())
-    }
-
-    /// Repopulates the key expiries for a guild from the database
-    /// 
-    /// This will replace the existing key expiries in cache
-    pub async fn repopulate_key_expiries_for(&self, id: Id) -> Result<(), crate::Error> {
-        let key_expiries = self.db.get_key_expiries_for(id).await?;
-
-        // Store the key expiries in the cache
-        self.key_expiries.insert(id, key_expiries).await;
         Ok(())
     }
 

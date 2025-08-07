@@ -78,6 +78,11 @@ impl WorkerLike for WorkerThreadPool {
     }
 
     async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> DispatchTemplateResult {
+        let templates = self.cache.get_templates_with_event(id, &event).await;
+        if templates.is_empty() {
+            return Ok(Vec::new()); // Fast return if no templates are found. We don't need to even do anything special
+        }
+
         self.get_thread_for(id).send(DispatchEvent {
             id,
             event,
@@ -86,6 +91,11 @@ impl WorkerLike for WorkerThreadPool {
     }
 
     async fn dispatch_scoped_event_to_templates(&self, id: Id, event: CreateEvent, scopes: Vec<String>) -> DispatchTemplateResult {
+        let templates = self.cache.get_templates_with_event_scoped(id, &event, &scopes).await;
+        if templates.is_empty() {
+            return Ok(Vec::new()); // Fast return if no templates are found. We don't need to even do anything special
+        }
+        
         self.get_thread_for(id).send(DispatchEvent {
             id,
             event,

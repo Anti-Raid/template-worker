@@ -41,7 +41,10 @@ impl KeyExpiryChannel {
     }
 
     async fn run(&self, mut rx: UnboundedReceiver<KeyExpiryChannelMessage>) {
-        let mut delay_queue = self.create_queue();
+        let mut delay_queue = self.create_queue().await.unwrap_or_else(|e| {
+            log::error!("FATAL: Failed to create key expiry delay queue: {}", e);
+            std::process::exit(1);
+        });
 
         loop {
             tokio::select! {
@@ -49,7 +52,14 @@ impl KeyExpiryChannel {
                     match msg {
                         KeyExpiryChannelMessage::Repopulate => {
                             log::info!("Repopulating key expiry channel");
-                            delay_queue = self.create_queue();
+                            match self.create_queue().await {
+                                Ok(new_queue) => {
+                                    delay_queue = new_queue;
+                                },
+                                Err(e) => {
+                                    log::error!("Failed to repopulate key expiry channel: {e}, continuing with old");
+                                }
+                            }
                         },
                     }
                 },
@@ -67,26 +77,28 @@ impl KeyExpiryChannel {
     }
 
     /// Populates the key expiry channel with current data from WorkerCacheData
-    fn create_queue(&self) -> DelayQueue<(Id, Arc<KeyExpiry>)> {
+    async fn create_queue(&self) -> Result<DelayQueue<(Id, Arc<KeyExpiry>)>, crate::Error> {
         let mut delay_queue = DelayQueue::new();
-        let expired_keys = self.cache.get_all_key_expiries();
+        let expired_keys = self.cache.db().get_key_expiries().await?;
         for data in expired_keys {
             if self.filter.is_allowed(data.0) {
-                let dt = data.1.expires_at - chrono::Utc::now();
-                let dt_is_neg = dt.num_seconds() < 0;
-                if !dt_is_neg {
-                    let duration_std = dt.to_std().unwrap();
-                    delay_queue.insert(data, duration_std);
-                } else {
-                    // Create a random duration between 5 and 10 seconds
-                    let duration_secs = rand::random_range(5..=10);
-                    let duration = Duration::from_secs(duration_secs);
-                    delay_queue.insert(data, duration);
+                for expiry in data.1 {
+                    let dt = expiry.expires_at - chrono::Utc::now();
+                    let dt_is_neg = dt.num_seconds() < 0;
+                    if !dt_is_neg {
+                        let duration_std = dt.to_std().unwrap();
+                        delay_queue.insert((data.0, expiry), duration_std);
+                    } else {
+                        // Create a random duration between 5 and 10 seconds
+                        let duration_secs = rand::random_range(5..=10);
+                        let duration = Duration::from_secs(duration_secs);
+                        delay_queue.insert((data.0, expiry), duration);
+                    }
                 }
             }
         }
 
-        delay_queue
+        Ok(delay_queue)
     }
 
     /// Send a repopulate message to the channel
@@ -94,13 +106,6 @@ impl KeyExpiryChannel {
         self.tx.send(KeyExpiryChannelMessage::Repopulate).map_err(|e| {
             format!("Failed to send repopulate message to key expiry channel: {}", e).into()
         })
-    }
-
-    /// Send a repopulate message to the channel
-    pub async fn repopulate_for(&self, id: Id) -> Result<(), crate::Error> {
-        self.cache.repopulate_key_expiries_for(id).await?;
-        self.repopulate()?;
-        Ok(())
     }
 
     /// Sets the sink for the key expiry channel

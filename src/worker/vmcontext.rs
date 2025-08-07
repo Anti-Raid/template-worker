@@ -402,7 +402,7 @@ ORDER BY scope",
 
         if curr_expiry != expires_at {
             // Regenerate the cache if the expiry has changed
-            self.key_expiry_chan.repopulate_for(Id::GuildId(self.guild_id)).await?;
+            self.key_expiry_chan.repopulate()?;
         }
 
         Ok((exists, id))
@@ -441,7 +441,7 @@ ORDER BY scope",
         }
 
         // Regenerate the cache in any case
-        self.key_expiry_chan.repopulate_for(Id::GuildId(self.guild_id)).await?;
+        self.key_expiry_chan.repopulate()?;
 
         Ok(())
     }
@@ -461,7 +461,7 @@ ORDER BY scope",
         .await?;
 
         // Regenerate the cache in any case
-        self.key_expiry_chan.repopulate_for(Id::GuildId(self.guild_id)).await?;
+        self.key_expiry_chan.repopulate()?;
 
         Ok(())
     }
@@ -513,7 +513,7 @@ ORDER BY scope",
 
         if curr_expiry != expires_at {
             // Regenerate the cache if the expiry has changed
-            self.key_expiry_chan.repopulate_for(Id::GuildId(self.guild_id)).await?;
+            self.key_expiry_chan.repopulate()?;
         }
 
         Ok(())
@@ -549,7 +549,7 @@ ORDER BY scope",
 
             if expires_at.is_some() {
                 // Regenerate the cache if the key has an expiry set
-                self.key_expiry_chan.repopulate_for(Id::GuildId(self.guild_id)).await?;
+                self.key_expiry_chan.repopulate()?;
                 break; // No need to continue if we found at least one expiry
             }
         }
@@ -571,7 +571,7 @@ ORDER BY scope",
 
             if expires_at.is_some() {
                 // Regenerate the cache if the key has an expiry set
-                self.key_expiry_chan.repopulate_for(Id::GuildId(self.guild_id)).await?;
+                self.key_expiry_chan.repopulate()?;
             }
         }
 
