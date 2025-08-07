@@ -48,6 +48,7 @@ impl KeyExpiryChannel {
                 Some(msg) = rx.recv() => {
                     match msg {
                         KeyExpiryChannelMessage::Repopulate => {
+                            log::info!("Repopulating key expiry channel");
                             delay_queue = self.create_queue();
                         },
                     }
@@ -93,6 +94,13 @@ impl KeyExpiryChannel {
         self.tx.send(KeyExpiryChannelMessage::Repopulate).map_err(|e| {
             format!("Failed to send repopulate message to key expiry channel: {}", e).into()
         })
+    }
+
+    /// Send a repopulate message to the channel
+    pub async fn repopulate_for(&self, id: Id) -> Result<(), crate::Error> {
+        self.cache.repopulate_key_expiries_for(id).await?;
+        self.repopulate()?;
+        Ok(())
     }
 
     /// Sets the sink for the key expiry channel

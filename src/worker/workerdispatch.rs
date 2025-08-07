@@ -156,6 +156,10 @@ impl WorkerDispatch {
 
     /// Dispatches an event to the appropriate VM based on the tenant ID without waiting for a response
     pub async fn dispatch_event(&self, id: Id, event: CreateEvent, templates: Vec<Arc<Template>>) -> DispatchTemplateResult {
+        if templates.is_empty() {
+            return Ok(Vec::new()); // Fast return if no templates are found. We don't need to even do anything special
+        }
+       
         let vm_data = self.vm_manager.get_vm_for(id).await
             .map_err(|e| format!("Failed to get VM for ID {id:?}: {e}"))?;
 
