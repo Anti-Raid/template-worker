@@ -81,11 +81,20 @@ impl WorkerVmManager {
 
     /// Removes the VM for the given tenant ID and cleans up its resources
     pub fn remove_vm_for(&self, id: Id) -> Result<(), crate::Error> {
-        let mut vms = self.vms.borrow_mut();
-        if let Some(vm) = vms.remove(&id) {
-            // If the VM was removed, we can also clean up the runtime manager
-            vm.runtime_manager.runtime().mark_broken(true)?;
-        }
+        let runtime_manager = {
+            let mut vms = self.vms.borrow_mut();
+            let removed = vms.remove(&id);
+
+            match removed {
+                Some(vm) => vm.runtime_manager,
+                None => return Ok(()), // VM doesn't exist, nothing to do
+            }
+        }; // VM is no longer borrowed here 
+
+        // If the VM was removed, we can also clean up the runtime manager
+        //
+        // This is safe as `self.vms` should not be borrowed or mutably borrowed at this point
+        runtime_manager.runtime().mark_broken(true)?;
 
         Ok(())
     }
