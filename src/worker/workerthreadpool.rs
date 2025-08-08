@@ -7,7 +7,6 @@ use crate::worker::workerthread::DispatchEvent;
 use super::workervmmanager::Id;
 
 use super::workerstate::WorkerState;
-use super::workercachedata::WorkerCacheData;
 use super::workerthread::WorkerThread;
 use super::workerfilter::WorkerFilter;
 
@@ -19,27 +18,21 @@ use super::workerfilter::WorkerFilter;
 pub struct WorkerThreadPool {
     /// The threads in the pool
     threads: Vec<WorkerThread>,
-    /// The cache data shared between the threads
-    cache: WorkerCacheData, 
-    /// The worker state shared between the threads
-    state: WorkerState
 }
 
 impl WorkerThreadPool {
     /// Creates a new WorkerThread with the given cache data and worker state
-    pub fn new(cache: WorkerCacheData, state: WorkerState, num_threads: usize) -> Result<Self, crate::Error> {
+    pub fn new(state: WorkerState, num_threads: usize) -> Result<Self, crate::Error> {
         let mut threads = Vec::with_capacity(num_threads);
 
         for id in 0..num_threads {
             let filter = Self::filter_for(id, num_threads);
-            let thread = WorkerThread::new(cache.clone(), state.clone(), filter, id)?;
+            let thread = WorkerThread::new(state.clone(), filter, id)?;
             threads.push(thread);
         }
 
         Ok(WorkerThreadPool {
             threads,
-            cache,
-            state,
         })
     }
 
@@ -78,11 +71,6 @@ impl WorkerLike for WorkerThreadPool {
     }
 
     async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> DispatchTemplateResult {
-        let templates = self.cache.get_templates_with_event(id, &event).await;
-        if templates.is_empty() {
-            return Ok(Vec::new()); // Fast return if no templates are found. We don't need to even do anything special
-        }
-
         self.get_thread_for(id).send(DispatchEvent {
             id,
             event,
@@ -90,12 +78,7 @@ impl WorkerLike for WorkerThreadPool {
         }).await?
     }
 
-    async fn dispatch_scoped_event_to_templates(&self, id: Id, event: CreateEvent, scopes: Vec<String>) -> DispatchTemplateResult {
-        let templates = self.cache.get_templates_with_event_scoped(id, &event, &scopes).await;
-        if templates.is_empty() {
-            return Ok(Vec::new()); // Fast return if no templates are found. We don't need to even do anything special
-        }
-        
+    async fn dispatch_scoped_event_to_templates(&self, id: Id, event: CreateEvent, scopes: Vec<String>) -> DispatchTemplateResult {        
         self.get_thread_for(id).send(DispatchEvent {
             id,
             event,

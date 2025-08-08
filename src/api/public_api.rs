@@ -380,7 +380,7 @@ pub(super) async fn get_user_guilds(
 pub(super) async fn base_guild_user_info(
     State(AppData {
         data,
-        serenity_context,
+        http,
         ..
     }): State<AppData>,
     AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
@@ -391,7 +391,7 @@ pub(super) async fn base_guild_user_info(
 
     let bot_user_id = data.current_user.id;
     let guild_json = crate::sandwich::guild(
-        &serenity_context.http,
+        &http,
         &data.reqwest,
         guild_id,
     )
@@ -408,7 +408,7 @@ pub(super) async fn base_guild_user_info(
 
     // Next fetch the member and bot_user
     let member_json = match crate::sandwich::member_in_guild(
-        &serenity_context.http,
+        &http,
         &data.reqwest,
         guild_id,
         user_id,
@@ -431,7 +431,7 @@ pub(super) async fn base_guild_user_info(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
     let bot_user_json = match crate::sandwich::member_in_guild(
-        &serenity_context.http,
+        &http,
         &data.reqwest,
         guild_id,
         bot_user_id,
@@ -455,7 +455,7 @@ pub(super) async fn base_guild_user_info(
 
     // Fetch the channels
     let channels_json = crate::sandwich::guild_channels(
-        &serenity_context.http,
+        &http,
         &data.reqwest,
         guild_id,
     )

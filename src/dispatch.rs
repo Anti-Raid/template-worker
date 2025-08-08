@@ -11,11 +11,6 @@ pub async fn discord_event_dispatch(
     event: IEvent,
     serenity_context: &Context,
 ) -> Result<(), crate::Error> {
-    if event.ty == "GUILD_CREATE" {
-        // Ignore guild create events
-        return Ok(());
-    }
-
     let data = serenity_context.data::<Data>();
 
     let guild_id = match event.sandwich_edt {

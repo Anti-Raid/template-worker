@@ -27,12 +27,14 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn new(
-        cache: WorkerCacheData, // The cache data, this can be shared across workers if needed (e.g. threadpool worker)
+    pub async fn new(
         state: WorkerState,
         filter: WorkerFilter, // The worker filter, used to filter automatically dispatched events based on tenant ID and worker ID
-    ) -> Self {
-        let db = cache.db().clone();
+    ) -> Result<Self, crate::Error> {
+        let db = WorkerDB::new(state.clone());
+
+        let cache = WorkerCacheData::new(db.clone(), filter.clone()).await?;
+        
         let vm_manager = WorkerVmManager::new(state);
         
         // This will automatically start a channel that will dispatch out key expiry notices to subscribed
@@ -44,15 +46,15 @@ impl Worker {
         let dispatch = WorkerDispatch::new(vm_manager.clone(), cache.clone(), db.clone(), key_expiry_chan.clone(), filter.clone());
 
         // This will automatically start a task to handle expiring keys
-        let key_expiry_task = WorkerKeyExpiry::new(cache, dispatch.clone(), key_expiry_chan.clone());
+        let key_expiry_task = WorkerKeyExpiry::new(db.clone(), dispatch.clone(), key_expiry_chan.clone());
 
-        Self {
+        Ok(Self {
             vm_manager,
             dispatch,
             db,
             filter,
             key_expiry_chan,
             key_expiry_task
-        }
+        })
     }
 }

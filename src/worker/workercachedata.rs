@@ -1,4 +1,9 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 use std::{hash::Hash, sync::Arc};
+
+use crate::worker::workerfilter::WorkerFilter;
 
 use super::template::Template;
 
@@ -7,13 +12,12 @@ use super::workervmmanager::Id;
 use super::workerdb::WorkerDB;
 
 use khronos_runtime::primitives::event::CreateEvent;
-use moka::future::Cache;
 
 #[derive(Clone)]
 struct CacheEntry<K, V> 
 where K: Send + Sync + Eq + Hash + 'static,
       V: Send + Sync + Clone + 'static {
-    data: Arc<Cache<K, V>>
+    data: Rc<RefCell<HashMap<K, V>>>,
 }
 
 impl<K, V> CacheEntry<K, V> 
@@ -22,24 +26,20 @@ where K: Send + Sync + Eq + Hash + 'static,
     fn new() -> Self {
         Self {
             // Unbounded permanent cache
-            data: Arc::new(Cache::builder().build())
+            data: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
-    async fn get(&self, key: &K) -> Option<V> {
-        self.data.get(key).await
+    fn get(&self, key: &K) -> Option<V> {
+        self.data.borrow().get(key).cloned()
     }
 
-    async fn insert(&self, key: K, value: V) {
-        self.data.insert(key, value).await;
+    fn insert(&self, key: K, value: V) {
+        self.data.borrow_mut().insert(key, value);
     }
 
-    async fn remove(&self, key: &K) -> Option<V> {
-        self.data.remove(key).await
-    }
-
-    fn iter(&self) -> impl Iterator<Item = (Arc<K>, V)> + use<'_, K, V> {
-        self.data.iter()
+    fn remove(&self, key: &K) -> Option<V> {
+        self.data.borrow_mut().remove(key)
     }
 }
 
@@ -60,25 +60,26 @@ pub enum DeferredCacheRegenerationMode {
 
 /// WorkerCacheData stores cache related data for templates and associated data (like key expiries)
 /// 
-/// NOTE: WorkerCache (WIP) will use WorkerCacheData on top of WorkerVmManager to allow for cache regeneration etc
-/// 
-/// WorkerCacheData is explicitly thread safe (and is one of the few parts of workers that is thread safe)
+/// A WorkerCacheData is specific to a worker and should *not* be shared (previous versions allowed
+/// shared but this is no longer the case for performance reasons)
 #[derive(Clone)]
 pub struct WorkerCacheData {
     db: WorkerDB,
     templates: CacheEntry<Id, ArcVec<Template>>, // Maps template names to their associated keys
     deferred_cache_regens: CacheEntry<Id, DeferredCacheRegenerationMode>, // Maps id to deferred cache regeneration mode
+    filter: WorkerFilter, // Filter for the worker
 }
 
 impl WorkerCacheData {
     /// Creates a new WorkerCacheData instance
     ///
     /// This will also set up the initial cache from the database
-    pub async fn new(db: WorkerDB) -> Result<Self, crate::Error> {
+    pub async fn new(db: WorkerDB, filter: WorkerFilter) -> Result<Self, crate::Error> {
         let data = Self {
             db,
             templates: CacheEntry::new(),
             deferred_cache_regens: CacheEntry::new(),
+            filter,
         };
 
         // Setup initial cache from database
@@ -99,18 +100,18 @@ impl WorkerCacheData {
     }
 
     /// Gets all templates matching the event given by `CreateEvent`
-    pub async fn get_templates_with_event(
+    pub fn get_templates_with_event(
         &self,
         id: Id,
         event: &CreateEvent,
     ) -> Vec<Arc<Template>> {
         self.get_templates_by_predicate(id, |template| {
             template.should_dispatch(event)
-        }).await
+        })
     }
 
     /// Gets all templates matching the event given by `CreateEvent` and the scopes
-    pub async fn get_templates_with_event_scoped(
+    pub fn get_templates_with_event_scoped(
         &self,
         id: Id,
         event: &CreateEvent,
@@ -118,12 +119,16 @@ impl WorkerCacheData {
     ) -> Vec<Arc<Template>> {
         self.get_templates_by_predicate(id, |template| {
             template.should_dispatch_scoped(event, scopes)
-        }).await
+        })
     }
 
     /// Helper method to get templates by a predicate
-    pub async fn get_templates_by_predicate(&self, id: Id, predicate: impl Fn(&Arc<Template>) -> bool) -> Vec<Arc<Template>> {
-        if let Some(templates) = self.templates.get(&id).await {
+    pub fn get_templates_by_predicate(&self, id: Id, predicate: impl Fn(&Arc<Template>) -> bool) -> Vec<Arc<Template>> {
+        if !self.filter.is_allowed(id) {
+            return Vec::with_capacity(0); // Skip if the id is not allowed by the filter
+        }
+
+        if let Some(templates) = self.templates.get(&id) {
             templates.iter().filter(|t| predicate(t)).cloned().collect()
         } else {
             if USE_BUILTINS {
@@ -142,7 +147,10 @@ impl WorkerCacheData {
         let templates = self.db.get_templates().await?;
 
         for (id, templates) in templates {
-            self.templates.insert(id, templates).await;
+            if !self.filter.is_allowed(id) {
+                continue; // Skip templates that are not allowed by the filter
+            }
+            self.templates.insert(id, templates);
         }
 
         Ok(())
@@ -153,26 +161,24 @@ impl WorkerCacheData {
     /// 
     /// Note that this method will *NOT* regenerate Lua VMs
     pub async fn repopulate_templates_for(&self, id: Id) -> Result<(), crate::Error> {
+        if !self.filter.is_allowed(id) {
+            return Ok(()); // Skip if the id is not allowed by the filter
+        }
+
         let templates = self.db.get_templates_for(id).await?;
 
         // Store the templates in the cache
-        self.templates.insert(id, templates).await;
+        self.templates.insert(id, templates);
         Ok(())
     }
 
     /// Sets a deferred cache regeneration mode for a tenant
     pub async fn set_deferred_cache_regeneration(&self, id: Id, mode: DeferredCacheRegenerationMode) {
-        self.deferred_cache_regens.insert(id, mode).await;
+        self.deferred_cache_regens.insert(id, mode);
     }
 
     /// Gets and removes the deferred cache regeneration mode for a tenant
     pub async fn take_deferred_cache_regeneration(&self, id: &Id) -> Option<DeferredCacheRegenerationMode> {
-        self.deferred_cache_regens.remove(id).await
+        self.deferred_cache_regens.remove(id)
     }
 }
-
-// Assert that WorkerCacheData is Send + Sync + Clone
-const _: () = {
-    const fn assert_send_sync_clone<T: Send + Sync + Clone>() {}
-    assert_send_sync_clone::<WorkerCacheData>();
-};

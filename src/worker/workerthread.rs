@@ -6,7 +6,7 @@ use std::{panic::AssertUnwindSafe, thread::JoinHandle};
 
 use crate::worker::limits::MAX_VM_THREAD_STACK_SIZE;
 use crate::worker::workerlike::WorkerLike;
-use super::{workercachedata::WorkerCacheData, workerstate::WorkerState, worker::Worker, workervmmanager::Id, workerdispatch::DispatchTemplateResult, workerfilter::WorkerFilter};
+use super::{workerstate::WorkerState, worker::Worker, workervmmanager::Id, workerdispatch::DispatchTemplateResult, workerfilter::WorkerFilter};
 
 /// WorkerThreadMessage is the message type that is sent to the worker thread
 enum WorkerThreadMessage {
@@ -96,18 +96,18 @@ pub struct WorkerThread {
 
 impl WorkerThread {
     /// Creates a new WorkerThread with the given cache data and worker state
-    pub fn new(cache: WorkerCacheData, state: WorkerState, filter: WorkerFilter, id: usize) -> Result<Self, crate::Error> {
+    pub fn new(state: WorkerState, filter: WorkerFilter, id: usize) -> Result<Self, crate::Error> {
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         
-        let handle = Self::create_thread(id, cache, state, filter, rx)?;
+        let handle = Self::create_thread(id, state, filter, rx)?;
         
         let worker_thread = Self { tx, id, handle };
 
        Ok(worker_thread)
     }
 
-    fn create_thread(id: usize, cache: WorkerCacheData, state: WorkerState, filter: WorkerFilter, mut rx: UnboundedReceiver<WorkerThreadMessage>) -> Result<JoinHandle<()>, crate::Error> {
+    fn create_thread(id: usize, state: WorkerState, filter: WorkerFilter, mut rx: UnboundedReceiver<WorkerThreadMessage>) -> Result<JoinHandle<()>, crate::Error> {
         std::thread::Builder::new()
             .name(format!("lua-vm-threadpool-{id}"))
             .stack_size(MAX_VM_THREAD_STACK_SIZE)
@@ -119,7 +119,7 @@ impl WorkerThread {
                         .expect("Failed to create tokio runtime");
 
                     rt.block_on(async move {
-                        let worker = Worker::new(cache, state, filter);
+                        let worker = Worker::new(state, filter).await.expect("Failed to create Worker");
 
                         // Listen to messages and handle them
                         while let Some(msg) = rx.recv().await {

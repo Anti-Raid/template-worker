@@ -11,6 +11,12 @@ use futures::StreamExt;
 
 use super::workerfilter::WorkerFilter;
 
+// The maximum duration of a delay before we need to do some tricks
+// From https://docs.rs/tokio-util/latest/src/tokio_util/time/wheel/mod.rs.html 
+const NUM_LEVELS: usize = 6;
+const MAX_DURATION: u64 = (1 << (6 * NUM_LEVELS)) - 1;
+const MAX_DURATION_OBJ: Duration = Duration::from_millis(MAX_DURATION-5000);
+
 enum KeyExpiryChannelMessage {
     Repopulate, // Repopulate the entire key expiry channel
 }
@@ -65,6 +71,14 @@ impl KeyExpiryChannel {
                 },
                 Some(data) = delay_queue.next() => {
                     let data = data.into_inner();
+
+                    if data.1.expires_at > chrono::Utc::now() {
+                        // Not expired yet, reinsert with new duration
+                        let dt = Self::get_expiry(&data.1);
+                        delay_queue.insert(data, dt);
+                        continue; // Skip dispatching as we haven't expired yet
+                    }
+
                     if self.filter.is_allowed(data.0) {
                         let sink_guard = self.sink.borrow();
                         if let Some(sink) = sink_guard.as_ref() {
@@ -83,22 +97,45 @@ impl KeyExpiryChannel {
         for data in expired_keys {
             if self.filter.is_allowed(data.0) {
                 for expiry in data.1 {
-                    let dt = expiry.expires_at - chrono::Utc::now();
-                    let dt_is_neg = dt.num_seconds() < 0;
-                    if !dt_is_neg {
-                        let duration_std = dt.to_std().unwrap();
-                        delay_queue.insert((data.0, expiry), duration_std);
-                    } else {
-                        // Create a random duration between 5 and 10 seconds
-                        let duration_secs = rand::random_range(5..=10);
-                        let duration = Duration::from_secs(duration_secs);
-                        delay_queue.insert((data.0, expiry), duration);
-                    }
+                    let dt = Self::get_expiry(&expiry);
+                    delay_queue.insert((data.0, expiry), dt);
                 }
             }
         }
 
         Ok(delay_queue)
+    }
+
+    /// Returns the next expiry duration for a key expiry
+    /// 
+    /// If the key is already expired, returns a random duration between 5 and 10 seconds
+    /// to ensure a random fanout
+    /// 
+    /// If the key is not expired, returns the duration until it expires, capped at MAX_DURATION
+    /// to avoid issues with tokio's DelayQueue wheel having a limit on maximum duration
+    fn get_expiry(key_expiry: &KeyExpiry) -> Duration {
+        // Not expired yet, reinsert with new duration
+        let dt = key_expiry.expires_at - chrono::Utc::now();
+        let dt_is_neg = dt.num_milliseconds() < 0;
+        if !dt_is_neg {
+            let mut duration_std = dt.to_std().unwrap();
+            if duration_std.as_millis() >= MAX_DURATION_OBJ.as_millis() {
+                // We cap it to the MAX_DURATION
+                // 
+                // when we (somehow) do get the event out,
+                // we simply see that we haven't expired yet and repush for more time
+                duration_std = MAX_DURATION_OBJ
+            }
+
+            log::info!("Reinserting key expiry to delay queue: {:?}", duration_std);
+
+            duration_std
+        } else {
+            // Create a random duration between 5 and 10 seconds
+            let duration_secs = rand::random_range(5..=10);
+            let duration = Duration::from_secs(duration_secs);
+            duration
+        }
     }
 
     /// Send a repopulate message to the channel

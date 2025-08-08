@@ -4,7 +4,6 @@ use crate::dispatch::parse_event;
 use crate::events::{AntiraidEvent, KeyExpiryEvent};
 
 use super::workerdb::WorkerDB;
-use super::workercachedata::WorkerCacheData;
 use super::workervmmanager::Id;
 use super::workerdispatch::WorkerDispatch;
 use super::keyexpirychannel::KeyExpiryChannel;
@@ -17,8 +16,6 @@ pub struct KeyExpiryInner {
     key_expiry_chan: KeyExpiryChannel,
     /// Worker Event Dispatch
     dispatch: WorkerDispatch,
-    /// Worker Cache Data
-    cache: WorkerCacheData,
     /// Worker Database
     db: WorkerDB,
 }
@@ -41,13 +38,12 @@ impl std::ops::Deref for WorkerKeyExpiry {
 }
 
 impl WorkerKeyExpiry {
-    pub fn new(cache: WorkerCacheData, dispatch: WorkerDispatch, key_expiry_chan: KeyExpiryChannel) -> Self {
+    pub fn new(db: WorkerDB, dispatch: WorkerDispatch, key_expiry_chan: KeyExpiryChannel) -> Self {
         let expirer = Self { 
             inner: Rc::new(KeyExpiryInner {
                 dispatch, 
                 key_expiry_chan, 
-                db: cache.db().clone(),
-                cache
+                db
             })
         };
 

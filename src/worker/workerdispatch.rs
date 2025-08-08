@@ -49,13 +49,13 @@ impl WorkerDispatch {
 
     /// Helper method to dispatch an scoped event to the right templates given a tenant ID and an event
     pub async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> Result<Vec<(String, TemplateResult)>, crate::Error> {
-        let templates = self.cache.get_templates_with_event(id, &event).await;
+        let templates = self.cache.get_templates_with_event(id, &event);
         self.dispatch_event(id, event, templates).await
     }
 
     /// Helper method to dispatch an scoped event to the right templates given a tenant ID and an event
     pub async fn dispatch_scoped_event_to_templates(&self, id: Id, event: CreateEvent, scopes: &[String]) -> Result<Vec<(String, TemplateResult)>, crate::Error> {
-        let templates = self.cache.get_templates_with_event_scoped(id, &event, scopes).await;
+        let templates = self.cache.get_templates_with_event_scoped(id, &event, scopes);
         self.dispatch_event(id, event, templates).await
     }
 

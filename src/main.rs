@@ -12,8 +12,6 @@ mod worker;
 use crate::config::{CMD_ARGS, CONFIG};
 use crate::data::Data;
 use crate::event_handler::EventFramework;
-use crate::worker::workercachedata::WorkerCacheData;
-use crate::worker::workerdb::WorkerDB;
 use crate::worker::workerstate::WorkerState;
 use crate::worker::workerthreadpool::WorkerThreadPool;
 use log::{error, info};
@@ -94,36 +92,49 @@ async fn main() {
     );
 
     let worker_state = WorkerState::new(
-        http,
+        http.clone(),
         reqwest.clone(),
         object_storage.clone(),
         pg_pool.clone(),
         Arc::new(current_user.clone()),
     ).expect("Failed to create worker state");
 
-    let worker_cache_data = WorkerCacheData::new(
-        WorkerDB::new(worker_state.clone())
-    )
-    .await
-    .expect("Failed to create worker cache data");
-
     let worker_pool = WorkerThreadPool::new(
-        worker_cache_data.clone(),
         worker_state.clone(),
         30, // TODO: Allow this to be configured
     )
     .expect("Failed to create worker thread pool");
 
-    let data = Data {
+    let data = Arc::new(Data {
         object_store: object_storage,
         pool: pg_pool.clone(),
         reqwest,
         current_user,
         worker: Arc::new(worker_pool),
-    };
+    });
+
+    let data1 = data.clone();
+    let http1 = http.clone();
+    tokio::task::spawn(async move {
+        log::info!("Starting RPC server");
+
+        let rpc_server = crate::api::server::create(data1, http1);
+
+        let addr = format!(
+            "{}:{}",
+            CONFIG.base_ports.template_worker_bind_addr,
+            CONFIG.base_ports.template_worker_port
+        );
+
+        let listener = tokio::net::TcpListener::bind(addr)
+            .await
+            .unwrap();
+
+        axum::serve(listener, rpc_server).await.unwrap();
+    });
 
     let mut client = client_builder
-        .data(Arc::new(data))
+        .data(data)
         .event_handler(EventFramework {})
         .wait_time_between_shard_start(Duration::from_secs(0)) // Disable wait time between shard start due to Sandwich
         .await
