@@ -4,11 +4,10 @@ use std::cell::RefCell;
 use std::{collections::HashMap, rc::Rc};
 use khronos_runtime::rt::mlua::prelude::*;
 use super::limits::{LuaKVConstraints, Ratelimits};
+use tokio::sync::broadcast::{channel as broadcast_channel, WeakSender as BroadcastWeakSender, Sender as BroadcastSender};
 
 use super::workerstate::WorkerState;
-use super::limits::{
-    MAX_TEMPLATE_MEMORY_USAGE, MAX_TEMPLATES_EXECUTION_TIME,
-};
+use super::limits::{MAX_TEMPLATE_MEMORY_USAGE, MAX_TEMPLATES_EXECUTION_TIME};
 
 pub type RuntimeManager = KhronosRuntimeManager<CreatedKhronosContext>;
 
@@ -27,6 +26,28 @@ pub struct VmData {
     pub ratelimits: Rc<Ratelimits>,
 }
 
+/// If multiple calls to get_vm_for happen at the same time, we want to ensure that only one VM is created
+/// 
+/// This is used to track the state of the VM creation process
+#[derive(Clone)]
+enum VmDataState {
+    Created(VmData),
+    Creating(BroadcastWeakSender<()>),
+}
+
+/// A handle to the VM creation process
+/// This is used to notify waiters when the VM creation has finished
+struct CreatingVmDataHandle {
+    tx: BroadcastSender<()>,
+}
+
+impl Drop for CreatingVmDataHandle {
+    fn drop(&mut self) {
+        // When the handle is dropped, we notify all waiters that the VM creation has finished
+        let _ = self.tx.send(());
+    }
+}
+
 /// A WorkerVmManager manages the state and VMs for a worker
 /// 
 /// # Notes
@@ -38,7 +59,7 @@ pub struct WorkerVmManager {
     /// The state all VMs in the WorkerVmManager share
     worker_state: WorkerState,
     /// The VMs managed by this WorkerVmManager, keyed by their tenant ID
-    vms: Rc<RefCell<HashMap<Id, VmData>>>
+    vms: Rc<RefCell<HashMap<Id, VmDataState>>>
 }
 
 impl WorkerVmManager {
@@ -53,16 +74,83 @@ impl WorkerVmManager {
     /// Returns the VM for the given tenant ID creating it if needed
     pub async fn get_vm_for(&self, id: Id) -> LuaResult<VmData> {
         // Check if the VM already exists
-        {
-            let vms = self.vms.borrow();
-            if let Some(vm) = vms.get(&id) {
-                return Ok(vm.clone());
+        loop {
+            let vm = {
+                let vms = self.vms.borrow();
+                vms.get(&id).cloned()
+            }; // At this point, self.vm's is no longer borrowed
+
+            match vm {
+                Some(VmDataState::Created(vm_data)) => return Ok(vm_data),
+                Some(VmDataState::Creating(tx)) => {
+                    let mut rx = {
+                        let Some(strong_tx) = tx.upgrade() else {
+                            // If the channel has been dropped, we need to retry creating the VM
+                            {
+                                let mut vms = self.vms.borrow_mut();
+                                vms.remove(&id); // Remove the VM if the channel is closed
+                            }
+                            continue;
+                        };
+                        let rx = strong_tx.subscribe();
+                        drop(tx); // Drop the Sender handle
+                        rx
+                    };
+
+                    if rx.is_closed() {
+                        // Retry if the channel is closed (failed to create the VM)
+                        {
+                            let mut vms = self.vms.borrow_mut();
+                            vms.remove(&id); // Remove the VM if the channel is closed
+                        }
+                        continue;
+                    }
+
+                    // If it's being created, we should wait for it to be created
+                    let _ = rx.recv().await;
+
+                    continue; // Retry to get the VM after it has been created
+                }
+                None => {
+                    // If it doesn't exist, we need to create it
+                    let (tx, _) = broadcast_channel(1);
+
+                    {
+                        let mut vms = self.vms.borrow_mut();
+                        vms.insert(id, VmDataState::Creating(tx.downgrade()));
+                    }
+
+                    {
+                        let _handle = CreatingVmDataHandle { tx };
+
+                        match self.create_vm_for(id).await {
+                            Ok(vmd) => {
+                                {
+                                    let mut vm_guard = self.vms.borrow_mut();
+                                    vm_guard.insert(id, VmDataState::Created(vmd.clone()));
+                                }
+                                return Ok(vmd);
+                            }
+                            Err(e) => {
+                                // If creation failed, remove the entry and notify waiters
+                                {
+                                    let mut vm_guard = self.vms.borrow_mut();
+                                    vm_guard.remove(&id);
+                                }
+                                return Err(e);
+                            }
+                        } // _handle should be dropped here
+                    }
+                }
             }
         }
+    }
 
+    /// Creates a new VM for the given tenant ID
+    /// 
+    /// Note that this does not store the VM in the vms map, it only creates it
+    async fn create_vm_for(&self, id: Id) -> LuaResult<VmData> {
         // If it doesn't exist, create a new VM
-        //
-        // This is safe as `self.vms` should not be borrowed or mutably borrowed
         let runtime_manager = self.configure_runtime_manager(id).await
             .map_err(|e| LuaError::external(e))?;
 
@@ -72,9 +160,6 @@ impl WorkerVmManager {
             kv_constraints: LuaKVConstraints::default(),
             ratelimits: Ratelimits::new().map_err(|e| LuaError::external(e.to_string()))?.into(),
         };
-
-        let mut vm_guard = self.vms.borrow_mut();
-        vm_guard.insert(id, vmd.clone());
 
         Ok(vmd)
     }
@@ -86,7 +171,12 @@ impl WorkerVmManager {
             let removed = vms.remove(&id);
 
             match removed {
-                Some(vm) => vm.runtime_manager,
+                Some(vm) => {
+                    match vm {
+                        VmDataState::Created(vmd) => vmd.runtime_manager,
+                        VmDataState::Creating(_) => return Err("Cannot remove a VM that is being created".into()),
+                    }
+                },
                 None => return Ok(()), // VM doesn't exist, nothing to do
             }
         }; // VM is no longer borrowed here 
