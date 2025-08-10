@@ -9,7 +9,7 @@ mod sandwich;
 mod events;
 mod worker;
 
-use crate::config::{CMD_ARGS, CONFIG};
+use crate::config::CONFIG;
 use crate::data::Data;
 use crate::event_handler::EventFramework;
 use crate::worker::workerstate::WorkerState;
@@ -19,14 +19,39 @@ use serenity::all::{ApplicationId, HttpBuilder};
 use sqlx::postgres::PgPoolOptions;
 use std::io::Write;
 use std::{sync::Arc, time::Duration};
+use clap::Parser;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>; // This is constant and should be copy pasted
 
-/// The main function is just a command handling function
+/// Command line arguments
+#[derive(Parser, Debug, Clone)]
+struct CmdArgs {
+    /// Shard IDs to start. Mutually exclusive with `shard_count` and neither passed [default is to autoshard]
+    #[clap(long)]
+    pub shards: Option<Vec<u16>>,
+
+    /// Number of shards to start. Mutually exclusive with `shards` and neither passed [default is to autoshard]
+    #[clap(long)]
+    pub shard_count: Option<u16>,
+
+    /// Max connections that should be made to the database
+    #[clap(long, default_value = "7")]
+    pub max_db_connections: u32,
+
+    #[clap(long, default_value_t = false)]
+    pub use_tokio_console: bool,
+
+    #[clap(long, default_value_t = false)]
+    pub register_commands_only: bool,
+
+    /// Number of threads to use for the worker thread pool
+    #[clap(long, default_value = "30")]
+    pub worker_threads: usize,
+}
+
 #[tokio::main]
 async fn main() {
-    let _ = &*CMD_ARGS;
-
+    let args = CmdArgs::parse();
     let mut env_builder = env_logger::builder();
 
     env_builder
@@ -65,7 +90,7 @@ async fn main() {
     info!("Connecting to database");
 
     let pg_pool = PgPoolOptions::new()
-        .max_connections(CMD_ARGS.max_db_connections)
+        .max_connections(args.max_db_connections)
         .connect(&CONFIG.meta.postgres_url)
         .await
         .expect("Could not initialize connection");
@@ -101,7 +126,7 @@ async fn main() {
 
     let worker_pool = WorkerThreadPool::new(
         worker_state.clone(),
-        30, // TODO: Allow this to be configured
+        args.worker_threads
     )
     .expect("Failed to create worker thread pool");
 
@@ -148,7 +173,7 @@ async fn main() {
 
     client.http.set_application_id(ApplicationId::new(current_user_id.get()));
 
-    if CMD_ARGS.register_commands_only {
+    if args.register_commands_only {
         client
             .http
             .create_global_commands(&data.commands)
@@ -158,8 +183,8 @@ async fn main() {
         return;
     }
 
-    if let Some(shard_count) = CMD_ARGS.shard_count {
-        if let Some(ref shards) = CMD_ARGS.shards {
+    if let Some(shard_count) = args.shard_count {
+        if let Some(ref shards) = args.shards {
             let shard_range = std::ops::Range {
                 start: shards[0],
                 end: *shards.last().expect("Shards should not be empty"),

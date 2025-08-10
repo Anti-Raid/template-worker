@@ -15,11 +15,9 @@ use khronos_runtime::traits::ir::ObjectMetadata;
 use khronos_runtime::traits::kvprovider::KVProvider;
 use khronos_runtime::traits::objectstorageprovider::ObjectStorageProvider;
 use khronos_runtime::utils::khronos_value::KhronosValue;
-use moka::future::Cache;
 use rand::distr::{Alphanumeric, SampleString};
 use serde_json::Value;
 use sqlx::Row;
-use std::sync::LazyLock;
 use std::{rc::Rc, sync::Arc};
 use super::limits::{LuaKVConstraints, Ratelimits};
 
@@ -27,14 +25,6 @@ use super::limits::{LuaKVConstraints, Ratelimits};
 fn gen_random(length: usize) -> String {
     Alphanumeric.sample_string(&mut rand::rng(), length)
 }
-
-/// Internal short-lived channel cache
-pub static CHANNEL_CACHE: LazyLock<Cache<serenity::all::GenericChannelId, Value>> =
-    LazyLock::new(|| {
-        Cache::builder()
-            .time_to_idle(std::time::Duration::from_secs(30))
-            .build()
-    });
 
 #[derive(Clone)]
 pub struct TemplateContextProvider {
@@ -770,23 +760,6 @@ impl DiscordProvider for ArDiscordProvider {
         &self,
         channel_id: serenity::all::GenericChannelId,
     ) -> serenity::Result<Value, crate::Error> {
-        {
-            // Check cache first
-            let cached_channel = CHANNEL_CACHE.get(&channel_id).await;
-
-            if let Some(cached_channel) = cached_channel {
-                let Some(Value::String(guild_id)) = cached_channel.get("guild_id") else {
-                    return Err(format!("Channel {channel_id} does not belong to a guild").into());
-                };
-
-                if guild_id != &self.guild_id.to_string() {
-                    return Err(format!("Channel {channel_id} does not belong to the guild").into());
-                }
-
-                return Ok(cached_channel);
-            }
-        }
-
         let channel = crate::sandwich::channel(
             &self.state.serenity_http,
             &self.state.reqwest_client,
@@ -832,9 +805,6 @@ impl DiscordProvider for ArDiscordProvider {
             .await
             .map_err(|e| format!("Failed to edit channel permissions: {}", e))?;
 
-        // Update cache
-        CHANNEL_CACHE.remove(&channel_id).await;
-
         Ok(())
     }
 
@@ -851,9 +821,6 @@ impl DiscordProvider for ArDiscordProvider {
             .await
             .map_err(|e| format!("Failed to edit channel: {}", e))?;
 
-        // Update cache
-        CHANNEL_CACHE.insert(channel_id, chan.clone()).await;
-
         Ok(chan)
     }
 
@@ -868,9 +835,6 @@ impl DiscordProvider for ArDiscordProvider {
             .delete_channel(channel_id, audit_log_reason)
             .await
             .map_err(|e| format!("Failed to delete channel: {}", e))?;
-
-        // Remove from cache
-        CHANNEL_CACHE.remove(&channel_id).await;
 
         Ok(chan)
     }

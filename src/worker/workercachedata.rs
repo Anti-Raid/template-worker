@@ -10,7 +10,6 @@ use super::template::Template;
 use super::builtins::{USE_BUILTINS, BUILTINS};
 use super::workervmmanager::Id;
 use super::workerdb::WorkerDB;
-
 use khronos_runtime::primitives::event::CreateEvent;
 
 #[derive(Clone)]
@@ -173,12 +172,12 @@ impl WorkerCacheData {
     }
 
     /// Sets a deferred cache regeneration mode for a tenant
-    pub async fn set_deferred_cache_regeneration(&self, id: Id, mode: DeferredCacheRegenerationMode) {
+    pub fn set_deferred_cache_regeneration(&self, id: Id, mode: DeferredCacheRegenerationMode) {
         self.deferred_cache_regens.insert(id, mode);
     }
 
     /// Gets and removes the deferred cache regeneration mode for a tenant
-    pub async fn take_deferred_cache_regeneration(&self, id: &Id) -> Option<DeferredCacheRegenerationMode> {
+    pub fn take_deferred_cache_regeneration(&self, id: &Id) -> Option<DeferredCacheRegenerationMode> {
         self.deferred_cache_regens.remove(id)
     }
 }

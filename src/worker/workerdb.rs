@@ -127,6 +127,7 @@ impl WorkerDB {
     }
 
     /// Gets key expiries for a specific tenant
+    #[allow(dead_code)]
     pub async fn get_key_expiries_for(&self, id: Id) -> Result<ArcVec<KeyExpiry>, crate::Error> {
         match id {
             Id::GuildId(guild_id) => {

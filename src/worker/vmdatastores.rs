@@ -527,8 +527,7 @@ impl DataStoreImpl for TemplateStore {
                             .set_deferred_cache_regeneration(
                                 self_ref.id,
                                 DeferredCacheRegenerationMode::FlushSelf {},
-                            )
-                            .await;
+                            );
 
                         Ok(value!(KhronosValue::Null))
                     })
@@ -591,8 +590,7 @@ impl DataStoreImpl for TemplateStore {
                             .set_deferred_cache_regeneration(
                                 self_ref.id,
                                 DeferredCacheRegenerationMode::FlushSelf {},
-                            )
-                            .await;
+                            );
 
                         Ok(value!(KhronosValue::Null))
                     })
@@ -647,8 +645,7 @@ impl DataStoreImpl for TemplateStore {
                             .set_deferred_cache_regeneration(
                                 self_ref.id,
                                 DeferredCacheRegenerationMode::FlushSelf {},
-                            )
-                            .await;
+                            );
 
                         Ok(value!(KhronosValue::Null))
                     })

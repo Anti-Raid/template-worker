@@ -421,7 +421,7 @@ impl WorkerDispatch {
             }
         }
 
-        if let Some(mode) = self.cache.take_deferred_cache_regeneration(&id).await {
+        if let Some(mode) = self.cache.take_deferred_cache_regeneration(&id) {
             log::info!("Detected deferred cache regeneration for ID {id:?}, performing now");
             if let Err(e) = self.regenerate_deferred_cache_for(id, mode).await {
                 log::error!("Failed to perform deferred cache regeneration for ID {id:?}: {e}");
