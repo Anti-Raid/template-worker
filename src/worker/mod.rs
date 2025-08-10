@@ -21,6 +21,7 @@
 //! - KeyExpiryChannel: Provides a channel for key expiries to be sent to the worker system while supporting on-demand repopulation on key expiry changes
 //! - KeyExpiry: Provides a task that handles key expiries and dispatches them to the worker system
 //! - WorkerThreadPool: Provides a thread pool for workers based on Discord's sharding formulapub mod, allowing for multiple worker threads to be spawned and used concurrently
+//! - StaticRef: Provides a static reference newtype to improve performance/avoid refcounting and boxing of internal worker structures. Not yet used
 
 pub mod workerdispatch;
 pub mod workervmmanager;
@@ -40,3 +41,5 @@ pub mod workerlike;
 pub mod workerfilter;
 pub mod workerthreadpool;
 pub mod staticref;
+pub mod workerprocesspool; // TODO: Implement process pool workers
+pub mod workerprocessserver; // TODO: Implement process workers

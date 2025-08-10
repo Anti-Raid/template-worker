@@ -19,9 +19,22 @@ use serenity::all::{ApplicationId, HttpBuilder};
 use sqlx::postgres::PgPoolOptions;
 use std::io::Write;
 use std::{sync::Arc, time::Duration};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>; // This is constant and should be copy pasted
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum WorkerType {
+    /// Worker that uses a thread pool for executing tasks
+    #[clap(name = "threadpool", alias = "thread-pool")]
+    ThreadPool,
+    /// Worker that uses a process pool for executing tasks
+    #[clap(name = "processpool", alias = "process-pool")]
+    ProcessPool,
+    /// Single worker within a process pool system
+    #[clap(name = "processpoolworker", alias = "process-pool-worker")]
+    ProcessPoolWorker
+}
 
 /// Command line arguments
 #[derive(Parser, Debug, Clone)]
@@ -47,6 +60,11 @@ struct CmdArgs {
     /// Number of threads to use for the worker thread pool
     #[clap(long, default_value = "30")]
     pub worker_threads: usize,
+
+    /// Type of worker to use
+    #[clap(long, default_value = "threadpool", value_enum)]
+    pub worker_type: WorkerType,
+    
 }
 
 #[tokio::main]
@@ -124,18 +142,18 @@ async fn main() {
         Arc::new(current_user.clone()),
     ).expect("Failed to create worker state");
 
-    let worker_pool = WorkerThreadPool::new(
+    let worker_pool = Arc::new(WorkerThreadPool::new(
         worker_state.clone(),
         args.worker_threads
     )
-    .expect("Failed to create worker thread pool");
+    .expect("Failed to create worker thread pool"));
 
     let data = Arc::new(Data {
         object_store: object_storage,
         pool: pg_pool.clone(),
         reqwest,
         current_user,
-        worker: Arc::new(worker_pool),
+        worker: worker_pool,
     });
 
     let data1 = data.clone();

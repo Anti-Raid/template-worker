@@ -88,7 +88,7 @@ impl PushableMessage for RegenerateCache {
 pub struct WorkerThread {
     /// The tx channel for sending messages to the worker thread
     tx: UnboundedSender<WorkerThreadMessage>,
-    /// The id of the worker thread, used for debugging and logging
+    /// The id of the worker thread, used for routing
     id: usize,
     /// Handle to the worker thread
     handle: JoinHandle<()>,
