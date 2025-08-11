@@ -1,9 +1,9 @@
 use std::{collections::HashMap, sync::{Arc, Mutex}};
 
 use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
-use tokio_tungstenite::MaybeTlsStream;
+use tokio_tungstenite::{tungstenite::{client::IntoClientRequest, handshake::server::Request}, MaybeTlsStream, WebSocketStream};
 
-use crate::worker::{workerdispatch::{DispatchTemplateResult, TemplateResult}, workervmmanager::Id};
+use crate::worker::{workerdispatch::{DispatchTemplateResult, TemplateResult}, workerlike::WorkerLike, workervmmanager::Id};
 use futures::StreamExt;
 use futures::SinkExt;
 use rand::{distr::{Alphanumeric, SampleString}, Rng};
@@ -33,45 +33,8 @@ pub trait WorkerProcessCommServer {
     }
 }
 
-#[async_trait::async_trait]
-pub trait WorkerProcessCommClient {
-    /// Connect to the worker process server
-    async fn connect(&self) -> Result<(), crate::Error>;
-
-    /// Receive an event from the worker process
-    async fn receive_event(&self) -> Result<(String, MasterMessageRecv), crate::Error>;
-
-    /// Sends a message to the master process
-    async fn send_message(&self, req_id: String, msg: MasterMessageSend) -> Result<(), crate::Error>;
-}
-
-/// Represents a message received from the master process
-pub enum MasterMessageRecv {
-    DispatchEventToTemplates {
-        id: Id,
-        event: CreateEvent,
-    },
-    DispatchScopedEventToTemplates {
-        id: WorkerProcessCommTenantId,
-        event: CreateEvent,
-        scopes: Vec<String>,
-    },
-    CacheRegenerate {
-        id: Id,
-    },
-    IsReady {}
-}
-
-/// Represents a message sent to the master process
-pub enum MasterMessageSend {
-    DispatchEventToTemplates {
-        resp: DispatchTemplateResult,
-    },
-    DispatchScopedEventToTemplates {
-        resp: DispatchTemplateResult,
-    },
-    IsReady {}
-}
+/// Marker trait to signify that this is a client for the worker process communication
+pub trait WorkerProcessCommClient {}
 
 #[derive(serde::Serialize, serde::Deserialize)]
 enum WorkerProcessCommTenantIdType {
@@ -139,8 +102,8 @@ impl From<WorkerProcessCommDispatchResult> for DispatchTemplateResult {
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-/// Stores the messages that can be sent over the IPC channel
-enum WorkerProcessCommWebsocketSendMessageData {
+/// Stores the message data that is sent from master to the worker process
+enum WorkerProcessCommWebsocketServerMessageData {
     DispatchEventToTemplates {
         id: WorkerProcessCommTenantId,
         event_json: String,
@@ -157,18 +120,17 @@ enum WorkerProcessCommWebsocketSendMessageData {
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-/// Stores the messages that can be sent over the IPC channel
-enum WorkerProcessCommWebsocketSendMessage {
+/// Stores the messages that can be sent from master to worker
+enum WorkerProcessCommWebsocketServerMessage {
     Request {
-        data: WorkerProcessCommWebsocketSendMessageData,
+        data: WorkerProcessCommWebsocketServerMessageData,
         id: String,
     },
-    Identified {},
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-/// Represents the messages that can be received from the websocket
-enum WorkerProcessCommWebsocketReceiveMessageData {
+/// Represents the message data that can be sent from worker to master
+enum WorkerProcessCommWebsocketClientMessageData {
     DispatchEventToTemplates {
         resp: WorkerProcessCommDispatchResult,
     },
@@ -180,21 +142,18 @@ enum WorkerProcessCommWebsocketReceiveMessageData {
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-/// Represents the messages that can be received from the websocket
-enum WorkerProcessCommWebsocketReceiveMessage {
+/// Represents the messages that can be sent from worker to master
+enum WorkerProcessCommWebsocketClientMessage {
     Response {
-        data: WorkerProcessCommWebsocketReceiveMessageData,
+        data: WorkerProcessCommWebsocketClientMessageData,
         id: String,
-    },
-    Identify {
-        token: String,
     },
 }
 
 /// Messages that can be sent to the websocket task
 enum WorkerProcessCommWebsocketMessage {
     MakeRequest {
-        req: WorkerProcessCommWebsocketSendMessage,
+        req: WorkerProcessCommWebsocketServerMessage,
     },
 }
 
@@ -204,11 +163,11 @@ pub struct WorkerProcessCommWebsocketServer {
     token: String,
     port: u16,
     tx: UnboundedSender<WorkerProcessCommWebsocketMessage>,
-    request_callbacks: Arc<Mutex<HashMap<String, OneShotSender<WorkerProcessCommWebsocketReceiveMessageData>>>>,
+    request_callbacks: Arc<Mutex<HashMap<String, OneShotSender<WorkerProcessCommWebsocketClientMessageData>>>>,
 }
 
 impl WorkerProcessCommWebsocketServer {
-    /// Create a new instance of `WorkerProcessCommWebsocket`
+    /// Create a new instance of `WorkerProcessCommWebsocket` and starts up the websocket server
     pub async fn new() -> Result<Self, crate::Error> {
         let mut port = rand::rng().random_range(1030..=65535);
         
@@ -247,7 +206,17 @@ impl WorkerProcessCommWebsocketServer {
     /// Background task to handle the websocket
     async fn ws_task(&self, listener: tokio::net::TcpListener, mut rx: UnboundedReceiver<WorkerProcessCommWebsocketMessage>) {
         while let Ok((stream, _)) = listener.accept().await {
-            let ws_stream = match tokio_tungstenite::accept_async(stream)
+            let ws_stream = match tokio_tungstenite::accept_hdr_async(stream, |req: &Request, res| {
+                let token = req.headers().get("Worker-Token")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+
+                if token.as_deref() != Some(&self.token) {
+                    return Err(tokio_tungstenite::tungstenite::handshake::server::ErrorResponse::new(Some("Invalid token".to_string())));
+                }
+
+                Ok(res)
+            })
                 .await {
                 Ok(ws) => ws,
                 Err(e) => {
@@ -264,7 +233,6 @@ impl WorkerProcessCommWebsocketServer {
     /// Internal handler for the websocket connection
     async fn ws_handler(&self, stream: tokio_tungstenite::WebSocketStream<TcpStream>, rx: &mut UnboundedReceiver<WorkerProcessCommWebsocketMessage>) {
         // Begin recieving events
-        let mut is_verified = false;
         let (mut write, mut read) = stream.split();
         loop {
             tokio::select! {
@@ -306,10 +274,11 @@ impl WorkerProcessCommWebsocketServer {
                         continue;
                     };
 
-                    let msg: WorkerProcessCommWebsocketReceiveMessage = match serde_json::from_str(&text) {
+                    let msg: WorkerProcessCommWebsocketClientMessage = match serde_json::from_str(&text) {
                         Ok(msg) => msg,
                         Err(e) => {
                             // Close the websocket
+                            log::error!("Failed to deserialize message: {e}");
                             if let Err(e) = write.send(tokio_tungstenite::tungstenite::Message::Close(None)).await {
                                 log::error!("Failed to send close message: {}", e);
                             }
@@ -322,48 +291,7 @@ impl WorkerProcessCommWebsocketServer {
                     };
 
                     match msg {
-                        WorkerProcessCommWebsocketReceiveMessage::Identify { token } => {
-                            if token != self.token {
-                                log::error!("Worker process did not verify connection, closing websocket");
-                                // Close the websocket
-                                if let Err(e) = write.send(tokio_tungstenite::tungstenite::Message::Close(None)).await {
-                                    log::error!("Failed to send close message: {}", e);
-                                }
-                                match write.close().await {
-                                    Ok(_) => {},
-                                    Err(e) => log::error!("Failed to close websocket: {}", e),
-                                }
-                                return;
-                            }
-
-                            is_verified = true;
-                            let identified_msg = match serde_json::to_string(&WorkerProcessCommWebsocketSendMessage::Identified {}) {
-                                Ok(msg) => msg,
-                                Err(e) => {
-                                    log::error!("Failed to serialize identified message: {}", e);
-                                    continue;
-                                }
-                            };
-
-                            if let Err(e) = write.send(tokio_tungstenite::tungstenite::Message::Text(identified_msg.into())).await {
-                                log::error!("Failed to send identified message: {}", e);
-                                continue;
-                            }
-                            log::info!("Worker process verified connection");
-                        },
-                        WorkerProcessCommWebsocketReceiveMessage::Response { data, id } => {
-                            if !is_verified {
-                                // Close the websocket
-                                if let Err(e) = write.send(tokio_tungstenite::tungstenite::Message::Close(None)).await {
-                                    log::error!("Failed to send close message: {}", e);
-                                }
-                                log::error!("Worker process did not verify connection, closing websocket");
-                                match write.close().await {
-                                    Ok(_) => {},
-                                    Err(e) => log::error!("Failed to close websocket: {}", e),
-                                }
-                                return;
-                            }
+                        WorkerProcessCommWebsocketClientMessage::Response { data, id } => {
                             let callback = {
                                 let mut guard = match self.request_callbacks.lock() {
                                     Ok(guard) => guard,
@@ -386,10 +314,10 @@ impl WorkerProcessCommWebsocketServer {
     }
 
     /// Send a message to the worker process and wait for a response
-    async fn send(&self, data: WorkerProcessCommWebsocketSendMessageData) -> Result<WorkerProcessCommWebsocketReceiveMessageData, crate::Error> {
+    async fn send(&self, data: WorkerProcessCommWebsocketServerMessageData) -> Result<WorkerProcessCommWebsocketClientMessageData, crate::Error> {
         struct SendDropGuard {
             id: String,
-            request_callbacks: Arc<Mutex<HashMap<String, OneShotSender<WorkerProcessCommWebsocketReceiveMessageData>>>>,
+            request_callbacks: Arc<Mutex<HashMap<String, OneShotSender<WorkerProcessCommWebsocketClientMessageData>>>>,
         }
 
         impl Drop for SendDropGuard {
@@ -406,7 +334,7 @@ impl WorkerProcessCommWebsocketServer {
         }
 
         let id = Alphanumeric.sample_string(&mut rand::rng(), 16);
-        let req = WorkerProcessCommWebsocketSendMessage::Request {
+        let req = WorkerProcessCommWebsocketServerMessage::Request {
             data,
             id: id.clone(),
         };
@@ -437,37 +365,37 @@ impl WorkerProcessCommWebsocketServer {
 #[async_trait::async_trait]
 impl WorkerProcessCommServer for WorkerProcessCommWebsocketServer {
     async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> DispatchTemplateResult {
-        let resp = self.send(WorkerProcessCommWebsocketSendMessageData::DispatchEventToTemplates {
+        let resp = self.send(WorkerProcessCommWebsocketServerMessageData::DispatchEventToTemplates {
             id: WorkerProcessCommTenantId::from(id),
             event_json: serde_json::to_string(&event)?,
         }).await?;
 
         match resp {
-            WorkerProcessCommWebsocketReceiveMessageData::DispatchEventToTemplates { resp } => resp.into(),
+            WorkerProcessCommWebsocketClientMessageData::DispatchEventToTemplates { resp } => resp.into(),
             _ => Err(format!("Unexpected response type").into()),
         }
     }
 
     async fn dispatch_scoped_event_to_templates(&self, id: Id, event: CreateEvent, scopes: Vec<String>) -> DispatchTemplateResult {
-        let resp = self.send(WorkerProcessCommWebsocketSendMessageData::DispatchScopedEventToTemplates {
+        let resp = self.send(WorkerProcessCommWebsocketServerMessageData::DispatchScopedEventToTemplates {
             id: WorkerProcessCommTenantId::from(id),
             scopes,
             event_json: serde_json::to_string(&event)?,
         }).await?;
 
         match resp {
-            WorkerProcessCommWebsocketReceiveMessageData::DispatchScopedEventToTemplates { resp } => resp.into(),
+            WorkerProcessCommWebsocketClientMessageData::DispatchScopedEventToTemplates { resp } => resp.into(),
             _ => Err(format!("Unexpected response type").into()),
         }
     }
 
     async fn regenerate_cache(&self, id: Id) -> Result<(), crate::Error> {
-        let resp = self.send(WorkerProcessCommWebsocketSendMessageData::CacheRegenerate {
+        let resp = self.send(WorkerProcessCommWebsocketServerMessageData::CacheRegenerate {
             id: WorkerProcessCommTenantId::from(id),
         }).await?;
 
         match resp {
-            WorkerProcessCommWebsocketReceiveMessageData::CacheRegenerate {} => Ok(()),
+            WorkerProcessCommWebsocketClientMessageData::CacheRegenerate {} => Ok(()),
             _ => Err(format!("Unexpected response type").into()),
         }
     }
@@ -489,10 +417,10 @@ impl WorkerProcessCommServer for WorkerProcessCommWebsocketServer {
     async fn wait_for_ready(&self) -> Result<(), crate::Error> {
         // Here there will implement logic to wait for the worker process to be ready
         // For now, we just return Ok
-        let resp = self.send(WorkerProcessCommWebsocketSendMessageData::IsReady {}).await?;
+        let resp = self.send(WorkerProcessCommWebsocketServerMessageData::IsReady {}).await?;
 
         match resp {
-            WorkerProcessCommWebsocketReceiveMessageData::IsReady {} => Ok(()),
+            WorkerProcessCommWebsocketClientMessageData::IsReady {} => Ok(()),
             _ => Err(format!("Unexpected response type").into()),
         }
     }
@@ -502,10 +430,12 @@ impl WorkerProcessCommServer for WorkerProcessCommWebsocketServer {
 #[derive(Clone)]
 pub struct WorkerProcessCommWebsocketClient {
     token: String,
+    worker: Arc<dyn WorkerLike + Send + Sync>,
 }
 
 impl WorkerProcessCommWebsocketClient {
-    pub async fn new() -> Result<Self, crate::Error> {
+    /// Creates a new WorkerProcessCommWebsocketClient (worker process communication via websockets client)
+    pub async fn new(worker: Arc<dyn WorkerLike + Send + Sync>) -> Result<Self, crate::Error> {
         let port = std::env::var("WORKER_COMM_WEBSOCKET_PORT")
             .map_err(|_| "WORKER_COMM_WEBSOCKET_PORT not set")?
             .parse::<u16>()
@@ -515,12 +445,39 @@ impl WorkerProcessCommWebsocketClient {
             .map_err(|_| "WORKER_COMM_WEBSOCKET_TOKEN not set")?;
 
         let url = format!("ws://127.0.1:{}", port);
-        let (conn, _) = tokio_tungstenite::connect_async(url)
+        let mut request = url.into_client_request()?;
+        request.headers_mut().insert("Worker-Token", token.clone().parse()?);
+        let (conn, _) = tokio_tungstenite::connect_async(request)
             .await
             .map_err(|e| format!("Failed to connect to websocket: {}", e))?;
 
-        Ok(Self {
+        let client = Self {
             token,
-        })
+            worker,
+        };
+
+        let client_ref = client.clone();
+        tokio::task::spawn(async move {
+            client_ref.ws_task(conn).await;
+        });
+
+        Ok(client)
+    }
+
+    async fn ws_task(&self, mut conn: WebSocketStream<MaybeTlsStream<TcpStream>>) {
+        loop {
+        }
+    }
+
+    async fn send_to_ws(conn: &mut WebSocketStream<MaybeTlsStream<TcpStream>>, msg: WorkerProcessCommWebsocketClientMessage) -> Result<(), crate::Error> {
+        let msg_str = serde_json::to_string(&msg)
+            .map_err(|e| format!("Failed to serialize message: {}", e))?;
+        
+        conn.send(tokio_tungstenite::tungstenite::Message::Text(msg_str.into()))
+            .await
+            .map_err(|e| format!("Failed to send message: {}", e))?;
+        Ok(())
     }
 }
+
+impl WorkerProcessCommClient for WorkerProcessCommWebsocketClient {}
