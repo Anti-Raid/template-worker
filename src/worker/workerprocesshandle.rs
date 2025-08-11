@@ -18,7 +18,7 @@ enum ProcessServerMessage {
 /// 
 /// WorkerProcessClient is the client side of the worker process server which runs on the worker process (not created on master)
 #[derive(Clone)]
-pub struct WorkerProcessServer {
+pub struct WorkerProcessHandle {
     /// The process handle for the worker process
     process_handle: UnboundedSender<ProcessServerMessage>,
 
@@ -30,8 +30,8 @@ pub struct WorkerProcessServer {
 }
 
 #[allow(unused)]
-impl WorkerProcessServer {
-    /// Creates a new WorkerProcessServer with the given process handle and communication ID
+impl WorkerProcessHandle {
+    /// Creates a new WorkerProcessHandle with the given process handle and communication ID
     pub async fn new(id: usize) -> Result<Self, crate::Error> {
 
         let (tx, rx) = unbounded_channel();
@@ -76,7 +76,7 @@ impl WorkerProcessServer {
                 }
             };
 
-            // ID used by iceoryx2 for routing messages to the correct worker process
+            // ID used for routing messages to the correct worker process
             let communication_id = format!("worker-{}", uuid::Uuid::new_v4());
 
             let mut child = match Command::new(current_exe)

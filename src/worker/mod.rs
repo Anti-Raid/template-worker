@@ -42,4 +42,5 @@ pub mod workerfilter;
 pub mod workerthreadpool;
 pub mod staticref;
 pub mod workerprocesspool; // TODO: Implement process pool workers
-pub mod workerprocessserver; // TODO: Implement process workers
+pub mod workerprocesshandle; // TODO: Implement process workers
+pub mod workerprocesscomm; // TODO: Implement process workers
