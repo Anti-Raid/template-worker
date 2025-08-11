@@ -55,9 +55,6 @@ serde_repr = "0.1"
 aws-sdk-s3 = { version = "1" }
 aws-smithy-types = { version = "1" }
 
-# tokio tungstenite
-tokio-tungstenite = { version = "0.27" }
-
 [dependencies.tokio]
 version = "1"
 features = ["sync", "macros", "rt-multi-thread", "tracing", "process"]
