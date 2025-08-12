@@ -27,14 +27,10 @@ enum WorkerThreadMessage {
     },
 }
 
-/// CreatedWorkerThreadMessage is a wrapper around WorkerThreadMessage 
-/// that is 'public'. Not usable outside of this file though
-pub struct CreatedWorkerThreadMessage(pub(self) WorkerThreadMessage);
-
-pub trait PushableMessage {
+trait PushableMessage {
     type Response: Send + Sync + 'static;
 
-    fn into_message(self, tx: Option<OneShotSender<Self::Response>>) -> CreatedWorkerThreadMessage;
+    fn into_message(self, tx: Option<OneShotSender<Self::Response>>) -> WorkerThreadMessage;
 }
 
 pub struct DispatchEvent {
@@ -49,19 +45,19 @@ pub struct DispatchEvent {
 impl PushableMessage for DispatchEvent {
     type Response = DispatchTemplateResult;
 
-    fn into_message(self, tx: Option<OneShotSender<Self::Response>>) -> CreatedWorkerThreadMessage {
+    fn into_message(self, tx: Option<OneShotSender<Self::Response>>) -> WorkerThreadMessage {
         match self.scopes {
-            Some(scopes) => CreatedWorkerThreadMessage(WorkerThreadMessage::DispatchScopedEvent {
+            Some(scopes) => WorkerThreadMessage::DispatchScopedEvent {
                 id: self.id,
                 event: self.event,
                 scopes,
                 tx,
-            }),
-            None => CreatedWorkerThreadMessage(WorkerThreadMessage::DispatchEvent {
+            },
+            None => WorkerThreadMessage::DispatchEvent {
                 id: self.id,
                 event: self.event,
                 tx,
-            }),
+            },
         }
     }
 }
@@ -74,11 +70,11 @@ pub struct RegenerateCache {
 impl PushableMessage for RegenerateCache {
     type Response = Result<(), crate::Error>;
 
-    fn into_message(self, tx: Option<OneShotSender<Self::Response>>) -> CreatedWorkerThreadMessage {
-        CreatedWorkerThreadMessage(WorkerThreadMessage::RegenerateCache {
+    fn into_message(self, tx: Option<OneShotSender<Self::Response>>) -> WorkerThreadMessage {
+        WorkerThreadMessage::RegenerateCache {
             id: self.id,
             tx,
-        })
+        }
     }
 }
 
@@ -155,16 +151,12 @@ impl WorkerThread {
             .map_err(|e| format!("Failed to spawn worker thread: {e}").into())
     }
 
-    /// Returns the ID of the worker thread
-    #[allow(dead_code)]
-    pub fn id(&self) -> usize { self.id }
-
     /// Sends a message to the worker thread
     /// and waits for a response
-    pub async fn send<T: PushableMessage>(&self, msg: T) -> Result<T::Response, crate::Error> {
+    async fn send<T: PushableMessage>(&self, msg: T) -> Result<T::Response, crate::Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let msg = msg.into_message(Some(tx));
-        self.tx.send(msg.0)
+        self.tx.send(msg)
             .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
         rx.await.map_err(|e| format!("Failed to receive response from worker thread: {e}").into())
     }
@@ -172,10 +164,10 @@ impl WorkerThread {
     /// Sends a message to the worker thread 
     /// and wait for a response with a timeout
     #[allow(dead_code)]
-    pub async fn send_timeout<T: PushableMessage>(&self, msg: T, duration: Duration) -> Result<T::Response, crate::Error> {
+    async fn send_timeout<T: PushableMessage>(&self, msg: T, duration: Duration) -> Result<T::Response, crate::Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let msg = msg.into_message(Some(tx));
-        self.tx.send(msg.0)
+        self.tx.send(msg)
             .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
 
         tokio::select! {
@@ -185,10 +177,10 @@ impl WorkerThread {
     }
 
     /// Sends a message to the worker thread
-    pub async fn send_nowait<T: PushableMessage>(&self, msg: T) -> Result<(), crate::Error> {
+    async fn send_nowait<T: PushableMessage>(&self, msg: T) -> Result<(), crate::Error> {
         let (tx, _rx) = tokio::sync::oneshot::channel();
         let msg = msg.into_message(Some(tx));
-        self.tx.send(msg.0)
+        self.tx.send(msg)
             .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
         Ok(())
     }

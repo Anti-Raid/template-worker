@@ -5,16 +5,34 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use super::{workerdispatch::DispatchTemplateResult, workerlike::WorkerLike, workervmmanager::Id};
 use rand::{distr::{Alphanumeric, SampleString}, Rng};
-use super::workerprocesscomm::{WorkerProcessCommServer, WorkerProcessCommClient, WorkerProcessCommTenantId, WorkerProcessCommDispatchResult};
+use super::workerprocesscomm::{WorkerProcessCommServer, WorkerProcessCommClient, WorkerProcessCommServerCreator, WorkerProcessCommTenantId, WorkerProcessCommDispatchResult};
+
+/// Worker Process Communication Server Creator for HTTP/2
+pub struct WorkerProcessCommHttp2ServerCreator {
+    reqwest: reqwest::Client,
+}
+
+impl WorkerProcessCommHttp2ServerCreator {
+    pub fn new(reqwest: reqwest::Client) -> Self {
+        Self { reqwest }
+    }
+}
+
+#[async_trait::async_trait]
+impl WorkerProcessCommServerCreator for WorkerProcessCommHttp2ServerCreator {
+    async fn create(&self) -> Result<Box<dyn WorkerProcessCommServer>, crate::Error> {
+        Ok(Box::new(WorkerProcessCommHttp2Master::new(self.reqwest.clone())))
+    }
+}
+
 
 /// Worker Process Communication using HTTP/2
 /// 
 /// Server here refers to the master side which sends data to/from the worker (client).
 /// Most notably, the client is what exposes the HTTP/2 server to the master process.
-#[derive(Clone)]
 pub struct WorkerProcessCommHttp2Master {
-    token: String,
-    port: u16,
+    token: Option<String>,
+    port: Option<u16>,
     reqwest: reqwest::Client,
 }
 
@@ -23,7 +41,15 @@ impl WorkerProcessCommHttp2Master {
     const REGENERATE_CACHE_PATH: &'static str = "/1";
     const TOKEN_LENGTH: usize = 4096;
 
-    pub async fn new(reqwest: reqwest::Client) -> Result<Self, crate::Error> {
+    pub fn new(reqwest: reqwest::Client) -> Self {
+        Self {
+            token: None,
+            port: None,
+            reqwest,
+        }
+    }
+
+    async fn create_state() -> Result<(u16, String), crate::Error> {
         let mut port = rand::rng().random_range(1030..=65535);
         
         let mut attempts = 0;
@@ -43,11 +69,7 @@ impl WorkerProcessCommHttp2Master {
             }
         };
 
-        Ok(Self {
-            token: Alphanumeric.sample_string(&mut rand::rng(), Self::TOKEN_LENGTH),
-            port,
-            reqwest,
-        })
+        Ok((port, Alphanumeric.sample_string(&mut rand::rng(), Self::TOKEN_LENGTH)))
     }
 
     /// Sends a request to the worker process and returns the response
@@ -56,9 +78,16 @@ impl WorkerProcessCommHttp2Master {
         url: &str,
         request: Request,
     ) -> Result<Response, crate::Error> {
-        let url = format!("http://127.0.1:{}{}", self.port, url);
+        let Some(port) = self.port else {
+            return Err("Worker process communication port not set".into());
+        };
+        let Some(token) = &self.token else {
+            return Err("Worker process communication token not set".into());
+        };
+
+        let url = format!("http://127.0.1:{}{}", port, url);
         let request = self.reqwest.post(&url)
-            .header("Token", &self.token)
+            .header("Token", token)
             .json(&request)
             .send()
             .await
@@ -77,6 +106,14 @@ impl WorkerProcessCommHttp2Master {
 
 #[async_trait::async_trait]
 impl WorkerProcessCommServer for WorkerProcessCommHttp2Master {
+    async fn reset_state(&mut self) -> Result<(), crate::Error> {
+        let (port, token) = Self::create_state().await?;
+        self.port = Some(port);
+        self.token = Some(token);
+
+        Ok(())
+    }
+
     async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> DispatchTemplateResult {
         let id = WorkerProcessCommTenantId::from(id);
         
@@ -121,9 +158,16 @@ impl WorkerProcessCommServer for WorkerProcessCommHttp2Master {
     }
 
     fn start_env(&self) -> Vec<(String, String)> {
+        let Some(token) = &self.token else {
+            panic!("Worker process communication token not set");
+        };
+        let Some(port) = self.port else {
+            panic!("Worker process communication port not set");
+        };
+
         vec![
-            ("WORKER_PROCESS_COMM_TOKEN".to_string(), self.token.clone()),
-            ("WORKER_PROCESS_COMM_PORT".to_string(), self.port.to_string()),
+            ("WORKER_PROCESS_COMM_TOKEN".to_string(), token.clone()),
+            ("WORKER_PROCESS_COMM_PORT".to_string(), port.to_string()),
         ]
     }
 }

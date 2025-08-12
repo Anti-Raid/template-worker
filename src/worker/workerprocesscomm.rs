@@ -2,7 +2,19 @@ use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::Khro
 use crate::worker::{workerdispatch::{DispatchTemplateResult, TemplateResult}, workervmmanager::Id};
 
 #[async_trait::async_trait]
-pub trait WorkerProcessCommServer {
+pub trait WorkerProcessCommServer: Send + Sync {
+    /// Resets the state of the communication method for a restart
+    /// of the worker process
+    /// 
+    /// For example, with http2, this would mean getting a new token and port
+    async fn reset_state(&mut self) -> Result<(), crate::Error>;
+
+    /// The extra arguments needed to start the worker process
+    fn start_args(&self) -> Vec<String>;
+
+    /// The environment variables needed to start the worker process
+    fn start_env(&self) -> Vec<(String, String)>;
+
     /// Dispatch an event to the templates managed by this worker
     async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> DispatchTemplateResult;
 
@@ -11,22 +23,17 @@ pub trait WorkerProcessCommServer {
 
     /// Regenerate the cache for a tenant
     async fn regenerate_cache(&self, id: Id) -> Result<(), crate::Error>;
-
-    /// The extra arguments needed to start the worker process
-    fn start_args(&self) -> Vec<String>;
-
-    /// The environment variables needed to start the worker process
-    fn start_env(&self) -> Vec<(String, String)>;
-
-    /// Wait for the worker process to be ready
-    async fn wait_for_ready(&self) -> Result<(), crate::Error> {
-        // Default implementation does nothing, can be overridden
-        Ok(())
-    }
 }
 
 /// Marker trait to signify that this is a client for the worker process communication
 pub trait WorkerProcessCommClient {}
+
+/// Trait to create a worker process communication server
+#[async_trait::async_trait]
+pub trait WorkerProcessCommServerCreator {
+    /// Creates a new worker process communication server
+    async fn create(&self) -> Result<Box<dyn WorkerProcessCommServer>, crate::Error>;
+}
 
 #[derive(serde::Serialize, serde::Deserialize)]
 /// Serializable representation of a tenant ID for the worker process communication

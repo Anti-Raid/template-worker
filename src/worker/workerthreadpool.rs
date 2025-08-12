@@ -2,7 +2,6 @@ use khronos_runtime::primitives::event::CreateEvent;
 
 use crate::worker::workerdispatch::DispatchTemplateResult;
 use crate::worker::workerlike::WorkerLike;
-use crate::worker::workerthread::DispatchEvent;
 
 use super::workervmmanager::Id;
 
@@ -71,27 +70,15 @@ impl WorkerLike for WorkerThreadPool {
     }
 
     async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> DispatchTemplateResult {
-        self.get_thread_for(id).send(DispatchEvent {
-            id,
-            event,
-            scopes: None,
-        }).await?
+        self.get_thread_for(id).dispatch_event_to_templates(id, event).await
     }
 
     async fn dispatch_scoped_event_to_templates(&self, id: Id, event: CreateEvent, scopes: Vec<String>) -> DispatchTemplateResult {        
-        self.get_thread_for(id).send(DispatchEvent {
-            id,
-            event,
-            scopes: Some(scopes),
-        }).await?
+        self.get_thread_for(id).dispatch_scoped_event_to_templates(id, event, scopes).await
     }
 
     async fn dispatch_event_to_templates_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
-        self.get_thread_for(id).send_nowait(DispatchEvent {
-            id,
-            event,
-            scopes: None,
-        }).await
+        self.get_thread_for(id).dispatch_event_to_templates_nowait(id, event).await
     }
 
     async fn regenerate_cache(&self, id: Id) -> Result<(), crate::Error> {
