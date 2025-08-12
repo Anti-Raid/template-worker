@@ -3,7 +3,7 @@ use std::time::Duration;
 use khronos_runtime::primitives::event::CreateEvent;
 use tokio::process::Command;
 use tokio::sync::broadcast::{Sender as BroadcastSender, channel as broadcast_channel};
-use tokio::sync::oneshot::{channel as oneshot_channel, Sender as OneshotSender};
+use tokio::sync::oneshot::{Sender as OneshotSender};
 use tokio::sync::mpsc::{
     UnboundedSender, UnboundedReceiver,
     unbounded_channel
@@ -17,7 +17,7 @@ use crate::worker::workervmmanager::Id;
 /// Message type for the worker process server monitor task
 enum ProcessServerMessage {
     Kill {
-        tx: OneshotSender<Result<(), crate::Error>>,
+        tx: Option<OneshotSender<Result<(), crate::Error>>>,
     },
     DispatchEvent {
         id: Id,
@@ -40,6 +40,16 @@ trait PushableMessage {
     type Response: Send + Sync + 'static;
 
     fn into_message(self, tx: Option<OneshotSender<Self::Response>>) -> ProcessServerMessage;
+}
+
+pub struct Kill {}
+
+impl PushableMessage for Kill {
+    type Response = Result<(), crate::Error>;
+
+    fn into_message(self, tx: Option<OneshotSender<Self::Response>>) -> ProcessServerMessage {
+        ProcessServerMessage::Kill { tx }
+    }
 }
 
 pub struct DispatchEvent {
@@ -103,6 +113,8 @@ pub struct WorkerProcessHandle {
 
 #[allow(unused)]
 impl WorkerProcessHandle {
+    const MAX_CONSECUTIVE_FAILURES_BEFORE_CRASH: usize = 10;
+
     /// Creates a new WorkerProcessHandle given the worker ID and a communication server backend
     pub async fn new(id: usize, process_comm: Box<dyn WorkerProcessCommServer + Send + Sync>) -> Result<Self, crate::Error> {
         let (tx, rx) = unbounded_channel();
@@ -141,7 +153,17 @@ impl WorkerProcessHandle {
         mut process_comm: Box<dyn WorkerProcessCommServer + Send + Sync>,
     ) {
         let mut failed_attempts = 0;
+        let mut consecutive_failures = 0;
         loop {
+            if consecutive_failures >= Self::MAX_CONSECUTIVE_FAILURES_BEFORE_CRASH {
+                log::error!("Worker process with ID: {} has failed {} times in a row, crashing", self.id, consecutive_failures);
+                let _ = self.start_events.send(Err("Worker process crashed due to too many consecutive failures".to_string()));
+
+                // Abort the master process
+                // TODO: Handle this more gracefully in the future
+                std::process::abort(); 
+            }
+
             let sleep_duration = Duration::from_secs(3 * std::cmp::min(failed_attempts, 5));
 
             // A reset_state call is required to reset the communication state and make sure
@@ -150,6 +172,7 @@ impl WorkerProcessHandle {
                 log::error!("Failed to reset worker process communication state: {}", e);
                 let _ = self.start_events.send(Err(e.to_string()));
                 failed_attempts += 1;
+                consecutive_failures += 1;
                 tokio::time::sleep(sleep_duration).await;
                 continue;
             }
@@ -160,6 +183,7 @@ impl WorkerProcessHandle {
                 Err(e) => {
                     let _ = self.start_events.send(Err(e.to_string()));
                     failed_attempts += 1;
+                    consecutive_failures += 1;
                     tokio::time::sleep(sleep_duration).await;
                     continue;
                 }
@@ -189,6 +213,7 @@ impl WorkerProcessHandle {
                 Err(e) => {
                     let _ = self.start_events.send(Err(e.to_string()));
                     failed_attempts += 1;
+                    consecutive_failures += 1;
                     tokio::time::sleep(sleep_duration).await;
                     continue;
                 }
@@ -198,6 +223,7 @@ impl WorkerProcessHandle {
 
             // Send the start signal to the caller
             let _ = self.start_events.send(Ok(()));
+            consecutive_failures = 0; // Reset consecutive failures on successful start
 
             loop {
                 tokio::select! {
@@ -216,7 +242,10 @@ impl WorkerProcessHandle {
                                 ProcessServerMessage::Kill { tx } => {
                                     log::info!("Killing worker process with ID: {}", self.id);
                                     is_killing = true;
-                                    let _ = tx.send(child.kill().await.map_err(|x| x.into()));
+                                    let res = child.kill().await.map_err(|x| x.into());
+                                    if let Some(tx) = tx {
+                                        let _ = tx.send(res);
+                                    }
                                     return; // Exit the loop after killing the process
                                 },
                                 ProcessServerMessage::DispatchEvent { id, event, tx } => {
@@ -249,43 +278,6 @@ impl WorkerProcessHandle {
                 }
             }
         }
-    }
-
-    pub async fn error_on_startup_fail(
-        &self,
-        max_consecutive_failures: usize,
-    ) -> Result<(), crate::Error> {
-        let mut rx = self.start_events.subscribe();
-        let mut consecutive_failures = 0;
-
-        loop {
-            match rx.recv().await {
-                Ok(Ok(())) => {
-                    consecutive_failures = 0; // Reset on success
-                }
-                Ok(Err(e)) => {
-                    consecutive_failures += 1;
-                    log::error!("Worker process startup failed: {}", e);
-                    if consecutive_failures >= max_consecutive_failures {
-                        return Err(format!(
-                            "Worker process failed to start {} times consecutively: {}",
-                            max_consecutive_failures, e
-                        ).into());
-                    }
-                }
-                Err(_) => {
-                    return Ok(()); // Channel closed, exit gracefully
-                }
-            }
-        }
-    }
-
-    /// Sends a kill signal to the worker process and waits for it to exit
-    pub async fn kill(&self) -> Result<(), crate::Error> {
-        let (tx, rx) = oneshot_channel();
-        self.process_handle.send(ProcessServerMessage::Kill { tx })?;
-
-        rx.await?
     }
 
     /// Sends a message to the worker thread
@@ -329,6 +321,10 @@ impl WorkerLike for WorkerProcessHandle {
         self.id
     }
 
+    async fn kill(&self) -> Result<(), crate::Error> {
+        self.send(Kill {}).await?
+    }
+
     async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> DispatchTemplateResult {
         self.send(DispatchEvent {
             id,
@@ -357,3 +353,9 @@ impl WorkerLike for WorkerProcessHandle {
         self.send(RegenerateCache { id }).await?
     }
 }
+
+// Assert that WorkerProcessHandle is Send + Sync
+const _: () = {
+    const fn assert_send_sync_clone<T: Send + Sync>() {}
+    assert_send_sync_clone::<WorkerProcessHandle>();
+};

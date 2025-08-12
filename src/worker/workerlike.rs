@@ -15,6 +15,9 @@ pub trait WorkerLike {
         0
     }
 
+    /// Kill the worker like
+    async fn kill(&self) -> Result<(), crate::Error>;
+
     /// Dispatch an event to the templates managed by this worker
     async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> DispatchTemplateResult;
 

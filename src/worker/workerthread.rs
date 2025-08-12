@@ -10,6 +10,9 @@ use super::{workerstate::WorkerState, worker::Worker, workervmmanager::Id, worke
 
 /// WorkerThreadMessage is the message type that is sent to the worker thread
 enum WorkerThreadMessage {
+    Kill {
+        tx: Option<OneShotSender<Result<(), crate::Error>>>,
+    },
     DispatchEvent {
         id: Id,
         event: CreateEvent,
@@ -31,6 +34,16 @@ trait PushableMessage {
     type Response: Send + Sync + 'static;
 
     fn into_message(self, tx: Option<OneShotSender<Self::Response>>) -> WorkerThreadMessage;
+}
+
+pub struct Kill {}
+
+impl PushableMessage for Kill {
+    type Response = Result<(), crate::Error>;
+
+    fn into_message(self, tx: Option<OneShotSender<Self::Response>>) -> WorkerThreadMessage {
+        WorkerThreadMessage::Kill { tx }
+    }
 }
 
 pub struct DispatchEvent {
@@ -120,6 +133,13 @@ impl WorkerThread {
                         // Listen to messages and handle them
                         while let Some(msg) = rx.recv().await {
                             match msg {
+                                WorkerThreadMessage::Kill { tx } => {
+                                    log::info!("Killing worker thread with ID: {}", id);
+                                    if let Some(tx) = tx {
+                                        let _ = tx.send(Ok(()));
+                                    }
+                                    return; // Exitting the loop will stop the thread automatically
+                                }
                                 WorkerThreadMessage::DispatchEvent { id, event, tx } => {
                                     let res = worker.dispatch.dispatch_event_to_templates(id, event).await;
                                     if let Some(tx) = tx {
@@ -190,6 +210,10 @@ impl WorkerThread {
 impl WorkerLike for WorkerThread {
     fn id(&self) -> usize {
         self.id
+    }
+
+    async fn kill(&self) -> Result<(), crate::Error> {
+        self.send(Kill {}).await?
     }
 
     async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> DispatchTemplateResult {

@@ -69,6 +69,13 @@ impl WorkerLike for WorkerThreadPool {
         0 // For a pool, return 0
     }
 
+    async fn kill(&self) -> Result<(), crate::Error> {
+        for thread in &self.threads {
+            thread.kill().await?;
+        }
+        Ok(())
+    }
+
     async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> DispatchTemplateResult {
         self.get_thread_for(id).dispatch_event_to_templates(id, event).await
     }
