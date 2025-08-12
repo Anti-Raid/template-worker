@@ -39,9 +39,9 @@ pub mod keyexpiry;
 pub mod keyexpirychannel;
 pub mod workerlike;
 pub mod workerfilter;
-pub mod workerthreadpool;
 pub mod staticref;
-pub mod workerprocesspool; // TODO: Implement process pool workers
+
 pub mod workerprocesshandle; // TODO: Implement process workers
 pub mod workerprocesscommhttp2; // TODO: Implement process workers
 pub mod workerprocesscomm; // TODO: Implement process workers
+pub mod workerpool;

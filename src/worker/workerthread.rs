@@ -6,6 +6,7 @@ use std::{panic::AssertUnwindSafe, thread::JoinHandle};
 
 use crate::worker::limits::MAX_VM_THREAD_STACK_SIZE;
 use crate::worker::workerlike::WorkerLike;
+use crate::worker::workerpool::Poolable;
 use super::{workerstate::WorkerState, worker::Worker, workervmmanager::Id, workerdispatch::DispatchTemplateResult, workerfilter::WorkerFilter};
 
 /// WorkerThreadMessage is the message type that is sent to the worker thread
@@ -242,6 +243,16 @@ impl WorkerLike for WorkerThread {
 
     async fn regenerate_cache(&self, id: Id) -> Result<(), crate::Error> {
         self.send(RegenerateCache { id }).await?
+    }
+}
+
+// WorkerThread's can be pooled via WorkerPool!
+impl Poolable for WorkerThread {
+    type ExtState = ();
+    fn new(state: WorkerState, filter: WorkerFilter, id: usize, _ext_state: &Self::ExtState) -> Result<Self, crate::Error>
+        where
+            Self: Sized {
+        Self::new(state, filter, id)
     }
 }
 

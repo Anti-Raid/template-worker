@@ -1,8 +1,8 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use khronos_runtime::primitives::event::CreateEvent;
 use tokio::process::Command;
-use tokio::sync::broadcast::{Sender as BroadcastSender, channel as broadcast_channel};
 use tokio::sync::oneshot::{Sender as OneshotSender};
 use tokio::sync::mpsc::{
     UnboundedSender, UnboundedReceiver,
@@ -10,8 +10,11 @@ use tokio::sync::mpsc::{
 };
 
 use crate::worker::workerdispatch::DispatchTemplateResult;
+use crate::worker::workerfilter::WorkerFilter;
 use crate::worker::workerlike::WorkerLike;
-use crate::worker::workerprocesscomm::WorkerProcessCommServer;
+use crate::worker::workerpool::Poolable;
+use crate::worker::workerprocesscomm::{WorkerProcessCommServer, WorkerProcessCommServerCreator};
+use crate::worker::workerstate::WorkerState;
 use crate::worker::workervmmanager::Id;
 
 /// Message type for the worker process server monitor task
@@ -104,9 +107,6 @@ pub struct WorkerProcessHandle {
     /// The process handle for the worker process
     process_handle: UnboundedSender<ProcessServerMessage>,
 
-    /// Start event channel
-    start_events: BroadcastSender<Result<(), String>>,
-
     /// The id of the worker process, used for routing
     id: usize,
 }
@@ -116,12 +116,10 @@ impl WorkerProcessHandle {
     const MAX_CONSECUTIVE_FAILURES_BEFORE_CRASH: usize = 10;
 
     /// Creates a new WorkerProcessHandle given the worker ID and a communication server backend
-    pub async fn new(id: usize, process_comm: Box<dyn WorkerProcessCommServer + Send + Sync>) -> Result<Self, crate::Error> {
+    pub fn new(id: usize, process_comm: Box<dyn WorkerProcessCommServer + Send + Sync>) -> Result<Self, crate::Error> {
         let (tx, rx) = unbounded_channel();
 
-        let (stx, mut srx) = broadcast_channel(100);
         let wps = Self {
-            start_events: stx,
             process_handle: tx,
             id,
         };
@@ -131,18 +129,7 @@ impl WorkerProcessHandle {
             wps_ref.run(rx, process_comm).await;
         });
 
-        // Wait for the worker process to start
-        match srx.recv().await {
-            Ok(Ok(())) => {
-                Ok(wps)
-            },
-            Ok(Err(e)) => {
-                Err(e.into())
-            },
-            Err(e) => {
-                Err(e.into())
-            }
-        }
+        Ok(wps)
     }
 
     /// Runs the worker process server, spawning a new worker process and handling messages
@@ -157,7 +144,6 @@ impl WorkerProcessHandle {
         loop {
             if consecutive_failures >= Self::MAX_CONSECUTIVE_FAILURES_BEFORE_CRASH {
                 log::error!("Worker process with ID: {} has failed {} times in a row, crashing", self.id, consecutive_failures);
-                let _ = self.start_events.send(Err("Worker process crashed due to too many consecutive failures".to_string()));
 
                 // Abort the master process
                 // TODO: Handle this more gracefully in the future
@@ -170,7 +156,6 @@ impl WorkerProcessHandle {
             // the communication layer is ready for spinning up a new worker process.
             if let Err(e) = process_comm.reset_state().await {
                 log::error!("Failed to reset worker process communication state: {}", e);
-                let _ = self.start_events.send(Err(e.to_string()));
                 failed_attempts += 1;
                 consecutive_failures += 1;
                 tokio::time::sleep(sleep_duration).await;
@@ -181,7 +166,7 @@ impl WorkerProcessHandle {
             let current_exe = match std::env::current_exe() {
                 Ok(path) => path,
                 Err(e) => {
-                    let _ = self.start_events.send(Err(e.to_string()));
+                    log::error!("Failed to get current executable path: {}", e);
                     failed_attempts += 1;
                     consecutive_failures += 1;
                     tokio::time::sleep(sleep_duration).await;
@@ -211,7 +196,7 @@ impl WorkerProcessHandle {
                     process
                 },
                 Err(e) => {
-                    let _ = self.start_events.send(Err(e.to_string()));
+                    log::error!("Failed to spawn worker process: {}", e);
                     failed_attempts += 1;
                     consecutive_failures += 1;
                     tokio::time::sleep(sleep_duration).await;
@@ -221,8 +206,6 @@ impl WorkerProcessHandle {
             log::info!("Spawned worker process with ID: {} and pid {:?}", self.id, child.id());
             let mut is_killing = false;
 
-            // Send the start signal to the caller
-            let _ = self.start_events.send(Ok(()));
             consecutive_failures = 0; // Reset consecutive failures on successful start
 
             loop {
@@ -351,6 +334,32 @@ impl WorkerLike for WorkerProcessHandle {
 
     async fn regenerate_cache(&self, id: Id) -> Result<(), crate::Error> {
         self.send(RegenerateCache { id }).await?
+    }
+}
+
+pub struct WorkerProcessHandleCreateOpts {
+    pub(super) communication_layer: Arc<dyn WorkerProcessCommServerCreator>,
+}
+
+impl WorkerProcessHandleCreateOpts {
+    /// Creates a new WorkerProcessHandleCreateOpts with the given communication layer
+    pub fn new(communication_layer: Arc<dyn WorkerProcessCommServerCreator>) -> Self {
+        Self {
+            communication_layer,
+        }
+    }
+}
+
+// WorkerProcessHandle's can be pooled via WorkerPool!
+impl Poolable for WorkerProcessHandle {
+    type ExtState = WorkerProcessHandleCreateOpts;
+
+    fn new(_state: WorkerState, _filter: WorkerFilter, id: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
+        where
+            Self: Sized {
+        // Create a new WorkerProcessHandle with the given state and filter
+        let process_comm = ext_state.communication_layer.create()?;
+        Self::new(id, process_comm)
     }
 }
 

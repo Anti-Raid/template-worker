@@ -18,9 +18,8 @@ impl WorkerProcessCommHttp2ServerCreator {
     }
 }
 
-#[async_trait::async_trait]
 impl WorkerProcessCommServerCreator for WorkerProcessCommHttp2ServerCreator {
-    async fn create(&self) -> Result<Box<dyn WorkerProcessCommServer>, crate::Error> {
+    fn create(&self) -> Result<Box<dyn WorkerProcessCommServer>, crate::Error> {
         Ok(Box::new(WorkerProcessCommHttp2Master::new(self.reqwest.clone())))
     }
 }

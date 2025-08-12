@@ -29,10 +29,9 @@ pub trait WorkerProcessCommServer: Send + Sync {
 pub trait WorkerProcessCommClient {}
 
 /// Trait to create a worker process communication server
-#[async_trait::async_trait]
-pub trait WorkerProcessCommServerCreator {
+pub trait WorkerProcessCommServerCreator: Send + Sync {
     /// Creates a new worker process communication server
-    async fn create(&self) -> Result<Box<dyn WorkerProcessCommServer>, crate::Error>;
+    fn create(&self) -> Result<Box<dyn WorkerProcessCommServer>, crate::Error>;
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

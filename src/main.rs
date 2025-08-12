@@ -13,7 +13,8 @@ use crate::config::CONFIG;
 use crate::data::Data;
 use crate::event_handler::EventFramework;
 use crate::worker::workerstate::WorkerState;
-use crate::worker::workerthreadpool::WorkerThreadPool;
+use crate::worker::workerpool::WorkerPool;
+use crate::worker::workerthread::WorkerThread;
 use log::{error, info};
 use serenity::all::{ApplicationId, HttpBuilder};
 use sqlx::postgres::PgPoolOptions;
@@ -64,7 +65,6 @@ struct CmdArgs {
     /// Type of worker to use
     #[clap(long, default_value = "threadpool", value_enum)]
     pub worker_type: WorkerType,
-    
 }
 
 #[tokio::main]
@@ -142,9 +142,10 @@ async fn main() {
         Arc::new(current_user.clone()),
     ).expect("Failed to create worker state");
 
-    let worker_pool = Arc::new(WorkerThreadPool::new(
+    let worker_pool = Arc::new(WorkerPool::<WorkerThread>::new(
         worker_state.clone(),
-        args.worker_threads
+        args.worker_threads,
+        &()
     )
     .expect("Failed to create worker thread pool"));
 
