@@ -323,7 +323,7 @@ impl WorkerDispatch {
                 }
             };
 
-            log::info!("Created subisolate for template {}", template.name);
+            log::debug!("Created subisolate for template {}", template.name);
 
             let provider = TemplateContextProvider::new(
                 vm_data.state.clone(), 

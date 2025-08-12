@@ -112,6 +112,9 @@ pub struct WorkerProcessHandle {
     
     /// The total number of processes in the pool
     total: usize,
+
+    /// Max DB connections for the worker process
+    max_db_conns: usize,
 }
 
 #[allow(unused)]
@@ -119,13 +122,14 @@ impl WorkerProcessHandle {
     const MAX_CONSECUTIVE_FAILURES_BEFORE_CRASH: usize = 10;
 
     /// Creates a new WorkerProcessHandle given the worker ID and a communication server backend
-    pub fn new(id: usize, total: usize, process_comm: Box<dyn WorkerProcessCommServer + Send + Sync>) -> Result<Self, crate::Error> {
+    pub fn new(id: usize, total: usize, max_db_conns: usize, process_comm: Box<dyn WorkerProcessCommServer + Send + Sync>) -> Result<Self, crate::Error> {
         let (tx, rx) = unbounded_channel();
 
         let wps = Self {
             process_handle: tx,
             id,
-            total
+            total,
+            max_db_conns
         };
 
         let wps_ref = wps.clone();
@@ -186,6 +190,8 @@ impl WorkerProcessHandle {
             command.arg(self.id.to_string());
             command.arg("--worker-threads");
             command.arg(self.total.to_string());
+            command.arg("--max-db-connections");
+            command.arg(self.max_db_conns.to_string());
 
             for arg in process_comm.start_args() {
                 command.arg(arg);
@@ -345,13 +351,15 @@ impl WorkerLike for WorkerProcessHandle {
 
 pub struct WorkerProcessHandleCreateOpts {
     pub(super) communication_layer: Arc<dyn WorkerProcessCommServerCreator>,
+    pub(super) max_db_conns: usize,
 }
 
 impl WorkerProcessHandleCreateOpts {
     /// Creates a new WorkerProcessHandleCreateOpts with the given communication layer
-    pub fn new(communication_layer: Arc<dyn WorkerProcessCommServerCreator>) -> Self {
+    pub fn new(communication_layer: Arc<dyn WorkerProcessCommServerCreator>, max_db_conns: usize,) -> Self {
         Self {
             communication_layer,
+            max_db_conns,
         }
     }
 }
@@ -365,7 +373,7 @@ impl Poolable for WorkerProcessHandle {
             Self: Sized {
         // Create a new WorkerProcessHandle with the given state and filter
         let process_comm = ext_state.communication_layer.create()?;
-        Self::new(id, total, process_comm)
+        Self::new(id, total, ext_state.max_db_conns, process_comm)
     }
 }
 

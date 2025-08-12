@@ -12,6 +12,7 @@ mod worker;
 use crate::config::CONFIG;
 use crate::data::Data;
 use crate::event_handler::EventFramework;
+use crate::worker::workerlike::WorkerLike;
 use crate::worker::workerprocesscomm::WorkerProcessCommClient;
 use crate::worker::workerprocesscommhttp2::{WorkerProcessCommHttp2ServerCreator, WorkerProcessCommHttp2Worker};
 use crate::worker::workerprocesshandle::{WorkerProcessHandle, WorkerProcessHandleCreateOpts};
@@ -50,15 +51,15 @@ struct CmdArgs {
     #[clap(long, default_value = "7")]
     pub max_db_connections: u32,
 
-    //#[clap(long, default_value_t = false)]
-    //pub use_tokio_console: bool,
+    #[clap(long, default_value_t = false)]
+    pub use_tokio_console: bool,
 
     /// Number of threads to use for the worker thread pool
     #[clap(long, default_value = "30")]
     pub worker_threads: usize,
 
     /// Type of worker to use
-    #[clap(long, default_value = "threadpool", value_enum)]
+    #[clap(long, default_value = "processpool", value_enum)]
     pub worker_type: WorkerType,
 
     /// The worker ID to use when running as a process pool worker
@@ -72,11 +73,44 @@ struct CmdArgs {
     /// Ignored unless `worker-type` is `processpoolworker`
     #[clap(long)]
     pub worker_comm_type: Option<String>,
+
+    /// How many db connections should each worker within the process pool have
+    #[clap(long, default_value = "3")]
+    pub max_worker_db_connections: usize,
+
+    /// How many tokio threads to use for the master
+    #[clap(long, default_value = "10")]
+    pub tokio_threads_master: usize,
+
+    /// How many tokio threads to use for the workers
+    #[clap(long, default_value = "3")]
+    pub tokio_threads_worker: usize,
 }
 
-#[tokio::main]
-async fn main() {
+/// Simple main function that initializes the tokio runtime and then calls the main (async) implementation
+fn main() {
     let args = CmdArgs::parse();
+
+    let num_tokio_threads = match args.worker_type {
+        WorkerType::RegisterCommands => 1,
+        WorkerType::ThreadPool => args.tokio_threads_master,
+        WorkerType::ProcessPool => args.tokio_threads_master,
+        WorkerType::ProcessPoolWorker => args.tokio_threads_worker,
+    };
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(num_tokio_threads)
+        .enable_all()
+        .build()
+        .expect("Failed to create tokio runtime");
+
+    rt.block_on(async move {
+        // Initialize the main implementation
+        main_impl(args).await;
+    });
+}
+
+async fn main_impl(args: CmdArgs) {
     let mut env_builder = env_logger::builder();
 
     if let Some(worker_id) = args.worker_id {
@@ -113,9 +147,9 @@ async fn main() {
 
     env_builder.init();
 
-    //if CMD_ARGS.use_tokio_console {
-    //    console_subscriber::init();
-    //}
+    if args.use_tokio_console {
+        console_subscriber::init();
+    }
 
     let proxy_url = CONFIG.meta.proxy.clone();
 
@@ -245,7 +279,8 @@ async fn main() {
                         .http2_prior_knowledge()
                         .build()
                         .expect("Failed to create reqwest client for worker process communication"),
-                    ))
+                    )),
+                    args.max_worker_db_connections,
                 )
             )
             .expect("Failed to create worker thread pool"));
@@ -255,7 +290,7 @@ async fn main() {
                 pool: pg_pool.clone(),
                 reqwest,
                 current_user,
-                worker: worker_pool,
+                worker: worker_pool.clone(),
             });
 
             let data1 = data.clone();
@@ -282,6 +317,9 @@ async fn main() {
             loop {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {
+                        // Kill the worker pool
+                        info!("Received Ctrl+C, shutting down worker pool");
+                        worker_pool.kill().await.expect("Failed to kill worker pool");
                         break; // Exit the loop
                     }
                 }

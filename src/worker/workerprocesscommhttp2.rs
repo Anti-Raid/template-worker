@@ -216,7 +216,7 @@ impl WorkerProcessCommHttp2Worker {
 
     async fn new_inner(token: String, port: u16, worker: Arc<dyn WorkerLike + Send + Sync>) -> Result<Self, crate::Error> {
         // Ensure the port is not already in use
-        let listener = tokio::net::TcpListener::bind(format!("127.0.1:{}:{}", port, token)).await?;
+        let listener = tokio::net::TcpListener::bind(format!("127.0.1:{port}")).await?;
 
         let self_n = Self { token, worker };
 
