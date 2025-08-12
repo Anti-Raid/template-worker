@@ -1,0 +1,251 @@
+use std::sync::Arc;
+
+use khronos_runtime::primitives::event::CreateEvent;
+use serde::{de::DeserializeOwned, Serialize};
+
+use super::{workerdispatch::DispatchTemplateResult, workerlike::WorkerLike, workervmmanager::Id};
+use rand::{distr::{Alphanumeric, SampleString}, Rng};
+use super::workerprocesscomm::{WorkerProcessCommServer, WorkerProcessCommClient, WorkerProcessCommTenantId, WorkerProcessCommDispatchResult};
+
+/// Worker Process Communication using HTTP/2
+/// 
+/// Server here refers to the master side which sends data to/from the worker (client).
+/// Most notably, the client is what exposes the HTTP/2 server to the master process.
+#[derive(Clone)]
+pub struct WorkerProcessCommHttp2Master {
+    token: String,
+    port: u16,
+    reqwest: reqwest::Client,
+}
+
+impl WorkerProcessCommHttp2Master {
+    const DISPATCH_TEMPLATES_PATH: &'static str = "/0";
+    const REGENERATE_CACHE_PATH: &'static str = "/1";
+    const TOKEN_LENGTH: usize = 4096;
+
+    pub async fn new(reqwest: reqwest::Client) -> Result<Self, crate::Error> {
+        let mut port = rand::rng().random_range(1030..=65535);
+        
+        let mut attempts = 0;
+        loop {
+            if attempts >= 20 {
+                return Err("Failed to find an available port after 20 attempts".into());
+            }
+            // Ensure the port is not already in use
+            match tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port)).await {
+                Ok(_) => {
+                    break;
+                },
+                Err(_) => {
+                    port = rand::rng().random_range(1030..=65535); // Try a different port
+                    attempts += 1;
+                }
+            }
+        };
+
+        Ok(Self {
+            token: Alphanumeric.sample_string(&mut rand::rng(), Self::TOKEN_LENGTH),
+            port,
+            reqwest,
+        })
+    }
+
+    /// Sends a request to the worker process and returns the response
+    async fn send<Request: Serialize, Response: DeserializeOwned>(
+        &self,
+        url: &str,
+        request: Request,
+    ) -> Result<Response, crate::Error> {
+        let url = format!("http://127.0.1:{}{}", self.port, url);
+        let request = self.reqwest.post(&url)
+            .header("Token", &self.token)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to send request: {}", e))?;
+
+        if !request.status().is_success() {
+            let resp = request.text().await.map_err(|e| format!("Failed to read response text: {}", e))?;
+            return Err(resp.into());
+        }
+
+        let response: Response = request.json().await.map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        Ok(response)
+    }
+}
+
+#[async_trait::async_trait]
+impl WorkerProcessCommServer for WorkerProcessCommHttp2Master {
+    async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> DispatchTemplateResult {
+        let id = WorkerProcessCommTenantId::from(id);
+        
+        let request = WorkerProcessCommHttp2DispatchEventToTemplates {
+            id,
+            event,
+            scopes: None,
+        };
+
+        let response: WorkerProcessCommHttp2DispatchEventToTemplatesResponse = self.send(Self::DISPATCH_TEMPLATES_PATH, request).await?;
+        response.result.into()
+    }
+
+    async fn dispatch_scoped_event_to_templates(&self, id: Id, event: CreateEvent, scopes: Vec<String>) -> DispatchTemplateResult {
+        let id = WorkerProcessCommTenantId::from(id);
+        
+        let request = WorkerProcessCommHttp2DispatchEventToTemplates {
+            id,
+            event,
+            scopes: Some(scopes),
+        };
+
+        let response: WorkerProcessCommHttp2DispatchEventToTemplatesResponse = self.send(Self::DISPATCH_TEMPLATES_PATH, request).await?;
+        response.result.into()
+    }
+
+    async fn regenerate_cache(&self, id: Id) -> Result<(), crate::Error> {
+        let id = WorkerProcessCommTenantId::from(id);
+        
+        let request = WorkerProcessCommHttp2RegenerateCache { id };
+        
+        let _: WorkerProcessCommHttp2RegenerateCacheResponse = self.send(Self::REGENERATE_CACHE_PATH, request).await?;
+
+        Ok(())
+    }
+
+    fn start_args(&self) -> Vec<String> {
+        vec![
+            "--worker-comm-type".to_string(),
+            "http2".to_string(),
+        ]
+    }
+
+    fn start_env(&self) -> Vec<(String, String)> {
+        vec![
+            ("WORKER_PROCESS_COMM_TOKEN".to_string(), self.token.clone()),
+            ("WORKER_PROCESS_COMM_PORT".to_string(), self.port.to_string()),
+        ]
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+/// Stores the message data that is sent from master to the worker process
+struct WorkerProcessCommHttp2DispatchEventToTemplates {
+    id: WorkerProcessCommTenantId,
+    event: CreateEvent,
+    scopes: Option<Vec<String>>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+/// Stores the message data that is sent from worker to master process
+struct WorkerProcessCommHttp2DispatchEventToTemplatesResponse {
+    result: WorkerProcessCommDispatchResult,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+/// Stores the message data that is sent from master to the worker process
+struct WorkerProcessCommHttp2RegenerateCache {
+    id: WorkerProcessCommTenantId,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+/// Stores the message data that is sent from worker to master process
+struct WorkerProcessCommHttp2RegenerateCacheResponse {}
+
+#[derive(Clone)]
+pub struct WorkerProcessCommHttp2Worker {
+    token: String,
+    port: u16,
+    worker: Arc<dyn WorkerLike + Send + Sync>,
+}
+
+impl WorkerProcessCommHttp2Worker {
+    pub async fn new(worker: Arc<dyn WorkerLike + Send + Sync>) -> Result<Self, crate::Error> {
+        let token = std::env::var("WORKER_PROCESS_COMM_TOKEN")
+            .map_err(|_| "WORKER_PROCESS_COMM_TOKEN environment variable not set")?;
+        let port_str = std::env::var("WORKER_PROCESS_COMM_PORT")
+            .map_err(|_| "WORKER_PROCESS_COMM_PORT environment variable not set")?
+            .trim()
+            .parse::<u16>()
+            .map_err(|_| "Invalid WORKER_PROCESS_COMM_PORT value")?;
+
+        Self::new_inner(token, port_str, worker).await
+    }
+
+    async fn new_inner(token: String, port: u16, worker: Arc<dyn WorkerLike + Send + Sync>) -> Result<Self, crate::Error> {
+        // Ensure the port is not already in use
+        let listener = tokio::net::TcpListener::bind(format!("127.0.1:{}:{}", port, token)).await?;
+
+        let self_n = Self { token, port, worker };
+
+        let router: axum::Router<()> = axum::Router::new()
+        .route(
+            WorkerProcessCommHttp2Master::DISPATCH_TEMPLATES_PATH,
+            axum::routing::post(axum::routing::post(http2_endpoints::dispatch_template_endpoint)),
+        )
+        .route(
+            WorkerProcessCommHttp2Master::REGENERATE_CACHE_PATH,
+            axum::routing::post(axum::routing::post(http2_endpoints::regenerate_cache_endpoint)),
+        )
+        .with_state(self_n.clone());
+
+        tokio::task::spawn(async move {
+            axum::serve(listener, router.into_make_service()).await.unwrap();
+        });
+
+        Ok(self_n)
+    }
+}
+
+impl WorkerProcessCommClient for WorkerProcessCommHttp2Worker {}
+
+mod http2_endpoints {
+    use axum::{
+        extract::State,
+        http::{HeaderMap, StatusCode},
+        Json,
+    };
+
+    fn verify_token(
+        headers: &HeaderMap,
+        token: &str,
+    ) -> Result<(), (StatusCode, Json<String>)> {
+        let token_header = headers.get("Token")
+            .and_then(|h| h.to_str().ok())
+            .ok_or((StatusCode::UNAUTHORIZED, Json("Missing or invalid Token header".to_string())))?;
+
+        if token_header.len() != super::WorkerProcessCommHttp2Master::TOKEN_LENGTH || token_header != token {
+            log::warn!("Worker call attempted with invalid token!");
+            return Err((StatusCode::UNAUTHORIZED, Json("Invalid Token".to_string())));
+        }
+
+        Ok(())
+    }
+
+    pub(super) async fn dispatch_template_endpoint(
+        State(data): State<super::WorkerProcessCommHttp2Worker>,
+        headers: HeaderMap,
+        Json(request): Json<super::WorkerProcessCommHttp2DispatchEventToTemplates>,
+    ) -> Result<Json<super::WorkerProcessCommHttp2DispatchEventToTemplatesResponse>, (StatusCode, Json<String>)> {
+        verify_token(&headers, &data.token)?;
+
+        let result = match request.scopes {
+            Some(scopes) => data.worker.dispatch_scoped_event_to_templates(request.id.into(), request.event, scopes).await,
+            None => data.worker.dispatch_event_to_templates(request.id.into(), request.event).await
+        };
+
+        Ok(Json(super::WorkerProcessCommHttp2DispatchEventToTemplatesResponse { result: result.into() }))
+    }
+
+    pub(super) async fn regenerate_cache_endpoint(
+        State(data): State<super::WorkerProcessCommHttp2Worker>,
+        headers: HeaderMap,
+        Json(request): Json<super::WorkerProcessCommHttp2RegenerateCache>,
+    ) -> Result<Json<super::WorkerProcessCommHttp2RegenerateCacheResponse>, (StatusCode, Json<String>)> {
+        verify_token(&headers, &data.token)?;
+
+        data.worker.regenerate_cache(request.id.into()).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())))?;
+
+        Ok(Json(super::WorkerProcessCommHttp2RegenerateCacheResponse {}))
+    }
+}
