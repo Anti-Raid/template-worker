@@ -57,7 +57,7 @@ aws-smithy-types = { version = "1" }
 
 [dependencies.tokio]
 version = "1"
-features = ["sync", "macros", "rt-multi-thread", "tracing", "process"]
+features = ["sync", "macros", "rt-multi-thread", "tracing", "process", "signal"]
 
 [dependencies.serenity]
 git = "https://github.com/Anti-Raid/serenity"

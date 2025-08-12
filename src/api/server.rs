@@ -86,6 +86,7 @@ pub fn create(data: Arc<crate::data::Data>, http: Arc<serenity::http::Http>) -> 
         //routes!(internal_api::get_vm_metrics_by_tid),
         //routes!(internal_api::get_vm_metrics_for_all),
         routes!(internal_api::guilds_exist),
+        routes!(internal_api::kill_worker)
     ];
 
     // Public routes

@@ -109,6 +109,9 @@ pub struct WorkerProcessHandle {
 
     /// The id of the worker process, used for routing
     id: usize,
+    
+    /// The total number of processes in the pool
+    total: usize,
 }
 
 #[allow(unused)]
@@ -116,12 +119,13 @@ impl WorkerProcessHandle {
     const MAX_CONSECUTIVE_FAILURES_BEFORE_CRASH: usize = 10;
 
     /// Creates a new WorkerProcessHandle given the worker ID and a communication server backend
-    pub fn new(id: usize, process_comm: Box<dyn WorkerProcessCommServer + Send + Sync>) -> Result<Self, crate::Error> {
+    pub fn new(id: usize, total: usize, process_comm: Box<dyn WorkerProcessCommServer + Send + Sync>) -> Result<Self, crate::Error> {
         let (tx, rx) = unbounded_channel();
 
         let wps = Self {
             process_handle: tx,
             id,
+            total
         };
 
         let wps_ref = wps.clone();
@@ -180,6 +184,8 @@ impl WorkerProcessHandle {
             command.arg("processpoolworker");
             command.arg("--worker-id");
             command.arg(self.id.to_string());
+            command.arg("--worker-threads");
+            command.arg(self.total.to_string());
 
             for arg in process_comm.start_args() {
                 command.arg(arg);
@@ -354,12 +360,12 @@ impl WorkerProcessHandleCreateOpts {
 impl Poolable for WorkerProcessHandle {
     type ExtState = WorkerProcessHandleCreateOpts;
 
-    fn new(_state: WorkerState, _filter: WorkerFilter, id: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
+    fn new(_state: WorkerState, _filter: WorkerFilter, id: usize, total: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
         where
             Self: Sized {
         // Create a new WorkerProcessHandle with the given state and filter
         let process_comm = ext_state.communication_layer.create()?;
-        Self::new(id, process_comm)
+        Self::new(id, total, process_comm)
     }
 }
 

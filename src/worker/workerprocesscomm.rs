@@ -26,7 +26,7 @@ pub trait WorkerProcessCommServer: Send + Sync {
 }
 
 /// Marker trait to signify that this is a client for the worker process communication
-pub trait WorkerProcessCommClient {}
+pub trait WorkerProcessCommClient: Send + Sync {}
 
 /// Trait to create a worker process communication server
 pub trait WorkerProcessCommServerCreator: Send + Sync {

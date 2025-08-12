@@ -12,6 +12,9 @@ mod worker;
 use crate::config::CONFIG;
 use crate::data::Data;
 use crate::event_handler::EventFramework;
+use crate::worker::workerprocesscomm::WorkerProcessCommClient;
+use crate::worker::workerprocesscommhttp2::{WorkerProcessCommHttp2ServerCreator, WorkerProcessCommHttp2Worker};
+use crate::worker::workerprocesshandle::{WorkerProcessHandle, WorkerProcessHandleCreateOpts};
 use crate::worker::workerstate::WorkerState;
 use crate::worker::workerpool::WorkerPool;
 use crate::worker::workerthread::WorkerThread;
@@ -24,8 +27,11 @@ use clap::{Parser, ValueEnum};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>; // This is constant and should be copy pasted
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 pub enum WorkerType {
+    /// Dummy worker for registering commands only
+    #[clap(name = "register", alias = "register-commands")]
+    RegisterCommands,
     /// Worker that uses a thread pool for executing tasks
     #[clap(name = "threadpool", alias = "thread-pool")]
     ThreadPool,
@@ -40,23 +46,12 @@ pub enum WorkerType {
 /// Command line arguments
 #[derive(Parser, Debug, Clone)]
 struct CmdArgs {
-    /// Shard IDs to start. Mutually exclusive with `shard_count` and neither passed [default is to autoshard]
-    #[clap(long)]
-    pub shards: Option<Vec<u16>>,
-
-    /// Number of shards to start. Mutually exclusive with `shards` and neither passed [default is to autoshard]
-    #[clap(long)]
-    pub shard_count: Option<u16>,
-
     /// Max connections that should be made to the database
     #[clap(long, default_value = "7")]
     pub max_db_connections: u32,
 
-    #[clap(long, default_value_t = false)]
-    pub use_tokio_console: bool,
-
-    #[clap(long, default_value_t = false)]
-    pub register_commands_only: bool,
+    //#[clap(long, default_value_t = false)]
+    //pub use_tokio_console: bool,
 
     /// Number of threads to use for the worker thread pool
     #[clap(long, default_value = "30")]
@@ -65,6 +60,18 @@ struct CmdArgs {
     /// Type of worker to use
     #[clap(long, default_value = "threadpool", value_enum)]
     pub worker_type: WorkerType,
+
+    /// The worker ID to use when running as a process pool worker
+    /// 
+    /// Ignored unless `worker-type` is `processpoolworker`
+    #[clap(long)]
+    pub worker_id: Option<usize>,
+
+    /// The worker process communication type to use when running as a process pool worker
+    /// 
+    /// Ignored unless `worker-type` is `processpoolworker`
+    #[clap(long)]
+    pub worker_comm_type: Option<String>,
 }
 
 #[tokio::main]
@@ -72,7 +79,26 @@ async fn main() {
     let args = CmdArgs::parse();
     let mut env_builder = env_logger::builder();
 
-    env_builder
+    if let Some(worker_id) = args.worker_id {
+        // Make sure worker type is process pool worker
+        if args.worker_type != WorkerType::ProcessPoolWorker {
+            panic!("Worker ID can only be set when worker type is processpoolworker");
+        }
+
+        env_builder
+        .format(move |buf, record| {
+            writeln!(
+                buf,
+                "[Worker {}] ({}) {} - {}",
+                worker_id,
+                record.target(),
+                record.level(),
+                record.args()
+            )
+        })
+        .filter(None, log::LevelFilter::Info);
+    } else {
+        env_builder
         .format(move |buf, record| {
             writeln!(
                 buf,
@@ -83,6 +109,7 @@ async fn main() {
             )
         })
         .filter(None, log::LevelFilter::Info);
+    }
 
     env_builder.init();
 
@@ -127,6 +154,8 @@ async fn main() {
 
     info!("Current user: {} ({})", current_user.name, current_user_id);
 
+    http.set_application_id(ApplicationId::new(current_user_id.get()));
+
     let object_storage = Arc::new(
         CONFIG
             .object_storage
@@ -142,97 +171,164 @@ async fn main() {
         Arc::new(current_user.clone()),
     ).expect("Failed to create worker state");
 
-    let worker_pool = Arc::new(WorkerPool::<WorkerThread>::new(
-        worker_state.clone(),
-        args.worker_threads,
-        &()
-    )
-    .expect("Failed to create worker thread pool"));
+    match args.worker_type {
+        WorkerType::RegisterCommands => {
+            info!("Getting registration data from builtins");
 
-    let data = Arc::new(Data {
-        object_store: object_storage,
-        pool: pg_pool.clone(),
-        reqwest,
-        current_user,
-        worker: worker_pool,
-    });
+            let data = &*register::REGISTER;
 
-    let data1 = data.clone();
-    let http1 = http.clone();
-    tokio::task::spawn(async move {
-        log::info!("Starting RPC server");
+            println!("Register data: {:?}", data);
 
-        let rpc_server = crate::api::server::create(data1, http1);
+            http
+                .create_global_commands(&data.commands)
+                .await
+                .expect("Failed to register commands");
 
-        let addr = format!(
-            "{}:{}",
-            CONFIG.base_ports.template_worker_bind_addr,
-            CONFIG.base_ports.template_worker_port
-        );
+        },
+        WorkerType::ThreadPool => {
+            let worker_pool = Arc::new(WorkerPool::<WorkerThread>::new(
+                worker_state.clone(),
+                args.worker_threads,
+                &()
+            )
+            .expect("Failed to create worker thread pool"));
 
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .unwrap();
+            let data = Arc::new(Data {
+                object_store: object_storage,
+                pool: pg_pool.clone(),
+                reqwest,
+                current_user,
+                worker: worker_pool,
+            });
 
-        axum::serve(listener, rpc_server).await.unwrap();
-    });
+            let data1 = data.clone();
+            let http1 = http.clone();
+            tokio::task::spawn(async move {
+                log::info!("Starting RPC server");
 
-    let mut client = client_builder
-        .data(data)
-        .event_handler(EventFramework {})
-        .wait_time_between_shard_start(Duration::from_secs(0)) // Disable wait time between shard start due to Sandwich
-        .await
-        .expect("Error creating client");
+                let rpc_server = crate::api::server::create(data1, http1);
 
-    info!("Getting registration data from builtins");
+                let addr = format!(
+                    "{}:{}",
+                    CONFIG.base_ports.template_worker_bind_addr,
+                    CONFIG.base_ports.template_worker_port
+                );
 
-    let data = &*register::REGISTER;
+                let listener = tokio::net::TcpListener::bind(addr)
+                    .await
+                    .unwrap();
 
-    println!("Register data: {:?}", data);
+                axum::serve(listener, rpc_server).await.unwrap();
+            });
 
-    client.http.set_application_id(ApplicationId::new(current_user_id.get()));
+            let mut client = client_builder
+                .data(data)
+                .event_handler(EventFramework {})
+                .wait_time_between_shard_start(Duration::from_secs(0)) // Disable wait time between shard start due to Sandwich
+                .await
+                .expect("Error creating client");
 
-    if args.register_commands_only {
-        client
-            .http
-            .create_global_commands(&data.commands)
-            .await
-            .expect("Failed to register commands");
+            info!("Starting using autosharding");
 
-        return;
-    }
+            if let Err(why) = client.start_autosharded().await {
+                error!("Client error: {:?}", why);
+                std::process::exit(1); // Clean exit with status code of 1
+            }
+        },
+        WorkerType::ProcessPool => {
+            let worker_pool = Arc::new(WorkerPool::<WorkerProcessHandle>::new(
+                worker_state.clone(),
+                args.worker_threads,
+                &WorkerProcessHandleCreateOpts::new(
+                    Arc::new(WorkerProcessCommHttp2ServerCreator::new(
+                        reqwest::Client::builder()
+                        .http2_prior_knowledge()
+                        .build()
+                        .expect("Failed to create reqwest client for worker process communication"),
+                    ))
+                )
+            )
+            .expect("Failed to create worker thread pool"));
 
-    if let Some(shard_count) = args.shard_count {
-        if let Some(ref shards) = args.shards {
-            let shard_range = std::ops::Range {
-                start: shards[0],
-                end: *shards.last().expect("Shards should not be empty"),
+            let data = Arc::new(Data {
+                object_store: object_storage,
+                pool: pg_pool.clone(),
+                reqwest,
+                current_user,
+                worker: worker_pool,
+            });
+
+            let data1 = data.clone();
+            let http1 = http.clone();
+            tokio::task::spawn(async move {
+                log::info!("Starting RPC server");
+
+                let rpc_server = crate::api::server::create(data1, http1);
+
+                let addr = format!(
+                    "{}:{}",
+                    CONFIG.base_ports.template_worker_bind_addr,
+                    CONFIG.base_ports.template_worker_port
+                );
+
+                let listener = tokio::net::TcpListener::bind(addr)
+                    .await
+                    .unwrap();
+
+                axum::serve(listener, rpc_server).await.unwrap();
+            });
+
+            // Loop indefinitely until Ctrl+C is pressed
+            loop {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {
+                        break; // Exit the loop
+                    }
+                }
+            }
+        },
+        WorkerType::ProcessPoolWorker => {
+            let Some(worker_id) = args.worker_id else {
+                panic!("Worker ID must be set when worker type is processpoolworker");
             };
 
-            info!("Starting shard range: {:?}", shard_range);
+            let worker_thread = Arc::new(WorkerThread::new(
+                worker_state.clone(),
+                WorkerPool::<WorkerProcessHandle>::filter_for(worker_id, args.worker_threads),
+                worker_id
+            ).expect("Failed to create worker thread"));
 
-            if let Err(why) = client.start_shard_range(shard_range, shard_count).await {
+            let Some(worker_comm_type) = args.worker_comm_type else {
+                panic!("Worker comm type must be set when worker type is processpoolworker");
+            };
+
+            let _comm_client: Arc<dyn WorkerProcessCommClient> = match worker_comm_type.as_str() {
+                "http2" => Arc::new(WorkerProcessCommHttp2Worker::new(worker_thread.clone()).await.expect("Failed to create HTTP/2 worker process communication client")),
+                _ => panic!("Unknown worker comm type: {}", worker_comm_type),
+            };
+
+            let data = Arc::new(Data {
+                object_store: object_storage,
+                pool: pg_pool.clone(),
+                reqwest,
+                current_user,
+                worker: worker_thread,
+            });
+
+            let mut client = client_builder
+                .data(data)
+                .event_handler(EventFramework {})
+                .wait_time_between_shard_start(Duration::from_secs(0)) // Disable wait time between shard start due to Sandwich
+                .await
+                .expect("Error creating client");
+
+            info!("Starting worker...");
+
+            // Start the worker shard
+            if let Err(why) = client.start_shard(worker_id.try_into().unwrap(), args.worker_threads.try_into().unwrap()).await {
                 error!("Client error: {:?}", why);
                 std::process::exit(1); // Clean exit with status code of 1
-            }
-
-            return;
-        } else {
-            info!("Starting shard count: {}", shard_count);
-
-            if let Err(why) = client.start_shards(shard_count).await {
-                error!("Client error: {:?}", why);
-                std::process::exit(1); // Clean exit with status code of 1
-            }
-
-            return;
-        }
-    } else {
-        info!("Starting using autosharding");
-
-        if let Err(why) = client.start_autosharded().await {
-            error!("Client error: {:?}", why);
-            std::process::exit(1); // Clean exit with status code of 1
+            }   
         }
     }
 }

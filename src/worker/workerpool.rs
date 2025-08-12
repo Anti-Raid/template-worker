@@ -15,7 +15,7 @@ pub trait Poolable: WorkerLike + Send + Sync {
     type ExtState: Send + Sync;
 
     /// Returns a new `Poolable` object given `state`, `filters` and `id`
-    fn new(state: WorkerState, filter: WorkerFilter, id: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
+    fn new(state: WorkerState, filter: WorkerFilter, id: usize, total: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
     where
         Self: Sized;
 }
@@ -37,7 +37,7 @@ impl<T: Poolable> WorkerPool<T> {
 
         for id in 0..num_threads {
             let filter = Self::filter_for(id, num_threads);
-            let thread = T::new(state.clone(), filter, id, ext_state)?;
+            let thread = T::new(state.clone(), filter, id, num_threads, ext_state)?;
             workers.push(thread);
         }
 
@@ -50,7 +50,7 @@ impl<T: Poolable> WorkerPool<T> {
 impl<T: WorkerLike + Send + Sync> WorkerPool<T> {
 
     /// Defines a filter for a worker in the pool
-    fn filter_for(id: usize, num_threads: usize) -> WorkerFilter {
+    pub fn filter_for(id: usize, num_threads: usize) -> WorkerFilter {
         let closure = move |tenant_id: Id| {
             match tenant_id {
                 // This is safe as AntiRaid workers does not currently support 32 bit platforms

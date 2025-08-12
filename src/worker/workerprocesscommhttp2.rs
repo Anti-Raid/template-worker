@@ -198,7 +198,6 @@ struct WorkerProcessCommHttp2RegenerateCacheResponse {}
 #[derive(Clone)]
 pub struct WorkerProcessCommHttp2Worker {
     token: String,
-    port: u16,
     worker: Arc<dyn WorkerLike + Send + Sync>,
 }
 
@@ -219,7 +218,7 @@ impl WorkerProcessCommHttp2Worker {
         // Ensure the port is not already in use
         let listener = tokio::net::TcpListener::bind(format!("127.0.1:{}:{}", port, token)).await?;
 
-        let self_n = Self { token, port, worker };
+        let self_n = Self { token, worker };
 
         let router: axum::Router<()> = axum::Router::new()
         .route(

@@ -255,3 +255,35 @@ pub(super) async fn guilds_exist(
 
     Ok(Json(guilds_exist))
 }
+
+/// Kill Worker
+/// 
+/// Kill a worker thread. Note that kills the WorkerLike object and so if run on a WorkerPool, 
+/// it will kill all workers in the pool. Only useful for debugging purposes.
+#[utoipa::path(
+    post, 
+    tag = "Internal API",
+    path = "/i/kill-worker",
+    security(
+        ("InternalAuth" = []) 
+    ),
+    request_body = Vec<String>,
+    responses(
+        (status = 200, description = "Killed worker successfully"),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
+#[axum::debug_handler]
+pub(super) async fn kill_worker(
+    State(AppData {
+        data,
+        ..
+    }): State<AppData>,
+    InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
+) -> ApiResponse<()> {
+    data.worker.kill()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
+
+    Ok(Json(()))
+}

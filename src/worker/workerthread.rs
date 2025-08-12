@@ -249,7 +249,7 @@ impl WorkerLike for WorkerThread {
 // WorkerThread's can be pooled via WorkerPool!
 impl Poolable for WorkerThread {
     type ExtState = ();
-    fn new(state: WorkerState, filter: WorkerFilter, id: usize, _ext_state: &Self::ExtState) -> Result<Self, crate::Error>
+    fn new(state: WorkerState, filter: WorkerFilter, id: usize, _num_threads: usize, _ext_state: &Self::ExtState) -> Result<Self, crate::Error>
         where
             Self: Sized {
         Self::new(state, filter, id)
