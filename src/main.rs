@@ -315,12 +315,40 @@ async fn main_impl(args: CmdArgs) {
 
             // Loop indefinitely until Ctrl+C is pressed
             loop {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {
-                        // Kill the worker pool
-                        info!("Received Ctrl+C, shutting down worker pool");
-                        worker_pool.kill().await.expect("Failed to kill worker pool");
-                        break; // Exit the loop
+                // On Unix, listen for *both* SIGINT and SIGTERM
+                #[cfg(unix)]
+                {
+                    use tokio::signal::unix::{signal, SignalKind};
+
+                    let mut sigint = signal(SignalKind::interrupt()).expect("Failed to set up SIGINT handler");
+                    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to set up SIGTERM handler");
+
+                    tokio::select! {
+                        _ = sigint.recv() => {
+                            // Kill the worker pool
+                            info!("Received SIGINT, shutting down worker pool");
+                            worker_pool.kill().await.expect("Failed to kill worker pool");
+                            break; // Exit the loop
+                        }
+                        _ = sigterm.recv() => {
+                            // Kill the worker pool
+                            info!("Received SIGTERM, shutting down worker pool");
+                            worker_pool.kill().await.expect("Failed to kill worker pool");
+                            break; // Exit the loop
+                        }
+                    }
+                }
+
+                // Fallback for non-unix systems
+                #[cfg(not(unix))]
+                {
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {
+                            // Kill the worker pool
+                            info!("Received Ctrl+C, shutting down worker pool");
+                            worker_pool.kill().await.expect("Failed to kill worker pool");
+                            break; // Exit the loop
+                        }
                     }
                 }
             }

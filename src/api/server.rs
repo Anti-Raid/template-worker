@@ -39,6 +39,7 @@ impl From<String> for ApiError {
 
 impl<'a> From<&'a str> for ApiError {
     fn from(message: &'a str) -> Self {
+        log::error!("Returning error: {message}");
         ApiError {
             message: message.to_string(),
             code: ApiErrorCode::InternalError,

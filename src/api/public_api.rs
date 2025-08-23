@@ -509,7 +509,7 @@ pub(super) async fn base_guild_user_info(
 /// NOTE: This is not a security mechanism
 static OAUTH2_CODE_CACHE: LazyLock<Cache<String, ()>> = LazyLock::new(|| {
     Cache::builder()
-        .time_to_live(std::time::Duration::from_secs(60 * 60)) // 1 hour
+        .time_to_live(std::time::Duration::from_secs(60 * 10)) // 10 minutes
         .build()
 });
 
@@ -542,7 +542,7 @@ pub(super) async fn create_oauth2_session(
         ));
     }
 
-    if req.code.len() < 5 {
+    if req.code.len() < 3 {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(ApiError {
