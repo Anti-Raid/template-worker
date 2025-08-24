@@ -1,13 +1,19 @@
 use rust_embed::Embed;
 use std::sync::{Arc, LazyLock};
 
-use super::template::{DefaultableOverlayFS, Template, TemplatingTypes};
+use super::template::{DefaultableOverlayFS, Template};
 
 /// Builtins
 #[derive(Embed, Debug)]
 #[folder = "$CARGO_MANIFEST_DIR/../../builtins"]
 #[prefix = ""]
 pub struct Builtins;
+
+/// To make uploads not need to upload all of ``templating-types`` and keep them up to date:
+#[derive(Embed, Debug)]
+#[folder = "$CARGO_MANIFEST_DIR/../../builtins/templating-types"]
+#[prefix = "templating-types/"]
+pub struct TemplatingTypes;
 
 /// Builtins patches
 #[derive(Embed, Debug)]
