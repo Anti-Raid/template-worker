@@ -1,10 +1,12 @@
+use crate::worker::limits::MAX_TEMPLATES_EXECUTION_TIME;
 use crate::worker::limits::MAX_VM_THREAD_STACK_SIZE;
+use crate::worker::limits::TEMPLATE_GIVE_TIME;
 use khronos_runtime::require::FilesystemWrapper;
 use khronos_runtime::rt::mlua::prelude::*;
 use khronos_runtime::rt::KhronosIsolate;
 use khronos_runtime::rt::KhronosRuntime;
-use khronos_runtime::rt::KhronosRuntimeInterruptData;
 use khronos_runtime::rt::RuntimeCreateOpts;
+use khronos_runtime::traits::context::TFlags;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serenity::all::*;
@@ -12,7 +14,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::RwLock;
-use std::time::Duration;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateCommand {
@@ -91,19 +92,9 @@ fn register() -> Result<RegisterResult, crate::Error> {
                 let mut rt = KhronosRuntime::new(
                     RuntimeCreateOpts {
                         disable_task_lib: false,
+                        time_limit: Some(MAX_TEMPLATES_EXECUTION_TIME),
+                        give_time: TEMPLATE_GIVE_TIME
                     },
-                    Some(|_a: &Lua, b: &KhronosRuntimeInterruptData| {
-                        let Some(last_execution_time) = b.last_execution_time else {
-                            return Ok(LuaVmState::Continue);
-                        };
-
-                        // In builtins.register.luau, we only give 2 seconds for the code to register
-                        if last_execution_time.elapsed() >= Duration::from_secs(2) {
-                            return Ok(LuaVmState::Yield);
-                        }
-
-                        Ok(LuaVmState::Continue)
-                    }),
                     None::<(fn(&Lua, LuaThread) -> Result<(), LuaError>, fn() -> ())>,
                 )
                 .await
@@ -114,7 +105,7 @@ fn register() -> Result<RegisterResult, crate::Error> {
                 let subisolate = KhronosIsolate::new_subisolate(
                     rt,
                     FilesystemWrapper::new(crate::worker::builtins::BUILTINS.content.0.clone()),
-                    true // Enable safeenv
+                    TFlags::READONLY_GLOBALS
                 )
                 .expect("Failed to create KhronosIsolate");
 

@@ -5,7 +5,8 @@ use std::time::Duration;
 
 pub const MAX_TEMPLATE_MEMORY_USAGE: usize = 1024 * 1024 * 20; // 20MB maximum memory
 pub const MAX_VM_THREAD_STACK_SIZE: usize = 1024 * 1024 * 20; // 20MB maximum memory
-pub const MAX_TEMPLATES_EXECUTION_TIME: Duration = Duration::from_secs(60 * 10); // 10 minute maximum execution time
+pub const MAX_TEMPLATES_EXECUTION_TIME: Duration = Duration::from_secs(10); // 10 seconds maximum execution time before sched yield must happen
+pub const TEMPLATE_GIVE_TIME: Duration = Duration::from_secs(1); // 1 second maximum time to give to a template to finish execution following a yield
 pub const MAX_TEMPLATES_RETURN_WAIT_TIME: Duration = Duration::from_secs(60); // 60 seconds maximum execution time
 
 pub fn create_nonmax_u32(value: u32) -> Result<NonZeroU32, crate::Error> {

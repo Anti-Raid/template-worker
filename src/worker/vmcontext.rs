@@ -4,10 +4,10 @@ use super::template::Template;
 use crate::worker::keyexpirychannel::KeyExpiryChannel;
 use crate::worker::workercachedata::WorkerCacheData;
 use khronos_runtime::traits::context::{
-    CompatibilityFlags, KhronosContext, Limitations, ScriptData,
+    KhronosContext, Limitations, ScriptData,
 };
 use khronos_runtime::traits::datastoreprovider::{DataStoreImpl, DataStoreProvider};
-use khronos_runtime::traits::discordprovider::DiscordProvider;
+use dapi::controller::DiscordProvider;
 use khronos_runtime::traits::httpclientprovider::HTTPClientProvider;
 use khronos_runtime::traits::httpserverprovider::HTTPServerProvider;
 use khronos_runtime::traits::ir::kv::KvRecord;
@@ -100,7 +100,6 @@ impl TemplateContextProvider {
                 created_at: Some(template_data.created_at),
                 updated_by: None,
                 updated_at: Some(template_data.updated_at),
-                compatibility_flags: CompatibilityFlags::empty(),
             }),
             template_data,
             kv_constraints,
@@ -138,14 +137,6 @@ impl KhronosContext for TemplateContextProvider {
 
     fn template_name(&self) -> String {
         self.template_data.name.clone()
-    }
-
-    fn current_user(&self) -> Option<serenity::all::CurrentUser> {
-        Some(
-            (*self.state
-            .current_user)
-            .clone()
-        )
     }
 
     fn kv_provider(&self) -> Option<Self::KVProvider> {
@@ -705,6 +696,14 @@ impl DiscordProvider for ArDiscordProvider {
         )
         .await
         .map_err(|e| format!("Failed to fetch guild information from sandwich: {}", e))?)
+    }
+
+    fn current_user(&self) -> Option<serenity::all::CurrentUser> {
+        Some(
+            (*self.state
+            .current_user)
+            .clone()
+        )
     }
 
     async fn get_guild_member(

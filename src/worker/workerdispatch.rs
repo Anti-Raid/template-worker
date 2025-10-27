@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use khronos_runtime::{primitives::event::{CreateEvent, Event}, require::FilesystemWrapper, rt::{IsolateData, KhronosIsolate}, utils::khronos_value::KhronosValue};
+use khronos_runtime::{primitives::event::{ContextEvent, CreateEvent}, require::FilesystemWrapper, rt::{IsolateData, KhronosIsolate, isolate::CodeSource}, traits::context::TFlags, utils::khronos_value::KhronosValue};
 use std::time::Duration;
 use super::template::Template;
 use crate::worker::{keyexpirychannel::KeyExpiryChannel, workercachedata::{DeferredCacheRegenerationMode, WorkerCacheData}, workerfilter::WorkerFilter};
@@ -278,7 +278,7 @@ impl WorkerDispatch {
     /// Helper method to dispatch an event to a single template
     async fn dispatch_event_to_template_impl(
         template: &Arc<Template>,
-        event: Event,
+        event: ContextEvent,
         vm_data: &VmData,
         cache: WorkerCacheData,
         key_expiry_chan: KeyExpiryChannel,
@@ -288,11 +288,25 @@ impl WorkerDispatch {
             return Err("Lua VM to dispatch to is broken".into());
         }
 
+        let provider = TemplateContextProvider::new(
+            vm_data.state.clone(), 
+            template.clone(), 
+            cache, 
+            id,
+            vm_data.kv_constraints,
+            vm_data.ratelimits.clone(),
+            key_expiry_chan
+        );
+
         // Get or create a subisolate
         let (sub_isolate, created_context) = if let Some(sub_isolate) =
             vm_data.runtime_manager.get_sub_isolate(&template.name)
         {
-            (sub_isolate.isolate, sub_isolate.data)
+            let sub_isolate = sub_isolate.isolate;
+            let created_context = sub_isolate.create_context(provider, event)
+                .map_err(|e| format!("Failed to create context for template {}: {}", template.name, e))?;
+
+            (sub_isolate, created_context)
         } else {
             let mut attempts = 0;
             let sub_isolate = loop {
@@ -301,7 +315,7 @@ impl WorkerDispatch {
                 match KhronosIsolate::new_subisolate(
                     vm_data.runtime_manager.runtime().clone(),
                     FilesystemWrapper::new(template.content.0.clone()),
-                    false // TODO: Allow safeenv optimization one day
+                    TFlags::empty() // TODO: Allow safeenv optimization one day
                 ) {
                     Ok(isolate) => {
                         break isolate;
@@ -325,35 +339,25 @@ impl WorkerDispatch {
 
             log::debug!("Created subisolate for template {}", template.name);
 
-            let provider = TemplateContextProvider::new(
-                vm_data.state.clone(), 
-                template.clone(), 
-                cache, 
-                id,
-                vm_data.kv_constraints,
-                vm_data.ratelimits.clone(),
-                key_expiry_chan
-            );
+            let iso_data = IsolateData {
+                isolate: sub_isolate.clone(),
+                data: (),
+            };
 
-            let created_context = match sub_isolate.create_context(provider) {
+            vm_data.runtime_manager.add_sub_isolate(template.name.clone(), iso_data);
+
+            let created_context = match sub_isolate.create_context(provider, event) {
                 Ok(ctx) => ctx,
                 Err(e) => {
                     return Err(format!("Failed to create context for template {}: {}", template.name, e).into());
                 }
             };
 
-            let iso_data = IsolateData {
-                isolate: sub_isolate.clone(),
-                data: created_context.clone(),
-            };
-
-            vm_data.runtime_manager.add_sub_isolate(template.name.clone(), iso_data);
-
             (sub_isolate, created_context)
         };
 
         let spawn_result = sub_isolate
-            .spawn_asset("/init.luau", "/init.luau", created_context, event)
+            .spawn_asset("/init.luau", CodeSource::AssetPath("/init.luau"), created_context)
             .await
             .map_err(|e| e.to_string())?;
 
@@ -384,8 +388,7 @@ impl WorkerDispatch {
 
         let mut set = tokio::task::JoinSet::new();
 
-        let event = Event::from_create_event_with_runtime(vm_data.runtime_manager.runtime(), event)
-            .map_err(|e| format!("Failed to create event: {}", e))?;
+        let event = event.into_context();
 
         for template in templates {
             let vm_ref = vm_data.clone();
