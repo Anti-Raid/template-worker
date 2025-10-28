@@ -101,6 +101,103 @@ impl AttachedGuildTemplate {
     pub fn is_from_shop_listing(&self) -> bool {
         self.shop_listing_ref.is_some()
     }
+
+    /// Updates the guild template's allowed capabilities and events
+    /// 
+    /// This is allowed for both owned and attached templates
+    /// 
+    /// Dev note: this is the underlying DB code. Workers should use
+    /// a dedicated API within WorkerCacheData or WorkerDB which will
+    /// call this and handle/trigger cache regeneration etc as needed.
+    pub async fn update_caps_and_events(
+        &mut self,
+        pool: &sqlx::PgPool,
+        new_allowed_caps: Vec<String>,
+        new_events: Vec<String>,
+    ) -> Result<(), Error> {
+        sqlx::query(
+            r#"
+            UPDATE attached_guild_templates
+            SET allowed_caps = $1, events = $2
+            WHERE guild_id = $3 AND template_pool_ref = $4
+            "#,
+        )
+        .bind(&new_allowed_caps)
+        .bind(&new_events)
+        .bind(self.guild_id.to_string())
+        .bind(self.template_pool_ref.id())
+        .execute(pool)
+        .await?;
+
+        self.allowed_caps = new_allowed_caps;
+        self.events = new_events;
+
+        Ok(())
+    }
+
+    /// Deletes the guild template from the database
+    ///
+    /// This is allowed for both owned and attached templates.
+    /// 
+    /// If the template is owned (not from a shop listing), then the
+    /// pool reference will also be deleted via a transaction.
+    /// 
+    /// Dev note: this is the underlying DB code. Workers should use
+    /// a dedicated API within WorkerCacheData or WorkerDB which will
+    /// call this and handle/trigger cache regeneration etc as needed.
+    pub async fn delete(
+        &self,
+        pool: &sqlx::PgPool,
+    ) -> Result<(), Error> {
+        if self.is_from_shop_listing() {
+            sqlx::query(
+                r#"
+                DELETE FROM attached_guild_templates
+                WHERE guild_id = $1 AND template_pool_ref = $2
+                "#,
+            )
+            .bind(self.guild_id.to_string())
+            .bind(self.template_pool_ref.id())
+            .execute(pool)
+            .await?;
+        } else {
+            let mut tx = pool.begin().await?;
+
+            // Verify ownership as an additional step before delete
+            // 
+            // Only delete the underlying BaseTemplate if the guild owns it
+            let Some(owner) = self.template_pool_ref.fetch_owner(&mut *tx).await? else {
+                return Err("BaseTemplate not found when attempting to delete owned AttachedGuildTemplate".into());
+            };
+
+            sqlx::query(
+                r#"
+                DELETE FROM attached_guild_templates
+                WHERE guild_id = $1 AND template_pool_ref = $2
+                "#,
+            )
+            .bind(self.guild_id.to_string())
+            .bind(self.template_pool_ref.id())
+            .execute(&mut tx)
+            .await?;
+
+            if owner.guild_owns(self.guild_id) {
+                sqlx::query(
+                    r#"
+                    DELETE FROM template_pool
+                    WHERE id = $1
+                    "#,
+                )
+                .bind(self.template_pool_ref.id())
+                .execute(&mut tx)
+                .await?;
+            }
+
+            tx.commit().await?;
+        }
+
+        Ok(())
+    }
 }
 
 

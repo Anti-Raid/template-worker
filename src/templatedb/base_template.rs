@@ -1,7 +1,7 @@
 use std::{collections::HashMap, str::FromStr};
 
 use serenity::all::{GuildId, UserId};
-use sqlx::{Row, postgres::PgRow};
+use sqlx::{Executor, Postgres, Row, postgres::PgRow};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 
@@ -169,7 +169,9 @@ impl TryFrom<PgRow> for BaseTemplateDb {
 
 impl BaseTemplate {
     /// Given an ID, fetch the BaseTemplate from the database
-    pub async fn fetch_by_id(pool: &sqlx::PgPool, id: Uuid) -> Result<Option<Self>, Error> {
+    pub async fn fetch_by_id<'c, E>(db: E, id: Uuid) -> Result<Option<Self>, Error> 
+        where E: Executor<'c, Database = Postgres>
+    {
         let record = sqlx::query(
             r#"
             SELECT
@@ -187,7 +189,7 @@ impl BaseTemplate {
             "#,
         )
         .bind(id)
-        .fetch_optional(pool)
+        .fetch_optional(db)
         .await?;
 
         if let Some(db_template) = record {
@@ -220,7 +222,39 @@ impl BaseTemplateRef {
     }
 
     /// Fetch the full BaseTemplate from the database
-    pub async fn fetch_from_db(&self, pool: &sqlx::PgPool) -> Result<Option<BaseTemplate>, Error> {
-        BaseTemplate::fetch_by_id(pool, self.id).await
+    pub async fn fetch_from_db<'c, E>(&self, db: E) -> Result<Option<BaseTemplate>, Error> 
+        where E: Executor<'c, Database = Postgres>
+    {
+        BaseTemplate::fetch_by_id(db, self.id).await
+    }
+
+    /// Returns the owner of the BaseTemplate
+    pub async fn fetch_owner<'c, E>(&self, db: E) -> Result<Option<TemplateOwner>, Error> 
+        where E: Executor<'c, Database = Postgres> 
+    {
+        let record = sqlx::query(
+            r#"
+            SELECT
+                owner_type,
+                owner_id
+            FROM template_pool
+            WHERE id = $1
+            "#,
+        )
+        .bind(self.id)
+        .fetch_optional(db)
+        .await?;
+
+        if let Some(row) = record {
+            let owner_type: String = row.try_get("owner_type")?;
+            let owner_id: String = row.try_get("owner_id")?;
+
+            let owner = TemplateOwner::new(&owner_type, &owner_id)
+                .ok_or(format!("Invalid owner type or id: {} {}", owner_type, owner_id))?;
+
+            Ok(Some(owner))
+        } else {
+            Ok(None)
+        }
     }
 }
