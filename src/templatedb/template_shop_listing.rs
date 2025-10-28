@@ -119,6 +119,34 @@ impl TemplateShopListing {
             Ok(None)
         }
     }
+
+    /// Fetch all TemplateShopListings
+    pub async fn fetch_all(
+        pool: &sqlx::PgPool,
+    ) -> Result<Vec<TemplateShopListing>, Error> {
+        let rows = sqlx::query(r#"
+            SELECT 
+                id, 
+                short, 
+                template_pool_ref, 
+                review_state, 
+                default_events, 
+                default_allowed_caps, 
+                created_at, 
+                last_updated_at 
+            FROM template_shop_listings
+            ORDER BY created_at DESC"#
+            )
+            .fetch_all(pool)
+            .await?;    
+        let mut listings = Vec::new();
+        for row in rows {
+            let db_listing = TemplateShopListingDb::try_from(row)?;
+            let listing = db_listing.into_template_shop_listing()?;
+            listings.push(listing);
+        }
+        Ok(listings)
+    }
 }
 
 /// Simple ergonomic struct that points to a TemplateShopListing in the DB by ID

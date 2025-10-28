@@ -32,44 +32,6 @@ pub struct AttachedGuildTemplate {
     pub events: Vec<String>,
 }
 
-/// Simple intermediary struct for DB -> AttachedGuildTemplate conversion
-pub struct AttachedGuildTemplateDb {
-    pub guild_id: String,
-    pub template_pool_ref: Uuid,
-    pub shop_listing_ref: Option<Uuid>,
-    pub created_at: DateTime<Utc>,
-    pub allowed_caps: Vec<String>,
-    pub events: Vec<String>,
-}
-
-impl AttachedGuildTemplateDb {
-    /// Convert a (internal) AttachedGuildTemplateDb to a AttachedGuildTemplate
-    fn into_attached_guild_template(self) -> Result<AttachedGuildTemplate, Error> {
-        Ok(AttachedGuildTemplate {
-            guild_id: self.guild_id.parse().map_err(|_| "Invalid guild ID")?,
-            template_pool_ref: BaseTemplateRef::new(self.template_pool_ref),
-            shop_listing_ref: self.shop_listing_ref.map(TemplateShopListingRef::new),
-            created_at: self.created_at,
-            allowed_caps: self.allowed_caps,
-            events: self.events,
-        })
-    }
-} 
-
-impl TryFrom<PgRow> for AttachedGuildTemplateDb {
-    type Error = Error;
-    fn try_from(row: PgRow) -> Result<Self, Self::Error> {
-        Ok(AttachedGuildTemplateDb {
-            guild_id: row.try_get("guild_id")?,
-            template_pool_ref: row.try_get("template_pool_ref")?,
-            shop_listing_ref: row.try_get("shop_listing_ref")?,
-            created_at: row.try_get("created_at")?,
-            allowed_caps: row.try_get("allowed_caps")?,
-            events: row.try_get("events")?,
-        })
-    }
-}
-
 impl AttachedGuildTemplate {
     /// Fetches all AttachedGuildTemplates for a given guild
     #[allow(dead_code)]
@@ -138,5 +100,44 @@ impl AttachedGuildTemplate {
     /// Returns if the guild template comes from a shop listing or not
     pub fn is_from_shop_listing(&self) -> bool {
         self.shop_listing_ref.is_some()
+    }
+}
+
+
+/// Simple intermediary struct for DB -> AttachedGuildTemplate conversion
+struct AttachedGuildTemplateDb {
+    guild_id: String,
+    template_pool_ref: Uuid,
+    shop_listing_ref: Option<Uuid>,
+    created_at: DateTime<Utc>,
+    allowed_caps: Vec<String>,
+    events: Vec<String>,
+}
+
+impl AttachedGuildTemplateDb {
+    /// Convert a (internal) AttachedGuildTemplateDb to a AttachedGuildTemplate
+    fn into_attached_guild_template(self) -> Result<AttachedGuildTemplate, Error> {
+        Ok(AttachedGuildTemplate {
+            guild_id: self.guild_id.parse().map_err(|_| "Invalid guild ID")?,
+            template_pool_ref: BaseTemplateRef::new(self.template_pool_ref),
+            shop_listing_ref: self.shop_listing_ref.map(TemplateShopListingRef::new),
+            created_at: self.created_at,
+            allowed_caps: self.allowed_caps,
+            events: self.events,
+        })
+    }
+} 
+
+impl TryFrom<PgRow> for AttachedGuildTemplateDb {
+    type Error = Error;
+    fn try_from(row: PgRow) -> Result<Self, Self::Error> {
+        Ok(AttachedGuildTemplateDb {
+            guild_id: row.try_get("guild_id")?,
+            template_pool_ref: row.try_get("template_pool_ref")?,
+            shop_listing_ref: row.try_get("shop_listing_ref")?,
+            created_at: row.try_get("created_at")?,
+            allowed_caps: row.try_get("allowed_caps")?,
+            events: row.try_get("events")?,
+        })
     }
 }
