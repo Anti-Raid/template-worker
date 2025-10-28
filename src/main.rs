@@ -8,6 +8,7 @@ mod register;
 mod sandwich;
 mod events;
 mod worker;
+mod templatedb;
 
 use crate::config::CONFIG;
 use crate::data::Data;
