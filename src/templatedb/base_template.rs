@@ -35,6 +35,16 @@ impl TemplateOwner {
             _ => None,
         }
     }
+
+    /// Returns if a guild owns this template
+    pub fn guild_owns(&self, guild_id: GuildId) -> bool {
+        matches!(self, TemplateOwner::Guild { id } if *id == guild_id)
+    }
+
+    /// Returns if a user owns this template
+    pub fn user_owns(&self, user_id: UserId) -> bool {
+        matches!(self, TemplateOwner::User { id } if *id == user_id)
+    }
 }
 
 pub enum TemplateLanguage {
@@ -194,12 +204,23 @@ impl BaseTemplate {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BaseTemplateRef {
     /// ID of the BaseTemplate
-    pub id: Uuid,
+    id: Uuid,
 }
 
 impl BaseTemplateRef {
+    /// Creates a new BaseTemplateRef
+    /// by ID
+    pub fn new(id: Uuid) -> Self {
+        BaseTemplateRef { id }
+    }
+
+    /// Returns the underlying ID of the BaseTemplate
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
     /// Fetch the full BaseTemplate from the database
-    pub async fn fetch(&self, pool: &sqlx::PgPool) -> Result<Option<BaseTemplate>, Error> {
+    pub async fn fetch_from_db(&self, pool: &sqlx::PgPool) -> Result<Option<BaseTemplate>, Error> {
         BaseTemplate::fetch_by_id(pool, self.id).await
     }
 }
