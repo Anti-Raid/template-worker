@@ -178,7 +178,7 @@ impl AttachedGuildTemplate {
             )
             .bind(self.guild_id.to_string())
             .bind(self.template_pool_ref.id())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await?;
 
             if owner.guild_owns(self.guild_id) {
@@ -189,7 +189,7 @@ impl AttachedGuildTemplate {
                     "#,
                 )
                 .bind(self.template_pool_ref.id())
-                .execute(&mut tx)
+                .execute(&mut *tx)
                 .await?;
             }
 
