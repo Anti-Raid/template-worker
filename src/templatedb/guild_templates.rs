@@ -1,13 +1,54 @@
-use serenity::all::GuildId;
+use serenity::all::{UserId, GuildId};
 use chrono::{DateTime, Utc};
 use sqlx::postgres::PgRow;
-use sqlx::Row;
+use sqlx::{Executor, Postgres, Row};
 use uuid::Uuid;
 
 use crate::Error;
 
 use super::base_template::BaseTemplateRef;
-use super::template_shop_listing::TemplateShopListingRef;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttachmentSource {
+    ShopListing,
+    Created
+}
+
+impl AttachmentSource {
+    /// Create a new AttachmentSource
+    /// 
+    /// Returns [`None`] if the source_type is invalid
+    pub fn new(source_type: &str) -> Option<Self> {
+        match source_type {
+            "shop_listing" => Some(AttachmentSource::ShopListing),
+            "created" => Some(AttachmentSource::Created),
+            _ => None,
+        }
+    }
+
+    /// Returns if the source is from a shop listing
+    #[allow(dead_code)]
+    pub fn is_shop_listing(&self) -> bool {
+        matches!(self, AttachmentSource::ShopListing)
+    }
+
+    /// Returns if the source is from a created template
+    #[allow(dead_code)]
+    pub fn is_created(&self) -> bool {
+        matches!(self, AttachmentSource::Created)
+    }
+}
+
+/// Represents a 'reference' (which is anyone who is using the template)
+pub enum TemplateReference {
+    /// A guild that has the template attached
+    Guild {
+        guild_id: GuildId,
+    },
+    User {
+        user_id: UserId,
+    },
+}
 
 /// Represents a template owned by a guild
 /// or one that is attached to a template shop listing
@@ -18,9 +59,8 @@ pub struct AttachedGuildTemplate {
     /// Reference to the base template pool
     pub template_pool_ref: BaseTemplateRef,
 
-    /// Reference to the shop listing if
-    /// the template is part of a shop listing
-    pub shop_listing_ref: Option<TemplateShopListingRef>, // TODO: Replace with actual ShopListingRef type
+    /// The source of how this template was attached
+    pub source: AttachmentSource,
 
     /// When the template was attached to the guild
     pub created_at: DateTime<Utc>,
@@ -43,7 +83,7 @@ impl AttachedGuildTemplate {
                 SELECT 
                     guild_id,
                     template_pool_ref,
-                    shop_listing_ref,
+                    source,
                     created_at,
                     allowed_caps,
                     events 
@@ -76,7 +116,7 @@ impl AttachedGuildTemplate {
                 SELECT 
                     guild_id,
                     template_pool_ref,
-                    shop_listing_ref,
+                    source,
                     created_at,
                     allowed_caps,
                     events 
@@ -97,9 +137,39 @@ impl AttachedGuildTemplate {
         }
     }
 
-    /// Returns if the guild template comes from a shop listing or not
-    pub fn is_from_shop_listing(&self) -> bool {
-        self.shop_listing_ref.is_some()
+    /// Returns the references to the base template
+    pub async fn template_refs<'c, E>(&self, db: E) -> Result<Vec<TemplateReference>, Error> 
+        where E: Executor<'c, Database = Postgres>
+    {
+        let mut refs = Vec::new();
+        refs.push(TemplateReference::Guild {
+            guild_id: self.guild_id,
+        });
+
+        if self.source.is_shop_listing() {
+            // Add refs from other guilds that have this template attached
+            let rows = sqlx::query(r#"
+                SELECT guild_id 
+                FROM attached_guild_templates 
+                WHERE template_pool_ref = $1"#
+            )
+            .bind(self.template_pool_ref.id())
+            .fetch_all(db)
+            .await?;
+
+            for row in rows {
+                let guild_id_str: String = row.try_get("guild_id")?;
+                let guild_id = guild_id_str.parse().map_err(|_| "Invalid guild ID")?;
+                if guild_id == self.guild_id {
+                    continue;
+                }
+                refs.push(TemplateReference::Guild {
+                    guild_id,
+                });
+            }
+        }
+
+        Ok(refs)
     }
 
     /// Updates the guild template's allowed capabilities and events
@@ -109,6 +179,7 @@ impl AttachedGuildTemplate {
     /// Dev note: this is the underlying DB code. Workers should use
     /// a dedicated API within WorkerCacheData or WorkerDB which will
     /// call this and handle/trigger cache regeneration etc as needed.
+    #[allow(dead_code)]
     pub async fn update_caps_and_events(
         &mut self,
         pool: &sqlx::PgPool,
@@ -149,7 +220,24 @@ impl AttachedGuildTemplate {
         &self,
         pool: &sqlx::PgPool,
     ) -> Result<(), Error> {
-        if self.is_from_shop_listing() {
+        let mut tx = pool.begin().await?;
+
+        // Determine if we need to fully delete the template pool from db or not
+        let fully_delete = {
+            if self.source.is_created() {
+                true
+            } else {
+                let refs = self.template_refs(&mut *tx).await?;
+                refs.len() <= 1 // Only this guild
+            }
+        };
+
+        if !fully_delete {
+            // Not owner, just delete the attached template
+            // reference as we only support shop listings
+            // for shared ownership right now and even
+            // if this changes in the future, we will
+            // still probably want to just detach here.
             sqlx::query(
                 r#"
                 DELETE FROM attached_guild_templates
@@ -158,18 +246,9 @@ impl AttachedGuildTemplate {
             )
             .bind(self.guild_id.to_string())
             .bind(self.template_pool_ref.id())
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
         } else {
-            let mut tx = pool.begin().await?;
-
-            // Verify ownership as an additional step before delete
-            // 
-            // Only delete the underlying BaseTemplate if the guild owns it
-            let Some(owner) = self.template_pool_ref.fetch_owner(&mut *tx).await? else {
-                return Err("BaseTemplate not found when attempting to delete owned AttachedGuildTemplate".into());
-            };
-
             sqlx::query(
                 r#"
                 DELETE FROM attached_guild_templates
@@ -181,20 +260,18 @@ impl AttachedGuildTemplate {
             .execute(&mut *tx)
             .await?;
 
-            if owner.guild_owns(self.guild_id) {
-                sqlx::query(
-                    r#"
-                    DELETE FROM template_pool
-                    WHERE id = $1
-                    "#,
-                )
-                .bind(self.template_pool_ref.id())
-                .execute(&mut *tx)
-                .await?;
-            }
-
-            tx.commit().await?;
+            sqlx::query(
+                r#"
+                DELETE FROM template_pool
+                WHERE id = $1
+                "#,
+            )
+            .bind(self.template_pool_ref.id())
+            .execute(&mut *tx)
+            .await?;
         }
+
+        tx.commit().await?;
 
         Ok(())
     }
@@ -205,7 +282,7 @@ impl AttachedGuildTemplate {
 struct AttachedGuildTemplateDb {
     guild_id: String,
     template_pool_ref: Uuid,
-    shop_listing_ref: Option<Uuid>,
+    source: String,
     created_at: DateTime<Utc>,
     allowed_caps: Vec<String>,
     events: Vec<String>,
@@ -217,7 +294,7 @@ impl AttachedGuildTemplateDb {
         Ok(AttachedGuildTemplate {
             guild_id: self.guild_id.parse().map_err(|_| "Invalid guild ID")?,
             template_pool_ref: BaseTemplateRef::new(self.template_pool_ref),
-            shop_listing_ref: self.shop_listing_ref.map(TemplateShopListingRef::new),
+            source: AttachmentSource::new(&self.source).ok_or("Invalid attachment source")?,
             created_at: self.created_at,
             allowed_caps: self.allowed_caps,
             events: self.events,
@@ -231,7 +308,7 @@ impl TryFrom<PgRow> for AttachedGuildTemplateDb {
         Ok(AttachedGuildTemplateDb {
             guild_id: row.try_get("guild_id")?,
             template_pool_ref: row.try_get("template_pool_ref")?,
-            shop_listing_ref: row.try_get("shop_listing_ref")?,
+            source: row.try_get("source")?,
             created_at: row.try_get("created_at")?,
             allowed_caps: row.try_get("allowed_caps")?,
             events: row.try_get("events")?,

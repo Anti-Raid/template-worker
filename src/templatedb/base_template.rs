@@ -200,6 +200,40 @@ impl BaseTemplate {
             Ok(None)
         }
     }
+
+    /// Given an ID, fetch the BaseTemplate from the database
+    pub async fn fetch_by_ids<'c, E>(db: E, ids: Vec<Uuid>) -> Result<Vec<Self>, Error> 
+        where E: Executor<'c, Database = Postgres>
+    {
+        let record = sqlx::query(
+            r#"
+            SELECT
+                id,
+                name,
+                owner_type,
+                owner_id,
+                language,
+                content,
+                last_updated_at,
+                created_at,
+                state
+            FROM template_pool
+            WHERE id = ANY($1)
+            "#,
+        )
+        .bind(ids)
+        .fetch_all(db)
+        .await?;
+
+        let mut templates = Vec::with_capacity(record.len());
+        for db_template in record {
+            let base_template_db: BaseTemplateDb = db_template.try_into()?;
+            let base_template = base_template_db.into_base_template()?;
+            templates.push(base_template);
+        }
+
+        Ok(templates)
+    }
 }
 
 /// Simple ergonomic struct that points to a BaseTemplate in the DB by ID
@@ -217,19 +251,19 @@ impl BaseTemplateRef {
     }
 
     /// Returns the underlying ID of the BaseTemplate
-    pub fn id(&self) -> Uuid {
+    pub fn id(self) -> Uuid {
         self.id
     }
 
     /// Fetch the full BaseTemplate from the database
-    pub async fn fetch_from_db<'c, E>(&self, db: E) -> Result<Option<BaseTemplate>, Error> 
+    pub async fn fetch_from_db<'c, E>(self, db: E) -> Result<Option<BaseTemplate>, Error> 
         where E: Executor<'c, Database = Postgres>
     {
         BaseTemplate::fetch_by_id(db, self.id).await
     }
 
     /// Returns the owner of the BaseTemplate
-    pub async fn fetch_owner<'c, E>(&self, db: E) -> Result<Option<TemplateOwner>, Error> 
+    pub async fn fetch_owner<'c, E>(self, db: E) -> Result<Option<TemplateOwner>, Error> 
         where E: Executor<'c, Database = Postgres> 
     {
         let record = sqlx::query(

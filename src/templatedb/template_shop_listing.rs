@@ -15,14 +15,11 @@ pub enum TemplateShopReviewState {
 
 /// Template shop listings
 pub struct TemplateShopListing {
-    /// The unique ID of the shop listing
-    pub id: Uuid,
+    /// Reference to the base template pool
+    pub template_pool_ref: BaseTemplateRef,
 
     /// Short description of the shop listing
     pub short: String,
-
-    /// Reference to the base template pool
-    pub template_pool_ref: BaseTemplateRef,
 
     /// The review state of the shop listing
     pub review_state: TemplateShopReviewState,
@@ -42,9 +39,8 @@ pub struct TemplateShopListing {
 
 /// Helper intermediary struct for DB -> TemplateShopListing conversion
 struct TemplateShopListingDb {
-    id: Uuid,
-    short: String,
     template_pool_ref: Uuid,
+    short: String,
     review_state: String,
     default_events: Vec<String>,
     default_allowed_caps: Vec<String>,
@@ -63,7 +59,6 @@ impl TemplateShopListingDb {
         };
 
         Ok(TemplateShopListing {
-            id: self.id,
             short: self.short,
             template_pool_ref: BaseTemplateRef::new(self.template_pool_ref),
             review_state,
@@ -79,9 +74,8 @@ impl TryFrom<PgRow> for TemplateShopListingDb {
     type Error = Error;
     fn try_from(row: PgRow) -> Result<Self, Self::Error> {
         Ok(TemplateShopListingDb {
-            id: row.try_get("id")?,
-            short: row.try_get("short")?,
             template_pool_ref: row.try_get("template_pool_ref")?,
+            short: row.try_get("short")?,
             review_state: row.try_get("review_state")?,
             default_events: row.try_get("default_events")?,
             default_allowed_caps: row.try_get("default_allowed_caps")?,
@@ -95,19 +89,18 @@ impl TemplateShopListing {
     /// Fetch a TemplateShopListing by its ID
     pub async fn fetch_by_id(
         pool: &sqlx::PgPool,
-        id: Uuid,
+        template_ref: BaseTemplateRef,
     ) -> Result<Option<TemplateShopListing>, Error> {
         let row = sqlx::query(r#"
             SELECT 
-                id, 
-                short, 
-                template_pool_ref, 
+                template_pool_ref,
+                short,  
                 review_state, 
                 default_events, 
                 default_allowed_caps 
             FROM template_shop_listings WHERE id = $1"#
             )
-            .bind(id)
+            .bind(template_ref.id())
             .fetch_optional(pool)
             .await?;
 
@@ -126,9 +119,8 @@ impl TemplateShopListing {
     ) -> Result<Vec<TemplateShopListing>, Error> {
         let rows = sqlx::query(r#"
             SELECT 
-                id, 
-                short, 
-                template_pool_ref, 
+                template_pool_ref,
+                short,  
                 review_state, 
                 default_events, 
                 default_allowed_caps, 
@@ -149,29 +141,12 @@ impl TemplateShopListing {
     }
 }
 
-/// Simple ergonomic struct that points to a TemplateShopListing in the DB by ID
-pub struct TemplateShopListingRef {
-    /// The unique ID of the shop listing
-    id: Uuid,
-}
-
-impl TemplateShopListingRef {
-    /// Creates a new TemplateShopListingRef
-    /// by ID
-    pub fn new(id: Uuid) -> Self {
-        TemplateShopListingRef { id }
-    }
-
-    /// Returns the underlying ID of the TemplateShopListing
-    pub fn id(&self) -> Uuid {
-        self.id
-    }
-
+impl BaseTemplateRef {
     /// Fetch the full TemplateShopListing from the database
-    pub async fn fetch_from_db(
-        &self,
+    pub async fn fetch_shop_listings(
+        self,
         pool: &sqlx::PgPool,
     ) -> Result<Option<TemplateShopListing>, Error> {
-        TemplateShopListing::fetch_by_id(pool, self.id).await
+        TemplateShopListing::fetch_by_id(pool, self).await
     }
 }

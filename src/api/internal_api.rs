@@ -287,3 +287,56 @@ pub(super) async fn kill_worker(
 
     Ok(Json(()))
 }
+
+// Template APIs (part of Proposed Unified Templates)
+
+// Fetch All Templates in Pool
+// 
+// Fetches all templates in the template pool
+
+// Fetch Template in Pool by ID
+//
+// Fetches a templates in the template pool by ID
+
+// Fetch Templates in Pool by IDs
+//
+// Fetches multiple templates in the template pool by their IDs
+//
+// The response is a list of templates whose IDs matched the requested IDs.
+
+// Set Template State
+//
+// Sets the state of a template in the template pool
+// Possible states are: "active", "paused", "suspended"
+//
+// A suspended template cannot be used in any guilds until set to
+// a different state by staff. Of note, a normal user/guild owner cannot
+// change the state of a template they own to "suspended" nor may they
+// change the state of a suspended template whatsoever
+
+// Fetch Template Shop Listings
+//
+// Fetches all template shop listings
+
+// Fetches Template Shop Listings by ID
+//
+// Fetches a template shop listing by ID.
+// The ID here is the same as the base template ID it references.
+// This is to ensure that there is a one-to-one mapping between a base 
+// template and its shop listing (without needing an extra ID field).
+
+// Set Template Shop Listing Review State
+//
+// Sets the review state of a template shop listing
+// Possible states are: "pending", "approved", "denied"
+
+// Fetches Guild Attached Templates
+//
+// Fetches all guild attached templates for a given guild ID
+//
+// Note that the information returned by this API does not include the full
+// base template information, only the attached guild template information.
+
+// Delete Guild Attached Template
+//
+// Deletes a guild attached template for a given guild ID and base template ID
