@@ -4,6 +4,7 @@ use axum::{
     Json, Router,
 };
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
+use utoipa::openapi::server::Server;
 use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::SwaggerUi;
 use std::sync::Arc;
@@ -123,6 +124,9 @@ pub fn create(data: Arc<crate::data::Data>, http: Arc<serenity::http::Http>) -> 
 
     let mut internal_openapi = oapi_router.into_openapi();
 
+    // Set OpenAPI servers so Swagger UI knows the API base URL
+    internal_openapi.servers = Some(vec![Server::new("https://splashtail-staging.antiraid.xyz")]);
+
     // Add InternalAuth
     if let Some(comps) = internal_openapi.components.as_mut() {
         comps.security_schemes.insert(
@@ -149,6 +153,9 @@ pub fn create(data: Arc<crate::data::Data>, http: Arc<serenity::http::Http>) -> 
     }
 
     let mut public_openapi = oapi_router.into_openapi();
+
+    // Set OpenAPI servers so Swagger UI knows the API base URL
+    public_openapi.servers = Some(vec![Server::new("https://splashtail-staging.antiraid.xyz")]);
 
     // Add PublicAuth
     if let Some(comps) = public_openapi.components.as_mut() {
