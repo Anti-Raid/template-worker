@@ -5,8 +5,9 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use uuid::Uuid;
 use super::server::AppData;
-use crate::{api::types::ApiDispatchResult, dispatch::parse_response, worker::workervmmanager::Id};
+use crate::{api::types::ApiDispatchResult, dispatch::parse_response, templatedb::base_template::{BaseTemplate, BaseTemplateRef}, worker::workervmmanager::Id};
 use crate::events::AntiraidEvent;
 use super::extractors::InternalEndpoint;
 use super::server::{ApiResponse, ApiError};
@@ -290,13 +291,59 @@ pub(super) async fn kill_worker(
 
 // Template APIs (part of Proposed Unified Templates)
 
-// Fetch All Templates in Pool
-// 
-// Fetches all templates in the template pool
+/// Fetch All Templates in Pool
+/// 
+/// Fetches all templates in the template pool
+#[utoipa::path(
+    get, 
+    tag = "Internal API",
+    path = "/i/templates/fetch_all_templates_in_pool",
+    security(
+        ("InternalAuth" = []) 
+    ),
+    responses(
+        (status = 200, description = "The list of all templates in the template pool"),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
+pub(super) async fn fetch_all_templates_in_pool(
+    State(AppData { data, .. }): State<AppData>,
+    InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
+) -> ApiResponse<Vec<BaseTemplate>> {
+    let templates = BaseTemplate::fetch_all(&data.pool)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
-// Fetch Template in Pool by ID
-//
-// Fetches a templates in the template pool by ID
+    Ok(Json(templates))
+}
+
+/// Fetch Template in Pool by ID
+///
+/// Fetches a template in the template pool by ID. Returns `null` if not found, otherwise BaseTemplate.
+#[utoipa::path(
+    get, 
+    tag = "Internal API",
+    path = "/i/templates/fetch_templates_in_pool_by_id/{id}",
+    security(
+        ("InternalAuth" = []) 
+    ),
+    responses(
+        (status = 200, description = "The list of all templates in the template pool"),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
+pub(super) async fn fetch_template_in_pool_by_id(
+    State(AppData { data, .. }): State<AppData>,
+    Path(id): Path<Uuid>,
+    InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
+) -> ApiResponse<Option<BaseTemplate>> {
+    let bref = BaseTemplateRef::new(id);
+    let templates = bref.fetch_from_db(&data.pool)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
+
+    Ok(Json(templates))
+}
 
 // Fetch Templates in Pool by IDs
 //
@@ -330,13 +377,20 @@ pub(super) async fn kill_worker(
 // Sets the review state of a template shop listing
 // Possible states are: "pending", "approved", "denied"
 
-// Fetches Guild Attached Templates
+// Fetch All Attached Templates
 //
-// Fetches all guild attached templates for a given guild ID
+// Fetches all attached templates
 //
 // Note that the information returned by this API does not include the full
-// base template information, only the attached guild template information.
+// base template information, only the attached template information.
 
-// Delete Guild Attached Template
+// Fetch Attached Templates For Owner
 //
-// Deletes a guild attached template for a given guild ID and base template ID
+// Fetches all attached templates for a given owner ID
+//
+// Note that the information returned by this API does not include the full
+// base template information, only the attached template information.
+
+// Delete Attached Template
+//
+// Deletes an attached template for a given owner ID and base template ID

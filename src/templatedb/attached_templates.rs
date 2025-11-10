@@ -1,14 +1,38 @@
-use serenity::all::{UserId, GuildId};
+use std::str::FromStr;
+
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgRow;
-use sqlx::{Executor, Postgres, Row};
+use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use crate::Error;
+use crate::templatedb::base_template::TemplateOwner;
 
 use super::base_template::BaseTemplateRef;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Template state
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TemplateState {
+    Active,
+    Paused,
+    Suspended,
+}
+
+impl FromStr for TemplateState {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "active" => Ok(TemplateState::Active),
+            "paused" => Ok(TemplateState::Paused),
+            "suspended" => Ok(TemplateState::Suspended),
+            _ => Err("Invalid template state".into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AttachmentSource {
     ShopListing,
     Created
@@ -39,22 +63,12 @@ impl AttachmentSource {
     }
 }
 
-/// Represents a 'reference' (which is anyone who is using the template)
-pub enum TemplateReference {
-    /// A guild that has the template attached
-    Guild {
-        guild_id: GuildId,
-    },
-    User {
-        user_id: UserId,
-    },
-}
-
 /// Represents a template owned by a guild
 /// or one that is attached to a template shop listing
-pub struct AttachedGuildTemplate {
-    /// The ID of the guild that has the template attached to it
-    pub guild_id: GuildId,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttachedTemplate {
+    /// The owner of the template usage wise
+    pub owner: TemplateOwner,
 
     /// Reference to the base template pool
     pub template_pool_ref: BaseTemplateRef,
@@ -65,38 +79,44 @@ pub struct AttachedGuildTemplate {
     /// When the template was attached to the guild
     pub created_at: DateTime<Utc>,
 
+    /// When the template was last updated
+    pub last_updated_at: DateTime<Utc>,
+
     /// Allowed capabilities for this template
     pub allowed_caps: Vec<String>,
+
+    /// State of the template
+    pub state: TemplateState,
 
     /// Events associated with this template
     pub events: Vec<String>,
 }
 
-impl AttachedGuildTemplate {
-    /// Fetches all AttachedGuildTemplates for a given guild
+impl AttachedTemplate {
+    /// Fetches all AttachedTemplate's for a given owner
     #[allow(dead_code)]
-    pub async fn fetch_all_for_guild(
-        pool: &sqlx::PgPool,
-        guild_id: GuildId,
+    pub async fn fetch_all<'c>(
+        db: &mut sqlx::Transaction<'c, Postgres>
     ) -> Result<Vec<Self>, Error> {
         let rows = sqlx::query(r#"
                 SELECT 
-                    guild_id,
+                    owner_type,
+                    owner_id,
                     template_pool_ref,
                     source,
                     created_at,
+                    last_updated_at,
                     allowed_caps,
+                    state,
                     events 
-                FROM attached_guild_templates 
-                WHERE guild_id = $1"#
+                FROM attached_templates"#
             )
-            .bind(guild_id.to_string())
-            .fetch_all(pool)
+            .fetch_all(&mut (**db))
             .await?;
 
         let mut templates = Vec::new();
         for row in rows {
-            let db_template = AttachedGuildTemplateDb::try_from(row)?;
+            let db_template = AttachedTemplateDb::try_from(row)?;
             let template = db_template.into_attached_guild_template()?;
             templates.push(template);
         }
@@ -104,32 +124,71 @@ impl AttachedGuildTemplate {
         Ok(templates)
     }
 
-    /// Fetches a AttachedGuildTemplate from the database
+    /// Fetches all AttachedTemplate's for a given owner
+    #[allow(dead_code)]
+    pub async fn fetch_all_for_owner(
+        pool: &sqlx::PgPool,
+        owner: TemplateOwner,
+    ) -> Result<Vec<Self>, Error> {
+        let rows = sqlx::query(r#"
+                SELECT 
+                    owner_type,
+                    owner_id,
+                    template_pool_ref,
+                    source,
+                    created_at,
+                    last_updated_at,
+                    allowed_caps,
+                    state,
+                    events 
+                FROM attached_templates 
+                WHERE owner_type = $1
+                AND owner_id = $2"#
+            )
+            .bind(owner.owner_type())
+            .bind(owner.owner_id())
+            .fetch_all(pool)
+            .await?;
+
+        let mut templates = Vec::new();
+        for row in rows {
+            let db_template = AttachedTemplateDb::try_from(row)?;
+            let template = db_template.into_attached_guild_template()?;
+            templates.push(template);
+        }
+
+        Ok(templates)
+    }
+
+    /// Fetches a AttachedTemplate from the database
     /// by template ref id
+    /// 
+    /// NOTE: This method does not check ownership,
     #[allow(dead_code)]
     pub async fn fetch_by_template_ref(
         pool: &sqlx::PgPool,
-        guild_id: GuildId,
         template_pool_ref: &BaseTemplateRef,
     ) -> Result<Option<Self>, Error> {
         let row = sqlx::query(r#"
                 SELECT 
-                    guild_id,
+                    owner_type,
+                    owner_id,
                     template_pool_ref,
                     source,
                     created_at,
+                    last_updated_at,
                     allowed_caps,
+                    state,
                     events 
-                FROM attached_guild_templates 
-                WHERE guild_id = $1 AND template_pool_ref = $2"#
+                FROM attached_templates 
+                WHERE template_pool_ref = $1"#
             )
-            .bind(guild_id.to_string())
             .bind(template_pool_ref.id())
             .fetch_optional(pool)
             .await?;
 
         if let Some(row) = row {
-            let db_template = AttachedGuildTemplateDb::try_from(row)?;
+            let db_template = AttachedTemplateDb::try_from(row)?;
             let template = db_template.into_attached_guild_template()?;
             Ok(Some(template))
         } else {
@@ -137,39 +196,23 @@ impl AttachedGuildTemplate {
         }
     }
 
-    /// Returns the references to the base template
-    pub async fn template_refs<'c, E>(&self, db: E) -> Result<Vec<TemplateReference>, Error> 
-        where E: Executor<'c, Database = Postgres>
-    {
-        let mut refs = Vec::new();
-        refs.push(TemplateReference::Guild {
-            guild_id: self.guild_id,
-        });
-
-        if self.source.is_shop_listing() {
-            // Add refs from other guilds that have this template attached
-            let rows = sqlx::query(r#"
-                SELECT guild_id 
-                FROM attached_guild_templates 
-                WHERE template_pool_ref = $1"#
+    /// Garbage collect the template if it has no references
+    pub async fn gc<'c>(template_pool_ref: BaseTemplateRef, db: &mut sqlx::Transaction<'c, Postgres>) -> Result<(), Error> {
+        let refs = template_pool_ref.template_refs(db).await?;
+        if refs.is_empty() {
+            // No references, delete the base template
+            sqlx::query(
+                r#"
+                DELETE FROM template_pool
+                WHERE id = $1
+                "#,
             )
-            .bind(self.template_pool_ref.id())
-            .fetch_all(db)
+            .bind(template_pool_ref.id())
+            .execute(&mut (**db))
             .await?;
-
-            for row in rows {
-                let guild_id_str: String = row.try_get("guild_id")?;
-                let guild_id = guild_id_str.parse().map_err(|_| "Invalid guild ID")?;
-                if guild_id == self.guild_id {
-                    continue;
-                }
-                refs.push(TemplateReference::Guild {
-                    guild_id,
-                });
-            }
         }
 
-        Ok(refs)
+        Ok(())
     }
 
     /// Updates the guild template's allowed capabilities and events
@@ -188,14 +231,15 @@ impl AttachedGuildTemplate {
     ) -> Result<(), Error> {
         sqlx::query(
             r#"
-            UPDATE attached_guild_templates
+            UPDATE attached_templates
             SET allowed_caps = $1, events = $2
-            WHERE guild_id = $3 AND template_pool_ref = $4
+            WHERE owner_type = $3 AND owner_id = $4 AND template_pool_ref = $5
             "#,
         )
         .bind(&new_allowed_caps)
         .bind(&new_events)
-        .bind(self.guild_id.to_string())
+        .bind(self.owner.owner_type())
+        .bind(self.owner.owner_id())
         .bind(self.template_pool_ref.id())
         .execute(pool)
         .await?;
@@ -222,54 +266,22 @@ impl AttachedGuildTemplate {
     ) -> Result<(), Error> {
         let mut tx = pool.begin().await?;
 
-        // Determine if we need to fully delete the template pool from db or not
-        let fully_delete = {
-            if self.source.is_created() {
-                true
-            } else {
-                let refs = self.template_refs(&mut *tx).await?;
-                refs.len() <= 1 // Only this guild
-            }
-        };
+        // First delete the attached template
+        sqlx::query(
+            r#"
+            DELETE FROM attached_templates
+            WHERE owner_type = $1 AND owner_id = $2 AND template_pool_ref = $2
+            "#,
+        )
+        .bind(self.owner.owner_type())
+        .bind(self.owner.owner_id())
+        .bind(self.template_pool_ref.id())
+        .execute(&mut *tx)
+        .await?;
 
-        if !fully_delete {
-            // Not owner, just delete the attached template
-            // reference as we only support shop listings
-            // for shared ownership right now and even
-            // if this changes in the future, we will
-            // still probably want to just detach here.
-            sqlx::query(
-                r#"
-                DELETE FROM attached_guild_templates
-                WHERE guild_id = $1 AND template_pool_ref = $2
-                "#,
-            )
-            .bind(self.guild_id.to_string())
-            .bind(self.template_pool_ref.id())
-            .execute(&mut *tx)
-            .await?;
-        } else {
-            sqlx::query(
-                r#"
-                DELETE FROM attached_guild_templates
-                WHERE guild_id = $1 AND template_pool_ref = $2
-                "#,
-            )
-            .bind(self.guild_id.to_string())
-            .bind(self.template_pool_ref.id())
-            .execute(&mut *tx)
-            .await?;
-
-            sqlx::query(
-                r#"
-                DELETE FROM template_pool
-                WHERE id = $1
-                "#,
-            )
-            .bind(self.template_pool_ref.id())
-            .execute(&mut *tx)
-            .await?;
-        }
+        // Then perform garbage collection to remove from template pool
+        // if there are no more references
+        Self::gc(self.template_pool_ref, &mut tx).await?;
 
         tx.commit().await?;
 
@@ -278,39 +290,51 @@ impl AttachedGuildTemplate {
 }
 
 
-/// Simple intermediary struct for DB -> AttachedGuildTemplate conversion
-struct AttachedGuildTemplateDb {
-    guild_id: String,
+/// Simple intermediary struct for DB -> AttachedTemplate conversion
+struct AttachedTemplateDb {
+    owner_type: String,
+    owner_id: String,
     template_pool_ref: Uuid,
     source: String,
     created_at: DateTime<Utc>,
+    last_updated_at: DateTime<Utc>,
     allowed_caps: Vec<String>,
+    state: TemplateState,
     events: Vec<String>,
 }
 
-impl AttachedGuildTemplateDb {
-    /// Convert a (internal) AttachedGuildTemplateDb to a AttachedGuildTemplate
-    fn into_attached_guild_template(self) -> Result<AttachedGuildTemplate, Error> {
-        Ok(AttachedGuildTemplate {
-            guild_id: self.guild_id.parse().map_err(|_| "Invalid guild ID")?,
+impl AttachedTemplateDb {
+    /// Convert a (internal) AttachedTemplateDb to a AttachedTemplate
+    fn into_attached_guild_template(self) -> Result<AttachedTemplate, Error> {
+        Ok(AttachedTemplate {
+            owner: TemplateOwner::new(&self.owner_type, &self.owner_id)
+                .ok_or("Invalid template owner")?,
             template_pool_ref: BaseTemplateRef::new(self.template_pool_ref),
             source: AttachmentSource::new(&self.source).ok_or("Invalid attachment source")?,
             created_at: self.created_at,
+            last_updated_at: self.last_updated_at,
             allowed_caps: self.allowed_caps,
+            state: self.state,
             events: self.events,
         })
     }
 } 
 
-impl TryFrom<PgRow> for AttachedGuildTemplateDb {
+impl TryFrom<PgRow> for AttachedTemplateDb {
     type Error = Error;
     fn try_from(row: PgRow) -> Result<Self, Self::Error> {
-        Ok(AttachedGuildTemplateDb {
-            guild_id: row.try_get("guild_id")?,
+        Ok(AttachedTemplateDb {
+            owner_type: row.try_get("owner_type")?,
+            owner_id: row.try_get("owner_id")?,
             template_pool_ref: row.try_get("template_pool_ref")?,
             source: row.try_get("source")?,
             created_at: row.try_get("created_at")?,
+            last_updated_at: row.try_get("last_updated_at")?,
             allowed_caps: row.try_get("allowed_caps")?,
+            state: {
+                let state_str: String = row.try_get("state")?;
+                TemplateState::from_str(&state_str)?
+            },
             events: row.try_get("events")?,
         })
     }

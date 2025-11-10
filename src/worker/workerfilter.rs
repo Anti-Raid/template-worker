@@ -1,10 +1,16 @@
-use std::sync::Arc;
+use std::{fmt::Debug, sync::Arc};
 
 use super::workervmmanager::Id;
 
 #[derive(Clone)]
 pub struct WorkerFilter {
     filter: Arc<dyn Fn(Id) -> bool + Send + Sync>,
+}
+
+impl Debug for WorkerFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WorkerFilter").finish()
+    }
 }
 
 impl WorkerFilter {
