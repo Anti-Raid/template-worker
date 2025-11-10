@@ -91,6 +91,7 @@ pub fn create(data: Arc<crate::data::Data>, http: Arc<serenity::http::Http>) -> 
         routes!(internal_api::kill_worker),
         routes!(internal_api::fetch_all_templates_in_pool),
         routes!(internal_api::fetch_template_in_pool_by_id),
+        routes!(internal_api::fetch_template_in_pool_by_ids),
     ];
 
     // Public routes
