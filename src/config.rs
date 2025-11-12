@@ -13,7 +13,7 @@ pub static CONFIG: LazyLock<Config> =
 #[derive(Serialize, Deserialize, Default)]
 pub struct DiscordAuth {
     pub token: String,
-    pub client_id: String,
+    pub client_id: UserId,
     pub client_secret: String,
     pub root_users: Vec<UserId>,
     pub allowed_redirects: Vec<String>

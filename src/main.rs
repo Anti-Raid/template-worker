@@ -9,6 +9,7 @@ mod sandwich;
 mod events;
 mod worker;
 mod templatedb;
+mod mesophyll;
 
 use crate::config::CONFIG;
 use crate::data::Data;
@@ -21,7 +22,7 @@ use crate::worker::workerstate::WorkerState;
 use crate::worker::workerpool::WorkerPool;
 use crate::worker::workerthread::WorkerThread;
 use log::{error, info};
-use serenity::all::{ApplicationId, HttpBuilder};
+use serenity::all::{ApplicationId, HttpBuilder, UserId};
 use sqlx::postgres::PgPoolOptions;
 use std::io::Write;
 use std::{sync::Arc, time::Duration};
@@ -184,6 +185,10 @@ async fn main_impl(args: CmdArgs) {
     let current_user = sandwich::current_user(&reqwest)
         .await
         .expect("Failed to get current user");
+
+    if current_user.id == UserId::new(0) {
+        panic!("current_user.id == 0, this is a fatal bug");
+    }
 
     let current_user_id = current_user.id;
 

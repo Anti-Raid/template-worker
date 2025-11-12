@@ -889,12 +889,10 @@ pub(super) async fn state() -> Json<Arc<TwState>> {
         (status = 400, description = "API Error", body = ApiError),
     )
 )]
-pub(super) async fn api_config(
-    State(AppData { data, .. }): State<AppData>
-) -> Json<ApiConfig> {
+pub(super) async fn api_config() -> Json<ApiConfig> {
     Json(ApiConfig {
         main_server: crate::CONFIG.servers.main,
-        client_id: data.current_user.id,
+        client_id: crate::CONFIG.discord_auth.client_id,
         support_server_invite: 
         crate::CONFIG.meta.support_server_invite.clone(),
     })

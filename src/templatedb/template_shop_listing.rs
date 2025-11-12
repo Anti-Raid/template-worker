@@ -7,6 +7,7 @@ use crate::Error;
 
 use super::base_template::BaseTemplateRef;
 
+#[allow(dead_code)]
 pub enum TemplateShopReviewState {
     Pending,
     Approved,
@@ -14,6 +15,7 @@ pub enum TemplateShopReviewState {
 }
 
 /// Template shop listings
+#[allow(dead_code)]
 pub struct TemplateShopListing {
     /// Reference to the base template pool
     pub template_pool_ref: BaseTemplateRef,
@@ -48,6 +50,7 @@ struct TemplateShopListingDb {
     last_updated_at: DateTime<Utc>,
 }
 
+#[allow(dead_code)]
 impl TemplateShopListingDb {
     /// Convert a (internal) TemplateShopListingDb to a TemplateShopListing
     fn into_template_shop_listing(self) -> Result<TemplateShopListing, Error> {
@@ -85,6 +88,7 @@ impl TryFrom<PgRow> for TemplateShopListingDb {
     }
 }
 
+#[allow(dead_code)]
 impl TemplateShopListing {
     /// Fetch a TemplateShopListing by its ID
     pub async fn fetch_by_id(
@@ -141,6 +145,7 @@ impl TemplateShopListing {
     }
 }
 
+#[allow(dead_code)]
 impl BaseTemplateRef {
     /// Fetch the full TemplateShopListing from the database
     pub async fn fetch_shop_listings(

@@ -79,6 +79,7 @@ impl TemplateOwner {
 }
 
 /// What does the template reference?
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TemplateReference {
     Usage {
         owner: TemplateOwner,
@@ -86,6 +87,7 @@ pub enum TemplateReference {
     ShopListing,
 }
 
+#[allow(dead_code)]
 pub enum TemplateLanguage {
     Luau,
 }
@@ -107,7 +109,7 @@ impl FromStr for TemplateLanguage {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct BaseTemplate {
     /// Identifier for the template in the pool
-    pub id: Uuid,
+    pub id: BaseTemplateRef,
  
     /// Name of the template
     pub name: String,
@@ -153,7 +155,7 @@ impl BaseTemplateDb {
             .map_err(|_| "Failed to parse template content")?;
 
         Ok(BaseTemplate {
-            id: self.id,
+            id: BaseTemplateRef::new(self.id),
             name: self.name,
             owner,
             language: self.language,
@@ -329,6 +331,7 @@ pub struct BaseTemplateRef {
     id: Uuid,
 }
 
+#[allow(dead_code)]
 impl BaseTemplateRef {
     /// Creates a new BaseTemplateRef
     /// by ID
@@ -382,5 +385,24 @@ impl BaseTemplateRef {
     pub async fn template_refs<'c>(self, db: &mut sqlx::Transaction<'c, Postgres>) -> Result<Vec<TemplateReference>, Error> {
         let refs = BaseTemplate::template_refs(self, db).await?;
         Ok(refs)
+    }
+
+    /// Garbage collect the template if it has no references
+    pub async fn gc<'c>(self, db: &mut sqlx::Transaction<'c, Postgres>) -> Result<(), Error> {
+        let refs = self.template_refs(db).await?;
+        if refs.is_empty() {
+            // No references, delete the base template
+            sqlx::query(
+                r#"
+                DELETE FROM template_pool
+                WHERE id = $1
+                "#,
+            )
+            .bind(self.id())
+            .execute(&mut (**db))
+            .await?;
+        }
+
+        Ok(())
     }
 }

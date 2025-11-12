@@ -1,4 +1,5 @@
 use khronos_runtime::rt::{KhronosRuntime, KhronosRuntimeManager, RuntimeCreateOpts};
+use serde::{Deserialize, Serialize};
 use serenity::all::GuildId;
 use std::cell::RefCell;
 use std::{collections::HashMap, rc::Rc};
@@ -13,7 +14,7 @@ use super::limits::{MAX_TEMPLATE_MEMORY_USAGE, MAX_TEMPLATES_EXECUTION_TIME};
 
 pub type RuntimeManager = KhronosRuntimeManager<()>;
 
-#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]
 /// Represents the ID of a tenant, which can currently only be a GuildId
 pub enum Id {
     GuildId(GuildId)

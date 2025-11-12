@@ -65,7 +65,7 @@ impl From<WorkerProcessCommTenantId> for Id {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 /// Serializable representation of a template result for the worker process communication
-pub(super) enum WorkerProcessCommTemplateResult {
+pub enum WorkerProcessCommTemplateResult {
     Ok {
         result: KhronosValue
     },
@@ -94,7 +94,7 @@ impl From<WorkerProcessCommTemplateResult> for TemplateResult {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 /// Serializable representation of the result of dispatching a template in the worker process communication
-pub(super) enum WorkerProcessCommDispatchResult {
+pub enum WorkerProcessCommDispatchResult {
     Ok {
         result: Vec<(String, WorkerProcessCommTemplateResult)>,
     },
