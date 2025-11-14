@@ -1,32 +1,34 @@
+mod api;
 mod config;
 mod data;
 mod dispatch;
 mod event_handler;
-mod api;
+mod events;
+//mod mesophyll;
 mod objectstore;
 mod register;
 mod sandwich;
-mod events;
-mod worker;
 mod templatedb;
-mod mesophyll;
+mod worker;
 
 use crate::config::CONFIG;
 use crate::data::Data;
 use crate::event_handler::EventFramework;
 use crate::worker::workerlike::WorkerLike;
+use crate::worker::workerpool::WorkerPool;
 use crate::worker::workerprocesscomm::WorkerProcessCommClient;
-use crate::worker::workerprocesscommhttp2::{WorkerProcessCommHttp2ServerCreator, WorkerProcessCommHttp2Worker};
+use crate::worker::workerprocesscommhttp2::{
+    WorkerProcessCommHttp2ServerCreator, WorkerProcessCommHttp2Worker,
+};
 use crate::worker::workerprocesshandle::{WorkerProcessHandle, WorkerProcessHandleCreateOpts};
 use crate::worker::workerstate::WorkerState;
-use crate::worker::workerpool::WorkerPool;
 use crate::worker::workerthread::WorkerThread;
+use clap::{Parser, ValueEnum};
 use log::{error, info};
 use serenity::all::{ApplicationId, HttpBuilder, UserId};
 use sqlx::postgres::PgPoolOptions;
 use std::io::Write;
 use std::{sync::Arc, time::Duration};
-use clap::{Parser, ValueEnum};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>; // This is constant and should be copy pasted
 
@@ -43,7 +45,7 @@ pub enum WorkerType {
     ProcessPool,
     /// Single worker within a process pool system
     #[clap(name = "processpoolworker", alias = "process-pool-worker")]
-    ProcessPoolWorker
+    ProcessPoolWorker,
 }
 
 /// Command line arguments
@@ -65,13 +67,13 @@ struct CmdArgs {
     pub worker_type: WorkerType,
 
     /// The worker ID to use when running as a process pool worker
-    /// 
+    ///
     /// Ignored unless `worker-type` is `processpoolworker`
     #[clap(long)]
     pub worker_id: Option<usize>,
 
     /// The worker process communication type to use when running as a process pool worker
-    /// 
+    ///
     /// Ignored unless `worker-type` is `processpoolworker`
     #[clap(long)]
     pub worker_comm_type: Option<String>,
@@ -122,29 +124,29 @@ async fn main_impl(args: CmdArgs) {
         }
 
         env_builder
-        .format(move |buf, record| {
-            writeln!(
-                buf,
-                "[Worker {}] ({}) {} - {}",
-                worker_id,
-                record.target(),
-                record.level(),
-                record.args()
-            )
-        })
-        .filter(None, log::LevelFilter::Info);
+            .format(move |buf, record| {
+                writeln!(
+                    buf,
+                    "[Worker {}] ({}) {} - {}",
+                    worker_id,
+                    record.target(),
+                    record.level(),
+                    record.args()
+                )
+            })
+            .filter(None, log::LevelFilter::Info);
     } else {
         env_builder
-        .format(move |buf, record| {
-            writeln!(
-                buf,
-                "({}) {} - {}",
-                record.target(),
-                record.level(),
-                record.args()
-            )
-        })
-        .filter(None, log::LevelFilter::Info);
+            .format(move |buf, record| {
+                writeln!(
+                    buf,
+                    "({}) {} - {}",
+                    record.target(),
+                    record.level(),
+                    record.args()
+                )
+            })
+            .filter(None, log::LevelFilter::Info);
     }
 
     env_builder.init();
@@ -158,11 +160,7 @@ async fn main_impl(args: CmdArgs) {
     info!("Proxy URL: {}", proxy_url);
 
     let token = serenity::all::SecretString::new(CONFIG.discord_auth.token.clone().into());
-    let http = Arc::new(
-        HttpBuilder::new(token.clone())
-            .proxy(proxy_url)
-            .build(),
-    );
+    let http = Arc::new(HttpBuilder::new(token.clone()).proxy(proxy_url).build());
 
     info!("HttpBuilder done");
 
@@ -209,7 +207,8 @@ async fn main_impl(args: CmdArgs) {
         object_storage.clone(),
         pg_pool.clone(),
         Arc::new(current_user.clone()),
-    ).expect("Failed to create worker state");
+    )
+    .expect("Failed to create worker state");
 
     match args.worker_type {
         WorkerType::RegisterCommands => {
@@ -219,19 +218,15 @@ async fn main_impl(args: CmdArgs) {
 
             println!("Register data: {:?}", data);
 
-            http
-                .create_global_commands(&data.commands)
+            http.create_global_commands(&data.commands)
                 .await
                 .expect("Failed to register commands");
-
-        },
+        }
         WorkerType::ThreadPool => {
-            let worker_pool = Arc::new(WorkerPool::<WorkerThread>::new(
-                worker_state.clone(),
-                args.worker_threads,
-                &()
-            )
-            .expect("Failed to create worker thread pool"));
+            let worker_pool = Arc::new(
+                WorkerPool::<WorkerThread>::new(worker_state.clone(), args.worker_threads, &())
+                    .expect("Failed to create worker thread pool"),
+            );
 
             let data = Arc::new(Data {
                 object_store: object_storage,
@@ -254,9 +249,7 @@ async fn main_impl(args: CmdArgs) {
                     CONFIG.base_ports.template_worker_port
                 );
 
-                let listener = tokio::net::TcpListener::bind(addr)
-                    .await
-                    .unwrap();
+                let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 
                 axum::serve(listener, rpc_server).await.unwrap();
             });
@@ -274,22 +267,26 @@ async fn main_impl(args: CmdArgs) {
                 error!("Client error: {:?}", why);
                 std::process::exit(1); // Clean exit with status code of 1
             }
-        },
+        }
         WorkerType::ProcessPool => {
-            let worker_pool = Arc::new(WorkerPool::<WorkerProcessHandle>::new(
-                worker_state.clone(),
-                args.worker_threads,
-                &WorkerProcessHandleCreateOpts::new(
-                    Arc::new(WorkerProcessCommHttp2ServerCreator::new(
-                        reqwest::Client::builder()
-                        .http2_prior_knowledge()
-                        .build()
-                        .expect("Failed to create reqwest client for worker process communication"),
-                    )),
-                    args.max_worker_db_connections,
+            let worker_pool = Arc::new(
+                WorkerPool::<WorkerProcessHandle>::new(
+                    worker_state.clone(),
+                    args.worker_threads,
+                    &WorkerProcessHandleCreateOpts::new(
+                        Arc::new(WorkerProcessCommHttp2ServerCreator::new(
+                            reqwest::Client::builder()
+                                .http2_prior_knowledge()
+                                .build()
+                                .expect(
+                                "Failed to create reqwest client for worker process communication",
+                            ),
+                        )),
+                        args.max_worker_db_connections,
+                    ),
                 )
-            )
-            .expect("Failed to create worker thread pool"));
+                .expect("Failed to create worker thread pool"),
+            );
 
             let data = Arc::new(Data {
                 object_store: object_storage,
@@ -312,22 +309,23 @@ async fn main_impl(args: CmdArgs) {
                     CONFIG.base_ports.template_worker_port
                 );
 
-                let listener = tokio::net::TcpListener::bind(addr)
-                    .await
-                    .unwrap();
+                let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 
                 axum::serve(listener, rpc_server).await.unwrap();
             });
 
             // Loop indefinitely until Ctrl+C is pressed
+            #[allow(clippy::never_loop)] // loop here is for documenting semantics
             loop {
                 // On Unix, listen for *both* SIGINT and SIGTERM
                 #[cfg(unix)]
                 {
                     use tokio::signal::unix::{signal, SignalKind};
 
-                    let mut sigint = signal(SignalKind::interrupt()).expect("Failed to set up SIGINT handler");
-                    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to set up SIGTERM handler");
+                    let mut sigint =
+                        signal(SignalKind::interrupt()).expect("Failed to set up SIGINT handler");
+                    let mut sigterm =
+                        signal(SignalKind::terminate()).expect("Failed to set up SIGTERM handler");
 
                     tokio::select! {
                         _ = sigint.recv() => {
@@ -358,24 +356,31 @@ async fn main_impl(args: CmdArgs) {
                     }
                 }
             }
-        },
+        }
         WorkerType::ProcessPoolWorker => {
             let Some(worker_id) = args.worker_id else {
                 panic!("Worker ID must be set when worker type is processpoolworker");
             };
 
-            let worker_thread = Arc::new(WorkerThread::new(
-                worker_state.clone(),
-                WorkerPool::<WorkerProcessHandle>::filter_for(worker_id, args.worker_threads),
-                worker_id
-            ).expect("Failed to create worker thread"));
+            let worker_thread = Arc::new(
+                WorkerThread::new(
+                    worker_state.clone(),
+                    WorkerPool::<WorkerProcessHandle>::filter_for(worker_id, args.worker_threads),
+                    worker_id,
+                )
+                .expect("Failed to create worker thread"),
+            );
 
             let Some(worker_comm_type) = args.worker_comm_type else {
                 panic!("Worker comm type must be set when worker type is processpoolworker");
             };
 
             let _comm_client: Arc<dyn WorkerProcessCommClient> = match worker_comm_type.as_str() {
-                "http2" => Arc::new(WorkerProcessCommHttp2Worker::new(worker_thread.clone()).await.expect("Failed to create HTTP/2 worker process communication client")),
+                "http2" => Arc::new(
+                    WorkerProcessCommHttp2Worker::new(worker_thread.clone())
+                        .await
+                        .expect("Failed to create HTTP/2 worker process communication client"),
+                ),
                 _ => panic!("Unknown worker comm type: {}", worker_comm_type),
             };
 
@@ -397,10 +402,16 @@ async fn main_impl(args: CmdArgs) {
             info!("Starting worker...");
 
             // Start the worker shard
-            if let Err(why) = client.start_shard(worker_id.try_into().unwrap(), args.worker_threads.try_into().unwrap()).await {
+            if let Err(why) = client
+                .start_shard(
+                    worker_id.try_into().unwrap(),
+                    args.worker_threads.try_into().unwrap(),
+                )
+                .await
+            {
                 error!("Client error: {:?}", why);
                 std::process::exit(1); // Clean exit with status code of 1
-            }   
+            }
         }
     }
 }

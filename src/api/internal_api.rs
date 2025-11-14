@@ -5,9 +5,8 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use uuid::Uuid;
 use super::server::AppData;
-use crate::{api::types::ApiDispatchResult, dispatch::parse_response, templatedb::base_template::{BaseTemplate, BaseTemplateRef}, worker::workervmmanager::Id};
+use crate::{api::types::ApiDispatchResult, dispatch::parse_response, templatedb::{attached_templates::{AttachedTemplate, AttachedTemplateId}, template_shop_listing::{ShopListingId, TemplateShopListing}}, worker::workervmmanager::Id};
 use crate::events::AntiraidEvent;
 use super::extractors::InternalEndpoint;
 use super::server::{ApiResponse, ApiError};
@@ -291,85 +290,53 @@ pub(super) async fn kill_worker(
 
 // Template APIs (part of Proposed Unified Templates)
 
-/// Fetch All Templates in Pool
+/// Fetch All Attached Templates
 /// 
-/// Fetches all templates in the template pool
+/// Fetches all attached templates
 #[utoipa::path(
     get, 
     tag = "Internal API",
-    path = "/i/templates/fetch_all_templates_in_pool",
+    path = "/i/templates/attached",
     security(
         ("InternalAuth" = []) 
     ),
     responses(
-        (status = 200, description = "The list of all templates in the template pool"),
+        (status = 200, description = "The list of all attached templates"),
         (status = 400, description = "API Error", body = ApiError),
     )
 )]
-pub(super) async fn fetch_all_templates_in_pool(
+pub(super) async fn fetch_all_attached_templates(
     State(AppData { data, .. }): State<AppData>,
     InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
-) -> ApiResponse<Vec<BaseTemplate>> {
-    let templates = BaseTemplate::fetch_all(&data.pool)
+) -> ApiResponse<Vec<AttachedTemplate>> {
+    let templates = AttachedTemplate::fetch_all(&data.pool)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
     Ok(Json(templates))
 }
 
-/// Fetch Template in Pool by ID
+/// Fetch Attached Template by ID
 ///
-/// Fetches a template in the template pool by ID. Returns `null` if not found, otherwise BaseTemplate.
+/// Fetches an attached template by ID. Returns `null` if not found, otherwise AttachedTemplate.
 #[utoipa::path(
     get, 
     tag = "Internal API",
-    path = "/i/templates/fetch_templates_in_pool_by_id/{id}",
+    path = "/i/templates/attached/{id}",
     security(
         ("InternalAuth" = []) 
     ),
     responses(
-        (status = 200, description = "The template in the template pool matching the ID or `null` if not found"),
+        (status = 200, description = "The attached template matching the ID or `null` if not found"),
         (status = 400, description = "API Error", body = ApiError),
     )
 )]
-pub(super) async fn fetch_template_in_pool_by_id(
+pub(super) async fn fetch_attached_template_by_id(
     State(AppData { data, .. }): State<AppData>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<AttachedTemplateId>,
     InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
-) -> ApiResponse<Option<BaseTemplate>> {
-    let bref = BaseTemplateRef::new(id);
-    let templates = bref.fetch_from_db(&data.pool)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
-
-    Ok(Json(templates))
-}
-
-/// Fetch Templates in Pool by IDs
-///
-/// Fetches multiple templates in the template pool by their IDs
-///
-/// The response is a list of templates whose IDs matched the requested IDs.
-#[utoipa::path(
-    get, 
-    tag = "Internal API",
-    path = "/i/templates/fetch_templates_in_pool_by_ids",
-    security(
-        ("InternalAuth" = []) 
-    ),
-    request_body = Vec<Uuid>,
-    responses(
-        (status = 200, description = "The list of the specified templates in the template pool"),
-        (status = 400, description = "API Error", body = ApiError),
-    )
-)]
-#[axum::debug_handler]
-pub(super) async fn fetch_template_in_pool_by_ids(
-    State(AppData { data, .. }): State<AppData>,
-    InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
-    Json(ids): Json<Vec<Uuid>>,
-) -> ApiResponse<Vec<BaseTemplate>> {
-    let templates = BaseTemplate::fetch_by_ids(&data.pool, ids)
+) -> ApiResponse<Option<AttachedTemplate>> {
+    let templates = id.fetch(&data.pool)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
@@ -386,16 +353,58 @@ pub(super) async fn fetch_template_in_pool_by_ids(
 // change the state of a template they own to "suspended" nor may they
 // change the state of a suspended template whatsoever
 
-// Fetch Template Shop Listings
+// Fetch Shop Listings
 //
-// Fetches all template shop listings
+// Fetches all shop listings
+#[utoipa::path(
+    get, 
+    tag = "Internal API",
+    path = "/i/templates/shop-listings",
+    security(
+        ("InternalAuth" = []) 
+    ),
+    responses(
+        (status = 200, description = "The list of all shop listings available"),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
+pub(super) async fn fetch_all_shop_listings(
+    State(AppData { data, .. }): State<AppData>,
+    InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
+) -> ApiResponse<Vec<TemplateShopListing>> {
+    let listings = TemplateShopListing::fetch_all(&data.pool)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
-// Fetches Template Shop Listings by ID
+    Ok(Json(listings))
+}
+
+// Fetches Shop Listings by ID
 //
-// Fetches a template shop listing by ID.
-// The ID here is the same as the base template ID it references.
-// This is to ensure that there is a one-to-one mapping between a base 
-// template and its shop listing (without needing an extra ID field).
+/// Fetches a shop listing by ID. Returns `null` if not found, otherwise ShopListing.
+#[utoipa::path(
+    get, 
+    tag = "Internal API",
+    path = "/i/templates/shop-listings/{id}",
+    security(
+        ("InternalAuth" = []) 
+    ),
+    responses(
+        (status = 200, description = "The shop listing matching the ID or `null` if not found"),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
+pub(super) async fn fetch_shop_listing_by_id(
+    State(AppData { data, .. }): State<AppData>,
+    Path(id): Path<ShopListingId>,
+    InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
+) -> ApiResponse<Option<TemplateShopListing>> {
+    let templates = id.fetch(&data.pool)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
+
+    Ok(Json(templates))
+}
 
 // Set Template Shop Listing Review State
 //

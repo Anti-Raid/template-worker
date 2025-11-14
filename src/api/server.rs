@@ -1,15 +1,15 @@
+use super::internal_api;
+use super::public_api;
 use axum::{
     http::StatusCode,
     routing::{get, post},
     Json, Router,
 };
+use std::sync::Arc;
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 use utoipa::openapi::server::Server;
 use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::SwaggerUi;
-use std::sync::Arc;
-use super::internal_api;
-use super::public_api;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 pub enum ApiErrorCode {
@@ -20,13 +20,13 @@ pub enum ApiErrorCode {
     InternalError,
     Restricted,
     NotFound,
-    BadRequest
+    BadRequest,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 pub struct ApiError {
     pub message: String,
-    pub code: ApiErrorCode
+    pub code: ApiErrorCode,
 }
 
 impl From<String> for ApiError {
@@ -55,11 +55,8 @@ pub struct AppData {
 }
 
 impl AppData {
-    pub fn new(data: Arc<crate::data::Data>, http: Arc<serenity::http::Http>,) -> Self {
-        Self {
-            data,
-            http
-        }
+    pub fn new(data: Arc<crate::data::Data>, http: Arc<serenity::http::Http>) -> Self {
+        Self { data, http }
     }
 }
 
@@ -70,15 +67,22 @@ async fn logger(
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    log::info!("Received request: method = {}, path={}", request.method(), request.uri().path());
+    log::info!(
+        "Received request: method = {}, path={}",
+        request.method(),
+        request.uri().path()
+    );
 
     let response = next.run(request).await;
     response
 }
 
-pub fn create(data: Arc<crate::data::Data>, http: Arc<serenity::http::Http>) -> axum::routing::IntoMakeService<Router> {
+pub fn create(
+    data: Arc<crate::data::Data>,
+    http: Arc<serenity::http::Http>,
+) -> axum::routing::IntoMakeService<Router> {
     let mut router = Router::new();
-    
+
     // Internal routes
     let internal_routes = [
         routes!(internal_api::dispatch_event),
@@ -89,9 +93,10 @@ pub fn create(data: Arc<crate::data::Data>, http: Arc<serenity::http::Http>) -> 
         //routes!(internal_api::get_vm_metrics_for_all),
         routes!(internal_api::guilds_exist),
         routes!(internal_api::kill_worker),
-        routes!(internal_api::fetch_all_templates_in_pool),
-        routes!(internal_api::fetch_template_in_pool_by_id),
-        routes!(internal_api::fetch_template_in_pool_by_ids),
+        routes!(internal_api::fetch_all_attached_templates),
+        routes!(internal_api::fetch_attached_template_by_id),
+        routes!(internal_api::fetch_all_shop_listings),
+        routes!(internal_api::fetch_shop_listing_by_id),
     ];
 
     // Public routes
@@ -119,7 +124,11 @@ pub fn create(data: Arc<crate::data::Data>, http: Arc<serenity::http::Http>) -> 
             assert!(paths.len() == 1, "Internal API routes should have one path");
             let first_entry = paths.first_entry();
             let path = first_entry.map(|path| path.key().clone()).unwrap();
-            if path.is_empty() { "/".to_string() } else { path }
+            if path.is_empty() {
+                "/".to_string()
+            } else {
+                path
+            }
         };
 
         router = router.route(&path, route.2);
@@ -134,9 +143,10 @@ pub fn create(data: Arc<crate::data::Data>, http: Arc<serenity::http::Http>) -> 
     if let Some(comps) = internal_openapi.components.as_mut() {
         comps.security_schemes.insert(
             "InternalAuth".to_string(),
-            SecurityScheme::ApiKey(ApiKey::Header(
-                ApiKeyValue::with_description("Authorization", "API token. Note that user must have root access to use this API")
-            )),
+            SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::with_description(
+                "Authorization",
+                "API token. Note that user must have root access to use this API",
+            ))),
         );
     }
 
@@ -149,7 +159,11 @@ pub fn create(data: Arc<crate::data::Data>, http: Arc<serenity::http::Http>) -> 
             assert!(paths.len() == 1, "Public API routes should have one path");
             let first_entry = paths.first_entry();
             let path = first_entry.map(|path| path.key().clone()).unwrap();
-            if path.is_empty() { "/".to_string() } else { path }
+            if path.is_empty() {
+                "/".to_string()
+            } else {
+                path
+            }
         };
 
         router = router.route(&path, route.2);
@@ -164,29 +178,28 @@ pub fn create(data: Arc<crate::data::Data>, http: Arc<serenity::http::Http>) -> 
     if let Some(comps) = public_openapi.components.as_mut() {
         comps.security_schemes.insert(
             "PublicAuth".to_string(),
-            SecurityScheme::ApiKey(ApiKey::Header(
-                ApiKeyValue::with_description("Authorization", "API token. This API is public but requires authentication")
-            )),
+            SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::with_description(
+                "Authorization",
+                "API token. This API is public but requires authentication",
+            ))),
         );
     }
 
     router = router
         .route("/healthcheck", post(|| async { Json(()) }))
-        .merge(
-            SwaggerUi::new("/docs")
-            .url("/openapi", public_openapi)
-        )
+        .merge(SwaggerUi::new("/docs").url("/openapi", public_openapi))
         .merge(SwaggerUi::new("/i/docs").url("/i/openapi", internal_openapi))
-        .fallback(
-            get(|| async { (StatusCode::NOT_FOUND, Json(ApiError {
-                message: "Not Found".to_string(),
-                code: ApiErrorCode::NotFound,
-            })) })
-        )
+        .fallback(get(|| async {
+            (
+                StatusCode::NOT_FOUND,
+                Json(ApiError {
+                    message: "Not Found".to_string(),
+                    code: ApiErrorCode::NotFound,
+                }),
+            )
+        }))
         .layer(tower_http::cors::CorsLayer::very_permissive())
-        .layer(
-            axum::middleware::from_fn(logger)
-        );
+        .layer(axum::middleware::from_fn(logger));
 
     let router: Router<()> = router.with_state(AppData::new(data, http));
     router.into_make_service()
