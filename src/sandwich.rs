@@ -495,6 +495,9 @@ pub async fn get_status(client: &reqwest::Client) -> Result<GetStatusResponse, E
         return Err("No data in response".into());
     };
 
+    let mut user_count = 0;
+    let mut total_members = 0;
+
     // Parse out the shard connections
     let mut shards = HashMap::new();
 
@@ -502,6 +505,9 @@ pub async fn get_status(client: &reqwest::Client) -> Result<GetStatusResponse, E
         if manager.display_name != *"Anti Raid" {
             continue; // Not for us
         }
+
+        user_count = manager.user_count;
+        total_members = manager.member_count;
 
         for v in manager.shard_groups.iter() {
             for shard in v.shards.iter() {
@@ -539,6 +545,8 @@ pub async fn get_status(client: &reqwest::Client) -> Result<GetStatusResponse, E
     Ok(GetStatusResponse {
         resp: data,
         shard_conns: shards,
+        user_count,
+        total_members,
     })
 }
 
@@ -555,6 +563,8 @@ pub struct ShardConn {
 pub struct GetStatusResponse {
     pub resp: StatusEndpointResponse,
     pub shard_conns: HashMap<i64, ShardConn>,
+    pub user_count: i64,
+    pub total_members: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
@@ -579,6 +589,8 @@ pub struct StatusEndpointResponse {
 pub struct StatusEndpointManager {
     pub display_name: String,
     pub shard_groups: Vec<StatusEndpointShardGroup>,
+    pub user_count: i64,
+    pub member_count: i64
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

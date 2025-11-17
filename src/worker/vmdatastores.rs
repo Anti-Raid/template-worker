@@ -112,10 +112,10 @@ impl DataStoreImpl for StatsStore {
             Some(DataStoreMethod::Async(Rc::new(move |_v| {
                 let state = state.clone();
                 Box::pin(async move {
-                    let total_guilds = {
-                        let sandwich_resp =
-                            crate::sandwich::get_status(&state.reqwest_client).await?;
+                    let sandwich_resp =
+                    crate::sandwich::get_status(&state.reqwest_client).await?;
 
+                    let total_guilds = {
                         let mut guild_count = 0;
                         sandwich_resp.shard_conns.iter().for_each(|(_, sc)| {
                             guild_count += sc.guilds;
@@ -127,7 +127,8 @@ impl DataStoreImpl for StatsStore {
                     Ok(value!(
                         "total_cached_guilds".to_string() => total_guilds, // This field is deprecated, use total_guilds instead
                         "total_guilds".to_string() => total_guilds,
-                        "total_users".to_string() => 0, // for now
+                        "total_users".to_string() => sandwich_resp.user_count,
+                        "total_members".to_string() => sandwich_resp.total_members,
                         "last_started_at".to_string() => crate::CONFIG.start_time
                     ))
                 })
