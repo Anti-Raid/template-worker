@@ -48,32 +48,35 @@ impl TemplateCacheView {
 
     /// Apply a TemplateCacheUpdate to this view
     /// 
-    /// Returns the list of affected TemplateReferences, if any
-    pub fn apply_cache_update(&mut self, update: TemplateCacheUpdate) {
-        self.apply_cache_update_single(update, 0);
+    /// Returns the list of affected TemplateOwner, if any
+    pub fn apply_cache_update(&mut self, update: TemplateCacheUpdate) -> Vec<TemplateOwner> {
+        self.apply_cache_update_single(update, 0)
     }
 
     /// Internal recursive function to apply a TemplateCacheUpdate
-    fn apply_cache_update_single(&mut self, update: TemplateCacheUpdate, depth: usize) {
+    fn apply_cache_update_single(&mut self, update: TemplateCacheUpdate, depth: usize) -> Vec<TemplateOwner> {
         if depth > 16 {
             log::error!("TemplateCacheView::apply_cache_update_single: exceeded max recursion depth");
-            return;
+            return Vec::with_capacity(0);
         }
 
         match update {
             TemplateCacheUpdate::Multi { evt } => {
+                let mut affected_owners = Vec::new();
                 for single_update in evt {
-                    self.apply_cache_update_single(single_update, depth + 1);
+                    affected_owners.extend(self.apply_cache_update_single(single_update, depth + 1));
                 }
+                affected_owners
             }
             TemplateCacheUpdate::Flush {} => {
                 self.entries.clear();
+                Vec::with_capacity(0)
             }
             TemplateCacheUpdate::FullSyncOwner { owner, templates } => {
                 // If no templates, remove the owner entry
                 if templates.is_empty() {
                     self.entries.remove(&owner);
-                    return;
+                    return vec![owner];
                 }
 
                 let mut template_map = HashMap::with_capacity(templates.len());
@@ -84,13 +87,14 @@ impl TemplateCacheView {
                     templates: template_map,
                     cache_regen_triggered: CacheRegenTriggerMode::CausedByFullSync,
                 });
+                vec![owner]
             }
             TemplateCacheUpdate::UpsertTemplateAttachment { attachment } => {
-                if let Some(attachments) = self.entries.get_mut(&attachment.owner) {
+                let owner = attachment.owner;
+                if let Some(attachments) = self.entries.get_mut(&owner) {
                     attachments.templates.insert(attachment.id, attachment);
                     attachments.cache_regen_triggered = CacheRegenTriggerMode::CausedByTemplateUpsertExisting;
                 } else {
-                    let owner = attachment.owner;
                     let mut new_map = HashMap::new();
                     new_map.insert(attachment.id, attachment);
                     self.entries.insert(owner, TemplateOwnerCache {
@@ -98,17 +102,20 @@ impl TemplateCacheView {
                         cache_regen_triggered: CacheRegenTriggerMode::CausedByTemplateUpsertNew,
                     });
                 }
+                vec![owner]
             }
             TemplateCacheUpdate::RemoveTemplateAttachment { owner, template_ref } => {
                 if let Some(attachments) = self.entries.get_mut(&owner) {
                     attachments.templates.remove(&template_ref);
                     attachments.cache_regen_triggered = CacheRegenTriggerMode::CausedByTemplateRemoval;
                 }
+                vec![owner]
             }
             TemplateCacheUpdate::RegenerateCache { owner } => {
                 if let Some(attachments) = self.entries.get_mut(&owner) {
                     attachments.cache_regen_triggered = CacheRegenTriggerMode::ManuallyTriggered;
                 }
+                vec![owner]
             }
         }
     }
