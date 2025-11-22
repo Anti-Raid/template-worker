@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::templatedb::template_shop_listing::ShopListingId;
 use crate::Error;
+use crate::worker::workervmmanager::Id;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, Default, Debug)]
 pub enum TemplateLanguage {
@@ -176,7 +177,8 @@ impl TemplateOwner {
     }
 
     // Converts a TemplateOwner to a Id
-    /*pub fn to_id(&self) -> Id {
+    #[deprecated = "Remove this method once Id gets removed"]
+    pub fn to_id(&self) -> Id {
         match self {
             TemplateOwner::Guild { id } => Id::GuildId(*id),
             // Note: Currently, only GuildId is supported in Id
@@ -184,10 +186,10 @@ impl TemplateOwner {
                 panic!("TemplateOwner::User cannot be converted to Id (not yet implemented)")
             }
         }
-    }*/
+    }
 }
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct AttachedTemplateId(Uuid);
 
 impl AttachedTemplateId {

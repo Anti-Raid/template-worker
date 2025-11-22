@@ -2,29 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use khronos_runtime::primitives::event::CreateEvent;
 
-use crate::{mesophyll::{message::MesophyllMessage, cache::TemplateCacheView}, templatedb::{base_template::TemplateReference}, worker::{workerdispatch::DispatchTemplateResult, workervmmanager::Id}};
-
-enum TemplateCacheViewState {
-    Empty,
-    Ready(TemplateCacheView),
-}
-
-#[allow(dead_code)]
-impl TemplateCacheViewState {
-    pub fn as_view(&self) -> Option<&TemplateCacheView> {
-        match self {
-            TemplateCacheViewState::Empty => None,
-            TemplateCacheViewState::Ready(view) => Some(view),
-        }
-    }
-
-    pub fn as_view_mut(&mut self) -> Option<&mut TemplateCacheView> {
-        match self {
-            TemplateCacheViewState::Empty => None,
-            TemplateCacheViewState::Ready(view) => Some(view),
-        }
-    }
-}
+use crate::{mesophyll::{message::MesophyllMessage, cache::TemplateCacheView}, worker::{workerdispatch::DispatchTemplateResult, workervmmanager::Id}};
 
 #[async_trait::async_trait]
 pub trait MesophyllClientHandler {
@@ -36,18 +14,12 @@ pub trait MesophyllClientHandler {
 
     /// Called when a scoped dispatched event result is received
     async fn dispatch_scoped_result(&self, client: &MesophyllClient, id: Id, event: CreateEvent, scopes: Vec<String>) -> DispatchTemplateResult;
-
-    /// Called when a cache regeneration is requested
-    async fn regenerate_cache(&self, client: &MesophyllClient, id: Id) -> Result<(), crate::Error>;
-
-    /// Called when cache regeneration is requested for multiple template references
-    async fn regenerate_caches(&self, client: &MesophyllClient, ids: Vec<TemplateReference>) -> Result<(), crate::Error>;
 }
 
 /// Mesophyll client, NOT THREAD SAFE
 #[derive(Clone)]
 pub struct MesophyllClient {
-    template_cache: Rc<RefCell<TemplateCacheViewState>>,
+    template_cache: Rc<RefCell<TemplateCacheView>>,
     handler: Rc<dyn MesophyllClientHandler>,
 }
 
@@ -58,7 +30,7 @@ impl MesophyllClient {
         T: MesophyllClientHandler + 'static,
     {
         Self {
-            template_cache: Rc::new(RefCell::new(TemplateCacheViewState::Empty)),
+            template_cache: Rc::new(RefCell::new(TemplateCacheView::new())),
             handler: Rc::new(handler),
         }
     }
@@ -72,20 +44,18 @@ impl MesophyllClient {
             MesophyllMessage::Identify { id: _, session_key: _ } => {
                 // Nothing client can do.
             },
-            MesophyllMessage::Ready { templates } => {
-                // This is safe as the whole thing is single threaded
-                *self.template_cache.borrow_mut() = TemplateCacheViewState::Ready(templates);
-                log::info!("Recieved new template cache from Mesophyll");
+            MesophyllMessage::Ready {} => {
                 self.handler.ready(self).await?;
             },
-            MesophyllMessage::TemplateUpdate { update } => {
-                if let Some(view) = self.template_cache.borrow_mut().as_view_mut() {
+            MesophyllMessage::TemplateCacheUpdate { update, req_id } => {
+                if let Ok(mut view) = self.template_cache.try_borrow_mut() {
                     log::info!("Recieved template update from Mesophyll and applying to cache");
-                   if let Some(refs) = view.apply_cache_update(update) {
-                        self.handler.regenerate_caches(self, refs).await?;
-                   }
+                    view.apply_cache_update(update);
+                    self.send_message(MesophyllMessage::ResponseAck { req_id })?;
                 } else {
                     log::warn!("Recieved template update from Mesophyll but template cache is not ready");
+                    self.send_message(MesophyllMessage::ResponseError { error: "Template cache not ready".to_string(), req_id })?;
+                    return Err("Template cache not ready".into());
                 }
             }
             MesophyllMessage::DispatchEvent { id, event, req_id } => {
@@ -98,18 +68,6 @@ impl MesophyllClient {
                 let response = MesophyllMessage::ResponseDispatchResult { result: result.into(), req_id };
                 let _ = self.send_message(response);
             },
-            MesophyllMessage::RegenerateCache { id, req_id } => {
-                match self.handler.regenerate_cache(self, id).await {
-                    Ok(_) => {},
-                    Err(e) => {
-                        let response = MesophyllMessage::ResponseError { error: format!("{e}"), req_id };
-                        let _ = self.send_message(response);
-                        return Err(e);
-                    }
-                };
-                let response = MesophyllMessage::ResponseAck { req_id };
-                let _ = self.send_message(response);
-            }
             MesophyllMessage::ResponseDispatchResult { .. } => {
                 // Nothing client can do.
             }

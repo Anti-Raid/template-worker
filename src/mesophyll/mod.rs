@@ -8,7 +8,6 @@
 ///
 /// In the future, it is a goal for Mesophyll to be a base unit of sandboxing as well
 /// through projects like khronos dapi
-
+pub mod cache;
 pub mod message;
 pub mod client;
-pub mod cache;
