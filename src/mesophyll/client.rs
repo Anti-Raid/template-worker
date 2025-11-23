@@ -10,7 +10,7 @@ pub trait MesophyllClientHandler {
     async fn ready(&self, client: &MesophyllClient) -> Result<(), crate::Error>;
 
     /// Called when a template cache update is received
-    async fn template_cache_update(&self, client: &MesophyllClient, update: &TemplateCacheUpdate);
+    async fn template_cache_update(&self, client: &MesophyllClient, update: &TemplateCacheUpdate) -> Result<(), crate::Error>;
 
     /// Called when a dispatched event result is received
     async fn dispatch_result(&self, client: &MesophyllClient, id: Id, event: CreateEvent) -> DispatchTemplateResult;
@@ -54,7 +54,14 @@ impl MesophyllClient {
                 if let Ok(mut view) = self.template_cache.try_borrow_mut() {
                     log::info!("Recieved template update from Mesophyll and applying to cache");
                     view.apply_cache_update(&update); // Apply the update to the internal cache
-                    self.handler.template_cache_update(self, &update).await; // Notify handler
+                    match self.handler.template_cache_update(self, &update).await {
+                        Ok(_) => {},
+                        Err(e) => {
+                            log::error!("Error handling template cache update: {}", e);
+                            self.send_message(MesophyllMessage::ResponseError { error: format!("Error handling template cache update: {}", e), req_id })?;
+                            return Err(e);
+                        }
+                    }; // Notify handler
                     self.send_message(MesophyllMessage::ResponseAck { req_id })?;
                 } else {
                     log::warn!("Recieved template update from Mesophyll but template cache is not ready");
