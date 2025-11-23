@@ -5,33 +5,10 @@ use sqlx::Postgres;
 
 use crate::{templatedb::{attached_templates::{AttachedTemplate, TemplateOwner, AttachedTemplateId}}, worker::workerfilter::WorkerFilter};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CacheRegenTriggerMode {
-    None, // No regeneration triggered
-    CausedByTemplateRemoval, // Caused when a template attachment is removed
-    CausedByTemplateUpsertExisting, // Caused when an existing template attachment is upserted
-    CausedByTemplateUpsertNew, // Caused when a new owner entry is created while upserting
-    CausedByFullSync, // Caused by a full sync operation
-    ManuallyTriggered, // Caused by a manual trigger (not automatic)
-}
-
-#[allow(dead_code)]
-impl CacheRegenTriggerMode {
-    /// Returns true if the cache regeneration was triggered by an event
-    pub fn is_triggered(&self) -> bool {
-        match self {
-            CacheRegenTriggerMode::None => false,
-            _ => true,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct TemplateOwnerCache {
     templates: HashMap<AttachedTemplateId, Arc<AttachedTemplate>>,
-    cache_regen_triggered: CacheRegenTriggerMode,
 }
-
 /// Store a filtered view of a TemplateCache
 #[derive(Debug)]
 pub struct TemplateCacheView {
@@ -49,73 +26,57 @@ impl TemplateCacheView {
     /// Apply a TemplateCacheUpdate to this view
     /// 
     /// Returns the list of affected TemplateOwner, if any
-    pub fn apply_cache_update(&mut self, update: TemplateCacheUpdate) -> Vec<TemplateOwner> {
+    pub fn apply_cache_update(&mut self, update: &TemplateCacheUpdate) {
         self.apply_cache_update_single(update, 0)
     }
 
     /// Internal recursive function to apply a TemplateCacheUpdate
-    fn apply_cache_update_single(&mut self, update: TemplateCacheUpdate, depth: usize) -> Vec<TemplateOwner> {
+    fn apply_cache_update_single(&mut self, update: &TemplateCacheUpdate, depth: usize) {
         if depth > 16 {
             log::error!("TemplateCacheView::apply_cache_update_single: exceeded max recursion depth");
-            return Vec::with_capacity(0);
+            return;
         }
 
         match update {
             TemplateCacheUpdate::Multi { evt } => {
-                let mut affected_owners = Vec::new();
                 for single_update in evt {
-                    affected_owners.extend(self.apply_cache_update_single(single_update, depth + 1));
+                    self.apply_cache_update_single(single_update, depth + 1);
                 }
-                affected_owners
             }
-            TemplateCacheUpdate::Flush {} => {
-                self.entries.clear();
-                Vec::with_capacity(0)
+            TemplateCacheUpdate::Flush { exclude } => {
+                self.entries.retain(|owner, _| exclude.contains(owner));
             }
             TemplateCacheUpdate::FullSyncOwner { owner, templates } => {
                 // If no templates, remove the owner entry
                 if templates.is_empty() {
                     self.entries.remove(&owner);
-                    return vec![owner];
+                    return;
                 }
 
                 let mut template_map = HashMap::with_capacity(templates.len());
                 for at in templates {
-                    template_map.insert(at.id, at);
+                    template_map.insert(at.id, at.clone());
                 }
-                self.entries.insert(owner, TemplateOwnerCache {
+                self.entries.insert(*owner, TemplateOwnerCache {
                     templates: template_map,
-                    cache_regen_triggered: CacheRegenTriggerMode::CausedByFullSync,
                 });
-                vec![owner]
             }
             TemplateCacheUpdate::UpsertTemplateAttachment { attachment } => {
                 let owner = attachment.owner;
                 if let Some(attachments) = self.entries.get_mut(&owner) {
-                    attachments.templates.insert(attachment.id, attachment);
-                    attachments.cache_regen_triggered = CacheRegenTriggerMode::CausedByTemplateUpsertExisting;
+                    attachments.templates.insert(attachment.id, attachment.clone());
                 } else {
                     let mut new_map = HashMap::new();
-                    new_map.insert(attachment.id, attachment);
+                    new_map.insert(attachment.id, attachment.clone());
                     self.entries.insert(owner, TemplateOwnerCache {
                         templates: new_map,
-                        cache_regen_triggered: CacheRegenTriggerMode::CausedByTemplateUpsertNew,
                     });
                 }
-                vec![owner]
             }
             TemplateCacheUpdate::RemoveTemplateAttachment { owner, template_ref } => {
                 if let Some(attachments) = self.entries.get_mut(&owner) {
                     attachments.templates.remove(&template_ref);
-                    attachments.cache_regen_triggered = CacheRegenTriggerMode::CausedByTemplateRemoval;
                 }
-                vec![owner]
-            }
-            TemplateCacheUpdate::RegenerateCache { owner } => {
-                if let Some(attachments) = self.entries.get_mut(&owner) {
-                    attachments.cache_regen_triggered = CacheRegenTriggerMode::ManuallyTriggered;
-                }
-                vec![owner]
             }
         }
     }
@@ -129,8 +90,10 @@ pub enum TemplateCacheUpdate {
     Multi {
         evt: Vec<TemplateCacheUpdate>,
     },
-    /// Flushes the current cache
-    Flush {},
+    /// Flushes the entire cache except for the specified owners
+    Flush {
+        exclude: Vec<TemplateOwner>,
+    },
     /// Performs a full sync on a specific owner
     FullSyncOwner {
         owner: TemplateOwner,
@@ -143,9 +106,6 @@ pub enum TemplateCacheUpdate {
     RemoveTemplateAttachment { 
         owner: TemplateOwner,
         template_ref: AttachedTemplateId,
-    },
-    RegenerateCache {
-        owner: TemplateOwner,
     },
 }
 
@@ -177,11 +137,9 @@ impl TemplateCache {
     /// Creates a Sync update for a worker using a WorkerFilter
     ///
     /// The resulting sync can be sent to the destination worker to sync all data
-    pub fn create_full_sync(&self, filter: &WorkerFilter, flush: bool) -> TemplateCacheUpdate {
+    pub fn create_full_sync(&self, filter: &WorkerFilter) -> TemplateCacheUpdate {
         let mut events = Vec::new();
-        if flush {
-            events.push(TemplateCacheUpdate::Flush {});
-        }
+        let mut known_ids = Vec::new();
 
         for (owner, attachments) in &self.attachments {
             #[allow(deprecated)]
@@ -190,8 +148,14 @@ impl TemplateCache {
                     owner: *owner,
                     templates: attachments.clone(),
                 });
+                known_ids.push(*owner);
             }
         }
+
+        // Flush any owners not in known_ids
+        events.push(TemplateCacheUpdate::Flush {
+            exclude: known_ids,
+        });
 
         TemplateCacheUpdate::Multi { evt: events }
     }

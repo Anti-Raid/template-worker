@@ -2,12 +2,15 @@ use std::{cell::RefCell, rc::Rc};
 
 use khronos_runtime::primitives::event::CreateEvent;
 
-use crate::{mesophyll::{message::MesophyllMessage, cache::TemplateCacheView}, worker::{workerdispatch::DispatchTemplateResult, workervmmanager::Id}};
+use crate::{mesophyll::{cache::{TemplateCacheUpdate, TemplateCacheView}, message::MesophyllMessage}, worker::{workerdispatch::DispatchTemplateResult, workervmmanager::Id}};
 
 #[async_trait::async_trait]
 pub trait MesophyllClientHandler {
     /// Called when the Mesophyll client is ready with initial state
     async fn ready(&self, client: &MesophyllClient) -> Result<(), crate::Error>;
+
+    /// Called when a template cache update is received
+    async fn template_cache_update(&self, client: &MesophyllClient, update: &TemplateCacheUpdate);
 
     /// Called when a dispatched event result is received
     async fn dispatch_result(&self, client: &MesophyllClient, id: Id, event: CreateEvent) -> DispatchTemplateResult;
@@ -50,7 +53,8 @@ impl MesophyllClient {
             MesophyllMessage::TemplateCacheUpdate { update, req_id } => {
                 if let Ok(mut view) = self.template_cache.try_borrow_mut() {
                     log::info!("Recieved template update from Mesophyll and applying to cache");
-                    view.apply_cache_update(update);
+                    view.apply_cache_update(&update); // Apply the update to the internal cache
+                    self.handler.template_cache_update(self, &update).await; // Notify handler
                     self.send_message(MesophyllMessage::ResponseAck { req_id })?;
                 } else {
                     log::warn!("Recieved template update from Mesophyll but template cache is not ready");
