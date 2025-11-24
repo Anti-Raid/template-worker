@@ -1,6 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use khronos_runtime::primitives::event::CreateEvent;
+use tokio::sync::Notify;
 
 use crate::{mesophyll::{cache::{TemplateCacheUpdate, TemplateCacheView}, message::MesophyllMessage}, worker::{workerdispatch::DispatchTemplateResult, workervmmanager::Id}};
 
@@ -10,6 +11,8 @@ pub trait MesophyllClientHandler {
     async fn ready(&self, client: &MesophyllClient) -> Result<(), crate::Error>;
 
     /// Called when a template cache update is received
+    /// 
+    /// Note: this will be called after updating the internal template cache view
     async fn template_cache_update(&self, client: &MesophyllClient, update: &TemplateCacheUpdate) -> Result<(), crate::Error>;
 
     /// Called when a dispatched event result is received
@@ -24,6 +27,7 @@ pub trait MesophyllClientHandler {
 pub struct MesophyllClient {
     template_cache: Rc<RefCell<TemplateCacheView>>,
     handler: Rc<dyn MesophyllClientHandler>,
+    ready: Rc<Notify>
 }
 
 #[allow(dead_code)]
@@ -35,6 +39,7 @@ impl MesophyllClient {
         Self {
             template_cache: Rc::new(RefCell::new(TemplateCacheView::new())),
             handler: Rc::new(handler),
+            ready: Rc::new(Notify::new()),
         }
     }
 
@@ -46,8 +51,11 @@ impl MesophyllClient {
         match event {
             MesophyllMessage::Identify { id: _, session_key: _ } => {
                 // Nothing client can do.
+                log::warn!("Mesophyll client received unexpected Identify message");
             },
             MesophyllMessage::Ready {} => {
+                log::info!("Mesophyll client is now ready");
+                self.ready.notify_waiters();
                 self.handler.ready(self).await?;
             },
             MesophyllMessage::TemplateCacheUpdate { update, req_id } => {
@@ -81,12 +89,15 @@ impl MesophyllClient {
             },
             MesophyllMessage::ResponseDispatchResult { .. } => {
                 // Nothing client can do.
+                log::warn!("Mesophyll client received unexpected ResponseDispatchResult message");
             }
             MesophyllMessage::ResponseAck { .. } => {
                 // Nothing client can do.
+                log::warn!("Mesophyll client received unexpected ResponseAck message");
             }
             MesophyllMessage::ResponseError { .. } => {
                 // Nothing client can do.
+                log::warn!("Mesophyll client received unexpected ResponseError message");
             }
         }
 

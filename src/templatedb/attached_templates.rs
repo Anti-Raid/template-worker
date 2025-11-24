@@ -118,6 +118,18 @@ impl TemplateSource {
             _ => Err("Invalid template source type".into()),
         }
     }
+
+    pub fn is_builtins(&self) -> bool {
+        matches!(self, TemplateSource::Builtins)
+    }
+
+    pub fn is_shop(&self) -> bool {
+        matches!(self, TemplateSource::Shop { .. })
+    }
+
+    pub fn is_custom(&self) -> bool {
+        matches!(self, TemplateSource::Custom { .. })
+    }
 }
 
 /// Information about the owner of a template

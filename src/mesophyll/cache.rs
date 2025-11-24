@@ -103,6 +103,7 @@ pub enum TemplateCacheUpdate {
     UpsertTemplateAttachment { 
         attachment: Arc<AttachedTemplate>,
     },
+    /// Remove a specific attached template
     RemoveTemplateAttachment { 
         owner: TemplateOwner,
         template_ref: AttachedTemplateId,

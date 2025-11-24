@@ -29,6 +29,7 @@ pub mod workerstate;
 pub mod limits;
 pub mod vmcontext;
 pub mod vmdatastores;
+pub mod vmisolatemanager;
 pub mod workercachedata;
 pub mod builtins;
 pub mod worker;
@@ -41,7 +42,7 @@ pub mod workerlike;
 pub mod workerfilter;
 pub mod staticref;
 
-pub mod workerprocesshandle; // TODO: Implement process workers
-pub mod workerprocesscommhttp2; // TODO: Implement process workers
-pub mod workerprocesscomm; // TODO: Implement process workers
+pub mod workerprocesshandle; // TODO: Replace with mesophyll
+pub mod workerprocesscommhttp2; // TODO: Replace with mesophyll
+pub mod workerprocesscomm; // TODO: Replace with mesophyll
 pub mod workerpool;
