@@ -14,12 +14,13 @@ pub struct VmIsolateManager {
     rt: KhronosRuntime,
 
     /// A map of name to sub-isolate
-    sub_isolates: Rc<RefCell<std::collections::HashMap<String, KhronosIsolate>>>,
+    sub_isolates: Rc<RefCell<HashMap<String, KhronosIsolate>>>,
 
     /// A function to be called if the runtime is marked as broken
     on_broken: Rc<RefCell<Option<OnBrokenFunc>>>,
 }
 
+#[allow(dead_code)]
 impl VmIsolateManager {
     /// Creates a new runtime manager
     pub fn new(rt: KhronosRuntime) -> Self {

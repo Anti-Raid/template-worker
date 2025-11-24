@@ -1,18 +1,17 @@
-use khronos_runtime::rt::{KhronosRuntime, KhronosRuntimeManager, RuntimeCreateOpts};
+use khronos_runtime::rt::{KhronosRuntime, RuntimeCreateOpts};
 use serde::{Deserialize, Serialize};
 use serenity::all::GuildId;
 use std::cell::RefCell;
 use std::{collections::HashMap, rc::Rc};
 use khronos_runtime::rt::mlua::prelude::*;
 use crate::worker::limits::TEMPLATE_GIVE_TIME;
+use crate::worker::vmisolatemanager::VmIsolateManager;
 
 use super::limits::{LuaKVConstraints, Ratelimits};
 use tokio::sync::broadcast::{channel as broadcast_channel, WeakSender as BroadcastWeakSender, Sender as BroadcastSender};
 
 use super::workerstate::WorkerState;
 use super::limits::{MAX_TEMPLATE_MEMORY_USAGE, MAX_TEMPLATES_EXECUTION_TIME};
-
-pub type RuntimeManager = KhronosRuntimeManager<()>;
 
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]
 /// Represents the ID of a tenant, which can currently only be a GuildId
@@ -24,7 +23,7 @@ pub enum Id {
 #[derive(Clone)]
 pub struct VmData {
     pub state: WorkerState,
-    pub runtime_manager: RuntimeManager,
+    pub runtime_manager: VmIsolateManager,
     pub kv_constraints: LuaKVConstraints,
     pub ratelimits: Rc<Ratelimits>,
 }
@@ -214,7 +213,7 @@ impl WorkerVmManager {
     /// Configures a new khronos runtime manager
     /// 
     /// Panics if `self.vms` is mutably borrowed
-    async fn configure_runtime_manager(&self, id: Id) -> LuaResult<RuntimeManager> {
+    async fn configure_runtime_manager(&self, id: Id) -> LuaResult<VmIsolateManager> {
         let mut rt = KhronosRuntime::new(
             RuntimeCreateOpts {
                 disable_task_lib: false,
@@ -229,7 +228,7 @@ impl WorkerVmManager {
 
         rt.sandbox()?;
 
-        let manager = KhronosRuntimeManager::new(rt);
+        let manager = VmIsolateManager::new(rt);
 
         {
             let vms_ref = self.vms.clone();

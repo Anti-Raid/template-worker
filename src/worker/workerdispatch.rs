@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use khronos_runtime::{primitives::event::{ContextEvent, CreateEvent}, require::FilesystemWrapper, rt::{IsolateData, KhronosIsolate, isolate::CodeSource}, traits::context::TFlags, utils::khronos_value::KhronosValue};
+use khronos_runtime::{primitives::event::{ContextEvent, CreateEvent}, require::FilesystemWrapper, rt::{KhronosIsolate, isolate::CodeSource}, traits::context::TFlags, utils::khronos_value::KhronosValue};
 use std::time::Duration;
 use super::template::Template;
 use crate::worker::{keyexpirychannel::KeyExpiryChannel, workercachedata::{DeferredCacheRegenerationMode, WorkerCacheData}, workerfilter::WorkerFilter};
@@ -302,7 +302,6 @@ impl WorkerDispatch {
         let (sub_isolate, created_context) = if let Some(sub_isolate) =
             vm_data.runtime_manager.get_sub_isolate(&template.name)
         {
-            let sub_isolate = sub_isolate.isolate;
             let created_context = sub_isolate.create_context(provider, event)
                 .map_err(|e| format!("Failed to create context for template {}: {}", template.name, e))?;
 
@@ -339,12 +338,7 @@ impl WorkerDispatch {
 
             log::debug!("Created subisolate for template {}", template.name);
 
-            let iso_data = IsolateData {
-                isolate: sub_isolate.clone(),
-                data: (),
-            };
-
-            vm_data.runtime_manager.add_sub_isolate(template.name.clone(), iso_data);
+            vm_data.runtime_manager.add_sub_isolate(template.name.clone(), sub_isolate.clone());
 
             let created_context = match sub_isolate.create_context(provider, event) {
                 Ok(ctx) => ctx,
