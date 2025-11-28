@@ -42,7 +42,7 @@ impl Display for TemplateShopReviewState {
     }
 }
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct ShopListingId(Uuid);
 
 #[allow(dead_code)] // todo: remove this once the fetch api in iapi is added

@@ -31,6 +31,7 @@ futures = "0.3"
 dashmap = { version = "6", features = ["serde", "inline", "rayon"] }
 tokio-util = { version = "0.7", features = ["time"] }
 console-subscriber = { version = "0.4" }
+tokio-tungstenite = { version = "0.28" }
 
 # events
 strum = { version = "0.26", features = ["derive"] }

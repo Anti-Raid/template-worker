@@ -1,31 +1,28 @@
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 use khronos_runtime::primitives::event::CreateEvent;
 use tokio::sync::Notify;
 
-use crate::{mesophyll::{cache::{TemplateCacheUpdate, TemplateCacheView}, message::MesophyllMessage}, worker::{workerdispatch::DispatchTemplateResult, workervmmanager::Id}};
+use crate::{mesophyll::message::{MesophyllMessage, MesophyllRelayMessage}, templatedb::attached_templates::TemplateOwner, worker::workerdispatch::DispatchTemplateResult};
 
 #[async_trait::async_trait]
 pub trait MesophyllClientHandler {
     /// Called when the Mesophyll client is ready with initial state
     async fn ready(&self, client: &MesophyllClient) -> Result<(), crate::Error>;
 
-    /// Called when a template cache update is received
-    /// 
-    /// Note: this will be called after updating the internal template cache view
-    async fn template_cache_update(&self, client: &MesophyllClient, update: &TemplateCacheUpdate) -> Result<(), crate::Error>;
+    /// Called when a relay message is received
+    async fn relay(&self, client: &MesophyllClient, msg: MesophyllRelayMessage) -> Result<(), crate::Error>;
 
     /// Called when a dispatched event result is received
-    async fn dispatch_result(&self, client: &MesophyllClient, id: Id, event: CreateEvent) -> DispatchTemplateResult;
+    async fn dispatch_result(&self, client: &MesophyllClient, id: TemplateOwner, event: CreateEvent) -> DispatchTemplateResult;
 
     /// Called when a scoped dispatched event result is received
-    async fn dispatch_scoped_result(&self, client: &MesophyllClient, id: Id, event: CreateEvent, scopes: Vec<String>) -> DispatchTemplateResult;
+    async fn dispatch_scoped_result(&self, client: &MesophyllClient, id: TemplateOwner, event: CreateEvent, scopes: Vec<String>) -> DispatchTemplateResult;
 }
 
 /// Mesophyll client, NOT THREAD SAFE
 #[derive(Clone)]
 pub struct MesophyllClient {
-    template_cache: Rc<RefCell<TemplateCacheView>>,
     handler: Rc<dyn MesophyllClientHandler>,
     ready: Rc<Notify>
 }
@@ -37,7 +34,6 @@ impl MesophyllClient {
         T: MesophyllClientHandler + 'static,
     {
         Self {
-            template_cache: Rc::new(RefCell::new(TemplateCacheView::new())),
             handler: Rc::new(handler),
             ready: Rc::new(Notify::new()),
         }
@@ -58,23 +54,17 @@ impl MesophyllClient {
                 self.ready.notify_waiters();
                 self.handler.ready(self).await?;
             },
-            MesophyllMessage::TemplateCacheUpdate { update, req_id } => {
-                if let Ok(mut view) = self.template_cache.try_borrow_mut() {
-                    log::info!("Recieved template update from Mesophyll and applying to cache");
-                    view.apply_cache_update(&update); // Apply the update to the internal cache
-                    match self.handler.template_cache_update(self, &update).await {
-                        Ok(_) => {},
-                        Err(e) => {
-                            log::error!("Error handling template cache update: {}", e);
-                            self.send_message(MesophyllMessage::ResponseError { error: format!("Error handling template cache update: {}", e), req_id })?;
-                            return Err(e);
-                        }
-                    }; // Notify handler
-                    self.send_message(MesophyllMessage::ResponseAck { req_id })?;
-                } else {
-                    log::warn!("Recieved template update from Mesophyll but template cache is not ready");
-                    self.send_message(MesophyllMessage::ResponseError { error: "Template cache not ready".to_string(), req_id })?;
-                    return Err("Template cache not ready".into());
+            MesophyllMessage::Relay { msg, req_id } => {
+                log::info!("Mesophyll client received relay message");
+                match self.handler.relay(self, msg).await {
+                    Ok(_) => {
+                        self.send_message(MesophyllMessage::ResponseAck { req_id })?;
+                    },
+                    Err(e) => {
+                        log::error!("Error handling relay message: {}", e);
+                        self.send_message(MesophyllMessage::ResponseError { error: format!("Error handling relay message: {}", e), req_id })?;
+                        return Err(e);  
+                    }
                 }
             }
             MesophyllMessage::DispatchEvent { id, event, req_id } => {

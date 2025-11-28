@@ -194,7 +194,7 @@ impl Template {
                             serde_json::from_value(shop_data.content)?;
 
                         let mem_fs =
-                            khronos_runtime::utils::memoryvfs::create_memory_vfs_from_map(content)
+                            khronos_runtime::utils::memoryvfs::create_memory_vfs_from_map(&content)
                                 .map_err(|e| {
                                     Error::from(format!("Failed to create vfs from map: {e}"))
                                 })?;
@@ -216,7 +216,7 @@ impl Template {
                         serde_json::from_value(template.content)?;
 
                     let mem_fs =
-                        khronos_runtime::utils::memoryvfs::create_memory_vfs_from_map(content)
+                        khronos_runtime::utils::memoryvfs::create_memory_vfs_from_map(&content)
                             .map_err(|e| {
                                 Error::from(format!("Failed to create vfs from map: {e}"))
                             })?;

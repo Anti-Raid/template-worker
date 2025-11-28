@@ -9,11 +9,11 @@ use sqlx::postgres::PgRow;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
-use crate::templatedb::template_shop_listing::ShopListingId;
+use super::template_shop_listing::ShopListingId;
 use crate::Error;
 use crate::worker::workervmmanager::Id;
 
-#[derive(Clone, serde::Serialize, serde::Deserialize, Default, Debug)]
+#[derive(Copy, Clone, serde::Serialize, serde::Deserialize, Default, Debug)]
 pub enum TemplateLanguage {
     #[serde(rename = "luau")]
     #[default]

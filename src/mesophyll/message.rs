@@ -1,6 +1,15 @@
+use std::sync::Arc;
+
 use khronos_runtime::{primitives::event::CreateEvent};
 
-use crate::{mesophyll::cache::TemplateCacheUpdate, worker::{workerprocesscomm::WorkerProcessCommDispatchResult, workervmmanager::Id}};
+use crate::{templatedb::{attached_templates::TemplateOwner, template_shop_listing::TemplateShopListing}, worker::workerprocesscomm::WorkerProcessCommDispatchResult};
+
+/// A message that is relayed to all connected Mesophyll clients
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub enum MesophyllRelayMessage {
+    /// Shop template has been updated
+    ShopTemplateUpdate { listing: Arc<TemplateShopListing> },
+}
 
 /// The messages Mesophyll can send to a worker.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -11,21 +20,19 @@ pub enum MesophyllMessage {
     /// Ready message from worker to Mesophyll
     Ready { },
 
-    /// Notifies a worker about a template update
-    /// 
-    /// Sends a partial view of every affected tenants new template cache state
-    TemplateCacheUpdate { update: TemplateCacheUpdate, req_id: u64 },
+    /// Relay message to all connected clients
+    Relay { msg: MesophyllRelayMessage, req_id: u64 },
 
     // dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> DispatchTemplateResult;
     /// Dispatch an template event to a worker
     /// 
     /// Worker must respond with a DispatchTemplateResult
-    DispatchEvent { id: Id, event: CreateEvent, req_id: u64 },
+    DispatchEvent { id: TemplateOwner, event: CreateEvent, req_id: u64 },
 
     /// Dispatch a scoped template event to a worker
     ///
     /// Worker must respond with a DispatchTemplateResult
-    DispatchScopedEvent { id: Id, event: CreateEvent, scopes: Vec<String>, req_id: u64 },
+    DispatchScopedEvent { id: TemplateOwner, event: CreateEvent, scopes: Vec<String>, req_id: u64 },
 
     /// Response from worker with the result of a dispatched event
     ResponseDispatchResult { result: WorkerProcessCommDispatchResult, req_id: u64 },
