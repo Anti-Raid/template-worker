@@ -3,8 +3,6 @@ use chrono::{DateTime, Utc};
 
 use crate::worker::workervmmanager::Id;
 
-type ArcVec<T> = Arc<Vec<Arc<T>>>;
-
 #[derive(Debug)]
 pub struct KeyExpiry {
     pub id: String,
@@ -191,7 +189,7 @@ impl WorkerState {
     }
 
     /// Gets all key expiries from the database
-    pub async fn get_key_expiries(&self) -> Result<HashMap<Id, Vec<Arc<KeyExpiry>>>, crate::Error> {
+    pub async fn get_key_expiries(&self) -> Result<HashMap<Id, Vec<KeyExpiry>>, crate::Error> {
         #[derive(sqlx::FromRow)]
         struct KeyExpiryPartial {
             guild_id: String,
@@ -206,17 +204,17 @@ impl WorkerState {
             .fetch_all(&self.pool)
             .await?;
 
-        let mut expiries: HashMap<Id, Vec<Arc<KeyExpiry>>> = HashMap::new();
+        let mut expiries: HashMap<Id, Vec<KeyExpiry>> = HashMap::new();
 
         for partial in partials {
             let guild_id = partial.guild_id.parse()?;
 
-            let expiry = Arc::new(KeyExpiry {
+            let expiry = KeyExpiry {
                 id: partial.id,
                 key: partial.key,
                 scopes: partial.scopes,
                 expires_at: partial.expires_at,
-            });
+            };
 
             let id = Id::GuildId(guild_id);
             if let Some(expiries_vec) = expiries.get_mut(&id) {
@@ -227,43 +225,6 @@ impl WorkerState {
         }
 
         Ok(expiries)
-    }
-
-    /// Gets key expiries for a specific tenant
-    #[allow(dead_code)]
-    pub async fn get_key_expiries_for(&self, id: Id) -> Result<ArcVec<KeyExpiry>, crate::Error> {
-        match id {
-            Id::GuildId(guild_id) => {
-                #[derive(sqlx::FromRow)]
-                struct KeyExpiryPartial {
-                    id: String,
-                    key: String,
-                    scopes: Vec<String>,
-                    expires_at: chrono::DateTime<chrono::Utc>,
-                }
-
-                let executions_vec: Vec<KeyExpiryPartial> = sqlx::query_as(
-                    "SELECT id, key, scopes, expires_at FROM guild_templates_kv WHERE guild_id = $1 AND expires_at IS NOT NULL ORDER BY expires_at DESC",
-                )
-                .bind(guild_id.to_string())
-                .fetch_all(&self.pool)
-                .await?;
-
-                let executions_vec = executions_vec
-                    .into_iter()
-                    .map(|partial| {
-                        Arc::new(KeyExpiry {
-                            id: partial.id,
-                            key: partial.key,
-                            scopes: partial.scopes,
-                            expires_at: partial.expires_at,
-                        })
-                    })
-                    .collect::<Vec<_>>();
-
-                Ok(executions_vec.into())
-            }
-        }
     }
 
     /// Removes keys with the given ID

@@ -2,7 +2,6 @@ use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver, unbounded_channel};
 use tokio_util::time::DelayQueue;
 use std::rc::Rc;
 use std::cell::RefCell;
-use std::sync::Arc;
 use std::time::Duration;
 use crate::worker::workerstate::WorkerState;
 
@@ -28,7 +27,7 @@ pub struct KeyExpiryChannel {
     state: WorkerState,
     filter: WorkerFilter,
     tx: UnboundedSender<KeyExpiryChannelMessage>,
-    sink: Rc<RefCell<Option<UnboundedSender<(Id, Arc<KeyExpiry>)>>>>
+    sink: Rc<RefCell<Option<UnboundedSender<(Id, KeyExpiry)>>>>
 }
 
 impl KeyExpiryChannel {
@@ -92,7 +91,7 @@ impl KeyExpiryChannel {
     }
 
     /// Populates the key expiry channel with current data from WorkerCacheData
-    async fn create_queue(&self) -> Result<DelayQueue<(Id, Arc<KeyExpiry>)>, crate::Error> {
+    async fn create_queue(&self) -> Result<DelayQueue<(Id, KeyExpiry)>, crate::Error> {
         let mut delay_queue = DelayQueue::new();
         let expired_keys = self.state.get_key_expiries().await?;
         for data in expired_keys {
@@ -168,12 +167,12 @@ impl KeyExpiryChannel {
 /// 
 /// This automatically drops the sink when the subscriber is dropped
 pub struct KeyExpiryChannelSubscriber {
-    tx: UnboundedReceiver<(Id, Arc<KeyExpiry>)>,
-    sink: Rc<RefCell<Option<UnboundedSender<(Id, Arc<KeyExpiry>)>>>>,
+    tx: UnboundedReceiver<(Id, KeyExpiry)>,
+    sink: Rc<RefCell<Option<UnboundedSender<(Id, KeyExpiry)>>>>,
 }
 
 impl std::ops::Deref for KeyExpiryChannelSubscriber {
-    type Target = UnboundedReceiver<(Id, Arc<KeyExpiry>)>;
+    type Target = UnboundedReceiver<(Id, KeyExpiry)>;
 
     fn deref(&self) -> &Self::Target {
         &self.tx
