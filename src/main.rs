@@ -9,6 +9,7 @@ mod objectstore;
 mod register;
 mod sandwich;
 mod worker;
+mod migrations;
 
 use crate::config::CONFIG;
 use crate::data::Data;
@@ -36,6 +37,9 @@ pub enum WorkerType {
     /// Dummy worker for registering commands only
     #[clap(name = "register", alias = "register-commands")]
     RegisterCommands,
+    /// Dummy worker that applies a migration by name and exits
+    #[clap(name = "migrate", alias = "apply-migration")]
+    Migrate,
     /// Worker that uses a thread pool for executing tasks
     #[clap(name = "threadpool", alias = "thread-pool")]
     ThreadPool,
@@ -88,6 +92,10 @@ struct CmdArgs {
     /// How many tokio threads to use for the workers
     #[clap(long, default_value = "3")]
     pub tokio_threads_worker: usize,
+
+    /// Migration to apply (only used when worker-type is "migrate")
+    #[clap(long, default_value = "")]
+    pub migration: String,
 }
 
 /// Simple main function that initializes the tokio runtime and then calls the main (async) implementation
@@ -96,6 +104,7 @@ fn main() {
 
     let num_tokio_threads = match args.worker_type {
         WorkerType::RegisterCommands => 1,
+        WorkerType::Migrate => 1,
         WorkerType::ThreadPool => args.tokio_threads_master,
         WorkerType::ProcessPool => args.tokio_threads_master,
         WorkerType::ProcessPoolWorker => args.tokio_threads_worker,
@@ -220,6 +229,26 @@ async fn main_impl(args: CmdArgs) {
             http.create_global_commands(&data.commands)
                 .await
                 .expect("Failed to register commands");
+        }
+        WorkerType::Migrate => {
+            let migration_name = args.migration;
+            if migration_name.is_empty() {
+                panic!("Migration name must be provided when worker type is 'migrate'");
+            }
+
+            info!("Applying migration: {}", migration_name);
+
+            for migration in migrations::MIGRATIONS {
+                if migration.id == migration_name {
+                    (migration.up)(pg_pool.clone())
+                        .await
+                        .expect("Failed to apply migration");
+                    info!("Migration applied successfully");
+                    return;
+                }
+            }
+
+            error!("Migration not found: {}", migration_name);
         }
         WorkerType::ThreadPool => {
             let worker_pool = Arc::new(
