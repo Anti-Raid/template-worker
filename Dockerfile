@@ -1,16 +1,20 @@
 # syntax=docker/dockerfile:1
 
-FROM rust:1.88-bookworm
+FROM rust:1.92-bookworm
 
 RUN apt update
 RUN apt install -y clang lld
 
 # Set destination for COPY
+WORKDIR /app
 
 # Copy the source code. Note the slash at the end, as explained in
 # https://docs.docker.com/engine/reference/builder/#copy
+COPY luau/ ./luau/
+COPY src/ ./src/
+COPY Cargo.toml Cargo.lock ./
 COPY .cargo/ ./.cargo/
-RUN ls ./.cargo/config.toml
+RUN ls ./ *
 
 # Build the rust project
 RUN  --mount=type=cache,target=/root/.cargo/git \

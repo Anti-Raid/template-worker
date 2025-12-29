@@ -1,4 +1,10 @@
 /target
 /bindings
 /config.yaml
+
+# Docker
 /deploy/dockerconf
+/deploy/docker/seaweed/s3.json
+/deploy/docker/state
+**.docker.yaml
+**.docker.json
