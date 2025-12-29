@@ -105,7 +105,7 @@ fn register() -> Result<RegisterResult, crate::Error> {
 
                 let builtins_register = rt
                     .eval_script::<LuaValue>(
-                        "/builtins.register.luau",
+                        "./builtins.register",
                     )
                     .expect("Failed to spawn asset");
 

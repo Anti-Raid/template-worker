@@ -88,7 +88,7 @@ impl WorkerDispatch {
 
         let func: khronos_runtime::rt::mlua::Function = vm_data
         .runtime
-        .eval_script("/builtins.templateloop.luau")?;
+        .eval_script("./builtins.templateloop")?;
 
         let provider = TemplateContextProvider::new(
             id,

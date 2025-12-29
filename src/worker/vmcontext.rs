@@ -1011,7 +1011,11 @@ impl RuntimeProvider for ArRuntimeProvider {
         Ok(base_templates)
     }
 
-    async fn get_template(&self, id: &str) -> Result<Option<khronos_runtime::traits::ir::runtime::Template>, khronos_runtime::Error> {
+    fn builtin_template(&self) -> Result<runtime_ir::Template, khronos_runtime::Error> {
+        Ok(self.builtins_template())
+    }
+
+    async fn get_template(&self, id: &str) -> Result<Option<runtime_ir::Template>, khronos_runtime::Error> {
         let id: sqlx::types::Uuid = id.parse().map_err(|_| "Invalid template ID")?;
         let Some(row) = sqlx::query(
             r#"
@@ -1203,7 +1207,6 @@ impl RuntimeProvider for ArRuntimeProvider {
             events: ts.events.iter().cloned().collect(),
             banned: ts.banned,
             flags: ts.flags.try_into().unwrap_or(0),
-            startup_events: ts.startup_events,
         })
     }
 
@@ -1215,7 +1218,6 @@ impl RuntimeProvider for ArRuntimeProvider {
                     events: HashSet::from_iter(state.events),
                     banned: state.banned,
                     flags: state.flags.try_into()?,
-                    startup_events: state.startup_events,
                 },
             )
             .await?;

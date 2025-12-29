@@ -16,7 +16,6 @@ pub struct TenantState {
     pub events: HashSet<String>,
     pub banned: bool,
     pub flags: i32,
-    pub startup_events: bool,
 }
 
 static DEFAULT_TENANT_STATE: LazyLock<TenantState> = LazyLock::new(|| TenantState {
@@ -30,7 +29,6 @@ static DEFAULT_TENANT_STATE: LazyLock<TenantState> = LazyLock::new(|| TenantStat
     },
     banned: false,
     flags: 0,
-    startup_events: false,
 });
 
 #[derive(Clone)]
@@ -108,13 +106,12 @@ impl WorkerState {
             events: Vec<String>,
             banned: bool,
             flags: i32,
-            startup_events: bool,
             owner_id: String,
             owner_type: String,
         }
 
         let partials: Vec<TenantStatePartial> =
-            sqlx::query_as("SELECT owner_id, owner_type, events, banned, flags, startup_events FROM tenant_state")
+            sqlx::query_as("SELECT owner_id, owner_type, events, banned, flags FROM tenant_state")
             .fetch_all(&self.pool)
             .await?;
 
@@ -126,17 +123,16 @@ impl WorkerState {
                 _ => continue, // Unknown type, skip
             };
 
+            // Track startup events
+            if partial.events.contains(&"OnStartup".to_string()) {
+                startup_events.insert(id.clone());
+            }
+
             let state = TenantState {
                 events: HashSet::from_iter(partial.events),
                 banned: partial.banned,
                 flags: partial.flags,
-                startup_events: partial.startup_events,
             };
-
-            // Track startup events
-            if partial.startup_events {
-                startup_events.insert(id.clone());
-            }
 
             states.insert(id, state);
         }
@@ -167,13 +163,12 @@ impl WorkerState {
         match id {
             Id::GuildId(guild_id) => {
                 sqlx::query(
-                    "INSERT INTO tenant_state (owner_id, owner_type, events, banned, flags, startup_events) VALUES ($1, 'guild', $2, $3, $4, $5) ON CONFLICT (owner_id, owner_type) DO UPDATE SET events = EXCLUDED.events, banned = EXCLUDED.banned, flags = EXCLUDED.flags, startup_events = EXCLUDED.startup_events",
+                    "INSERT INTO tenant_state (owner_id, owner_type, events, banned, flags) VALUES ($1, 'guild', $2, $3, $4) ON CONFLICT (owner_id, owner_type) DO UPDATE SET events = EXCLUDED.events, banned = EXCLUDED.banned, flags = EXCLUDED.flags",
                 )
                 .bind(guild_id.to_string())
                 .bind(&events)
                 .bind(state.banned)
                 .bind(state.flags as i32)
-                .bind(state.startup_events)
                 .execute(&self.pool)
                 .await?;
             }

@@ -18,7 +18,7 @@ cd /ibl
 
 # Keep rerunning `ibl db load /seed.iblcli-seed` until exit code 0
 while true; do
-    echo "Running ibl db load data/seed.iblcli-seed..."
+    echo "Running ibl db load deploy/seed.iblcli-seed..."
     PGUSER=antiraid ./ibl db load /seed.iblcli-seed
     if [ $? -eq 0 ]; then
         echo "Seed loaded successfully."

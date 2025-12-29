@@ -42,7 +42,9 @@ services:
       test: [ "CMD", "curl", "-f", "http://localhost:29334/antiraid/api/v9/gateway/bot" ]
       interval: 10s
       timeout: 10s
-      retries: 1000000000
+      start_period: 300s
+      retries: 5
+
     ports:
       - "29334:29334" # Exposed to host for testing/auditing
       - "3931:3931" # Prometheus metrics
@@ -61,8 +63,8 @@ services:
     # Expose /seed.iblcli-seed
     volumes:
       - ./deploy/seed.iblcli-seed:/seed.iblcli-seed:ro
-      - ./deploy/state/postgres-other:/var/lib/postgresql
-      - ./deploy/state/postgres:/var/lib/postgresql/data
+      - ./deploy/docker/state/postgres-other:/var/lib/postgresql
+      - ./deploy/docker/state/postgres:/var/lib/postgresql/data
     healthcheck:
       test: [ "CMD", "pg_isready", "-U", "antiraid" ]
       interval: 3s
