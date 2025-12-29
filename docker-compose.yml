@@ -1,0 +1,176 @@
+services:
+  # Nirn Proxy
+  nirn_proxy:
+    container_name: nirn_proxy
+    networks:
+      - antiraid_infra
+      - antiraid_internal # Exposed to internal services
+    depends_on:
+      sandwich:
+        condition: service_healthy
+    build:
+      context: http://github.com/anti-raid/nirn-proxy.git
+      dockerfile: ./Dockerfile
+    volumes:
+      - ./deploy/dockerconf/secrets.docker.json:/secrets.json:ro
+    command: cache-endpoints=false port=3221 ratelimit-over-408 endpoint-rewrite=/api/gateway/bot@http://sandwich:29334/antiraid,/api/v*/gateway/bot@http://sandwich:29334/antiraid token-map-file=secrets.json
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:3221/nirn/healthz" ]
+      interval: 3s
+      timeout: 10s
+      retries: 3
+    ports:
+      - "3222:3221" # And exposed to host for testing/auditing
+    labels:
+      type: "discord-rest"
+
+  # Sandwich
+  sandwich:
+    container_name: sandwich
+    networks:
+      - antiraid_infra
+      - antiraid_internal # Exposed to internal services
+    build:
+      context: http://github.com/anti-raid/Sandwich-Daemon.git
+      dockerfile: ./Dockerfile
+    volumes:
+      - ./deploy/dockerconf/sandwich.docker.yaml:/sandwich.yaml:ro
+    command: /app/sandwich -configurationPath=/sandwich.yaml -prometheusAddress :3931 -httpEnabled --httpHost 0.0.0.0:29334 -level debug
+    environment:
+      EXTERNAL_GATEWAY_ADDRESS: ws://sandwich:3600
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:29334/antiraid/api/v9/gateway/bot" ]
+      interval: 10s
+      timeout: 10s
+      retries: 1000000000
+    ports:
+      - "29334:29334" # Exposed to host for testing/auditing
+      - "3931:3931" # Prometheus metrics
+      - "3600:3600" # Websocket connection for the bot
+    labels:
+      type: "discord-gateway"
+
+  # Postgres database
+  postgres:
+    container_name: postgres
+    networks:
+      - antiraid_internal # Exposed to internal services
+    build:
+      context: ./deploy/docker/postgres
+      dockerfile: ./Dockerfile
+    # Expose /seed.iblcli-seed
+    volumes:
+      - ./deploy/seed.iblcli-seed:/seed.iblcli-seed:ro
+      - ./deploy/state/postgres-other:/var/lib/postgresql
+      - ./deploy/state/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "antiraid" ]
+      interval: 3s
+      timeout: 10s
+      retries: 3
+    labels:
+      type: "database"
+
+  # Seaweed needs a postgres database to function
+  seaweed_postgres:
+    container_name: seaweed_postgres
+    networks:
+      - antiraid_seaweed # Exposed to SeaweedFS services
+    build:
+      context: ./data/docker/seaweed-postgres
+      dockerfile: ./Dockerfile
+    volumes:
+      - ./data/state/seaweed_postgres-other:/var/lib/postgresql
+      - ./data/state/seaweed_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "seaweed" ]
+      interval: 3s
+      timeout: 10s
+      retries: 3
+
+  # Seaweed FS itself 
+  seaweed:
+    container_name: seaweed
+    build:
+      context: ./data/docker/seaweed
+      dockerfile: ./Dockerfile
+    networks:
+      - antiraid_internal # Exposed to internal services
+      - antiraid_seaweed # Exposed to SeaweedFS services
+    depends_on:
+      seaweed_postgres:
+        condition: service_healthy
+    command: server -filer -s3 -volume.max=100 -master.port=9333 -volume.port=9334 -master.volumeSizeLimitMB=4096 -filer.encryptVolumeData -ip.bind=0.0.0.0
+    volumes:
+      - ./data/state/seaweed:/data
+      - ./data/state/seaweed-config:/etc/seaweedfs
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9333/cluster/status" ]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+
+  # Template worker process
+  template-worker:
+    container_name: template-worker
+    networks:
+      - antiraid_internal # Exposed to internal services
+    depends_on:
+      sandwich:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    build:
+      context: .
+      dockerfile: ./services/template-worker/Dockerfile
+    volumes:
+      - ./config.docker.yaml:/app/config.yaml:ro
+    environment:
+      RUST_LOG: "template-worker=info"
+    healthcheck:
+      test: [ "CMD", "curl", "-X", "POST", "-f", "http://localhost:60000/healthcheck" ]
+      interval: 3s
+      timeout: 10s
+      retries: 100
+    labels:
+      type: "service"
+
+  # Nginx process to expose the API outwards while ensuring API itself doesn't get any
+  # external net access. Bridges external and internal layers
+  api_exposer:
+    container_name: api_exposer
+    networks:
+      - antiraid_internal # Exposed to internal services
+      - antiraid_infra # Needs access to the outside world
+      - antiraid_seaweed
+    depends_on:
+      template-worker:
+        condition: service_started
+      seaweed:
+        condition: service_healthy
+    image: nginx:1.27.4-alpine
+    volumes:
+      - ./data/docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "5600:5600" # Expose API to host
+      - "5601:5601" # Expose SeaweedFS to host
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:5600/docs/splashtail" ]
+      interval: 3s
+      timeout: 10s
+      retries: 3
+
+networks:
+  antiraid_infra:
+    name: antiraid_infra
+    driver: bridge
+    internal: false # Infra needs external access
+  antiraid_internal:
+    name: antiraid_internal
+    driver: bridge
+    internal: true # No external net access
+  antiraid_seaweed:
+    # Used for internal SeaweedFS services
+    name: antiraid_seaweed
+    driver: bridge
+    internal: true # No external net access

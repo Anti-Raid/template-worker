@@ -6,7 +6,7 @@ import base64
 import json
 import pathlib
 
-os.mkdir("./data/dockerconf")
+os.mkdir("./deploy/dockerconf")
 
 # Get bot token, client id and client secret
 def get_var(prompt: str, env_var: str) -> str:
@@ -129,7 +129,7 @@ nirn_secrets = {
 }
 
 print("Saving secrets.docker.json")
-with open("./data/dockerconf/secrets.docker.json", "w") as f:
+with open("./deploy/dockerconf/secrets.docker.json", "w") as f:
     json.dump(nirn_secrets, f, indent=4)
 
 SANDWICH_YAML = f"""
@@ -211,11 +211,11 @@ managers:
 
 # Save to sandwich.docker.yaml
 print("Saving sandwich.docker.yaml")
-with open("./data/dockerconf/sandwich.docker.yaml", "w") as f:
+with open("./deploy/dockerconf/sandwich.docker.yaml", "w") as f:
     f.write(SANDWICH_YAML)
 
 # Finally seaweed
-data_path = pathlib.Path("data") / "docker" / "seaweed"
+data_path = pathlib.Path("deploy") / "docker" / "seaweed"
 data_path.mkdir(parents=True, exist_ok=True)
 
 s3_json = {
@@ -240,7 +240,7 @@ s3_json = {
   "accounts":  []
 }
 
-print("Saving data/docker/seaweed/s3.json")
+print("Saving deploy/docker/seaweed/s3.json")
 with open(data_path / "s3.json", "w") as f:
     json.dump(s3_json, f, indent=4)
 

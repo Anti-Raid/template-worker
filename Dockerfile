@@ -6,25 +6,11 @@ RUN apt update
 RUN apt install -y clang lld
 
 # Set destination for COPY
-# WORKAROUND: We need to use /app/a/b here as template-worker needs builtins to be in ../../builtins
-WORKDIR /app/a/b
 
 # Copy the source code. Note the slash at the end, as explained in
 # https://docs.docker.com/engine/reference/builder/#copy
-COPY services/template-worker ./
 COPY .cargo/ ./.cargo/
 RUN ls ./.cargo/config.toml
-
-# Copy over builtins from a git clone to ensure its up to date
-WORKDIR /app
-RUN ls ./
-COPY builtins/ ./builtins/
-COPY templating-types/ ./templating-types
-COPY builtins_patches/ ./builtins_patches
-RUN rm -rf ./builtins/templating-types && cp -rf ./templating-types ./builtins
-RUN ls ./
-
-WORKDIR /app/a/b
 
 # Build the rust project
 RUN  --mount=type=cache,target=/root/.cargo/git \
