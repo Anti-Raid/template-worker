@@ -87,16 +87,11 @@ pub fn create(
     let internal_routes = [
         routes!(internal_api::dispatch_event),
         routes!(internal_api::dispatch_event_and_wait),
-        routes!(internal_api::regenerate_cache_api),
         routes!(internal_api::get_threads_count),
         //routes!(internal_api::get_vm_metrics_by_tid),
         //routes!(internal_api::get_vm_metrics_for_all),
         routes!(internal_api::guilds_exist),
         routes!(internal_api::kill_worker),
-        routes!(internal_api::fetch_all_attached_templates),
-        routes!(internal_api::fetch_attached_template_by_id),
-        routes!(internal_api::fetch_all_shop_listings),
-        routes!(internal_api::fetch_shop_listing_by_id),
     ];
 
     // Public routes

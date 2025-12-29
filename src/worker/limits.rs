@@ -7,7 +7,6 @@ pub const MAX_TEMPLATE_MEMORY_USAGE: usize = 1024 * 1024 * 20; // 20MB maximum m
 pub const MAX_VM_THREAD_STACK_SIZE: usize = 1024 * 1024 * 20; // 20MB maximum memory
 pub const MAX_TEMPLATES_EXECUTION_TIME: Duration = Duration::from_secs(10); // 10 seconds maximum execution time before sched yield must happen
 pub const TEMPLATE_GIVE_TIME: Duration = Duration::from_secs(1); // 1 second maximum time to give to a template to finish execution following a yield
-pub const MAX_TEMPLATES_RETURN_WAIT_TIME: Duration = Duration::from_secs(60); // 60 seconds maximum execution time
 
 pub fn create_nonmax_u32(value: u32) -> Result<NonZeroU32, crate::Error> {
     Ok(NonZeroU32::new(value).ok_or("Value must be non-zero")?)
@@ -154,24 +153,6 @@ impl Ratelimits {
         })
     }
 
-    fn new_data_stores_rl() -> Result<LuaRatelimits, crate::Error> {
-        // Create the global limit
-        let global_quota =
-            LuaRatelimits::create_quota(create_nonmax_u32(75)?, Duration::from_secs(1))?;
-        let global1 = DefaultKeyedRateLimiter::keyed(global_quota);
-        let global = vec![global1];
-
-        // Create the clock
-        let clock = QuantaClock::default();
-
-        Ok(LuaRatelimits {
-            global,
-            global_ignore: LuaRatelimits::create_empty_global_ignore()?,
-            per_bucket: indexmap::indexmap!(),
-            clock,
-        })
-    }
-
     fn new_object_storage_rl() -> Result<LuaRatelimits, crate::Error> {
         // Create the global limit
         let global_quota =
@@ -207,6 +188,24 @@ impl Ratelimits {
             clock,
         })
     }
+
+    fn new_runtime_rl() -> Result<LuaRatelimits, crate::Error> {
+        // Create the global limit
+        let global_quota =
+            LuaRatelimits::create_quota(create_nonmax_u32(10)?, Duration::from_secs(1))?;
+        let global1 = DefaultKeyedRateLimiter::keyed(global_quota);
+        let global = vec![global1];
+
+        // Create the clock
+        let clock = QuantaClock::default();
+
+        Ok(LuaRatelimits {
+            global,
+            global_ignore: LuaRatelimits::create_empty_global_ignore()?,
+            per_bucket: indexmap::indexmap!(),
+            clock,
+        })
+    }
 }
 
 /// Represents the limits for various operations in the worker
@@ -217,14 +216,14 @@ pub struct Ratelimits {
     /// Stores the lua kv ratelimiters
     pub kv: LuaRatelimits,
 
-    /// Stores the data store ratelimiters
-    pub data_stores: LuaRatelimits,
-
     /// Stores the object storage ratelimiters
     pub object_storage: LuaRatelimits,
 
     /// Stores the http ratelimiters
     pub http: LuaRatelimits,
+
+    /// Stores the runtime ratelimiters
+    pub runtime: LuaRatelimits,
 }
 
 impl Ratelimits {
@@ -232,9 +231,9 @@ impl Ratelimits {
         Ok(Ratelimits {
             discord: Ratelimits::new_discord_rl()?,
             kv: Ratelimits::new_kv_rl()?,
-            data_stores: Ratelimits::new_data_stores_rl()?,
             object_storage: Ratelimits::new_object_storage_rl()?,
             http: Ratelimits::new_http_rl()?,
+            runtime: Ratelimits::new_runtime_rl()?,
         })
     }
 }

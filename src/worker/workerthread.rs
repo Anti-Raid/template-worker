@@ -7,7 +7,8 @@ use std::{panic::AssertUnwindSafe, thread::JoinHandle};
 use crate::worker::limits::MAX_VM_THREAD_STACK_SIZE;
 use crate::worker::workerlike::WorkerLike;
 use crate::worker::workerpool::Poolable;
-use super::{workerstate::WorkerState, worker::Worker, workervmmanager::Id, workerdispatch::DispatchTemplateResult, workerfilter::WorkerFilter};
+use crate::worker::workerstate::CreateWorkerState;
+use super::{workerstate::WorkerState, worker::Worker, workervmmanager::Id, workerfilter::WorkerFilter};
 
 /// WorkerThreadMessage is the message type that is sent to the worker thread
 enum WorkerThreadMessage {
@@ -17,17 +18,7 @@ enum WorkerThreadMessage {
     DispatchEvent {
         id: Id,
         event: CreateEvent,
-        tx: Option<OneShotSender<DispatchTemplateResult>>,
-    },
-    DispatchScopedEvent {
-        id: Id,
-        event: CreateEvent,
-        scopes: Vec<String>,
-        tx: Option<OneShotSender<DispatchTemplateResult>>,
-    },
-    RegenerateCache {
-        id: Id,
-        tx: Option<OneShotSender<Result<(), crate::Error>>>,
+        tx: Option<OneShotSender<Result<serde_json::Value, crate::Error>>>,
     },
 }
 
@@ -52,41 +43,15 @@ pub struct DispatchEvent {
     pub id: Id,
     /// The event to dispatch
     pub event: CreateEvent,
-    /// The scopes to dispatch the event to, if any
-    pub scopes: Option<Vec<String>>,
 }
 
 impl PushableMessage for DispatchEvent {
-    type Response = DispatchTemplateResult;
+    type Response = Result<serde_json::Value, crate::Error>;
 
     fn into_message(self, tx: Option<OneShotSender<Self::Response>>) -> WorkerThreadMessage {
-        match self.scopes {
-            Some(scopes) => WorkerThreadMessage::DispatchScopedEvent {
-                id: self.id,
-                event: self.event,
-                scopes,
-                tx,
-            },
-            None => WorkerThreadMessage::DispatchEvent {
-                id: self.id,
-                event: self.event,
-                tx,
-            },
-        }
-    }
-}
-
-pub struct RegenerateCache {
-    /// The id of the template to regenerate the cache for
-    pub id: Id,
-}
-
-impl PushableMessage for RegenerateCache {
-    type Response = Result<(), crate::Error>;
-
-    fn into_message(self, tx: Option<OneShotSender<Self::Response>>) -> WorkerThreadMessage {
-        WorkerThreadMessage::RegenerateCache {
+        WorkerThreadMessage::DispatchEvent {
             id: self.id,
+            event: self.event,
             tx,
         }
     }
@@ -106,7 +71,7 @@ pub struct WorkerThread {
 
 impl WorkerThread {
     /// Creates a new WorkerThread with the given cache data and worker state
-    pub fn new(state: WorkerState, filter: WorkerFilter, id: usize) -> Result<Self, crate::Error> {
+    pub fn new(state: CreateWorkerState, filter: WorkerFilter, id: usize) -> Result<Self, crate::Error> {
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         
@@ -117,7 +82,7 @@ impl WorkerThread {
        Ok(worker_thread)
     }
 
-    fn create_thread(id: usize, state: WorkerState, filter: WorkerFilter, mut rx: UnboundedReceiver<WorkerThreadMessage>) -> Result<JoinHandle<()>, crate::Error> {
+    fn create_thread(id: usize, state: CreateWorkerState, filter: WorkerFilter, mut rx: UnboundedReceiver<WorkerThreadMessage>) -> Result<JoinHandle<()>, crate::Error> {
         std::thread::Builder::new()
             .name(format!("lua-vm-threadpool-{id}"))
             .stack_size(MAX_VM_THREAD_STACK_SIZE)
@@ -129,6 +94,7 @@ impl WorkerThread {
                         .expect("Failed to create tokio runtime");
 
                     rt.block_on(async move {
+                        let state = WorkerState::new(state).await.expect("Failed to create WorkerState");
                         let worker = Worker::new(state, filter).await.expect("Failed to create Worker");
 
                         // Listen to messages and handle them
@@ -142,21 +108,9 @@ impl WorkerThread {
                                     return; // Exitting the loop will stop the thread automatically
                                 }
                                 WorkerThreadMessage::DispatchEvent { id, event, tx } => {
-                                    let res = worker.dispatch.dispatch_event_to_templates(id, event).await;
+                                    let res = worker.dispatch.dispatch_event(id, event).await;
                                     if let Some(tx) = tx {
-                                        let _ = tx.send(res);
-                                    }
-                                }
-                                WorkerThreadMessage::DispatchScopedEvent { id, event, scopes, tx } => {
-                                    let res = worker.dispatch.dispatch_scoped_event_to_templates(id, event, &scopes).await;
-                                    if let Some(tx) = tx {
-                                        let _ = tx.send(res);
-                                    }
-                                }
-                                WorkerThreadMessage::RegenerateCache { id, tx } => {
-                                    let res = worker.dispatch.regenerate_cache(id).await;
-                                    if let Some(tx) = tx {
-                                        let _ = tx.send(res);
+                                        let _ = tx.send(res.map_err(|e| e.to_string().into()));
                                     }
                                 }
                             }
@@ -217,42 +171,28 @@ impl WorkerLike for WorkerThread {
         self.send(Kill {}).await?
     }
 
-    async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> DispatchTemplateResult {
+    async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<serde_json::Value, crate::Error> {
         self.send(DispatchEvent {
             id,
             event,
-            scopes: None,
         }).await?
     }
 
-    async fn dispatch_scoped_event_to_templates(&self, id: Id, event: CreateEvent, scopes: Vec<String>) -> DispatchTemplateResult {
-        self.send(DispatchEvent {
-            id,
-            event,
-            scopes: Some(scopes),
-        }).await?
-    }
-
-    async fn dispatch_event_to_templates_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
+    async fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
         self.send_nowait(DispatchEvent {
             id,
             event,
-            scopes: None,
         }).await
-    }
-
-    async fn regenerate_cache(&self, id: Id) -> Result<(), crate::Error> {
-        self.send(RegenerateCache { id }).await?
     }
 }
 
 // WorkerThread's can be pooled via WorkerPool!
 impl Poolable for WorkerThread {
-    type ExtState = ();
-    fn new(state: WorkerState, filter: WorkerFilter, id: usize, _num_threads: usize, _ext_state: &Self::ExtState) -> Result<Self, crate::Error>
+    type ExtState = CreateWorkerState;
+    fn new(filter: WorkerFilter, id: usize, _num_threads: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
         where
             Self: Sized {
-        Self::new(state, filter, id)
+        Self::new(ext_state.clone(), filter, id)
     }
 }
 

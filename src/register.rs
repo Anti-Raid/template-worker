@@ -1,12 +1,10 @@
+use crate::worker::builtins::{Builtins, BuiltinsPatches, TemplatingTypes};
 use crate::worker::limits::MAX_TEMPLATES_EXECUTION_TIME;
 use crate::worker::limits::MAX_VM_THREAD_STACK_SIZE;
 use crate::worker::limits::TEMPLATE_GIVE_TIME;
-use khronos_runtime::require::FilesystemWrapper;
 use khronos_runtime::rt::mlua::prelude::*;
-use khronos_runtime::rt::KhronosIsolate;
 use khronos_runtime::rt::KhronosRuntime;
 use khronos_runtime::rt::RuntimeCreateOpts;
-use khronos_runtime::traits::context::TFlags;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serenity::all::*;
@@ -89,56 +87,36 @@ fn register() -> Result<RegisterResult, crate::Error> {
                 .expect("Failed to create tokio runtime");
 
             rt.block_on(async move {
-                let mut rt = KhronosRuntime::new(
+                let rt = KhronosRuntime::new(
                     RuntimeCreateOpts {
                         disable_task_lib: false,
                         time_limit: Some(MAX_TEMPLATES_EXECUTION_TIME),
                         give_time: TEMPLATE_GIVE_TIME
                     },
-                    None::<(fn(&Lua, LuaThread) -> Result<(), LuaError>, fn() -> ())>,
+                    None::<(fn(&Lua, LuaThread) -> Result<(), LuaError>, fn(LuaLightUserData) -> ())>,
+                    vfs::OverlayFS::new(&vec![
+                        vfs::EmbeddedFS::<BuiltinsPatches>::new().into(),
+                        vfs::EmbeddedFS::<Builtins>::new().into(),
+                        vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
+                    ]),
                 )
                 .await
                 .expect("Failed to create KhronosRuntime");
 
-                rt.sandbox().expect("Failed to create sandbox");
-
-                let subisolate = KhronosIsolate::new_subisolate(
-                    rt,
-                    FilesystemWrapper::new(crate::worker::builtins::BUILTINS.content.0.clone()),
-                    TFlags::READONLY_GLOBALS
-                )
-                .expect("Failed to create KhronosIsolate");
-
-                let code = subisolate
-                    .asset_manager()
-                    .get_file("/builtins.register.luau".to_string())
-                    .expect("Failed to get asset file");
-                let code = String::from_utf8(code)
-                    .expect("Failed to convert asset file to string");
-
-                let spawn_result = subisolate
-                    .spawn_script(
+                let builtins_register = rt
+                    .eval_script::<LuaValue>(
                         "/builtins.register.luau",
-                        "/builtins.register.luau",
-                        &code,
-                        khronos_runtime::rt::mlua::MultiValue::with_capacity(0)
                     )
-                    .await
                     .expect("Failed to spawn asset");
 
-                let result = spawn_result
-                    .into_khronos_value(&subisolate)
-                    .expect("Failed to convert result to serde_json_value");
-
-                let result: RegisterResult = result
-                    .into_value()
+                let result: RegisterResult = rt.from_value(builtins_register)
                     .expect("Failed to deserialize RegisterResult");
 
                 // Store the result in the shared Arc<RwLock>
                 let mut result_lock = ref_a.write().unwrap();
                 *result_lock = Some(result);
 
-                subisolate.inner().scheduler().stop();
+                rt.scheduler().stop();
             });
         })
         .expect("Failed to spawn register thread")

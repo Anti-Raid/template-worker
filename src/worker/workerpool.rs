@@ -1,12 +1,10 @@
 use khronos_runtime::primitives::event::CreateEvent;
 
-use crate::worker::workerdispatch::DispatchTemplateResult;
 use crate::worker::workerlike::WorkerLike;
 use crate::worker::workerthread::WorkerThread;
 
 use super::workervmmanager::Id;
 
-use super::workerstate::WorkerState;
 use super::workerfilter::WorkerFilter;
 
 /// The Poolable trait provides the needed operations a WorkerLike needs to additionally
@@ -15,7 +13,7 @@ pub trait Poolable: WorkerLike + Send + Sync {
     type ExtState: Send + Sync;
 
     /// Returns a new `Poolable` object given `state`, `filters` and `id`
-    fn new(state: WorkerState, filter: WorkerFilter, id: usize, total: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
+    fn new(filter: WorkerFilter, id: usize, total: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
     where
         Self: Sized;
 }
@@ -32,12 +30,12 @@ pub struct WorkerPool<T: WorkerLike + Send + Sync> {
 
 impl<T: Poolable> WorkerPool<T> {
     /// Creates a new WorkerPool with the given cache data and worker state
-    pub fn new(state: WorkerState, num_threads: usize, ext_state: &T::ExtState) -> Result<Self, crate::Error> {
+    pub fn new(num_threads: usize, ext_state: &T::ExtState) -> Result<Self, crate::Error> {
         let mut workers = Vec::with_capacity(num_threads);
 
         for id in 0..num_threads {
             let filter = Self::filter_for(id, num_threads);
-            let thread = T::new(state.clone(), filter, id, num_threads, ext_state)?;
+            let thread = T::new(filter, id, num_threads, ext_state)?;
             workers.push(thread);
         }
 
@@ -48,7 +46,6 @@ impl<T: Poolable> WorkerPool<T> {
 }
 
 impl<T: WorkerLike + Send + Sync> WorkerPool<T> {
-
     /// Defines a filter for a worker in the pool
     pub fn filter_for(id: usize, num_threads: usize) -> WorkerFilter {
         let closure = move |tenant_id: Id| {
@@ -90,20 +87,12 @@ impl<T: WorkerLike + Send + Sync> WorkerLike for WorkerPool<T> {
         Ok(())
     }
 
-    async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> DispatchTemplateResult {
-        self.get_worker_for(id).dispatch_event_to_templates(id, event).await
+    async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<serde_json::Value, crate::Error> {
+        self.get_worker_for(id).dispatch_event(id, event).await
     }
 
-    async fn dispatch_scoped_event_to_templates(&self, id: Id, event: CreateEvent, scopes: Vec<String>) -> DispatchTemplateResult {        
-        self.get_worker_for(id).dispatch_scoped_event_to_templates(id, event, scopes).await
-    }
-
-    async fn dispatch_event_to_templates_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
-        self.get_worker_for(id).dispatch_event_to_templates_nowait(id, event).await
-    }
-
-    async fn regenerate_cache(&self, id: Id) -> Result<(), crate::Error> {
-        self.get_worker_for(id).regenerate_cache(id).await
+    async fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
+        self.get_worker_for(id).dispatch_event_nowait(id, event).await
     }
 
     fn len(&self) -> usize {

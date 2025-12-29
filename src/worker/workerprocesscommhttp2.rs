@@ -3,9 +3,9 @@ use std::sync::Arc;
 use khronos_runtime::primitives::event::CreateEvent;
 use serde::{de::DeserializeOwned, Serialize};
 
-use super::{workerdispatch::DispatchTemplateResult, workerlike::WorkerLike, workervmmanager::Id};
+use super::{workerlike::WorkerLike, workervmmanager::Id};
 use rand::{distr::{Alphanumeric, SampleString}, Rng};
-use super::workerprocesscomm::{WorkerProcessCommServer, WorkerProcessCommClient, WorkerProcessCommServerCreator, WorkerProcessCommTenantId, WorkerProcessCommDispatchResult};
+use super::workerprocesscomm::{WorkerProcessCommServer, WorkerProcessCommClient, WorkerProcessCommServerCreator, WorkerProcessCommTenantId};
 
 /// Worker Process Communication Server Creator for HTTP/2
 pub struct WorkerProcessCommHttp2ServerCreator {
@@ -37,7 +37,6 @@ pub struct WorkerProcessCommHttp2Master {
 
 impl WorkerProcessCommHttp2Master {
     const DISPATCH_TEMPLATES_PATH: &'static str = "/0";
-    const REGENERATE_CACHE_PATH: &'static str = "/1";
     const TOKEN_LENGTH: usize = 4096;
 
     pub fn new(reqwest: reqwest::Client) -> Self {
@@ -92,6 +91,11 @@ impl WorkerProcessCommHttp2Master {
             .await
             .map_err(|e| format!("Failed to send request: {}", e))?;
 
+        if request.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err("Worker process communication unauthorized: invalid token".into());
+        } 
+
+        // All other errors
         if !request.status().is_success() {
             let resp = request.text().await.map_err(|e| format!("Failed to read response text: {}", e))?;
             return Err(resp.into());
@@ -113,40 +117,15 @@ impl WorkerProcessCommServer for WorkerProcessCommHttp2Master {
         Ok(())
     }
 
-    async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> DispatchTemplateResult {
+    async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<serde_json::Value, crate::Error> {
         let id = WorkerProcessCommTenantId::from(id);
         
         let request = WorkerProcessCommHttp2DispatchEventToTemplates {
             id,
             event,
-            scopes: None,
         };
 
-        let response: WorkerProcessCommHttp2DispatchEventToTemplatesResponse = self.send(Self::DISPATCH_TEMPLATES_PATH, request).await?;
-        response.result.into()
-    }
-
-    async fn dispatch_scoped_event_to_templates(&self, id: Id, event: CreateEvent, scopes: Vec<String>) -> DispatchTemplateResult {
-        let id = WorkerProcessCommTenantId::from(id);
-        
-        let request = WorkerProcessCommHttp2DispatchEventToTemplates {
-            id,
-            event,
-            scopes: Some(scopes),
-        };
-
-        let response: WorkerProcessCommHttp2DispatchEventToTemplatesResponse = self.send(Self::DISPATCH_TEMPLATES_PATH, request).await?;
-        response.result.into()
-    }
-
-    async fn regenerate_cache(&self, id: Id) -> Result<(), crate::Error> {
-        let id = WorkerProcessCommTenantId::from(id);
-        
-        let request = WorkerProcessCommHttp2RegenerateCache { id };
-        
-        let _: WorkerProcessCommHttp2RegenerateCacheResponse = self.send(Self::REGENERATE_CACHE_PATH, request).await?;
-
-        Ok(())
+        self.send(Self::DISPATCH_TEMPLATES_PATH, request).await
     }
 
     fn start_args(&self) -> Vec<String> {
@@ -176,24 +155,7 @@ impl WorkerProcessCommServer for WorkerProcessCommHttp2Master {
 struct WorkerProcessCommHttp2DispatchEventToTemplates {
     id: WorkerProcessCommTenantId,
     event: CreateEvent,
-    scopes: Option<Vec<String>>,
 }
-
-#[derive(serde::Serialize, serde::Deserialize)]
-/// Stores the message data that is sent from worker to master process
-struct WorkerProcessCommHttp2DispatchEventToTemplatesResponse {
-    result: WorkerProcessCommDispatchResult,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-/// Stores the message data that is sent from master to the worker process
-struct WorkerProcessCommHttp2RegenerateCache {
-    id: WorkerProcessCommTenantId,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-/// Stores the message data that is sent from worker to master process
-struct WorkerProcessCommHttp2RegenerateCacheResponse {}
 
 #[derive(Clone)]
 pub struct WorkerProcessCommHttp2Worker {
@@ -224,10 +186,6 @@ impl WorkerProcessCommHttp2Worker {
         .route(
             WorkerProcessCommHttp2Master::DISPATCH_TEMPLATES_PATH,
             axum::routing::post(axum::routing::post(http2_endpoints::dispatch_template_endpoint)),
-        )
-        .route(
-            WorkerProcessCommHttp2Master::REGENERATE_CACHE_PATH,
-            axum::routing::post(axum::routing::post(http2_endpoints::regenerate_cache_endpoint)),
         )
         .with_state(self_n.clone());
 
@@ -268,26 +226,12 @@ mod http2_endpoints {
         State(data): State<super::WorkerProcessCommHttp2Worker>,
         headers: HeaderMap,
         Json(request): Json<super::WorkerProcessCommHttp2DispatchEventToTemplates>,
-    ) -> Result<Json<super::WorkerProcessCommHttp2DispatchEventToTemplatesResponse>, (StatusCode, Json<String>)> {
+    ) -> Result<Json<serde_json::Value>, (StatusCode, Json<String>)> {
         verify_token(&headers, &data.token)?;
 
-        let result = match request.scopes {
-            Some(scopes) => data.worker.dispatch_scoped_event_to_templates(request.id.into(), request.event, scopes).await,
-            None => data.worker.dispatch_event_to_templates(request.id.into(), request.event).await
-        };
+        let result = data.worker.dispatch_event(request.id.into(), request.event).await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())))?;
 
-        Ok(Json(super::WorkerProcessCommHttp2DispatchEventToTemplatesResponse { result: result.into() }))
-    }
-
-    pub(super) async fn regenerate_cache_endpoint(
-        State(data): State<super::WorkerProcessCommHttp2Worker>,
-        headers: HeaderMap,
-        Json(request): Json<super::WorkerProcessCommHttp2RegenerateCache>,
-    ) -> Result<Json<super::WorkerProcessCommHttp2RegenerateCacheResponse>, (StatusCode, Json<String>)> {
-        verify_token(&headers, &data.token)?;
-
-        data.worker.regenerate_cache(request.id.into()).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())))?;
-
-        Ok(Json(super::WorkerProcessCommHttp2RegenerateCacheResponse {}))
+        Ok(Json(result))
     }
 }

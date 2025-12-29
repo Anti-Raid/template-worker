@@ -35,10 +35,8 @@ pub struct KeyExpiryEvent {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema, TS)]
 #[ts(export)]
-pub struct KeyResumeEvent {
-    pub id: String,
-    pub key: String,
-    pub scopes: Vec<String>,
+pub struct StartupEvent {
+    pub reason: String,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, IntoStaticStr, VariantNames, utoipa::ToSchema, TS)]
@@ -51,7 +49,7 @@ pub enum AntiraidEvent {
     /// Fired when a key is resumed
     /// 
     /// This occurs if a resumable key is set and the template is reloaded or the worker process restarted
-    KeyResume(KeyResumeEvent),
+    OnStartup(StartupEvent),
 
     /// A GetSettings event. Fired when settings are requested by the user
     ///
@@ -79,19 +77,9 @@ impl AntiraidEvent {
     pub fn to_value(&self) -> Result<serde_json::Value, serde_json::Error> {
         match self {
             AntiraidEvent::KeyExpiry(data) => serde_json::to_value(data),
-            AntiraidEvent::KeyResume(templates) => serde_json::to_value(templates),
+            AntiraidEvent::OnStartup(templates) => serde_json::to_value(templates),
             AntiraidEvent::GetSettings(data) => serde_json::to_value(data),
             AntiraidEvent::ExecuteSetting(data) => serde_json::to_value(data),
-        }
-    }
-
-    /// Returns the author of the event
-    pub fn author(&self) -> Option<String> {
-        match self {
-            AntiraidEvent::KeyResume(_) => None,
-            AntiraidEvent::KeyExpiry(_) => None, // Key expiries inherently have no author
-            AntiraidEvent::GetSettings(data) => Some(data.author.to_string()),
-            AntiraidEvent::ExecuteSetting(data) => Some(data.author.to_string()),
         }
     }
 }

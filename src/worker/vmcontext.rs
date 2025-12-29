@@ -1,12 +1,16 @@
 use super::workerstate::WorkerState;
 use super::workervmmanager::Id;
-use super::template::Template;
+use crate::events::AntiraidEvent;
+use crate::worker::workerstate::TenantState;
+use crate::worker::workervmmanager::VmData;
+use super::builtins::{Builtins, BuiltinsPatches, TemplatingTypes};
 use crate::worker::keyexpirychannel::KeyExpiryChannel;
-use crate::worker::workercachedata::WorkerCacheData;
+use khronos_runtime::core::typesext::Vfs;
+use khronos_runtime::mluau_require::create_memory_vfs_from_map;
 use khronos_runtime::traits::context::{
-    KhronosContext, Limitations, ScriptData,
+    KhronosContext, Limitations,
 };
-use khronos_runtime::traits::datastoreprovider::{DataStoreImpl, DataStoreProvider};
+use khronos_runtime::traits::ir::runtime as runtime_ir;
 use dapi::controller::DiscordProvider;
 use khronos_runtime::traits::httpclientprovider::HTTPClientProvider;
 use khronos_runtime::traits::httpserverprovider::HTTPServerProvider;
@@ -14,10 +18,12 @@ use khronos_runtime::traits::ir::kv::KvRecord;
 use khronos_runtime::traits::ir::ObjectMetadata;
 use khronos_runtime::traits::kvprovider::KVProvider;
 use khronos_runtime::traits::objectstorageprovider::ObjectStorageProvider;
+use khronos_runtime::traits::runtimeprovider::RuntimeProvider;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use rand::distr::{Alphanumeric, SampleString};
 use serde_json::Value;
 use sqlx::Row;
+use std::collections::HashSet;
 use std::{rc::Rc, sync::Arc};
 use super::limits::{LuaKVConstraints, Ratelimits};
 
@@ -32,15 +38,6 @@ pub struct TemplateContextProvider {
 
     id: Id,
 
-    /// The template data
-    template_data: Arc<Template>,
-
-    /// The datastores to expose
-    datastores: Vec<Rc<dyn DataStoreImpl>>,
-
-    /// Script data
-    script_data: Arc<ScriptData>,
-
     /// The KV constraints for this template
     kv_constraints: LuaKVConstraints,
     
@@ -52,58 +49,17 @@ pub struct TemplateContextProvider {
 }
 
 impl TemplateContextProvider {
-    fn datastores(
-        state: WorkerState,
-        cache: WorkerCacheData,
-        id: Id,
-        _template_data: Arc<Template>,
-    ) -> Vec<Rc<dyn DataStoreImpl>> {
-        vec![
-            Rc::new(super::vmdatastores::StatsStore {
-                state: state.clone(),
-            }),
-            Rc::new(super::vmdatastores::LinksStore {}),
-            Rc::new(khronos_runtime::traits::ir::datastores::CopyDataStore {}),
-            Rc::new(super::vmdatastores::TemplateStore {
-                state,
-                cache,
-                id
-            }),
-        ]
-    }
-
     /// Creates a new `TemplateContextProvider` with the given template data
     pub fn new(
-        state: WorkerState, 
-        template_data: Arc<Template>, 
-        cache: WorkerCacheData, 
         id: Id,
-        kv_constraints: LuaKVConstraints,
-        ratelimits: Rc<Ratelimits>,
+        vm_data: VmData,
         key_expiry_chan: KeyExpiryChannel,
     ) -> Self {
         Self {
             id,
-            datastores: Self::datastores(state.clone(), cache, id, template_data.clone()),
-            state,
-            script_data: Arc::new(ScriptData {
-                guild_id: Some(template_data.guild_id),
-                name: template_data.name.clone(),
-                description: template_data.description.clone(),
-                shop_name: template_data.shop_name.clone(),
-                shop_owner: template_data.shop_owner,
-                events: template_data.events.clone(),
-                error_channel: template_data.error_channel.map(|x| x.widen()),
-                lang: template_data.lang.to_string(),
-                allowed_caps: template_data.allowed_caps.clone(),
-                created_by: None,
-                created_at: Some(template_data.created_at),
-                updated_by: None,
-                updated_at: Some(template_data.updated_at),
-            }),
-            template_data,
-            kv_constraints,
-            ratelimits,
+            state: vm_data.state,
+            kv_constraints: vm_data.kv_constraints,
+            ratelimits: vm_data.ratelimits,
             key_expiry_chan,
         }
     }
@@ -112,31 +68,20 @@ impl TemplateContextProvider {
 impl KhronosContext for TemplateContextProvider {
     type KVProvider = ArKVProvider;
     type DiscordProvider = ArDiscordProvider;
-    type DataStoreProvider = ArDataStoreProvider;
     type ObjectStorageProvider = ArObjectStorageProvider;
     type HTTPClientProvider = ArHTTPClientProvider;
     type HTTPServerProvider = ArHTTPServerProvider;
-
-    fn data(&self) -> &ScriptData {
-        &self.script_data
-    }
+    type RuntimeProvider = ArRuntimeProvider;
 
     fn limitations(&self) -> Limitations {
-        Limitations::new(self.template_data.allowed_caps.clone())
+        // We start with full limitations with builtins applying extra limits prior to event dispatch where desired
+        Limitations::new(vec!["*".to_string()])
     }
 
     fn guild_id(&self) -> Option<serenity::all::GuildId> {
         match self.id {
             Id::GuildId(gid) => Some(gid),
         }
-    }
-
-    fn owner_guild_id(&self) -> Option<serenity::all::GuildId> {
-        self.template_data.shop_owner
-    }
-
-    fn template_name(&self) -> String {
-        self.template_data.name.clone()
     }
 
     fn kv_provider(&self) -> Option<Self::KVProvider> {
@@ -157,11 +102,10 @@ impl KhronosContext for TemplateContextProvider {
         })
     }
 
-    fn datastore_provider(&self) -> Option<Self::DataStoreProvider> {
-        Some(ArDataStoreProvider {
-            guild_id: self.guild_id()?,
+    fn runtime_provider(&self) -> Option<Self::RuntimeProvider> {
+        Some(ArRuntimeProvider {
+            id: Id::GuildId(self.guild_id()?),
             state: self.state.clone(),
-            datastores: self.datastores.clone(),
             ratelimits: self.ratelimits.clone(),
         })
     }
@@ -210,7 +154,7 @@ impl KVProvider for ArKVProvider {
 
         let rec = if scopes.is_empty() {
             sqlx::query(
-            "SELECT id, expires_at, scopes, value, created_at, last_updated_at, resume FROM guild_templates_kv WHERE guild_id = $1 AND key = $2",
+            "SELECT id, expires_at, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2",
             )
             .bind(self.guild_id.to_string())
             .bind(&key)
@@ -218,7 +162,7 @@ impl KVProvider for ArKVProvider {
             .await?
         } else {
             sqlx::query(
-            "SELECT id, expires_at, scopes, value, created_at, last_updated_at, resume FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
+            "SELECT id, expires_at, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
             )
             .bind(self.guild_id.to_string())
             .bind(&key)
@@ -246,13 +190,12 @@ impl KVProvider for ArKVProvider {
             created_at: Some(rec.try_get("created_at")?),
             last_updated_at: Some(rec.try_get("last_updated_at")?),
             expires_at: rec.try_get("expires_at")?,
-            resume: rec.try_get("resume").unwrap_or(false),
         }))
     }
 
     async fn get_by_id(&self, id: String) -> Result<Option<KvRecord>, crate::Error> {
         let rec = sqlx::query(
-            "SELECT key, expires_at, scopes, value, created_at, last_updated_at, resume FROM guild_templates_kv WHERE guild_id = $1 AND id = $2",
+            "SELECT key, expires_at, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND id = $2",
         )
         .bind(self.guild_id.to_string())
         .bind(id.clone())
@@ -278,7 +221,6 @@ impl KVProvider for ArKVProvider {
             created_at: Some(rec.try_get("created_at")?),
             last_updated_at: Some(rec.try_get("last_updated_at")?),
             expires_at: rec.try_get("expires_at")?,
-            resume: rec.try_get("resume").unwrap_or(false),
         }))
     }
 
@@ -307,7 +249,6 @@ ORDER BY scope",
         key: String,
         data: KhronosValue,
         expires_at: Option<chrono::DateTime<chrono::Utc>>,
-        resume: bool,
     ) -> Result<(bool, String), crate::Error> {
         // Shouldn't happen but scopes must be non-empty
         if scopes.is_empty() {
@@ -350,11 +291,10 @@ ORDER BY scope",
         let (exists, id) = if let Some(curr_id) = curr_id {
             // Update existing record
             sqlx::query(
-                "UPDATE guild_templates_kv SET value = $1, last_updated_at = NOW(), expires_at = $2, resume = $3 WHERE id = $4",
+                "UPDATE guild_templates_kv SET value = $1, last_updated_at = NOW(), expires_at = $2 WHERE id = $3",
             )
             .bind(serde_json::to_value(data)?)
             .bind(expires_at)
-            .bind(resume)
             .bind(&curr_id)
             .execute(&mut *tx)
             .await?;
@@ -364,7 +304,7 @@ ORDER BY scope",
             // Insert new record
             let id = gen_random(64);
             sqlx::query(
-                "INSERT INTO guild_templates_kv (id, guild_id, key, value, scopes, expires_at, resume) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                "INSERT INTO guild_templates_kv (id, guild_id, key, value, scopes, expires_at) VALUES ($1, $2, $3, $4, $5, $6)",
             )
             .bind(&id)
             .bind(self.guild_id.to_string())
@@ -372,7 +312,6 @@ ORDER BY scope",
             .bind(serde_json::to_value(data)?)
             .bind(scopes)
             .bind(expires_at)
-            .bind(resume)
             .execute(&mut *tx)
             .await?;
 
@@ -452,7 +391,6 @@ ORDER BY scope",
         id: String,
         data: KhronosValue,
         expires_at: Option<chrono::DateTime<chrono::Utc>>,
-        resume: bool,
     ) -> Result<(), khronos_runtime::Error> {
         // Check bytes length
         let data_str = serde_json::to_string(&data)?;
@@ -481,11 +419,10 @@ ORDER BY scope",
 
         // Update existing record
         sqlx::query(
-            "UPDATE guild_templates_kv SET value = $1, last_updated_at = NOW(), expires_at = $2, resume = $3 WHERE id = $4",
+            "UPDATE guild_templates_kv SET value = $1, last_updated_at = NOW(), expires_at = $2 WHERE id = $3",
         )
         .bind(serde_json::to_value(data)?)
         .bind(expires_at)
-        .bind(resume)
         .bind(&id)
         .execute(&mut *tx)
         .await?;
@@ -628,7 +565,6 @@ ORDER BY scope",
                 },
                 created_at: Some(rec.try_get("created_at")?),
                 last_updated_at: Some(rec.try_get("last_updated_at")?),
-                resume: rec.try_get("resume").unwrap_or(false),
             };
 
             records.push(record);
@@ -840,39 +776,6 @@ impl DiscordProvider for ArDiscordProvider {
 }
 
 #[derive(Clone)]
-#[allow(dead_code)]
-pub struct ArDataStoreProvider {
-    guild_id: serenity::all::GuildId,
-    state: WorkerState,
-    datastores: Vec<Rc<dyn DataStoreImpl>>,
-    ratelimits: Rc<Ratelimits>,
-}
-
-impl DataStoreProvider for ArDataStoreProvider {
-    fn attempt_action(&self, method: &str, bucket: &str) -> Result<(), khronos_runtime::Error> {
-        self.ratelimits
-            .data_stores
-            .check(&format!("{}:{}", method, bucket))
-    }
-
-    /// Returns a builtin data store given its name
-    fn get_builtin_data_store(&self, name: &str) -> Option<Rc<dyn DataStoreImpl>> {
-        for ds in self.datastores.iter() {
-            if ds.name() == name {
-                return Some(ds.clone());
-            }
-        }
-
-        None
-    }
-
-    /// Returns all public builtin data stores
-    fn public_builtin_data_stores(&self) -> Vec<String> {
-        self.datastores.iter().map(|ds| ds.name()).collect()
-    }
-}
-
-#[derive(Clone)]
 pub struct ArObjectStorageProvider {
     guild_id: serenity::all::GuildId,
     ratelimits: Rc<Ratelimits>,
@@ -994,5 +897,328 @@ pub struct ArHTTPServerProvider {
 impl HTTPServerProvider for ArHTTPServerProvider {
     fn attempt_action(&self, _bucket: &str, _path: String) -> Result<(), khronos_runtime::Error> {
         Err("Internal Error: unreachable code: HTTP server provider not implemented for templates".into())
+    }
+}
+
+#[derive(Clone)]
+pub struct ArRuntimeProvider {
+    id: Id,
+    state: WorkerState,
+    ratelimits: Rc<Ratelimits>,
+}
+
+impl ArRuntimeProvider {
+    /// Returns the built-in template's runtime ir
+    fn builtins_template(&self) -> runtime_ir::Template {
+        runtime_ir::Template {
+            id: "$builtins".to_string(),
+            owner: match self.id {
+                Id::GuildId(gid) => runtime_ir::TemplateOwner::Guild { id: gid }
+            },
+            created_at: chrono::Utc::now(),
+            last_updated_at: chrono::Utc::now(),
+            source: runtime_ir::TemplateSource::Builtins,
+            allowed_caps: vec!["*".to_string()],
+            vfs: Vfs {
+                vfs: Arc::new(vfs::OverlayFS::new(&vec![
+                    vfs::EmbeddedFS::<BuiltinsPatches>::new().into(),
+                    vfs::EmbeddedFS::<Builtins>::new().into(),
+                    vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
+                ]))
+            },
+            paused: false,
+        }
+    }
+
+    /// Converts a database row into a runtime ir template
+    fn template_from_row(
+        &self,
+        row: &sqlx::postgres::PgRow,
+    ) -> Result<runtime_ir::Template, khronos_runtime::Error> {
+        let owner = match self.id {
+            Id::GuildId(gid) => runtime_ir::TemplateOwner::Guild { id: gid },
+        };
+
+        let source: String = row.try_get("source")?;
+        let (template_source, vfs) = match source.as_str() {
+            "custom" => {
+                let content_json: serde_json::Value = row.try_get("content")?;
+                let content = serde_json::from_value(content_json).map_err(|e| {
+                    format!("Failed to deserialize template content: {}", e)
+                })?;
+
+                // VFS for a custom template
+                let vfs = Arc::new(vfs::OverlayFS::new(&vec![
+                    create_memory_vfs_from_map(&content)?.into(),
+                    vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
+                ]));
+
+                (runtime_ir::TemplateSource::Custom {
+                    name: row.try_get("name")?,
+                    language: row.try_get("language")?,
+                    content,
+                }, vfs)
+            }
+            _ => {
+                return Err(format!("Unknown template source: {}", source).into());
+            }
+        };
+        Ok(runtime_ir::Template {
+            id: row.try_get("id")?,
+            owner,
+            created_at: row.try_get("created_at")?,
+            last_updated_at: row.try_get("last_updated_at")?,
+            source: template_source,
+            allowed_caps: row.try_get("allowed_caps")?,
+            vfs: Vfs {
+                vfs,
+            },
+            paused: false,
+        })
+    }
+}
+
+impl RuntimeProvider for ArRuntimeProvider {
+    fn attempt_action(&self, bucket: &str) -> Result<(), khronos_runtime::Error> {
+        self.ratelimits.runtime.check(bucket)
+    }
+
+    async fn list_templates(&self) -> Result<Vec<khronos_runtime::traits::ir::runtime::Template>, khronos_runtime::Error> {
+        let mut base_templates = vec![self.builtins_template()];
+
+        let rows = sqlx::query(
+            r#"
+                SELECT id, source,
+                    -- data custom
+                    name, language, content,
+                    -- data shop
+                    shop_ref,
+                    -- metadata
+                    created_at, last_updated_at, allowed_caps, events, state
+                FROM attached_templates 
+                WHERE owner_type = $1
+                AND owner_id = $2"#,
+        )
+        .bind(self.id.tenant_type())
+        .bind(self.id.tenant_id())
+        .fetch_all(&self.state.pool)
+        .await?;
+
+        for row in rows.iter() {
+            base_templates.push(self.template_from_row(row)?);
+        }
+
+        Ok(base_templates)
+    }
+
+    async fn get_template(&self, id: &str) -> Result<Option<khronos_runtime::traits::ir::runtime::Template>, khronos_runtime::Error> {
+        let id: sqlx::types::Uuid = id.parse().map_err(|_| "Invalid template ID")?;
+        let Some(row) = sqlx::query(
+            r#"
+                SELECT id, source,
+                    -- data custom
+                    name, language, content,
+                    -- data shop
+                    shop_ref,
+                    -- metadata
+                    created_at, last_updated_at, allowed_caps, events, state
+                FROM attached_templates 
+                WHERE owner_type = $1
+                AND owner_id = $2
+                AND id = $3"#,
+        )
+        .bind(self.id.tenant_type())
+        .bind(self.id.tenant_id())
+        .bind(id)
+        .fetch_optional(&self.state.pool)
+        .await? else {
+            return Ok(None);
+        };
+
+        Ok(Some(self.template_from_row(&row)?))
+    }
+
+    async fn create_template(&self, template: runtime_ir::CreateTemplate) -> Result<String, khronos_runtime::Error> {
+             let rec = sqlx::query(
+            r#"
+            INSERT INTO attached_templates (
+                owner_type, owner_id, source,
+                -- data custom
+                name, language, content,
+                -- data shop
+                shop_ref,
+                -- metadata
+                created_at, last_updated_at, allowed_caps, state
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW(), $8, $9)
+             RETURNING id
+            "#,
+        )
+        .bind(self.id.tenant_type())
+        .bind(self.id.tenant_id())
+        .bind(match &template.source {
+            runtime_ir::CreateTemplateSource::Custom { .. } => "custom",
+            runtime_ir::CreateTemplateSource::Shop { .. } => "shop",
+        })
+        .bind(match &template.source {
+            runtime_ir::CreateTemplateSource::Custom { name, .. } => Some(name),
+            _ => None,
+        })
+        .bind(match &template.source {
+            runtime_ir::CreateTemplateSource::Custom { language, .. } => Some(language),
+            _ => None,
+        })
+        .bind(match &template.source {
+            runtime_ir::CreateTemplateSource::Custom { content, .. } => Some(serde_json::to_value(content)?),
+            _ => None,
+        })
+        .bind(match &template.source {
+            // TODO: More validation here would be useful
+            runtime_ir::CreateTemplateSource::Shop { shop_listing } => Some(shop_listing),
+            _ => None,
+        })
+        .bind(&template.allowed_caps)
+        .bind(if template.paused { "paused" } else { "active" })
+        .fetch_one(&self.state.pool)
+        .await?;   
+        let id: sqlx::types::Uuid = rec.try_get("id")?;
+        Ok(id.to_string())
+    }
+
+    async fn update_template(&self, id: &str, template: runtime_ir::CreateTemplate) -> Result<(), khronos_runtime::Error> {
+        let id: sqlx::types::Uuid = id.parse().map_err(|_| "Invalid template ID")?;
+        sqlx::query(
+            r#"
+            UPDATE attached_templates
+            SET 
+                source = $1,
+                -- data custom
+                name = $2, language = $3, content = $4,
+                -- data shop
+                shop_ref = $5,
+                -- metadata
+                last_updated_at = NOW(), allowed_caps = $6, state = $7
+            WHERE id = $8 AND owner_type = $9 AND owner_id = $10
+            "#,
+        )
+        .bind(match &template.source {
+            runtime_ir::CreateTemplateSource::Custom { .. } => "custom",
+            runtime_ir::CreateTemplateSource::Shop { .. } => "shop",
+        })
+        .bind(match &template.source {
+            runtime_ir::CreateTemplateSource::Custom { name, .. } => Some(name),
+            _ => None,
+        })
+        .bind(match &template.source {
+            runtime_ir::CreateTemplateSource::Custom { language, .. } => Some(language),
+            _ => None,
+        })
+        .bind(match &template.source {
+            runtime_ir::CreateTemplateSource::Custom { content, .. } => Some(serde_json::to_value(content)?),
+            _ => None,
+        })
+        .bind(match &template.source {
+            runtime_ir::CreateTemplateSource::Shop { shop_listing } => Some(shop_listing),
+            _ => None,
+        })
+        .bind(&template.allowed_caps)
+        .bind(if template.paused { "paused" } else { "active" })
+        .bind(id)
+        .bind(self.id.tenant_type())
+        .bind(self.id.tenant_id())
+        .execute(&self.state.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn delete_template(&self, id: &str) -> Result<(), khronos_runtime::Error> {
+        let id: sqlx::types::Uuid = id.parse().map_err(|_| "Invalid template ID")?;
+        sqlx::query(
+            r#"DELETE FROM attached_templates 
+            WHERE id = $1 AND owner_type = $2 AND owner_id = $3"#,
+        )
+        .bind(id)
+        .bind(self.id.tenant_type())
+        .bind(self.id.tenant_id())
+        .execute(&self.state.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn stats(&self) -> Result<runtime_ir::RuntimeStats, khronos_runtime::Error> {
+        let sandwich_resp =
+        crate::sandwich::get_status(&self.state.reqwest_client).await?;
+
+        let total_guilds = {
+            let mut guild_count: i64 = 0;
+            sandwich_resp.shard_conns.iter().for_each(|(_, sc)| {
+                guild_count += sc.guilds;
+            });
+
+            guild_count
+        };
+
+        Ok(runtime_ir::RuntimeStats {
+            total_cached_guilds: total_guilds.try_into()?, // This field is deprecated, use total_guilds instead
+            total_guilds: total_guilds.try_into()?,
+            total_users: sandwich_resp.user_count.try_into()?,
+            //total_members: sandwich_resp.total_members.try_into()?,
+            last_started_at: crate::CONFIG.start_time,
+        })
+    }
+
+    fn event_list(&self) -> Result<Vec<String>, khronos_runtime::Error> {
+        let mut vec = AntiraidEvent::variant_names()
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+
+        vec.extend(
+            dapi::EVENT_LIST
+                .iter()
+                .copied()
+                .map(|x| x.to_string())
+                .collect::<Vec<String>>(),
+        );
+
+        Ok(vec)
+    }
+
+    fn links(&self) -> Result<runtime_ir::RuntimeLinks, khronos_runtime::Error> {
+        let support_server = crate::CONFIG.meta.support_server_invite.clone();
+        let api_url = crate::CONFIG.sites.api.clone();
+        let frontend_url = crate::CONFIG.sites.frontend.clone();
+        let docs_url = crate::CONFIG.sites.docs.clone();
+
+        Ok(runtime_ir::RuntimeLinks {
+            support_server,
+            api_url,
+            frontend_url,
+            docs_url,
+        })
+    }
+
+    async fn get_tenant_state(&self) -> Result<runtime_ir::TenantState, khronos_runtime::Error> {
+        let ts = self.state.get_cached_tenant_state_for(self.id)?;
+        Ok(runtime_ir::TenantState {
+            events: ts.events.iter().cloned().collect(),
+            banned: ts.banned,
+            flags: ts.flags.try_into().unwrap_or(0),
+            startup_events: ts.startup_events,
+        })
+    }
+
+    async fn set_tenant_state(&self, state: runtime_ir::TenantState) -> Result<(), khronos_runtime::Error> {
+        self.state
+            .set_tenant_state_for(
+                self.id,
+                TenantState {
+                    events: HashSet::from_iter(state.events),
+                    banned: state.banned,
+                    flags: state.flags.try_into()?,
+                    startup_events: state.startup_events,
+                },
+            )
+            .await?;
+        Ok(())
     }
 }

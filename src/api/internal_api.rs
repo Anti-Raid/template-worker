@@ -6,7 +6,7 @@ use axum::{
     Json,
 };
 use super::server::AppData;
-use crate::{api::types::ApiDispatchResult, dispatch::parse_response, templatedb::{attached_templates::{AttachedTemplate, AttachedTemplateId}, template_shop_listing::{ShopListingId, TemplateShopListing}}, worker::workervmmanager::Id};
+use crate::{api::types::ApiDispatchResult, worker::workervmmanager::Id};
 use crate::events::AntiraidEvent;
 use super::extractors::InternalEndpoint;
 use super::server::{ApiResponse, ApiError};
@@ -41,7 +41,7 @@ pub(super) async fn dispatch_event(
 ) -> ApiResponse<()> {
     let event = parse_event(&event).map_err(|e| (StatusCode::BAD_REQUEST, Json(e.to_string().into())))?;
 
-    data.worker.dispatch_event_to_templates_nowait(Id::GuildId(guild_id), event)
+    data.worker.dispatch_event_nowait(Id::GuildId(guild_id), event)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
@@ -76,52 +76,14 @@ pub(super) async fn dispatch_event_and_wait(
     InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
     Path(guild_id): Path<serenity::all::GuildId>,
     Json(event): Json<AntiraidEvent>,
-) -> ApiResponse<DispatchResponse> {
+) -> ApiResponse<serde_json::Value> {
     let event = parse_event(&event).map_err(|e| (StatusCode::BAD_REQUEST, Json(e.to_string().into())))?;
 
-    let results = parse_response(
-        data.worker.dispatch_event_to_templates(Id::GuildId(guild_id), event)
-        .await
-    )
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?
-    .into_iter()
-    .map(|(name, result)| (name, result.into()))
-    .collect::<HashMap<_, _>>();
+    let result = data.worker.dispatch_event(Id::GuildId(guild_id), event)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
-    Ok(Json(results))
-}
-
-/// Regenerate Guild Cache
-///
-/// Regenerates the cache for a guild
-#[utoipa::path(
-    post, 
-    tag = "Internal API",
-    path = "/i/regenerate-cache/{guild_id}",
-    security(
-        ("InternalAuth" = []) 
-    ),
-    params(
-        ("guild_id" = String, description = "The ID of the guild to regenerate the cache for")
-    ),
-    responses(
-        (status = 204, description = "Cache regenerated successfully"),
-        (status = 400, description = "API Error", body = ApiError),
-    )
-)]
-pub(super) async fn regenerate_cache_api(
-    State(AppData {
-        data,
-        ..
-    }): State<AppData>,
-    InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
-    Path(guild_id): Path<serenity::all::GuildId>,
-) -> ApiResponse<()> {
-    data.worker.regenerate_cache(Id::GuildId(guild_id))
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
-
-    Ok(Json(()))
+    Ok(Json(result))
 }
 
 /// Get Thread Count
@@ -290,59 +252,6 @@ pub(super) async fn kill_worker(
 
 // Template APIs (part of Proposed Unified Templates)
 
-/// Fetch All Attached Templates
-/// 
-/// Fetches all attached templates
-#[utoipa::path(
-    get, 
-    tag = "Internal API",
-    path = "/i/templates/attached",
-    security(
-        ("InternalAuth" = []) 
-    ),
-    responses(
-        (status = 200, description = "The list of all attached templates"),
-        (status = 400, description = "API Error", body = ApiError),
-    )
-)]
-pub(super) async fn fetch_all_attached_templates(
-    State(AppData { data, .. }): State<AppData>,
-    InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
-) -> ApiResponse<Vec<AttachedTemplate>> {
-    let templates = AttachedTemplate::fetch_all(&data.pool)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
-
-    Ok(Json(templates))
-}
-
-/// Fetch Attached Template by ID
-///
-/// Fetches an attached template by ID. Returns `null` if not found, otherwise AttachedTemplate.
-#[utoipa::path(
-    get, 
-    tag = "Internal API",
-    path = "/i/templates/attached/{id}",
-    security(
-        ("InternalAuth" = []) 
-    ),
-    responses(
-        (status = 200, description = "The attached template matching the ID or `null` if not found"),
-        (status = 400, description = "API Error", body = ApiError),
-    )
-)]
-pub(super) async fn fetch_attached_template_by_id(
-    State(AppData { data, .. }): State<AppData>,
-    Path(id): Path<AttachedTemplateId>,
-    InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
-) -> ApiResponse<Option<AttachedTemplate>> {
-    let templates = id.fetch(&data.pool)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
-
-    Ok(Json(templates))
-}
-
 // Set Template State
 //
 // Sets the state of a template in the template pool
@@ -353,78 +262,9 @@ pub(super) async fn fetch_attached_template_by_id(
 // change the state of a template they own to "suspended" nor may they
 // change the state of a suspended template whatsoever
 
-// Fetch Shop Listings
-//
-// Fetches all shop listings
-#[utoipa::path(
-    get, 
-    tag = "Internal API",
-    path = "/i/templates/shop-listings",
-    security(
-        ("InternalAuth" = []) 
-    ),
-    responses(
-        (status = 200, description = "The list of all shop listings available"),
-        (status = 400, description = "API Error", body = ApiError),
-    )
-)]
-pub(super) async fn fetch_all_shop_listings(
-    State(AppData { data, .. }): State<AppData>,
-    InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
-) -> ApiResponse<Vec<TemplateShopListing>> {
-    let listings = TemplateShopListing::fetch_all(&data.pool)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
-
-    Ok(Json(listings))
-}
-
-// Fetches Shop Listings by ID
-//
-/// Fetches a shop listing by ID. Returns `null` if not found, otherwise ShopListing.
-#[utoipa::path(
-    get, 
-    tag = "Internal API",
-    path = "/i/templates/shop-listings/{id}",
-    security(
-        ("InternalAuth" = []) 
-    ),
-    responses(
-        (status = 200, description = "The shop listing matching the ID or `null` if not found"),
-        (status = 400, description = "API Error", body = ApiError),
-    )
-)]
-pub(super) async fn fetch_shop_listing_by_id(
-    State(AppData { data, .. }): State<AppData>,
-    Path(id): Path<ShopListingId>,
-    InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
-) -> ApiResponse<Option<TemplateShopListing>> {
-    let templates = id.fetch(&data.pool)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
-
-    Ok(Json(templates))
-}
-
 // Set Template Shop Listing Review State
 //
 // Sets the review state of a template shop listing
 // Possible states are: "pending", "approved", "denied"
 
-// Fetch All Attached Templates
-//
-// Fetches all attached templates
-//
-// Note that the information returned by this API does not include the full
-// base template information, only the attached template information.
-
-// Fetch Attached Templates For Owner
-//
-// Fetches all attached templates for a given owner ID
-//
-// Note that the information returned by this API does not include the full
-// base template information, only the attached template information.
-
-// Delete Attached Template
-//
-// Deletes an attached template for a given owner ID and base template ID
+// Mock Luau Script

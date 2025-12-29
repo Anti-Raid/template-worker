@@ -15,8 +15,6 @@ use serenity::all::CommandOptionType;
 use serenity::all::CommandType;
 use ts_rs::TS;
 
-use crate::dispatch::DispatchResult;
-
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema, TS)]
 #[ts(export)]
 pub struct GuildChannelWithPermissions {
@@ -328,17 +326,23 @@ pub struct ApiCreateCommandOptionChoice {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema, TS)]
 #[ts(export)]
-#[serde(tag = "type", content = "data")]
+#[serde(tag = "type")]
 pub enum ApiDispatchResult<T> {
-    Ok(T),
-    Err(String),
+    Ok {
+        id: String,
+        value: T,
+    },
+    Err {
+        id: String,
+        value: String,
+    },
 }
 
-impl<T> From<DispatchResult<T>> for ApiDispatchResult<T> {
-    fn from(value: DispatchResult<T>) -> Self {
-        match value {
-            DispatchResult::Ok(data) => ApiDispatchResult::Ok(data),
-            DispatchResult::Err(err) => ApiDispatchResult::Err(err),
+impl<T> ApiDispatchResult<T> {
+    pub fn id(&self) -> &String {
+        match self {
+            ApiDispatchResult::Ok { id, .. } => id,
+            ApiDispatchResult::Err { id, .. } => id,
         }
     }
 }
@@ -353,6 +357,8 @@ pub struct SettingDispatchDocType(
     >
 );
 
+pub type RawSettingsDispatchResult = Vec<ApiDispatchResult<Vec<crate::events::Setting>>>;
+pub type RawSettingsExecuteResult = Vec<ApiDispatchResult<serde_json::Value>>;
 pub type SettingDispatch = HashMap<String, ApiDispatchResult<Vec<crate::events::Setting>>>;
 
 /// New type purely for documentation purposes

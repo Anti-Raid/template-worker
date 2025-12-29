@@ -14,11 +14,12 @@ use crate::api::types::ApiPartialRole;
 use crate::api::types::AuthorizeRequest;
 use crate::api::types::GetStatusResponse;
 use crate::api::types::GuildChannelWithPermissions;
+use crate::api::types::RawSettingsDispatchResult;
+use crate::api::types::RawSettingsExecuteResult;
 use crate::api::types::SettingDispatch;
 use crate::api::types::SettingExecuteDispatch;
 use crate::api::types::ShardConn;
 use crate::api::types::UserSessionList;
-use crate::dispatch::parse_response;
 use crate::events::AntiraidEvent;
 use crate::events::GetSettingsEvent;
 use crate::events::SettingExecuteEvent;
@@ -109,19 +110,22 @@ pub(super) async fn get_settings_for_guild_user(
     }))
     .map_err(|e| (StatusCode::BAD_REQUEST, Json(e.to_string().into())))?;
 
-    let results = parse_response(
-        data.worker.dispatch_event_to_templates(
+    let results = serde_json::from_value::<RawSettingsDispatchResult>(
+        data.worker.dispatch_event(
             Id::GuildId(guild_id),
             event,
         )
         .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?
     )
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?
-    .into_iter()
-    .map(|(name, result)| (name, result.into()))
-    .collect::<HashMap<_, _>>();
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
-    Ok(Json(results))
+    let mut results_map = HashMap::new();
+    for result in results {
+        results_map.insert(result.id().clone(), result);
+    }
+
+    Ok(Json(results_map))
 }
 
 /// Execute Setting For User
@@ -171,27 +175,29 @@ pub(super) async fn execute_setting_for_guild_user(
 
     // Make a ExecuteSetting event
     let event = parse_event(&AntiraidEvent::ExecuteSetting(SettingExecuteEvent {
-        id: req.setting.clone(),
+        id: req.setting,
         op,
         author: user_id,
         fields: req.fields,
     }))
     .map_err(|e| (StatusCode::BAD_REQUEST, Json(e.to_string().into())))?;
 
-    let results = parse_response(
-        data.worker.dispatch_scoped_event_to_templates(
+    let results = serde_json::from_value::<RawSettingsExecuteResult>(
+        data.worker.dispatch_event(
             Id::GuildId(guild_id),
             event,
-            vec![req.setting],
         )
         .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?
     )
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?
-    .into_iter()
-    .map(|(name, result)| (name, result.into()))
-    .collect::<HashMap<_, _>>();
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
-    Ok(Json(results))
+    let mut results_map = HashMap::new();
+    for result in results {
+        results_map.insert(result.id().clone(), result);
+    }
+
+    Ok(Json(results_map))
 }
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]

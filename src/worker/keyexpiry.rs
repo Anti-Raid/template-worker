@@ -3,7 +3,6 @@ use std::rc::Rc;
 use crate::dispatch::parse_event;
 use crate::events::{AntiraidEvent, KeyExpiryEvent};
 
-use super::workerdb::WorkerDB;
 use super::workervmmanager::Id;
 use super::workerdispatch::WorkerDispatch;
 use super::keyexpirychannel::KeyExpiryChannel;
@@ -16,8 +15,6 @@ pub struct KeyExpiryInner {
     key_expiry_chan: KeyExpiryChannel,
     /// Worker Event Dispatch
     dispatch: WorkerDispatch,
-    /// Worker Database
-    db: WorkerDB,
 }
 
 #[derive(Clone)]
@@ -38,12 +35,11 @@ impl std::ops::Deref for WorkerKeyExpiry {
 }
 
 impl WorkerKeyExpiry {
-    pub fn new(db: WorkerDB, dispatch: WorkerDispatch, key_expiry_chan: KeyExpiryChannel) -> Self {
+    pub fn new(dispatch: WorkerDispatch, key_expiry_chan: KeyExpiryChannel) -> Self {
         let expirer = Self { 
             inner: Rc::new(KeyExpiryInner {
                 dispatch, 
                 key_expiry_chan, 
-                db
             })
         };
 
@@ -60,7 +56,7 @@ impl WorkerKeyExpiry {
     /// 
     /// NOTE: This does not repopulate the key expiry channel as it is not needed in the cases this is called
     async fn remove_key_expiry(&self, id: Id, kv_id: &str) -> Result<(), crate::Error> {
-        self.db.remove_key_expiry(id, kv_id).await?;
+        self.dispatch.worker_state().remove_key_expiry(id, kv_id).await?;
         Ok(())
     }
 
@@ -86,7 +82,7 @@ impl WorkerKeyExpiry {
 
             let self_ref = self.clone();
             set.spawn_local(async move {
-                if let Err(e) = self_ref.dispatch.dispatch_scoped_event_to_templates(id, create_event, &data.scopes).await {
+                if let Err(e) = self_ref.dispatch.dispatch_event(id, create_event).await {
                     log::error!("Error in key expiry: {:?}", e);
                 }
 

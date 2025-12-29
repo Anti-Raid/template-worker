@@ -4,11 +4,10 @@ mod data;
 mod dispatch;
 mod event_handler;
 mod events;
-mod mesophyll;
+//mod mesophyll;
 mod objectstore;
 mod register;
 mod sandwich;
-mod templatedb;
 mod worker;
 
 use crate::config::CONFIG;
@@ -21,7 +20,7 @@ use crate::worker::workerprocesscommhttp2::{
     WorkerProcessCommHttp2ServerCreator, WorkerProcessCommHttp2Worker,
 };
 use crate::worker::workerprocesshandle::{WorkerProcessHandle, WorkerProcessHandleCreateOpts};
-use crate::worker::workerstate::WorkerState;
+use crate::worker::workerstate::CreateWorkerState;
 use crate::worker::workerthread::WorkerThread;
 use clap::{Parser, ValueEnum};
 use log::{error, info};
@@ -185,7 +184,8 @@ async fn main_impl(args: CmdArgs) {
         .expect("Failed to get current user");
 
     if current_user.id == UserId::new(0) {
-        panic!("current_user.id == 0, this is a fatal bug");
+        // TODO: Figure out why this happens sometimes
+        log::error!("current_user.id == 0, this is a known bug that may cause issues");
     }
 
     let current_user_id = current_user.id;
@@ -201,14 +201,13 @@ async fn main_impl(args: CmdArgs) {
             .expect("Could not initialize object store"),
     );
 
-    let worker_state = WorkerState::new(
+    let worker_state = CreateWorkerState::new(
         http.clone(),
         reqwest.clone(),
         object_storage.clone(),
         pg_pool.clone(),
         Arc::new(current_user.clone()),
-    )
-    .expect("Failed to create worker state");
+    );
 
     match args.worker_type {
         WorkerType::RegisterCommands => {
@@ -224,7 +223,7 @@ async fn main_impl(args: CmdArgs) {
         }
         WorkerType::ThreadPool => {
             let worker_pool = Arc::new(
-                WorkerPool::<WorkerThread>::new(worker_state.clone(), args.worker_threads, &())
+                WorkerPool::<WorkerThread>::new(args.worker_threads, &worker_state)
                     .expect("Failed to create worker thread pool"),
             );
 
@@ -271,7 +270,6 @@ async fn main_impl(args: CmdArgs) {
         WorkerType::ProcessPool => {
             let worker_pool = Arc::new(
                 WorkerPool::<WorkerProcessHandle>::new(
-                    worker_state.clone(),
                     args.worker_threads,
                     &WorkerProcessHandleCreateOpts::new(
                         Arc::new(WorkerProcessCommHttp2ServerCreator::new(

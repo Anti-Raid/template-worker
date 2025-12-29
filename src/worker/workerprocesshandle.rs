@@ -9,12 +9,10 @@ use tokio::sync::mpsc::{
     unbounded_channel
 };
 
-use crate::worker::workerdispatch::DispatchTemplateResult;
 use crate::worker::workerfilter::WorkerFilter;
 use crate::worker::workerlike::WorkerLike;
 use crate::worker::workerpool::Poolable;
 use crate::worker::workerprocesscomm::{WorkerProcessCommServer, WorkerProcessCommServerCreator};
-use crate::worker::workerstate::WorkerState;
 use crate::worker::workervmmanager::Id;
 
 /// Message type for the worker process server monitor task
@@ -25,17 +23,7 @@ enum ProcessServerMessage {
     DispatchEvent {
         id: Id,
         event: CreateEvent,
-        tx: Option<OneshotSender<DispatchTemplateResult>>,
-    },
-    DispatchScopedEvent {
-        id: Id,
-        event: CreateEvent,
-        scopes: Vec<String>,
-        tx: Option<OneshotSender<DispatchTemplateResult>>,
-    },
-    RegenerateCache {
-        id: Id,
-        tx: Option<OneshotSender<Result<(), crate::Error>>>,
+        tx: Option<OneshotSender<Result<serde_json::Value, crate::Error>>>,
     },
 }
 
@@ -60,41 +48,15 @@ pub struct DispatchEvent {
     pub id: Id,
     /// The event to dispatch
     pub event: CreateEvent,
-    /// The scopes to dispatch the event to, if any
-    pub scopes: Option<Vec<String>>,
 }
 
 impl PushableMessage for DispatchEvent {
-    type Response = DispatchTemplateResult;
+    type Response = Result<serde_json::Value, crate::Error>;
 
     fn into_message(self, tx: Option<OneshotSender<Self::Response>>) -> ProcessServerMessage {
-        match self.scopes {
-            Some(scopes) => ProcessServerMessage::DispatchScopedEvent {
-                id: self.id,
-                event: self.event,
-                scopes,
-                tx,
-            },
-            None => ProcessServerMessage::DispatchEvent {
-                id: self.id,
-                event: self.event,
-                tx,
-            },
-        }
-    }
-}
-
-pub struct RegenerateCache {
-    /// The id of the template to regenerate the cache for
-    pub id: Id,
-}
-
-impl PushableMessage for RegenerateCache {
-    type Response = Result<(), crate::Error>;
-
-    fn into_message(self, tx: Option<OneshotSender<Self::Response>>) -> ProcessServerMessage {
-        ProcessServerMessage::RegenerateCache {
+        ProcessServerMessage::DispatchEvent {
             id: self.id,
+            event: self.event,
             tx,
         }
     }
@@ -244,19 +206,7 @@ impl WorkerProcessHandle {
                                     return; // Exit the loop after killing the process
                                 },
                                 ProcessServerMessage::DispatchEvent { id, event, tx } => {
-                                    let res = process_comm.dispatch_event_to_templates(id, event).await;
-                                    if let Some(tx) = tx {
-                                        let _ = tx.send(res);
-                                    }
-                                },
-                                ProcessServerMessage::DispatchScopedEvent { id, event, scopes, tx } => {
-                                    let res = process_comm.dispatch_scoped_event_to_templates(id, event, scopes).await;
-                                    if let Some(tx) = tx {
-                                        let _ = tx.send(res);
-                                    }
-                                },
-                                ProcessServerMessage::RegenerateCache { id, tx } => {
-                                    let res = process_comm.regenerate_cache(id).await;
+                                    let res = process_comm.dispatch_event(id, event).await;
                                     if let Some(tx) = tx {
                                         let _ = tx.send(res);
                                     }
@@ -320,32 +270,17 @@ impl WorkerLike for WorkerProcessHandle {
         self.send(Kill {}).await?
     }
 
-    async fn dispatch_event_to_templates(&self, id: Id, event: CreateEvent) -> DispatchTemplateResult {
+    async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<serde_json::Value, crate::Error> {
         self.send(DispatchEvent {
             id,
             event,
-            scopes: None,
         }).await?
     }
-
-    async fn dispatch_scoped_event_to_templates(&self, id: Id, event: CreateEvent, scopes: Vec<String>) -> DispatchTemplateResult {
-        self.send(DispatchEvent {
-            id,
-            event,
-            scopes: Some(scopes),
-        }).await?
-    }
-
-    async fn dispatch_event_to_templates_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
+    async fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
         self.send_nowait(DispatchEvent {
             id,
             event,
-            scopes: None,
         }).await
-    }
-
-    async fn regenerate_cache(&self, id: Id) -> Result<(), crate::Error> {
-        self.send(RegenerateCache { id }).await?
     }
 }
 
@@ -368,7 +303,7 @@ impl WorkerProcessHandleCreateOpts {
 impl Poolable for WorkerProcessHandle {
     type ExtState = WorkerProcessHandleCreateOpts;
 
-    fn new(_state: WorkerState, _filter: WorkerFilter, id: usize, total: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
+    fn new(_filter: WorkerFilter, id: usize, total: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
         where
             Self: Sized {
         // Create a new WorkerProcessHandle with the given state and filter

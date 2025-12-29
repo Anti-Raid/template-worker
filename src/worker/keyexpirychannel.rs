@@ -4,9 +4,10 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::time::Duration;
+use crate::worker::workerstate::WorkerState;
+
 use super::workervmmanager::Id;
-use super::workercachedata::WorkerCacheData;
-use super::workerdb::KeyExpiry;
+use super::workerstate::KeyExpiry;
 use futures::StreamExt;
 
 use super::workerfilter::WorkerFilter;
@@ -24,7 +25,7 @@ enum KeyExpiryChannelMessage {
 /// A channel to send out key expiry events when needed
 #[derive(Clone)]
 pub struct KeyExpiryChannel {
-    cache: WorkerCacheData,
+    state: WorkerState,
     filter: WorkerFilter,
     tx: UnboundedSender<KeyExpiryChannelMessage>,
     sink: Rc<RefCell<Option<UnboundedSender<(Id, Arc<KeyExpiry>)>>>>
@@ -32,10 +33,10 @@ pub struct KeyExpiryChannel {
 
 impl KeyExpiryChannel {
     /// Create a new key expiry channel
-    pub fn new(cache: WorkerCacheData, filter: WorkerFilter) -> Self {
+    pub fn new(state: WorkerState, filter: WorkerFilter) -> Self {
         let (tx, rx): (UnboundedSender<KeyExpiryChannelMessage>, UnboundedReceiver<KeyExpiryChannelMessage>) = unbounded_channel();
 
-        let chan = Self { cache, tx, filter, sink: Rc::default() };
+        let chan = Self { state, tx, filter, sink: Rc::default() };
 
         // Run the channel in a separate task
         let chan_ref = chan.clone();
@@ -93,7 +94,7 @@ impl KeyExpiryChannel {
     /// Populates the key expiry channel with current data from WorkerCacheData
     async fn create_queue(&self) -> Result<DelayQueue<(Id, Arc<KeyExpiry>)>, crate::Error> {
         let mut delay_queue = DelayQueue::new();
-        let expired_keys = self.cache.db().get_key_expiries().await?;
+        let expired_keys = self.state.get_key_expiries().await?;
         for data in expired_keys {
             if self.filter.is_allowed(data.0) {
                 for expiry in data.1 {
