@@ -1,6 +1,7 @@
 use super::workerstate::WorkerState;
 use super::workervmmanager::Id;
 use super::template::Template;
+use crate::objectstore::{Bucket, BucketWithKey, BucketWithPrefix};
 use crate::worker::keyexpirychannel::KeyExpiryChannel;
 use crate::worker::workercachedata::WorkerCacheData;
 use khronos_runtime::traits::context::{
