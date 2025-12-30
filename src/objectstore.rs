@@ -1,4 +1,4 @@
-use dashmap::DashMap;
+use serenity::all::GuildId;
 
 const CHUNK_SIZE: usize = 5 * 1024 * 1024;
 const MULTIPART_MIN_SIZE: usize = 50 * 1024 * 1024;
@@ -9,7 +9,6 @@ pub enum ObjectStore {
         client: aws_sdk_s3::Client,
         cdn_client: aws_sdk_s3::Client,
         cdn_endpoint: String,
-        created_buckets: DashMap<String, ()>,
     },
     Local {
         dir: String,
@@ -81,7 +80,6 @@ impl ObjectStore {
             client,
             cdn_client,
             cdn_endpoint,
-            created_buckets: DashMap::new(),
         })
     }
 
@@ -97,75 +95,96 @@ pub struct ListObjectsResponse {
     pub etag: Option<String>,
 }
 
+/// Represents a bucket in the object store
+#[derive(Clone, Copy, Debug)]
+pub enum Bucket {
+    Guild(GuildId)
+}
+
+impl Bucket {
+    pub fn bucket(&self) -> &'static str {
+        match self {
+            Bucket::Guild(_) => "antiraid.guilds",
+        }
+    }
+
+    pub fn prefix(&self) -> String {
+        match self {
+            Bucket::Guild(guild_id) => format!("{}", guild_id),
+        }
+    }
+
+    /// Returns the full key for the given object in the bucket
+    /// 
+    /// Errors if the key is invalid (contains "../")
+    pub fn key(&self, key: &str) -> Result<String, crate::Error> {
+        for segment in key.split('/') {
+            match segment {
+                ".." => return Err("Invalid key: potential path traversal attempt".into()),
+                "." => return Err("Invalid key: current directory reference".into()),
+                "" => return Err("Invalid key: empty path segment".into()),
+                _ => {}
+            }
+        }
+        Ok(format!("{}/{}", self.prefix(), key))
+    }
+}
+
+pub struct BucketWithKey<'a> {
+    bucket: Bucket,
+    key: &'a str,
+}
+
+impl<'a> std::ops::Deref for BucketWithKey<'a> {
+    type Target = Bucket;
+
+    fn deref(&self) -> &Self::Target {
+        &self.bucket
+    }
+}
+
+impl<'a> BucketWithKey<'a> {
+    pub fn new(bucket: Bucket, key: &'a str) -> Self {
+        Self { bucket, key }
+    }
+
+    pub fn key(&self) -> Result<String, crate::Error> {
+        self.bucket.key(self.key)
+    }
+}
+
+pub struct BucketWithPrefix<'a> {
+    bucket: Bucket,
+    key: Option<&'a str>,
+}
+
+impl<'a> std::ops::Deref for BucketWithPrefix<'a> {
+    type Target = Bucket;
+
+    fn deref(&self) -> &Self::Target {
+        &self.bucket
+    }
+}
+
+impl<'a> BucketWithPrefix<'a> {
+    pub fn new(bucket: Bucket, key: Option<&'a str>) -> Self {
+        Self { bucket, key }
+    }
+
+    pub fn prefix(&self) -> Result<String, crate::Error> {
+        match self.key {
+            Some(key) => Ok(self.bucket.key(key)?),
+            None => Ok(self.bucket.prefix()),
+        }
+    }
+}
+
 impl ObjectStore {
-    /// Create a bucket with the given name
-    pub async fn create_bucket(&self, name: &str) -> Result<(), crate::Error> {
-        match self {
-            ObjectStore::S3 {
-                client,
-                created_buckets,
-                ..
-            } => {
-                client.create_bucket().bucket(name).send().await?;
-                created_buckets.insert(name.to_string(), ());
-                Ok(())
-            }
-            ObjectStore::Local { dir } => {
-                // Make directory <prefix>
-                std::fs::create_dir_all(format!("{}/{}", dir, name))
-                    .map_err(|e| format!("Failed to create directory: {}", e))?;
-
-                Ok(())
-            }
-        }
-    }
-
-    /// Creates the bucket if it does not already exist
-    pub async fn create_bucket_if_not_exists(&self, name: &str) -> Result<(), crate::Error> {
-        match self {
-            ObjectStore::S3 {
-                client,
-                created_buckets,
-                ..
-            } => {
-                if created_buckets.contains_key(name) {
-                    return Ok(());
-                }
-
-                let action = client.head_bucket().bucket(name);
-
-                let must_create_bucket = match action.send().await {
-                    Ok(_) => false,
-                    Err(e) => {
-                        let Some(e) = e.as_service_error() else {
-                            return Err(format!("Failed to list objects: {}", e).into());
-                        };
-
-                        e.is_not_found()
-                    }
-                };
-
-                if must_create_bucket {
-                    self.create_bucket(name).await?;
-                }
-
-                Ok(())
-            }
-            ObjectStore::Local { dir } => {
-                // Make directory <prefix>
-                std::fs::create_dir_all(format!("{}/{}", dir, name))
-                    .map_err(|e| format!("Failed to create directory: {}", e))?;
-
-                Ok(())
-            }
-        }
-    }
-
     /// Returns if a file exists in the object store
-    pub async fn exists(&self, bucket: &str, key: &str) -> Result<bool, crate::Error> {
+    pub async fn exists(&self, b: BucketWithKey<'_>) -> Result<bool, crate::Error> {
         match self {
             ObjectStore::S3 { client, .. } => {
-                let action = client.head_object().bucket(bucket).key(key);
+                let action = client.head_object().bucket(b.bucket()).key(b.key()?);
 
                 match action.send().await {
                     Ok(_) => Ok(true),
@@ -183,7 +202,7 @@ impl ObjectStore {
                 }
             }
             ObjectStore::Local { dir } => {
-                let path = std::path::Path::new(dir).join(bucket).join(key);
+                let path = std::path::Path::new(dir).join(b.bucket()).join(b.key()?);
                 Ok(path.exists())
             }
         }
@@ -194,8 +213,7 @@ impl ObjectStore {
     /// On S3, this returns a presigned URL, on local, it returns a file:// url
     pub async fn get_url(
         &self,
-        bucket: &str,
-        key: &str,
+        b: BucketWithKey<'_>,
         duration: std::time::Duration,
     ) -> Result<String, crate::Error> {
         match self {
@@ -206,8 +224,8 @@ impl ObjectStore {
             } => {
                 let url = cdn_client
                     .get_object()
-                    .bucket(bucket)
-                    .key(key)
+                    .bucket(b.bucket())
+                    .key(b.key()?)
                     .presigned(aws_sdk_s3::presigning::PresigningConfig::expires_in(
                         duration,
                     )?)
@@ -234,28 +252,22 @@ impl ObjectStore {
 
                 Ok(url)
             }
-            ObjectStore::Local { dir } => Ok(format!("file://{}/{}/{}", dir, bucket, key)),
+            ObjectStore::Local { dir } => Ok(format!("file://{}/{}/{}", dir, b.bucket(), b.key()?)),
         }
     }
 
     /// Lists all files in the object store with a given prefix
     pub async fn list_files(
         &self,
-        bucket: &str,
-        key: Option<&str>,
+        b: BucketWithPrefix<'_>
     ) -> Result<Vec<ListObjectsResponse>, crate::Error> {
         match self {
             ObjectStore::S3 { client, .. } => {
                 let mut continuation_token = None;
-                let mut have_created_bucket = false;
                 let mut resp = vec![];
 
                 loop {
-                    let mut action = client.list_objects_v2().bucket(bucket);
-
-                    if let Some(key) = key {
-                        action = action.prefix(key);
-                    }
+                    let mut action = client.list_objects_v2().bucket(b.bucket()).prefix(b.prefix()?);
 
                     if let Some(continuation_token) = &continuation_token {
                         action = action.continuation_token(continuation_token);
@@ -268,14 +280,7 @@ impl ObjectStore {
                                 return Err(format!("Failed to list objects: {}", e).into());
                             };
 
-                            if e.is_no_such_bucket() && !have_created_bucket {
-                                // Try creating a new bucket
-                                self.create_bucket(bucket).await?;
-                                have_created_bucket = true;
-                                continue;
-                            } else {
-                                return Err(format!("Failed to list objects: {}", e).into());
-                            }
+                            return Err(format!("Failed to list objects: {}", e).into());
                         }
                     };
 
@@ -309,11 +314,7 @@ impl ObjectStore {
                 Ok(resp)
             }
             ObjectStore::Local { dir } => {
-                let mut path = std::path::Path::new(dir).join(bucket).to_path_buf();
-
-                if let Some(key) = key {
-                    path = path.join(key);
-                }
+                let path = std::path::Path::new(dir).join(b.bucket()).join(b.prefix()?).to_path_buf();
 
                 let mut files = vec![];
                 for entry in std::fs::read_dir(path)
@@ -353,17 +354,17 @@ impl ObjectStore {
     }
 
     /// Downloads a file from the object store with a given key
-    pub async fn download_file(&self, bucket: &str, key: &str) -> Result<Vec<u8>, crate::Error> {
+    pub async fn download_file(&self, b: BucketWithKey<'_>) -> Result<Vec<u8>, crate::Error> {
         match self {
             ObjectStore::S3 { client, .. } => {
-                let resp = client.get_object().bucket(bucket).key(key).send().await?;
+                let resp = client.get_object().bucket(b.bucket()).key(b.key()?).send().await?;
 
                 let body = resp.body.collect().await?;
 
                 Ok(body.into_bytes().to_vec())
             }
             ObjectStore::Local { dir } => {
-                let path = std::path::Path::new(dir).join(bucket).join(key);
+                let path = std::path::Path::new(dir).join(b.bucket()).join(b.key()?);
                 Ok(std::fs::read(path).map_err(|e| format!("Failed to read object: {}", e))?)
             }
         }
@@ -372,19 +373,16 @@ impl ObjectStore {
     /// Uploads a file to the object store with a given key
     pub async fn upload_file(
         &self,
-        bucket: &str,
-        key: &str,
+        b: BucketWithKey<'_>,
         data: Vec<u8>,
     ) -> Result<(), crate::Error> {
-        self.create_bucket_if_not_exists(bucket).await?;
-
         match self {
             ObjectStore::S3 { client, .. } => {
                 if data.len() > MULTIPART_MIN_SIZE {
                     let cmuo = client
                         .create_multipart_upload()
-                        .bucket(bucket)
-                        .key(key)
+                        .bucket(b.bucket())
+                        .key(b.key()?)
                         .send()
                         .await?;
 
@@ -398,9 +396,9 @@ impl ObjectStore {
                     loop {
                         let mut action = client
                             .upload_part()
-                            .bucket(bucket)
+                            .bucket(b.bucket())
                             .upload_id(upload_id.clone())
-                            .key(key)
+                            .key(b.key()?)
                             .part_number(match parts.len().try_into() {
                                 Ok(part_number) => part_number,
                                 Err(_) => {
@@ -449,8 +447,8 @@ impl ObjectStore {
                     if let Some(error) = error {
                         client
                             .abort_multipart_upload()
-                            .bucket(bucket)
-                            .key(key)
+                            .bucket(b.bucket())
+                            .key(b.key()?)
                             .upload_id(upload_id)
                             .send()
                             .await?;
@@ -465,8 +463,8 @@ impl ObjectStore {
 
                     client
                         .complete_multipart_upload()
-                        .bucket(bucket)
-                        .key(key)
+                        .bucket(b.bucket())
+                        .key(b.key()?)
                         .upload_id(upload_id)
                         .multipart_upload(completed_multipart_upload)
                         .send()
@@ -476,8 +474,8 @@ impl ObjectStore {
                 } else {
                     client
                         .put_object()
-                        .bucket(bucket)
-                        .key(key)
+                        .bucket(b.bucket())
+                        .key(b.key()?)
                         .body(aws_smithy_types::byte_stream::ByteStream::from(data))
                         .send()
                         .await?;
@@ -486,7 +484,7 @@ impl ObjectStore {
                 }
             }
             ObjectStore::Local { dir } => {
-                let path = std::path::Path::new(dir).join(bucket).join(key);
+                let path = std::path::Path::new(dir).join(b.bucket()).join(b.key()?);
                 std::fs::write(path, data).map_err(|e| format!("Failed to write object: {}", e))?;
 
                 Ok(())
@@ -494,20 +492,20 @@ impl ObjectStore {
         }
     }
 
-    pub async fn delete(&self, bucket: &str, key: &str) -> Result<(), crate::Error> {
+    pub async fn delete(&self, b: BucketWithKey<'_>) -> Result<(), crate::Error> {
         match self {
             ObjectStore::S3 { client, .. } => {
                 client
                     .delete_object()
-                    .bucket(bucket)
-                    .key(key)
+                    .bucket(b.bucket())
+                    .key(b.key()?)
                     .send()
                     .await?;
 
                 Ok(())
             }
             ObjectStore::Local { dir } => {
-                let path = std::path::Path::new(dir).join(bucket).join(key);
+                let path = std::path::Path::new(dir).join(b.bucket()).join(b.key()?);
                 std::fs::remove_file(path)
                     .map_err(|e| format!("Failed to delete object: {}", e))?;
 
@@ -515,9 +513,4 @@ impl ObjectStore {
             }
         }
     }
-}
-
-/// Returns the name of the bucket for the given guild
-pub fn guild_bucket(guild_id: serenity::all::GuildId) -> String {
-    format!("antiraid.guild.{}", guild_id)
 }

@@ -1,12 +1,12 @@
 use super::workerstate::WorkerState;
 use super::workervmmanager::Id;
 use crate::events::AntiraidEvent;
+use crate::objectstore::{Bucket, BucketWithKey, BucketWithPrefix};
+use crate::worker::builtins::EXPOSED_VFS;
 use crate::worker::workerstate::TenantState;
 use crate::worker::workervmmanager::VmData;
-use super::builtins::{Builtins, BuiltinsPatches, TemplatingTypes};
 use crate::worker::keyexpirychannel::KeyExpiryChannel;
 use khronos_runtime::core::typesext::Vfs;
-use khronos_runtime::mluau_require::create_memory_vfs_from_map;
 use khronos_runtime::traits::context::{
     KhronosContext, Limitations,
 };
@@ -24,7 +24,7 @@ use rand::distr::{Alphanumeric, SampleString};
 use serde_json::Value;
 use sqlx::Row;
 use std::collections::HashSet;
-use std::{rc::Rc, sync::Arc};
+use std::rc::Rc;
 use super::limits::{LuaKVConstraints, Ratelimits};
 
 /// Returns a random string of length ``length``
@@ -112,7 +112,7 @@ impl KhronosContext for TemplateContextProvider {
 
     fn objectstorage_provider(&self) -> Option<Self::ObjectStorageProvider> {
         Some(ArObjectStorageProvider {
-            guild_id: self.guild_id()?,
+            bucket: Bucket::Guild(self.guild_id()?),
             state: self.state.clone(),
             kv_constraints: self.kv_constraints.clone(),
             ratelimits: self.ratelimits.clone(),
@@ -777,7 +777,7 @@ impl DiscordProvider for ArDiscordProvider {
 
 #[derive(Clone)]
 pub struct ArObjectStorageProvider {
-    guild_id: serenity::all::GuildId,
+    bucket: Bucket,
     ratelimits: Rc<Ratelimits>,
     state: WorkerState,
     kv_constraints: LuaKVConstraints,
@@ -789,7 +789,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
     }
 
     fn bucket_name(&self) -> String {
-        crate::objectstore::guild_bucket(self.guild_id)
+        self.bucket.prefix()
     }
 
     async fn list_files(
@@ -800,8 +800,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
             .state
             .object_store
             .list_files(
-                &crate::objectstore::guild_bucket(self.guild_id),
-                prefix.as_ref().map(|x| x.as_str()),
+                BucketWithPrefix::new(self.bucket, prefix.as_deref())
             )
             .await?
             .into_iter()
@@ -818,7 +817,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
         Ok(self
             .state
             .object_store
-            .exists(&crate::objectstore::guild_bucket(self.guild_id), &key)
+            .exists(BucketWithKey::new(self.bucket, &key))
             .await?)
     }
 
@@ -826,7 +825,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
         Ok(self
             .state
             .object_store
-            .download_file(&crate::objectstore::guild_bucket(self.guild_id), &key)
+            .download_file(BucketWithKey::new(self.bucket, &key))
             .await?)
     }
 
@@ -839,8 +838,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
             .state
             .object_store
             .get_url(
-                &crate::objectstore::guild_bucket(self.guild_id),
-                &key,
+                BucketWithKey::new(self.bucket, &key),
                 expiry,
             )
             .await?)
@@ -861,7 +859,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
 
         self.state
             .object_store
-            .upload_file(&crate::objectstore::guild_bucket(self.guild_id), &key, data)
+            .upload_file(BucketWithKey::new(self.bucket, &key), data)
             .await?;
 
         Ok(())
@@ -871,7 +869,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
         Ok(self
             .state
             .object_store
-            .delete(&crate::objectstore::guild_bucket(self.guild_id), &key)
+            .delete(BucketWithKey::new(self.bucket, &key))
             .await?)
     }
 }
@@ -907,245 +905,13 @@ pub struct ArRuntimeProvider {
     ratelimits: Rc<Ratelimits>,
 }
 
-impl ArRuntimeProvider {
-    /// Returns the built-in template's runtime ir
-    fn builtins_template(&self) -> runtime_ir::Template {
-        runtime_ir::Template {
-            id: "$builtins".to_string(),
-            owner: match self.id {
-                Id::GuildId(gid) => runtime_ir::TemplateOwner::Guild { id: gid }
-            },
-            created_at: chrono::Utc::now(),
-            last_updated_at: chrono::Utc::now(),
-            source: runtime_ir::TemplateSource::Builtins,
-            allowed_caps: vec!["*".to_string()],
-            vfs: Vfs {
-                vfs: Arc::new(vfs::OverlayFS::new(&vec![
-                    vfs::EmbeddedFS::<BuiltinsPatches>::new().into(),
-                    vfs::EmbeddedFS::<Builtins>::new().into(),
-                    vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
-                ]))
-            },
-            paused: false,
-        }
-    }
-
-    /// Converts a database row into a runtime ir template
-    fn template_from_row(
-        &self,
-        row: &sqlx::postgres::PgRow,
-    ) -> Result<runtime_ir::Template, khronos_runtime::Error> {
-        let owner = match self.id {
-            Id::GuildId(gid) => runtime_ir::TemplateOwner::Guild { id: gid },
-        };
-
-        let source: String = row.try_get("source")?;
-        let (template_source, vfs) = match source.as_str() {
-            "custom" => {
-                let content_json: serde_json::Value = row.try_get("content")?;
-                let content = serde_json::from_value(content_json).map_err(|e| {
-                    format!("Failed to deserialize template content: {}", e)
-                })?;
-
-                // VFS for a custom template
-                let vfs = Arc::new(vfs::OverlayFS::new(&vec![
-                    create_memory_vfs_from_map(&content)?.into(),
-                    vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
-                ]));
-
-                (runtime_ir::TemplateSource::Custom {
-                    name: row.try_get("name")?,
-                    language: row.try_get("language")?,
-                    content,
-                }, vfs)
-            }
-            _ => {
-                return Err(format!("Unknown template source: {}", source).into());
-            }
-        };
-        Ok(runtime_ir::Template {
-            id: row.try_get("id")?,
-            owner,
-            created_at: row.try_get("created_at")?,
-            last_updated_at: row.try_get("last_updated_at")?,
-            source: template_source,
-            allowed_caps: row.try_get("allowed_caps")?,
-            vfs: Vfs {
-                vfs,
-            },
-            paused: false,
-        })
-    }
-}
-
 impl RuntimeProvider for ArRuntimeProvider {
     fn attempt_action(&self, bucket: &str) -> Result<(), khronos_runtime::Error> {
         self.ratelimits.runtime.check(bucket)
     }
 
-    async fn list_templates(&self) -> Result<Vec<khronos_runtime::traits::ir::runtime::Template>, khronos_runtime::Error> {
-        let mut base_templates = vec![self.builtins_template()];
-
-        let rows = sqlx::query(
-            r#"
-                SELECT id, source,
-                    -- data custom
-                    name, language, content,
-                    -- data shop
-                    shop_ref,
-                    -- metadata
-                    created_at, last_updated_at, allowed_caps, events, state
-                FROM attached_templates 
-                WHERE owner_type = $1
-                AND owner_id = $2"#,
-        )
-        .bind(self.id.tenant_type())
-        .bind(self.id.tenant_id())
-        .fetch_all(&self.state.pool)
-        .await?;
-
-        for row in rows.iter() {
-            base_templates.push(self.template_from_row(row)?);
-        }
-
-        Ok(base_templates)
-    }
-
-    fn builtin_template(&self) -> Result<runtime_ir::Template, khronos_runtime::Error> {
-        Ok(self.builtins_template())
-    }
-
-    async fn get_template(&self, id: &str) -> Result<Option<runtime_ir::Template>, khronos_runtime::Error> {
-        let id: sqlx::types::Uuid = id.parse().map_err(|_| "Invalid template ID")?;
-        let Some(row) = sqlx::query(
-            r#"
-                SELECT id, source,
-                    -- data custom
-                    name, language, content,
-                    -- data shop
-                    shop_ref,
-                    -- metadata
-                    created_at, last_updated_at, allowed_caps, events, state
-                FROM attached_templates 
-                WHERE owner_type = $1
-                AND owner_id = $2
-                AND id = $3"#,
-        )
-        .bind(self.id.tenant_type())
-        .bind(self.id.tenant_id())
-        .bind(id)
-        .fetch_optional(&self.state.pool)
-        .await? else {
-            return Ok(None);
-        };
-
-        Ok(Some(self.template_from_row(&row)?))
-    }
-
-    async fn create_template(&self, template: runtime_ir::CreateTemplate) -> Result<String, khronos_runtime::Error> {
-             let rec = sqlx::query(
-            r#"
-            INSERT INTO attached_templates (
-                owner_type, owner_id, source,
-                -- data custom
-                name, language, content,
-                -- data shop
-                shop_ref,
-                -- metadata
-                created_at, last_updated_at, allowed_caps, state
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW(), $8, $9)
-             RETURNING id
-            "#,
-        )
-        .bind(self.id.tenant_type())
-        .bind(self.id.tenant_id())
-        .bind(match &template.source {
-            runtime_ir::CreateTemplateSource::Custom { .. } => "custom",
-            runtime_ir::CreateTemplateSource::Shop { .. } => "shop",
-        })
-        .bind(match &template.source {
-            runtime_ir::CreateTemplateSource::Custom { name, .. } => Some(name),
-            _ => None,
-        })
-        .bind(match &template.source {
-            runtime_ir::CreateTemplateSource::Custom { language, .. } => Some(language),
-            _ => None,
-        })
-        .bind(match &template.source {
-            runtime_ir::CreateTemplateSource::Custom { content, .. } => Some(serde_json::to_value(content)?),
-            _ => None,
-        })
-        .bind(match &template.source {
-            // TODO: More validation here would be useful
-            runtime_ir::CreateTemplateSource::Shop { shop_listing } => Some(shop_listing),
-            _ => None,
-        })
-        .bind(&template.allowed_caps)
-        .bind(if template.paused { "paused" } else { "active" })
-        .fetch_one(&self.state.pool)
-        .await?;   
-        let id: sqlx::types::Uuid = rec.try_get("id")?;
-        Ok(id.to_string())
-    }
-
-    async fn update_template(&self, id: &str, template: runtime_ir::CreateTemplate) -> Result<(), khronos_runtime::Error> {
-        let id: sqlx::types::Uuid = id.parse().map_err(|_| "Invalid template ID")?;
-        sqlx::query(
-            r#"
-            UPDATE attached_templates
-            SET 
-                source = $1,
-                -- data custom
-                name = $2, language = $3, content = $4,
-                -- data shop
-                shop_ref = $5,
-                -- metadata
-                last_updated_at = NOW(), allowed_caps = $6, state = $7
-            WHERE id = $8 AND owner_type = $9 AND owner_id = $10
-            "#,
-        )
-        .bind(match &template.source {
-            runtime_ir::CreateTemplateSource::Custom { .. } => "custom",
-            runtime_ir::CreateTemplateSource::Shop { .. } => "shop",
-        })
-        .bind(match &template.source {
-            runtime_ir::CreateTemplateSource::Custom { name, .. } => Some(name),
-            _ => None,
-        })
-        .bind(match &template.source {
-            runtime_ir::CreateTemplateSource::Custom { language, .. } => Some(language),
-            _ => None,
-        })
-        .bind(match &template.source {
-            runtime_ir::CreateTemplateSource::Custom { content, .. } => Some(serde_json::to_value(content)?),
-            _ => None,
-        })
-        .bind(match &template.source {
-            runtime_ir::CreateTemplateSource::Shop { shop_listing } => Some(shop_listing),
-            _ => None,
-        })
-        .bind(&template.allowed_caps)
-        .bind(if template.paused { "paused" } else { "active" })
-        .bind(id)
-        .bind(self.id.tenant_type())
-        .bind(self.id.tenant_id())
-        .execute(&self.state.pool)
-        .await?;
-        Ok(())
-    }
-
-    async fn delete_template(&self, id: &str) -> Result<(), khronos_runtime::Error> {
-        let id: sqlx::types::Uuid = id.parse().map_err(|_| "Invalid template ID")?;
-        sqlx::query(
-            r#"DELETE FROM attached_templates 
-            WHERE id = $1 AND owner_type = $2 AND owner_id = $3"#,
-        )
-        .bind(id)
-        .bind(self.id.tenant_type())
-        .bind(self.id.tenant_id())
-        .execute(&self.state.pool)
-        .await?;
-        Ok(())
+    fn get_exposed_vfs(&self) -> Result<std::collections::HashMap<String, Vfs>, khronos_runtime::Error> {
+        Ok((&*EXPOSED_VFS).clone())
     }
 
     async fn stats(&self) -> Result<runtime_ir::RuntimeStats, khronos_runtime::Error> {
