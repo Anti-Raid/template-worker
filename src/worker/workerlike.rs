@@ -1,4 +1,4 @@
-use khronos_runtime::primitives::event::CreateEvent;
+use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
 
 use super::workervmmanager::Id;
 
@@ -17,7 +17,7 @@ pub trait WorkerLike {
     async fn kill(&self) -> Result<(), crate::Error>;
 
     /// Dispatch an event to the templates managed by this worker
-    async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<serde_json::Value, crate::Error>;
+    async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error>;
 
     /// Dispatch an event to the templates managed by this worker without waiting for the result
     async fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error>;

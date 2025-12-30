@@ -229,7 +229,8 @@ impl ObjectStore {
                     .presigned(aws_sdk_s3::presigning::PresigningConfig::expires_in(
                         duration,
                     )?)
-                    .await?;
+                    .await
+                    .map_err(|e| format!("failed to get presigned url: {e:?}"))?;
 
                 let url = url.uri();
 

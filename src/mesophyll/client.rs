@@ -3,39 +3,19 @@ use std::rc::Rc;
 use khronos_runtime::primitives::event::CreateEvent;
 use tokio::sync::Notify;
 
-use crate::{mesophyll::message::{MesophyllMessage, MesophyllRelayMessage}, templatedb::attached_templates::TemplateOwner, worker::workerdispatch::DispatchTemplateResult};
-
-#[async_trait::async_trait]
-pub trait MesophyllClientHandler {
-    /// Called when the Mesophyll client is ready with initial state
-    async fn ready(&self, client: &MesophyllClient) -> Result<(), crate::Error>;
-
-    /// Called when a relay message is received
-    async fn relay(&self, client: &MesophyllClient, msg: MesophyllRelayMessage) -> Result<(), crate::Error>;
-
-    /// Called when a dispatched event result is received
-    async fn dispatch_result(&self, client: &MesophyllClient, id: TemplateOwner, event: CreateEvent) -> DispatchTemplateResult;
-
-    /// Called when a scoped dispatched event result is received
-    async fn dispatch_scoped_result(&self, client: &MesophyllClient, id: TemplateOwner, event: CreateEvent, scopes: Vec<String>) -> DispatchTemplateResult;
-}
+use crate::worker::workerdispatch::WorkerDispatch;
 
 /// Mesophyll client, NOT THREAD SAFE
 #[derive(Clone)]
 pub struct MesophyllClient {
-    handler: Rc<dyn MesophyllClientHandler>,
-    ready: Rc<Notify>
+    dispatch: WorkerDispatch,
 }
 
 #[allow(dead_code)]
 impl MesophyllClient {
-    pub fn new<T>(handler: T) -> Self 
-    where
-        T: MesophyllClientHandler + 'static,
-    {
+    pub fn new(dispatch: WorkerDispatch) -> Self {
         Self {
-            handler: Rc::new(handler),
-            ready: Rc::new(Notify::new()),
+            dispatch,
         }
     }
 

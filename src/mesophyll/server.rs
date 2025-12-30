@@ -1,242 +1,217 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::{Arc, RwLock, Weak}, time::{Duration, Instant}};
 
 use dashmap::DashMap;
 use futures::{SinkExt, StreamExt};
-use khronos_runtime::primitives::event::CreateEvent;
-use tokio::{net::{TcpListener, TcpStream}, select, spawn, sync::{mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel}, oneshot::{Receiver, Sender, channel}}};
-use tokio_tungstenite::{WebSocketStream, accept_async, tungstenite::{Message, Utf8Bytes, protocol::{CloseFrame, frame::coding::CloseCode}}};
+use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
+use tokio::{select, spawn, sync::{Notify, mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel}, oneshot::{Receiver, Sender, channel}}};
 use tokio_util::sync::CancellationToken;
 
-use crate::{mesophyll::message::MesophyllMessage, templatedb::attached_templates::TemplateOwner, worker::workerprocesscomm::WorkerProcessCommDispatchResult};
+use crate::{mesophyll::message::{ClientMessage, ServerMessage}, worker::workervmmanager::Id};
 
-/// Data associated with a Mesophyll connection
-struct ConnectionData {
-    queue: UnboundedSender<MesophyllMessage>,
-    id: usize,
-}
+use axum::{
+    extract::{Path, State, WebSocketUpgrade, ws::WebSocket, ws::Message},
+    http::{StatusCode, HeaderMap},
+    response::IntoResponse,
+    routing::get,
+    Router,
+};
+
 
 #[derive(Clone)]
 pub struct MesophyllServer {
     cancel: CancellationToken,
-    idents: Arc<DashMap<usize, String>>,
-    send_queues: Arc<DashMap<usize, ConnectionData>>,
-    response_handlers: Arc<DashMap<u64, Sender<MesophyllClientServerResponse>>>,
+    idents: Arc<HashMap<usize, String>>,
+    conns: Arc<DashMap<usize, MesophyllServerConn>>,
 }
 
-#[allow(dead_code)]
 impl MesophyllServer {
-    /// Create a new Mesophyll server
-    pub async fn new(addr: String) -> Result<Self, crate::Error> {
+    pub async fn new(addr: String, idents: HashMap<usize, String>) -> Result<Self, crate::Error> {
         let s = Self {
             cancel: CancellationToken::new(),
-            idents: Arc::new(DashMap::new()),
-            send_queues: Arc::new(DashMap::new()),
-            response_handlers: Arc::new(DashMap::new()),
+            idents: Arc::new(idents),
+            conns: Arc::new(DashMap::new()),
         };
 
-        let s_ref = s.clone();
-        let listener = TcpListener::bind(addr).await?;
+        // Axum Router
+        let app = Router::new()
+            .route("/:worker_id", get(ws_handler))
+            .with_state(s.clone());
 
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        
+        log::info!("Mesophyll server listening...");
+        
+        // Spawn the server task
         spawn(async move {
-            s_ref.serve(listener).await;
+            axum::serve(listener, app).await.expect("Mesophyll server failed");
         });
 
         Ok(s)
     }
 
-    pub fn set_ident(&self, id: usize, session_key: String) {
-        self.idents.insert(id, session_key);
+    pub fn get_connection(&self, worker_id: usize) -> Option<MesophyllServerConn> {
+        self.conns.get(&worker_id).map(|r| r.value().clone())
+    }
+}
+
+/// WebSocket handler for Mesophyll server
+async fn ws_handler(
+    Path(worker_id): Path<usize>,
+    State(state): State<MesophyllServer>,
+    headers: HeaderMap,           // <--- 1. Extract Headers
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    let token = headers
+        .get("X-Mesophyll-Token")
+        .and_then(|val| val.to_str().ok())
+        .unwrap_or("");
+
+    let Some(expected_key) = state.idents.get(&worker_id) else {
+        log::warn!("Connection attempt from unknown worker ID: {}", worker_id);
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    // Verify token of the worker trying to connect to us before upgrading
+    if token != expected_key {
+        log::warn!("Invalid token for worker {}", worker_id);
+        return StatusCode::UNAUTHORIZED.into_response();
     }
 
-    async fn serve(&self, listener: TcpListener) {
-        loop {
-            select! {
-                Ok((stream, _)) = listener.accept() => {
-                    log::info!("New Mesophyll transport connection established");
+    ws.on_upgrade(move |socket| handle_socket(socket, worker_id, state))
+}
 
-                    let (tx, rx) = unbounded_channel();
+/// Handles a new Mesophyll server WebSocket connection
+async fn handle_socket(socket: WebSocket, id: usize, state: MesophyllServer) {
+    if state.conns.contains_key(&id) {
+        log::warn!("Worker {id} reconnection - overwriting old connection.");
+    }
 
-                    // Attempt a websocket connection handshake
-                    let s = match accept_async(stream).await {
-                        Ok(s) => s,
-                        Err(e) => {
-                            log::error!("Failed to accept Mesophyll websocket connection: {}", e);
-                            continue;
-                        }
-                    };
+    let weak_map = Arc::downgrade(&state.conns);
+    let conn = MesophyllServerConn::new(id, socket, weak_map);
 
-                    let s_ref = self.clone();
-                    spawn(async move {
-                        s_ref.handle(s, tx, rx).await;
-                    });
-                }
-                _ = self.cancel.cancelled() => {
-                    log::info!("Mesophyll transport shutting down");
-                    return;
-                }
+    state.conns.insert(id, conn);
+    log::info!("Worker {} connected", id);
+}
+
+pub struct HeartbeatInfo {
+    last_heartbeat: Instant,
+    vm_count: u64,
+}
+
+/// A Mesophyll server connection
+#[derive(Clone)]
+pub struct MesophyllServerConn {
+    id: usize,
+    send_queue: UnboundedSender<ServerMessage>,
+    dispatch_response_handlers: Arc<DashMap<u64, Sender<Result<KhronosValue, String>>>>,
+    heartbeat_info: Arc<RwLock<Option<HeartbeatInfo>>>,
+    heartbeat_notify: Arc<Notify>,
+    cancel: CancellationToken,
+    conns_map: Weak<DashMap<usize, MesophyllServerConn>>,
+}
+
+impl Drop for MesophyllServerConn {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+    }
+}
+
+impl MesophyllServerConn {
+    fn new(id: usize, stream: WebSocket, conns_map: Weak<DashMap<usize, MesophyllServerConn>>) -> Self {
+        let (send_queue, recv_queue) = unbounded_channel();
+        let s = Self {
+            id,
+            send_queue,
+            dispatch_response_handlers: Arc::new(DashMap::new()),
+            heartbeat_info: Arc::new(RwLock::new(None)),
+            heartbeat_notify: Arc::new(Notify::new()),
+            cancel: CancellationToken::new(),
+            conns_map: conns_map.clone(),
+        };
+
+        let s_ref = s.clone();
+        spawn(async move {
+            s_ref.run_loop(stream, recv_queue).await;
+
+            if let Some(map) = conns_map.upgrade() {
+                map.remove(&id);
             }
-        }
+        });
+        s
     }
 
-    async fn handle(&self, stream: WebSocketStream<TcpStream>, tx: UnboundedSender<MesophyllMessage>, mut rx: UnboundedReceiver<MesophyllMessage>) {
-        let (mut stream_tx, mut stream_rx) = stream.split();
-        let mut id = None;
+    async fn run_loop(&self, socket: WebSocket, mut rx: UnboundedReceiver<ServerMessage>) {
+        let (mut stream_tx, mut stream_rx) = socket.split();
+
         loop {
             select! {
                 Some(msg) = rx.recv() => {
-                    let Ok(bytes) = serde_json::to_string(&msg) else {
-                        log::error!("Failed to serialize Mesophyll message");
-                        continue;
+                    let Ok(json) = serde_json::to_string(&msg) else { 
+                        continue 
                     };
-
-                    stream_tx.send(Message::Text(Utf8Bytes::from(bytes))).await.unwrap_or_else(|e| {
-                        log::error!("Failed to send Mesophyll message: {}", e);
-                    });
+                    if let Err(e) = stream_tx.send(Message::Text(json.into())).await {
+                        log::error!("Failed to send Mesophyll message to worker {}: {}", self.id, e);
+                    }
                 }
                 Some(Ok(msg)) = stream_rx.next() => {
                     match msg {
-                        Message::Text(txt) => {
-                            let Ok(msg) = serde_json::from_str::<MesophyllMessage>(&txt) else {
-                                log::error!("Failed to deserialize Mesophyll message");
-                                continue;
-                            };
-
-                            let self_ref = self.clone();
-
-                            // TODO: Decide between spawning a new task or just doing it directly not in task
-                            match self_ref.process_message(tx.clone(), msg).await {
-                                Ok(MesophyllStateChange::Identified { id: new_id }) => {
-                                    id = Some(new_id);
-                                }
-                                Ok(MesophyllStateChange::None) => {}
-                                Err(e) => {
-                                    log::error!("Error processing Mesophyll message: {}", e);
-                                }
+                        Message::Text(text) => {
+                            if let Ok(client_msg) = serde_json::from_str::<ClientMessage>(&text) {
+                                self.handle_message(client_msg).await;
                             }
                         }
-                        Message::Close(frame) => {
-                            log::info!("Mesophyll transport connection closed: {:?}", frame);
-                            if let Some(conn_id) = id {
-                                self.send_queues.remove(&conn_id);
-                            }
-                            return;
-                        }
-                        _ => {
-                            log::warn!("Mesophyll transport received unsupported message type");
-                        }
+                        Message::Close(_) => {
+                            log::info!("Mesophyll server connection {} closed by client", self.id);
+                            break;
+                        },
+                        _ => {}
                     }
                 }
                 _ = self.cancel.cancelled() => {
-                    log::info!("Mesophyll transport connection shutting down");
-                    if let Some(conn_id) = id {
-                        self.send_queues.remove(&conn_id);
-                    }
-                    let mut stream = stream_tx.reunite(stream_rx).expect("Failed to reunite websocket stream");
-                    if let Err(e) = stream.close(Some(CloseFrame {
-                        code: CloseCode::Again,
-                        reason: "Server shutting down".into(),
-                    })).await {
-                        log::error!("Error shutting down Mesophyll transport connection: {}", e);
-                    }
-                    return;
+                    log::info!("Mesophyll server connection {} cancelling", self.id);
+                    break;
+                }
+                else => {
+                    log::info!("Mesophyll server connection {} shutting down", self.id);
+                    break;
                 }
             }
         }
     }
 
-    async fn process_message(&self, tx: UnboundedSender<MesophyllMessage>, event: MesophyllMessage) -> Result<MesophyllStateChange, crate::Error> {
-        match event {
-            MesophyllMessage::Identify { id, session_key } => {
-                let Some(stored_key) = self.idents.get(&id) else {
-                    log::warn!("Mesophyll server received Identify message with unknown id: {}", id);
-                    return Ok(MesophyllStateChange::None);
-                };
-
-                if *stored_key.value() != session_key {
-                    log::warn!("Mesophyll server received Identify message with invalid session key for id: {}", id);
-                    return Ok(MesophyllStateChange::None);
-                }
-
-                log::info!("Mesophyll server identified client with id: {}", id);
-                self.send_queues.insert(
-                    id,
-                    ConnectionData {
-                        queue: tx,
-                        id
-                    },
-                );
-
-                return Ok(MesophyllStateChange::Identified { id });
-            }
-            MesophyllMessage::Ready {} => {
-                // Nothing server can do.
-                log::warn!("Mesophyll server received unexpected Ready message");
-            }
-            MesophyllMessage::Relay { msg, req_id } => {
-                // Relay message to all connected clients
-                for entry in self.send_queues.iter() {
-                    let conn = entry.value();
-                    match conn.queue.send(MesophyllMessage::Relay { msg: msg.clone(), req_id }) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            log::error!("Failed to relay Mesophyll message to client {}: {}", conn.id, e);
-                        }
-                    }
+    async fn handle_message(&self, msg: ClientMessage) {
+        match msg {
+            ClientMessage::DispatchResponse { req_id, result } => {
+                if let Some((_, tx)) = self.dispatch_response_handlers.remove(&req_id) {
+                    let _ = tx.send(result);
                 }
             }
-            MesophyllMessage::DispatchEvent { .. } => {
-                // Nothing server can do.
-                log::warn!("Mesophyll server received unsupported DispatchEvent message");
-            }
-            MesophyllMessage::DispatchScopedEvent { .. } => {
-                // Nothing server can do.
-                log::warn!("Mesophyll server received unsupported DispatchScopedEvent message");
-            }
-            MesophyllMessage::ResponseAck { req_id } => {
-                if let Some(handler) = self.response_handlers.remove(&req_id) {
-                    let _ = handler.1.send(MesophyllClientServerResponse::Ack);
-                } else {
-                    log::warn!("Mesophyll server received ResponseAck for unknown req_id: {}", req_id);
-                }
-            }
-            MesophyllMessage::ResponseError { error, req_id } => {
-                if let Some(handler) = self.response_handlers.remove(&req_id) {
-                    let _ = handler.1.send(MesophyllClientServerResponse::Error(error));
-                } else {
-                    log::warn!("Mesophyll server received ResponseError for unknown req_id: {}", req_id);
-                }
-            }
-            MesophyllMessage::ResponseDispatchResult { result, req_id } => {
-                if let Some(handler) = self.response_handlers.remove(&req_id) {
-                    let _ = handler.1.send(MesophyllClientServerResponse::DispatchResult(result));
-                } else {
-                    log::warn!("Mesophyll server received ResponseDispatchResult for unknown req_id: {}", req_id);
-                }
+            ClientMessage::Heartbeat { vm_count } => {
+                // SAFETY: We do not hold the lock across an await point
+                let mut lock = self.heartbeat_info.write().expect("Failed to acquire heartbeat info write lock");
+                *lock = Some(HeartbeatInfo {
+                    last_heartbeat: Instant::now(),
+                    vm_count,
+                });
             }
         }
-
-        Ok(MesophyllStateChange::None)
     }
 
-    // Sends a message to a specific Mesophyll client
-    pub async fn send(&self, id: usize, message: MesophyllMessage) -> Result<(), crate::Error> {
-        let Some(conn) = self.send_queues.get(&id) else {
-            return Err("Mesophyll client not connected".into());
-        };
-
-        match conn.queue.send(message) {
+    // Sends a message to the connected client
+    fn send(&self, message: ServerMessage) -> Result<(), crate::Error> {
+        match self.send_queue.send(message) {
             Ok(_) => Ok(()),
             Err(e) => {
-                Err(format!("Failed to send Mesophyll message to client {}: {}", id, e).into())
+                Err(format!("Failed to send Mesophyll message to client: {}", e).into())
             }
         }
     }
 
     // Internal helper method to register a response handler for the next req_id, returning the req_id
-    fn register_response_handler(&self) -> (u64, Receiver<MesophyllClientServerResponse>) {
+    fn register_dispatch_response_handler(&self) -> (u64, Receiver<Result<KhronosValue, String>>) {
         let mut req_id = rand::random::<u64>();
         loop {
-            if !self.response_handlers.contains_key(&req_id) {
+            if !self.dispatch_response_handlers.contains_key(&req_id) {
                 break;
             } else {
                 req_id = rand::random::<u64>();
@@ -244,39 +219,34 @@ impl MesophyllServer {
         }
 
         let (tx, rx) = channel();
-        self.response_handlers.insert(req_id, tx);
+        self.dispatch_response_handlers.insert(req_id, tx);
         (req_id, rx)
     }
 
-    // Dispatches an event to a specific Mesophyll client and waits for a response
-    pub async fn dispatch_event(&self, worker_id: usize, owner: TemplateOwner, event: CreateEvent, scopes: Option<Vec<String>>) -> Result<WorkerProcessCommDispatchResult, crate::Error> {
-        let (req_id, rx) = self.register_response_handler();
+    // Dispatches an event and waits for a response
+    pub async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
+        let (req_id, rx) = self.register_dispatch_response_handler();
 
-        let message = if let Some(scopes) = scopes {
-            MesophyllMessage::DispatchScopedEvent { id: owner, event, scopes, req_id }
-        } else {
-            MesophyllMessage::DispatchEvent { id: owner, event, req_id }
-        };
-
-        self.send(worker_id, message).await?;
-
-        match rx.await? {
-            MesophyllClientServerResponse::DispatchResult(result) => Ok(result),
-            MesophyllClientServerResponse::Error(err) => Err(err.into()),
-            MesophyllClientServerResponse::Ack => Err("Unexpected Ack response for DispatchEvent".into()),
+        let message = ServerMessage::DispatchEvent { id, event, req_id };
+        match self.send(message) {
+            Ok(_) => {},
+            Err(e) => {
+                self.dispatch_response_handlers.remove(&req_id);
+                return Err(e);
+            }
+        }
+        match tokio::time::timeout(Duration::from_secs(30), rx).await {
+            Ok(Ok(r)) => {
+                Ok(r?)
+            },
+            Ok(Err(_)) => {
+                self.dispatch_response_handlers.remove(&req_id);
+                Err("Dispatch event response channel closed unexpectedly".into())
+            }
+            Err(e) => {
+                self.dispatch_response_handlers.remove(&req_id);
+                return Err(format!("Dispatch event timed out: {}", e).into());
+            }
         }
     }
-}
-
-/// Result of processing a Mesophyll message
-enum MesophyllStateChange {
-    None,
-    Identified { id: usize },
-}
-
-/// Response from Mesophyll client to server
-enum MesophyllClientServerResponse {
-    Ack,
-    Error(String),
-    DispatchResult(WorkerProcessCommDispatchResult)
 }

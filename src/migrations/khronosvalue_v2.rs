@@ -100,7 +100,6 @@ impl From<KhronosValue> for KhronosProxy {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "value")]
 pub enum KhronosValueV2 {
     Text(String),
     Integer(i64),

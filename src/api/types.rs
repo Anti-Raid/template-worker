@@ -14,6 +14,7 @@ use serenity::all::UserId;
 use serenity::all::CommandOptionType;
 use serenity::all::CommandType;
 use ts_rs::TS;
+use khronos_runtime::utils::khronos_value::KhronosValue;
 
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema, TS)]
 #[ts(export)]
@@ -85,14 +86,6 @@ pub struct BaseGuildUserInfo {
     pub bot_roles: Vec<RoleId>,
     /// List of all channels in the server
     pub channels: Vec<GuildChannelWithPermissions>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
-pub struct SettingsOperationRequest {
-    pub fields: Value,
-    pub operation: String,
-    pub setting: String,
 }
 
 #[derive(Serialize, Deserialize, utoipa::ToSchema, TS)]
@@ -324,51 +317,33 @@ pub struct ApiCreateCommandOptionChoice {
     pub value: Value,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema, TS)]
 #[ts(export)]
-#[serde(tag = "type")]
-pub enum ApiDispatchResult<T> {
-    Ok {
-        id: String,
-        value: T,
-    },
-    Err {
-        id: String,
-        value: String,
-    },
+pub struct PublicLuauExecute {
+    /// The event name, must start with 'Web' for security reasons
+    pub name: String,
+
+    #[schema(value_type = KhronosValueApi)]
+    #[ts(as = "KhronosValueApi")]
+    /// The event data
+    pub data: KhronosValue,
 }
 
-impl<T> ApiDispatchResult<T> {
-    pub fn id(&self) -> &String {
-        match self {
-            ApiDispatchResult::Ok { id, .. } => id,
-            ApiDispatchResult::Err { id, .. } => id,
-        }
-    }
+// Type for documentation and TypeScript generation purposes
+#[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema)]
+pub enum KhronosValueApi {
+    Text(String),
+    Integer(i64),
+    UnsignedInteger(u64),
+    Float(f64),
+    Boolean(bool),
+    Buffer(Vec<u8>),   
+    Vector((f32, f32, f32)), 
+    Map(Vec<(KhronosValueApi, KhronosValueApi)>),
+    List(Vec<KhronosValueApi>),
+    Timestamptz(chrono::DateTime<chrono::Utc>),
+    Interval(chrono::Duration),
+    TimeZone(String),
+    LazyStringMap(HashMap<String, String>), 
+    Null,
 }
-
-/// New type purely for documentation purposes
-#[derive(utoipa::ToSchema)]
-#[allow(dead_code)]
-pub struct SettingDispatchDocType(
-    pub HashMap<
-        String, 
-        ApiDispatchResult<Vec<crate::events::Setting>>
-    >
-);
-
-pub type RawSettingsDispatchResult = Vec<ApiDispatchResult<Vec<crate::events::Setting>>>;
-pub type RawSettingsExecuteResult = Vec<ApiDispatchResult<serde_json::Value>>;
-pub type SettingDispatch = HashMap<String, ApiDispatchResult<Vec<crate::events::Setting>>>;
-
-/// New type purely for documentation purposes
-#[derive(utoipa::ToSchema)]
-#[allow(dead_code)]
-pub struct SettingExecuteDispatchDocType(
-    pub HashMap<
-        String, 
-        ApiDispatchResult<serde_json::Value>
-    >
-);
-
-pub type SettingExecuteDispatch = HashMap<String, ApiDispatchResult<serde_json::Value>>;

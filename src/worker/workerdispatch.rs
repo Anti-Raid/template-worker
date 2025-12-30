@@ -1,9 +1,10 @@
-use khronos_runtime::primitives::event::CreateEvent;
+use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
 use crate::{events::StartupEvent, worker::{keyexpirychannel::KeyExpiryChannel, workerfilter::WorkerFilter, workerstate::WorkerState}};
 use super::workervmmanager::{Id, WorkerVmManager, VmData};
 use super::vmcontext::TemplateContextProvider;
 use crate::events::AntiraidEvent;
 use crate::dispatch::parse_event;
+use khronos_runtime::rt::mlua;
 
 /// A WorkerDispatch manages the dispatching of events to a Luau VM
 /// with some utility methods
@@ -68,7 +69,7 @@ impl WorkerDispatch {
     }
 
     /// Dispatches an event to the appropriate VM based on the tenant ID
-    pub async fn dispatch_event(&self, id: Id, event: CreateEvent) -> khronos_runtime::rt::mlua::Result<serde_json::Value> {
+    pub async fn dispatch_event(&self, id: Id, event: CreateEvent) -> mlua::Result<KhronosValue> {
         use khronos_runtime::rt::mlua;
 
         let tenant_state = self.vm_manager.worker_state().get_cached_tenant_state_for(id)
@@ -76,7 +77,7 @@ impl WorkerDispatch {
 
         if !tenant_state.events.contains(event.name()) {
             // Event not registered for this tenant, skip
-            return Ok(serde_json::Value::Null);
+            return Ok(KhronosValue::Null);
         }
 
         let vm_data = self.vm_manager.get_vm_for(id).await
@@ -95,10 +96,9 @@ impl WorkerDispatch {
             vm_data.clone(),
             self.key_expiry_chan.clone()
         );
-        let event = event.into_context();
         let context = vm_data.runtime.create_context(provider, event)?;
-        match vm_data.runtime.call_in_scheduler(func, context).await {
-            Ok(result) => Ok(vm_data.runtime.from_value(result)?),
+        match vm_data.runtime.call_in_scheduler::<_, KhronosValue>(func, context).await {
+            Ok(result) => Ok(result),
             Err(e) => {
                 let err_str = e.to_string();
                 tokio::task::spawn_local(async move {

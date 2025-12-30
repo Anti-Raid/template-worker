@@ -1,4 +1,5 @@
 use khronos_runtime::primitives::event::CreateEvent;
+use khronos_runtime::utils::khronos_value::KhronosValue;
 use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 use tokio::sync::oneshot::Sender as OneShotSender;
 use std::time::Duration;
@@ -18,7 +19,7 @@ enum WorkerThreadMessage {
     DispatchEvent {
         id: Id,
         event: CreateEvent,
-        tx: Option<OneShotSender<Result<serde_json::Value, crate::Error>>>,
+        tx: Option<OneShotSender<Result<KhronosValue, crate::Error>>>,
     },
 }
 
@@ -46,7 +47,7 @@ pub struct DispatchEvent {
 }
 
 impl PushableMessage for DispatchEvent {
-    type Response = Result<serde_json::Value, crate::Error>;
+    type Response = Result<KhronosValue, crate::Error>;
 
     fn into_message(self, tx: Option<OneShotSender<Self::Response>>) -> WorkerThreadMessage {
         WorkerThreadMessage::DispatchEvent {
@@ -171,7 +172,7 @@ impl WorkerLike for WorkerThread {
         self.send(Kill {}).await?
     }
 
-    async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<serde_json::Value, crate::Error> {
+    async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
         self.send(DispatchEvent {
             id,
             event,

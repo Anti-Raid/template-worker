@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use khronos_runtime::primitives::event::CreateEvent;
+use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
 use serde::{de::DeserializeOwned, Serialize};
 
 use super::{workerlike::WorkerLike, workervmmanager::Id};
@@ -117,7 +117,7 @@ impl WorkerProcessCommServer for WorkerProcessCommHttp2Master {
         Ok(())
     }
 
-    async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<serde_json::Value, crate::Error> {
+    async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
         let id = WorkerProcessCommTenantId::from(id);
         
         let request = WorkerProcessCommHttp2DispatchEventToTemplates {
@@ -205,6 +205,7 @@ mod http2_endpoints {
         http::{HeaderMap, StatusCode},
         Json,
     };
+    use khronos_runtime::utils::khronos_value::KhronosValue;
 
     fn verify_token(
         headers: &HeaderMap,
@@ -226,7 +227,7 @@ mod http2_endpoints {
         State(data): State<super::WorkerProcessCommHttp2Worker>,
         headers: HeaderMap,
         Json(request): Json<super::WorkerProcessCommHttp2DispatchEventToTemplates>,
-    ) -> Result<Json<serde_json::Value>, (StatusCode, Json<String>)> {
+    ) -> Result<Json<KhronosValue>, (StatusCode, Json<String>)> {
         verify_token(&headers, &data.token)?;
 
         let result = data.worker.dispatch_event(request.id.into(), request.event).await

@@ -1,20 +1,19 @@
-use std::collections::HashMap;
-
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     Json,
 };
+use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
+use serenity::all::UserId;
 use super::server::AppData;
-use crate::{api::types::ApiDispatchResult, worker::workervmmanager::Id};
-use crate::events::AntiraidEvent;
+use crate::{api::types::{KhronosValueApi, PublicLuauExecute}, worker::workervmmanager::Id};
 use super::extractors::InternalEndpoint;
 use super::server::{ApiResponse, ApiError};
-use crate::dispatch::parse_event;
 
 /// Dispatch Event
 /// 
-/// Dispatches a new event
+/// Dispatches a new event under the user account. Note that the `Web` event name restriction does not
+/// apply here (along with checking if a guild contains the bot) as this is an internal API.
 #[utoipa::path(
     post, 
     tag = "Internal API",
@@ -26,7 +25,7 @@ use crate::dispatch::parse_event;
         ("guild_id" = String, description = "The ID of the guild to dispatch the event to")
     ),
     responses(
-        (status = 204, description = "Event dispatched successfully"),
+        (status = 204, description = "Event dispatched successfully", body = KhronosValueApi),
         (status = 400, description = "API Error", body = ApiError),
     )
 )]
@@ -35,55 +34,24 @@ pub(super) async fn dispatch_event(
         data,
         ..
     }): State<AppData>,
-    InternalEndpoint { .. }: InternalEndpoint,
+    InternalEndpoint { user_id }: InternalEndpoint,
     Path(guild_id): Path<serenity::all::GuildId>,
-    Json(event): Json<AntiraidEvent>,
-) -> ApiResponse<()> {
-    let event = parse_event(&event).map_err(|e| (StatusCode::BAD_REQUEST, Json(e.to_string().into())))?;
+    Json(req): Json<PublicLuauExecute>,
+) -> ApiResponse<KhronosValue> {
+    // Make a event
+    let user_id: UserId = user_id.parse()
+        .map_err(|e: serenity::all::ParseIdError| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
-    data.worker.dispatch_event_nowait(Id::GuildId(guild_id), event)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
+    let event = CreateEvent::new_khronos_value(req.name, Some(user_id.to_string()), req.data);
 
-    Ok(Json(()))
-}
-
-type DispatchResponse = HashMap<String, ApiDispatchResult<serde_json::Value>>;
-
-/// Dispatch Event And Wait
-/// 
-/// Dispatches a new event and waits for a response
-#[utoipa::path(
-    post, 
-    tag = "Internal API",
-    path = "/i/dispatch-event/{guild_id}/@wait",
-    security(
-        ("InternalAuth" = []) 
-    ),
-    params(
-        ("guild_id" = String, description = "The ID of the guild to dispatch the event to")
-    ),
-    responses(
-        (status = 200, description = "Event dispatched successfully", body = DispatchResponse),
-        (status = 400, description = "API Error", body = ApiError),
+    let resp = data.worker.dispatch_event(
+        Id::GuildId(guild_id),
+        event,
     )
-)]
-pub(super) async fn dispatch_event_and_wait(
-    State(AppData {
-        data,
-        ..
-    }): State<AppData>,
-    InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
-    Path(guild_id): Path<serenity::all::GuildId>,
-    Json(event): Json<AntiraidEvent>,
-) -> ApiResponse<serde_json::Value> {
-    let event = parse_event(&event).map_err(|e| (StatusCode::BAD_REQUEST, Json(e.to_string().into())))?;
-
-    let result = data.worker.dispatch_event(Id::GuildId(guild_id), event)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
-    Ok(Json(result))
+    Ok(Json(resp))
 }
 
 /// Get Thread Count

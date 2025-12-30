@@ -86,7 +86,6 @@ pub fn create(
     // Internal routes
     let internal_routes = [
         routes!(internal_api::dispatch_event),
-        routes!(internal_api::dispatch_event_and_wait),
         routes!(internal_api::get_threads_count),
         //routes!(internal_api::get_vm_metrics_by_tid),
         //routes!(internal_api::get_vm_metrics_for_all),
@@ -96,8 +95,7 @@ pub fn create(
 
     // Public routes
     let public_routes = [
-        routes!(public_api::get_settings_for_guild_user),
-        routes!(public_api::execute_setting_for_guild_user),
+        routes!(public_api::dispatch_event),
         routes!(public_api::get_user_guilds),
         routes!(public_api::base_guild_user_info),
         routes!(public_api::create_oauth2_session),

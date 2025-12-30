@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use khronos_runtime::primitives::event::CreateEvent;
+use khronos_runtime::utils::khronos_value::KhronosValue;
 use tokio::process::Command;
 use tokio::sync::oneshot::{Sender as OneshotSender};
 use tokio::sync::mpsc::{
@@ -23,7 +24,7 @@ enum ProcessServerMessage {
     DispatchEvent {
         id: Id,
         event: CreateEvent,
-        tx: Option<OneshotSender<Result<serde_json::Value, crate::Error>>>,
+        tx: Option<OneshotSender<Result<KhronosValue, crate::Error>>>,
     },
 }
 
@@ -51,7 +52,7 @@ pub struct DispatchEvent {
 }
 
 impl PushableMessage for DispatchEvent {
-    type Response = Result<serde_json::Value, crate::Error>;
+    type Response = Result<KhronosValue, crate::Error>;
 
     fn into_message(self, tx: Option<OneshotSender<Self::Response>>) -> ProcessServerMessage {
         ProcessServerMessage::DispatchEvent {
@@ -270,7 +271,7 @@ impl WorkerLike for WorkerProcessHandle {
         self.send(Kill {}).await?
     }
 
-    async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<serde_json::Value, crate::Error> {
+    async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
         self.send(DispatchEvent {
             id,
             event,

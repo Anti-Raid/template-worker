@@ -37,7 +37,7 @@ tokio-tungstenite = { version = "0.28" }
 strum = { version = "0.26", features = ["derive"] }
 
 # http
-axum = { version = "0.8.4", features = ["macros"] }
+axum = { version = "0.8.4", features = ["macros", "ws"] }
 tower-http = { version = "0.5.2", features = ["trace", "cors"] }
 hyper = "1"
 hyper-util = { version = "0.1", features = ["tokio", "server-auto", "http1"] }

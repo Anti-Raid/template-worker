@@ -14,15 +14,10 @@ use crate::api::types::ApiPartialRole;
 use crate::api::types::AuthorizeRequest;
 use crate::api::types::GetStatusResponse;
 use crate::api::types::GuildChannelWithPermissions;
-use crate::api::types::RawSettingsDispatchResult;
-use crate::api::types::RawSettingsExecuteResult;
-use crate::api::types::SettingDispatch;
-use crate::api::types::SettingExecuteDispatch;
+use crate::api::types::KhronosValueApi;
+use crate::api::types::PublicLuauExecute;
 use crate::api::types::ShardConn;
 use crate::api::types::UserSessionList;
-use crate::events::AntiraidEvent;
-use crate::events::GetSettingsEvent;
-use crate::events::SettingExecuteEvent;
 use crate::worker::workervmmanager::Id;
 use axum::{
     extract::{Path, Query, State},
@@ -30,18 +25,19 @@ use axum::{
 };
 use axum::Json;
 use chrono::Utc;
+use khronos_runtime::primitives::event::CreateEvent;
+use khronos_runtime::utils::khronos_value::KhronosValue;
 use moka::future::Cache;
 use serenity::all::UserId;
 use std::sync::LazyLock;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use sqlx::Row;
 
 use super::types::{
-    BaseGuildUserInfo, SettingsOperationRequest, TwState,
+    BaseGuildUserInfo, TwState,
     DashboardGuild, DashboardGuildData, PartialUser, CreateUserSessionResponse, AuthorizedSession,
-    CreateUserSession, SettingDispatchDocType, SettingExecuteDispatchDocType
+    CreateUserSession
 };
-use crate::dispatch::parse_event;
 use super::server::{AppData, ApiResponse, ApiError, ApiErrorCode}; 
 
 static BOT_HAS_GUILD_CACHE: LazyLock<Cache<serenity::all::GuildId, ()>> = LazyLock::new(|| {
@@ -70,15 +66,11 @@ async fn check_guild_has_bot(
     Ok(())
 }
 
-/// Get Settings For Guild User
-/// 
-/// Gets the settings for a guild given a user. Note that it is perfectly
-/// allowed for the user to not be in the guild itself (e.g. ban appeal type settings
-/// in the future)
+/// Dispatch an event to a guild and wait for a response
 #[utoipa::path(
     get, 
     tag = "Public API",
-    path = "/guilds/{guild_id}/settings",
+    path = "/guilds/{guild_id}/events",
     security(
         ("UserAuth" = []) 
     ),
@@ -86,118 +78,40 @@ async fn check_guild_has_bot(
         ("guild_id" = String, description = "The ID of the guild to get the user info for")
     ),
     responses(
-        (status = 200, description = "Settings for the guild", body = SettingDispatchDocType),
+        (status = 200, description = "The results of the dispatched event", body = KhronosValueApi),
         (status = 400, description = "API Error", body = ApiError),
     )
 )]
-pub(super) async fn get_settings_for_guild_user(
+pub(super) async fn dispatch_event(
     State(AppData {
         data,
         ..
     }): State<AppData>,
-    AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
+    AuthorizedUser { user_id, .. }: AuthorizedUser,
     Path(guild_id): Path<serenity::all::GuildId>,
-) -> ApiResponse<SettingDispatch> {
-    // Make a GetSetting event
+    Json(req): Json<PublicLuauExecute>,
+) -> ApiResponse<KhronosValue> {
+    if !req.name.starts_with("Web") {
+        return Err((StatusCode::FORBIDDEN, Json("Event name must start with 'Web' for security reasons".into())));
+    }
+
+    // Make a event
     let user_id: UserId = user_id.parse()
         .map_err(|e: serenity::all::ParseIdError| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
     // Ensure the bot is in the guild
     check_guild_has_bot(&data, guild_id).await?;
 
-    let event = parse_event(&AntiraidEvent::GetSettings(GetSettingsEvent {
-        author: user_id,
-    }))
-    .map_err(|e| (StatusCode::BAD_REQUEST, Json(e.to_string().into())))?;
+    let event = CreateEvent::new_khronos_value(req.name, Some(user_id.to_string()), req.data);
 
-    let results = serde_json::from_value::<RawSettingsDispatchResult>(
-        data.worker.dispatch_event(
-            Id::GuildId(guild_id),
-            event,
-        )
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?
+    let resp = data.worker.dispatch_event(
+        Id::GuildId(guild_id),
+        event,
     )
+    .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
-    let mut results_map = HashMap::new();
-    for result in results {
-        results_map.insert(result.id().clone(), result);
-    }
-
-    Ok(Json(results_map))
-}
-
-/// Execute Setting For User
-///
-/// Executes a setting for a guild given a user. Note that it is perfectly
-/// allowed for the user to not be in the guild itself (e.g. ban appeal type settings
-/// in the future)
-#[utoipa::path(
-    post, 
-    tag = "Public API",
-    path = "/guilds/{guild_id}/settings",
-    security(
-        ("UserAuth" = []) 
-    ),
-    params(
-        ("guild_id" = String, description = "The ID of the guild to get the user info for")
-    ),
-    responses(
-        (status = 200, description = "Settings for the guild", body = SettingExecuteDispatchDocType),
-        (status = 400, description = "API Error", body = ApiError),
-    )
-)]
-pub(super) async fn execute_setting_for_guild_user(
-    State(AppData {
-        data,
-        ..
-    }): State<AppData>,
-    AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
-    Path(guild_id): Path<serenity::all::GuildId>,
-    Json(req): Json<SettingsOperationRequest>,
-) -> ApiResponse<SettingExecuteDispatch> {
-    let user_id: UserId = user_id.parse()
-        .map_err(|e: serenity::all::ParseIdError| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
-
-    // Ensure the bot is in the guild
-    check_guild_has_bot(&data, guild_id).await?;
-
-    let guild_exists = crate::sandwich::has_guilds(&data.reqwest, vec![guild_id])
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
-
-    if guild_exists.is_empty() || guild_exists[0] == 0 {
-        return Err((StatusCode::NOT_FOUND, Json("Guild to get settings for does not have the bot?".into())));
-    }
-
-    let op = req.operation;
-
-    // Make a ExecuteSetting event
-    let event = parse_event(&AntiraidEvent::ExecuteSetting(SettingExecuteEvent {
-        id: req.setting,
-        op,
-        author: user_id,
-        fields: req.fields,
-    }))
-    .map_err(|e| (StatusCode::BAD_REQUEST, Json(e.to_string().into())))?;
-
-    let results = serde_json::from_value::<RawSettingsExecuteResult>(
-        data.worker.dispatch_event(
-            Id::GuildId(guild_id),
-            event,
-        )
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?
-    )
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
-
-    let mut results_map = HashMap::new();
-    for result in results {
-        results_map.insert(result.id().clone(), result);
-    }
-
-    Ok(Json(results_map))
+    Ok(Json(resp))
 }
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]

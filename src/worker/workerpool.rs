@@ -1,4 +1,5 @@
 use khronos_runtime::primitives::event::CreateEvent;
+use khronos_runtime::utils::khronos_value::KhronosValue;
 
 use crate::worker::workerlike::WorkerLike;
 use crate::worker::workerthread::WorkerThread;
@@ -87,7 +88,7 @@ impl<T: WorkerLike + Send + Sync> WorkerLike for WorkerPool<T> {
         Ok(())
     }
 
-    async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<serde_json::Value, crate::Error> {
+    async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
         self.get_worker_for(id).dispatch_event(id, event).await
     }
 

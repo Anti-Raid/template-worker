@@ -1,4 +1,4 @@
-use khronos_runtime::primitives::event::CreateEvent;
+use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
 use crate::worker::workervmmanager::Id;
 
 #[async_trait::async_trait]
@@ -16,7 +16,7 @@ pub trait WorkerProcessCommServer: Send + Sync {
     fn start_env(&self) -> Vec<(String, String)>;
 
     /// Dispatch an event to the templates managed by this worker
-    async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<serde_json::Value, crate::Error>;
+    async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error>;
 
     // Regenerate the cache for a tenant
     //async fn regenerate_cache(&self, id: Id) -> Result<(), crate::Error>;

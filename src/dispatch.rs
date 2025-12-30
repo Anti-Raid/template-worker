@@ -34,6 +34,7 @@ pub async fn discord_event_dispatch(
             } else {
                 event.ty
             },
+            None,
             event.data,
         ),
     )
@@ -46,6 +47,7 @@ pub async fn discord_event_dispatch(
 pub fn parse_event(event: &AntiraidEvent) -> Result<CreateEvent, crate::Error> {
     Ok(CreateEvent::new(
         event.to_string(),
+        None,
         event.to_value()?,
     ))
 }
