@@ -886,7 +886,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
     }
 
     fn bucket_name(&self) -> String {
-        crate::objectstore::guild_bucket(self.guild_id)
+        self.bucket.prefix()
     }
 
     async fn list_files(
@@ -897,8 +897,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
             .state
             .object_store
             .list_files(
-                &crate::objectstore::guild_bucket(self.guild_id),
-                prefix.as_ref().map(|x| x.as_str()),
+                BucketWithPrefix::new(self.bucket, prefix.as_deref())
             )
             .await?
             .into_iter()
@@ -915,7 +914,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
         Ok(self
             .state
             .object_store
-            .exists(&crate::objectstore::guild_bucket(self.guild_id), &key)
+            .exists(BucketWithKey::new(self.bucket, &key))
             .await?)
     }
 
@@ -923,7 +922,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
         Ok(self
             .state
             .object_store
-            .download_file(&crate::objectstore::guild_bucket(self.guild_id), &key)
+            .download_file(BucketWithKey::new(self.bucket, &key))
             .await?)
     }
 
@@ -936,8 +935,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
             .state
             .object_store
             .get_url(
-                &crate::objectstore::guild_bucket(self.guild_id),
-                &key,
+                BucketWithKey::new(self.bucket, &key),
                 expiry,
             )
             .await?)
@@ -958,7 +956,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
 
         self.state
             .object_store
-            .upload_file(&crate::objectstore::guild_bucket(self.guild_id), &key, data)
+            .upload_file(BucketWithKey::new(self.bucket, &key), data)
             .await?;
 
         Ok(())
@@ -968,7 +966,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
         Ok(self
             .state
             .object_store
-            .delete(&crate::objectstore::guild_bucket(self.guild_id), &key)
+            .delete(BucketWithKey::new(self.bucket, &key))
             .await?)
     }
 }
