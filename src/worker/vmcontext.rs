@@ -169,7 +169,7 @@ impl KhronosContext for TemplateContextProvider {
 
     fn objectstorage_provider(&self) -> Option<Self::ObjectStorageProvider> {
         Some(ArObjectStorageProvider {
-            guild_id: self.guild_id()?,
+            bucket: Bucket::Guild(self.guild_id()?),
             state: self.state.clone(),
             kv_constraints: self.kv_constraints.clone(),
             ratelimits: self.ratelimits.clone(),
@@ -875,7 +875,7 @@ impl DataStoreProvider for ArDataStoreProvider {
 
 #[derive(Clone)]
 pub struct ArObjectStorageProvider {
-    guild_id: serenity::all::GuildId,
+    bucket: Bucket,
     ratelimits: Rc<Ratelimits>,
     state: WorkerState,
     kv_constraints: LuaKVConstraints,
