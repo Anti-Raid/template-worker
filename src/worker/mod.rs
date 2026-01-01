@@ -16,8 +16,6 @@
 //! - WorkerThread: Allows spinning up a worker thread that can be used to run the worker system
 //! - WorkerLike: While not a proper structure, WorkerLike defines the basic needs for a Worker unit
 //! - WorkerFilter: Allows filtering automatic event dispatches within a worker based on tenant ID and worker ID
-//! - KeyExpiryChannel: Provides a channel for key expiries to be sent to the worker system while supporting on-demand repopulation on key expiry changes
-//! - KeyExpiry: Provides a task that handles key expiries and dispatches them to the worker system
 //! - WorkerThreadPool: Provides a thread pool for workers based on Discord's sharding formulapub mod, allowing for multiple worker threads to be spawned and used concurrently
 //! - StaticRef: Provides a static reference newtype to improve performance/avoid refcounting and boxing of internal worker structures. Not yet used
 
@@ -29,8 +27,6 @@ pub mod vmcontext;
 pub mod builtins;
 pub mod worker;
 pub mod workerthread;
-pub mod keyexpiry;
-pub mod keyexpirychannel;
 pub mod workerlike;
 pub mod workerfilter;
 

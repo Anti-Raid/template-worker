@@ -1,13 +1,6 @@
 use strum::{IntoStaticStr, VariantNames};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct KeyExpiryEvent {
-    pub id: String,
-    pub key: String,
-    pub scopes: Vec<String>,
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct StartupEvent {
     pub reason: String,
 }
@@ -15,9 +8,6 @@ pub struct StartupEvent {
 #[derive(Debug, serde::Serialize, serde::Deserialize, IntoStaticStr, VariantNames)]
 #[must_use]
 pub enum AntiraidEvent {
-    /// Fired when a key expires within the key-value store
-    KeyExpiry(KeyExpiryEvent),
-
     /// Fired when a key is resumed
     /// 
     /// This occurs if a resumable key is set and the template is reloaded or the worker process restarted
@@ -40,7 +30,6 @@ impl AntiraidEvent {
     /// Convert the event's inner data to a JSON value
     pub fn to_value(&self) -> Result<serde_json::Value, serde_json::Error> {
         match self {
-            AntiraidEvent::KeyExpiry(data) => serde_json::to_value(data),
             AntiraidEvent::OnStartup(templates) => serde_json::to_value(templates),
         }
     }

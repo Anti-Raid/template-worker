@@ -1423,7 +1423,7 @@ dependencies = [
 [[package]]
 name = "dapi"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#b97c5e50e7c029846eb669244313aa1f3445373a"
+source = "git+https://github.com/anti-raid/khronos#ee2e48b2c59b1d384e1e86a04d6c2f9d0167cc23"
 dependencies = [
  "async-trait",
  "bitflags 2.10.0",
@@ -2890,7 +2890,7 @@ dependencies = [
 [[package]]
 name = "khronos_runtime"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#b97c5e50e7c029846eb669244313aa1f3445373a"
+source = "git+https://github.com/anti-raid/khronos#ee2e48b2c59b1d384e1e86a04d6c2f9d0167cc23"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -2939,6 +2939,7 @@ dependencies = [
  "tar",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-util",
  "toml",
  "tower 0.5.2",
  "uuid",
@@ -6790,9 +6791,9 @@ checksum = "40990edd51aae2c2b6907af74ffb635029d5788228222c4bb811e9351c0caad3"
 
 [[package]]
 name = "zmij"
-version = "1.0.3"
+version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9747e91771f56fd7893e1164abd78febd14a670ceec257caad15e051de35f06"
+checksum = "aac060176f7020d62c3bcc1cdbcec619d54f48b07ad1963a3f80ce7a0c17755f"
 
 [[package]]
 name = "zopfli"

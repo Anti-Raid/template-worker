@@ -5,7 +5,6 @@ use crate::objectstore::{Bucket, BucketWithKey, BucketWithPrefix};
 use crate::worker::builtins::EXPOSED_VFS;
 use crate::worker::workerstate::TenantState;
 use crate::worker::workervmmanager::VmData;
-use crate::worker::keyexpirychannel::KeyExpiryChannel;
 use khronos_runtime::core::typesext::Vfs;
 use khronos_runtime::traits::context::{
     KhronosContext, Limitations,
@@ -43,9 +42,6 @@ pub struct TemplateContextProvider {
     
     /// The ratelimits of the VM
     ratelimits: Rc<Ratelimits>,
-
-    /// The key expiry channel of the worker
-    key_expiry_chan: KeyExpiryChannel,
 }
 
 impl TemplateContextProvider {
@@ -53,14 +49,12 @@ impl TemplateContextProvider {
     pub fn new(
         id: Id,
         vm_data: VmData,
-        key_expiry_chan: KeyExpiryChannel,
     ) -> Self {
         Self {
             id,
             state: vm_data.state,
             kv_constraints: vm_data.kv_constraints,
             ratelimits: vm_data.ratelimits,
-            key_expiry_chan,
         }
     }
 }
@@ -90,7 +84,6 @@ impl KhronosContext for TemplateContextProvider {
             state: self.state.clone(),
             kv_constraints: self.kv_constraints.clone(),
             ratelimits: self.ratelimits.clone(),
-            key_expiry_chan: self.key_expiry_chan.clone(),
         })
     }
 
@@ -138,7 +131,6 @@ pub struct ArKVProvider {
     state: WorkerState,
     kv_constraints: LuaKVConstraints,
     ratelimits: Rc<Ratelimits>,
-    key_expiry_chan: KeyExpiryChannel,
 }
 
 impl KVProvider for ArKVProvider {
@@ -154,7 +146,7 @@ impl KVProvider for ArKVProvider {
 
         let rec = if scopes.is_empty() {
             sqlx::query(
-            "SELECT id, expires_at, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2",
+            "SELECT id, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2",
             )
             .bind(self.guild_id.to_string())
             .bind(&key)
@@ -162,7 +154,7 @@ impl KVProvider for ArKVProvider {
             .await?
         } else {
             sqlx::query(
-            "SELECT id, expires_at, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
+            "SELECT id, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
             )
             .bind(self.guild_id.to_string())
             .bind(&key)
@@ -189,13 +181,12 @@ impl KVProvider for ArKVProvider {
             },
             created_at: Some(rec.try_get("created_at")?),
             last_updated_at: Some(rec.try_get("last_updated_at")?),
-            expires_at: rec.try_get("expires_at")?,
         }))
     }
 
     async fn get_by_id(&self, id: String) -> Result<Option<KvRecord>, crate::Error> {
         let rec = sqlx::query(
-            "SELECT key, expires_at, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND id = $2",
+            "SELECT key, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND id = $2",
         )
         .bind(self.guild_id.to_string())
         .bind(id.clone())
@@ -220,7 +211,6 @@ impl KVProvider for ArKVProvider {
             },
             created_at: Some(rec.try_get("created_at")?),
             last_updated_at: Some(rec.try_get("last_updated_at")?),
-            expires_at: rec.try_get("expires_at")?,
         }))
     }
 
@@ -248,7 +238,6 @@ ORDER BY scope",
         scopes: &[String],
         key: String,
         data: KhronosValue,
-        expires_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<(bool, String), crate::Error> {
         // Shouldn't happen but scopes must be non-empty
         if scopes.is_empty() {
@@ -269,9 +258,9 @@ ORDER BY scope",
 
         let mut tx = self.state.pool.begin().await?;
 
-        let (curr_id, curr_expiry) = {
+        let curr_id = {
             let row = sqlx::query(
-                "SELECT id, expires_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
+                "SELECT id FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
             )
             .bind(self.guild_id.to_string())
             .bind(&key)
@@ -280,21 +269,17 @@ ORDER BY scope",
             .await?;
 
             match row {
-                Some(row) => (
-                    Some(row.try_get::<String, _>("id")?),
-                    row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("expires_at")?,
-                ),
-                None => (None, None),
+                Some(row) => Some(row.try_get::<String, _>("id")?),
+                None => None,
             }
         };
 
         let (exists, id) = if let Some(curr_id) = curr_id {
             // Update existing record
             sqlx::query(
-                "UPDATE guild_templates_kv SET value = $1, last_updated_at = NOW(), expires_at = $2 WHERE id = $3",
+                "UPDATE guild_templates_kv SET value = $1, last_updated_at = NOW() WHERE id = $2",
             )
             .bind(serde_json::to_value(data)?)
-            .bind(expires_at)
             .bind(&curr_id)
             .execute(&mut *tx)
             .await?;
@@ -304,14 +289,13 @@ ORDER BY scope",
             // Insert new record
             let id = gen_random(64);
             sqlx::query(
-                "INSERT INTO guild_templates_kv (id, guild_id, key, value, scopes, expires_at) VALUES ($1, $2, $3, $4, $5, $6)",
+                "INSERT INTO guild_templates_kv (id, guild_id, key, value, scopes) VALUES ($1, $2, $3, $4, $5)",
             )
             .bind(&id)
             .bind(self.guild_id.to_string())
             .bind(key)
             .bind(serde_json::to_value(data)?)
             .bind(scopes)
-            .bind(expires_at)
             .execute(&mut *tx)
             .await?;
 
@@ -320,77 +304,13 @@ ORDER BY scope",
 
         tx.commit().await?;
 
-        if curr_expiry != expires_at {
-            // Regenerate the cache if the expiry has changed
-            self.key_expiry_chan.repopulate()?;
-        }
-
         Ok((exists, id))
-    }
-
-    async fn set_expiry(
-        &self,
-        scopes: &[String],
-        key: String,
-        expires_at: Option<chrono::DateTime<chrono::Utc>>,
-    ) -> Result<(), khronos_runtime::Error> {
-        // Check key length
-        if key.len() > self.kv_constraints.max_key_length {
-            return Err("Key length too long".into());
-        }
-
-        if scopes.is_empty() {
-            sqlx::query(
-            "UPDATE guild_templates_kv SET expires_at = $1, last_updated_at = NOW() WHERE guild_id = $2 AND key = $3",
-            )
-            .bind(expires_at)
-            .bind(self.guild_id.to_string())
-            .bind(&key)
-            .execute(&self.state.pool)
-            .await?;
-        } else {
-            sqlx::query(
-                "UPDATE guild_templates_kv SET expires_at = $1, last_updated_at = NOW() WHERE guild_id = $2 AND key = $3 AND scopes @> $4",
-            )
-            .bind(expires_at)
-            .bind(self.guild_id.to_string())
-            .bind(&key)
-            .bind(scopes)
-            .execute(&self.state.pool)
-            .await?;
-        }
-
-        // Regenerate the cache in any case
-        self.key_expiry_chan.repopulate()?;
-
-        Ok(())
-    }
-
-    async fn set_expiry_by_id(
-        &self,
-        id: String,
-        expires_at: Option<chrono::DateTime<chrono::Utc>>,
-    ) -> Result<(), khronos_runtime::Error> {
-        sqlx::query(
-            "UPDATE guild_templates_kv SET expires_at = $1, last_updated_at = NOW() WHERE guild_id = $2 AND id = $3",
-        )
-        .bind(expires_at)
-        .bind(self.guild_id.to_string())
-        .bind(id)
-        .execute(&self.state.pool)
-        .await?;
-
-        // Regenerate the cache in any case
-        self.key_expiry_chan.repopulate()?;
-
-        Ok(())
     }
 
     async fn set_by_id(
         &self,
         id: String,
         data: KhronosValue,
-        expires_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<(), khronos_runtime::Error> {
         // Check bytes length
         let data_str = serde_json::to_string(&data)?;
@@ -399,40 +319,14 @@ ORDER BY scope",
             return Err("Value length too long".into());
         }
 
-        let mut tx = self.state.pool.begin().await?;
-
-        let curr_expiry = {
-            let row = sqlx::query(
-                "SELECT expires_at FROM guild_templates_kv WHERE guild_id = $1 AND id = $2",
-            )
-            .bind(self.guild_id.to_string())
-            .bind(&id)
-            .fetch_optional(&mut *tx)
-            .await?;
-
-            let Some(row) = row else {
-                return Ok(()); // do nothing if the record doesn't exist. TODO: rethink this behavior
-            };
-
-            row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("expires_at")?
-        };
-
         // Update existing record
         sqlx::query(
-            "UPDATE guild_templates_kv SET value = $1, last_updated_at = NOW(), expires_at = $2 WHERE id = $3",
+            "UPDATE guild_templates_kv SET value = $1, last_updated_at = NOW() WHERE id = $2",
         )
         .bind(serde_json::to_value(data)?)
-        .bind(expires_at)
         .bind(&id)
-        .execute(&mut *tx)
+        .execute(&self.state.pool)
         .await?;
-
-        tx.commit().await?;
-
-        if curr_expiry != expires_at {
-            // Regenerate the cache if the expiry has changed
-            self.key_expiry_chan.repopulate()?;
-        }
 
         Ok(())
     }
@@ -443,55 +337,36 @@ ORDER BY scope",
             return Err("Key length too long".into());
         }
 
-        let rows = if scopes.is_empty() {
+        if scopes.is_empty() {
             sqlx::query(
-            "DELETE FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 RETURNING expires_at",
+            "DELETE FROM guild_templates_kv WHERE guild_id = $1 AND key = $2",
             )
             .bind(self.guild_id.to_string())
             .bind(key)
-            .fetch_all(&self.state.pool)
-            .await?
+            .execute(&self.state.pool)
+            .await?;
         } else {
             sqlx::query(
-            "DELETE FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3 RETURNING expires_at",
+            "DELETE FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
             )
             .bind(self.guild_id.to_string())
             .bind(key)
             .bind(scopes)
-            .fetch_all(&self.state.pool)
-            .await?
+            .execute(&self.state.pool)
+            .await?;
         };
-
-        for row in rows {
-            let expires_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("expires_at")?;
-
-            if expires_at.is_some() {
-                // Regenerate the cache if the key has an expiry set
-                self.key_expiry_chan.repopulate()?;
-                break; // No need to continue if we found at least one expiry
-            }
-        }
 
         Ok(())
     }
 
     async fn delete_by_id(&self, id: String) -> Result<(), crate::Error> {
-        let row = sqlx::query(
-            "DELETE FROM guild_templates_kv WHERE guild_id = $1 AND id = $2 RETURNING expires_at",
+        sqlx::query(
+            "DELETE FROM guild_templates_kv WHERE guild_id = $1 AND id = $2",
         )
         .bind(self.guild_id.to_string())
         .bind(id)
-        .fetch_optional(&self.state.pool)
+        .execute(&self.state.pool)
         .await?;
-
-        if let Some(row) = row {
-            let expires_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("expires_at")?;
-
-            if expires_at.is_some() {
-                // Regenerate the cache if the key has an expiry set
-                self.key_expiry_chan.repopulate()?;
-            }
-        }
 
         Ok(())
     }
@@ -508,7 +383,7 @@ ORDER BY scope",
                 if scopes.is_empty() {
                     // no query, no scopes
                     sqlx::query(
-                    "SELECT id, key, value, expires_at, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1",
+                    "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1",
                     )
                     .bind(self.guild_id.to_string())
                     .fetch_all(&self.state.pool)
@@ -516,7 +391,7 @@ ORDER BY scope",
                 } else {
                     // no query, scopes
                     sqlx::query(
-                    "SELECT id, key, value, expires_at, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2",
+                    "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2",
                     )
                     .bind(self.guild_id.to_string())
                     .bind(scopes)
@@ -527,7 +402,7 @@ ORDER BY scope",
                 if scopes.is_empty() {
                     // query, no scopes
                     sqlx::query(
-                    "SELECT id, key, value, expires_at, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1 AND key ILIKE $2",
+                    "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1 AND key ILIKE $2",
                     )
                     .bind(self.guild_id.to_string())
                     .bind(query)
@@ -536,7 +411,7 @@ ORDER BY scope",
                 } else {
                     // query, scopes
                     sqlx::query(
-                    "SELECT id, key, value, expires_at, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2 AND key ILIKE $3",
+                    "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2 AND key ILIKE $3",
                     )
                     .bind(self.guild_id.to_string())
                     .bind(scopes)
@@ -553,7 +428,6 @@ ORDER BY scope",
             let record = KvRecord {
                 id: rec.try_get::<String, _>("id")?,
                 scopes: rec.try_get::<Vec<String>, _>("scopes")?,
-                expires_at: rec.try_get("expires_at")?,
                 key: rec.try_get("key")?,
                 value: {
                     let rec = rec
@@ -968,11 +842,11 @@ impl RuntimeProvider for ArRuntimeProvider {
     }
 
     async fn get_tenant_state(&self) -> Result<runtime_ir::TenantState, khronos_runtime::Error> {
-        let ts = self.state.get_cached_tenant_state_for(self.id)?;
+        let ts = self.state.get_cached_tenant_state_for(self.id)?.into_owned();
         Ok(runtime_ir::TenantState {
-            events: ts.events.iter().cloned().collect(),
+            events: ts.events.into_iter().collect(),
             banned: ts.banned,
-            flags: ts.flags.try_into().unwrap_or(0),
+            data: ts.data,
         })
     }
 
@@ -983,7 +857,7 @@ impl RuntimeProvider for ArRuntimeProvider {
                 TenantState {
                     events: HashSet::from_iter(state.events),
                     banned: state.banned,
-                    flags: state.flags.try_into()?,
+                    data: state.data,
                 },
             )
             .await?;

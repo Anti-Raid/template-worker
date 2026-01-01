@@ -1,34 +1,25 @@
 use std::{borrow::Cow, cell::RefCell, collections::{HashMap, HashSet}, rc::Rc, sync::{Arc, LazyLock}};
-use chrono::{DateTime, Utc};
+use serde_json::Value;
 
 use crate::worker::workervmmanager::Id;
-
-#[derive(Debug)]
-pub struct KeyExpiry {
-    pub id: String,
-    pub key: String,
-    pub scopes: Vec<String>,
-    pub expires_at: DateTime<Utc>,
-}
 
 #[derive(Clone)]
 pub struct TenantState {
     pub events: HashSet<String>,
     pub banned: bool,
-    pub flags: i32,
+    pub data: Value
 }
 
 static DEFAULT_TENANT_STATE: LazyLock<TenantState> = LazyLock::new(|| TenantState {
     events: {
         let mut set = HashSet::new();
         set.insert("INTERACTION_CREATE".to_string());
-        set.insert("KeyExpiry".to_string());
-        set.insert("GetSettings".to_string());
-        set.insert("ExecuteSetting".to_string());
+        set.insert("WebGetSettings".to_string());
+        set.insert("WebExecuteSetting".to_string());
         set
     },
     banned: false,
-    flags: 0,
+    data: Value::Object(serde_json::Map::new()),
 });
 
 #[derive(Clone)]
@@ -105,13 +96,13 @@ impl WorkerState {
         struct TenantStatePartial {
             events: Vec<String>,
             banned: bool,
-            flags: i32,
+            data: serde_json::Value,
             owner_id: String,
             owner_type: String,
         }
 
         let partials: Vec<TenantStatePartial> =
-            sqlx::query_as("SELECT owner_id, owner_type, events, banned, flags FROM tenant_state")
+            sqlx::query_as("SELECT owner_id, owner_type, events, banned, data FROM tenant_state")
             .fetch_all(&self.pool)
             .await?;
 
@@ -131,7 +122,7 @@ impl WorkerState {
             let state = TenantState {
                 events: HashSet::from_iter(partial.events),
                 banned: partial.banned,
-                flags: partial.flags,
+                data: partial.data,
             };
 
             states.insert(id, state);
@@ -163,12 +154,12 @@ impl WorkerState {
         match id {
             Id::GuildId(guild_id) => {
                 sqlx::query(
-                    "INSERT INTO tenant_state (owner_id, owner_type, events, banned, flags) VALUES ($1, 'guild', $2, $3, $4) ON CONFLICT (owner_id, owner_type) DO UPDATE SET events = EXCLUDED.events, banned = EXCLUDED.banned, flags = EXCLUDED.flags",
+                    "INSERT INTO tenant_state (owner_id, owner_type, events, banned, data) VALUES ($1, 'guild', $2, $3, $4) ON CONFLICT (owner_id, owner_type) DO UPDATE SET events = EXCLUDED.events, banned = EXCLUDED.banned, flags = EXCLUDED.flags",
                 )
                 .bind(guild_id.to_string())
                 .bind(&events)
                 .bind(state.banned)
-                .bind(state.flags as i32)
+                .bind(&state.data)
                 .execute(&self.pool)
                 .await?;
             }
@@ -182,59 +173,4 @@ impl WorkerState {
 
         Ok(())
     }
-
-    /// Gets all key expiries from the database
-    pub async fn get_key_expiries(&self) -> Result<HashMap<Id, Vec<KeyExpiry>>, crate::Error> {
-        #[derive(sqlx::FromRow)]
-        struct KeyExpiryPartial {
-            guild_id: String,
-            id: String,
-            key: String,
-            scopes: Vec<String>,
-            expires_at: chrono::DateTime<chrono::Utc>,
-        }
-
-        let partials: Vec<KeyExpiryPartial> =
-            sqlx::query_as("SELECT guild_id, id, key, scopes, expires_at FROM guild_templates_kv WHERE expires_at IS NOT NULL ORDER BY expires_at DESC")
-            .fetch_all(&self.pool)
-            .await?;
-
-        let mut expiries: HashMap<Id, Vec<KeyExpiry>> = HashMap::new();
-
-        for partial in partials {
-            let guild_id = partial.guild_id.parse()?;
-
-            let expiry = KeyExpiry {
-                id: partial.id,
-                key: partial.key,
-                scopes: partial.scopes,
-                expires_at: partial.expires_at,
-            };
-
-            let id = Id::GuildId(guild_id);
-            if let Some(expiries_vec) = expiries.get_mut(&id) {
-                expiries_vec.push(expiry);
-            } else {
-                expiries.insert(id, vec![expiry]);
-            }
-        }
-
-        Ok(expiries)
-    }
-
-    /// Removes keys with the given ID
-    pub async fn remove_key_expiry(&self, id: Id, kv_id: &str) -> Result<(), crate::Error> {
-        match id {
-            Id::GuildId(guild_id) => {
-                sqlx::query("DELETE FROM guild_templates_kv WHERE guild_id = $1 AND id = $2")
-                    .bind(guild_id.to_string())
-                    .bind(kv_id)
-                    .execute(&self.pool)
-                    .await?;
-            }
-        }
-
-        Ok(())
-    }
 }
-

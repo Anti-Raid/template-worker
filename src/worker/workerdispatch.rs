@@ -1,5 +1,5 @@
 use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
-use crate::{events::StartupEvent, worker::{keyexpirychannel::KeyExpiryChannel, workerfilter::WorkerFilter, workerstate::WorkerState}};
+use crate::{events::StartupEvent, worker::workerfilter::WorkerFilter};
 use super::workervmmanager::{Id, WorkerVmManager, VmData};
 use super::vmcontext::TemplateContextProvider;
 use crate::events::AntiraidEvent;
@@ -14,14 +14,12 @@ pub struct WorkerDispatch {
     vm_manager: WorkerVmManager,
     /// Worker filter
     filter: WorkerFilter,
-    /// Key expiry channel
-    key_expiry_chan: KeyExpiryChannel,
 }
 
 impl WorkerDispatch {
     /// Creates a new WorkerDispatch with the given WorkerVmManager
-    pub fn new(vm_manager: WorkerVmManager, key_expiry_chan: KeyExpiryChannel, filter: WorkerFilter) -> Self {
-        let dispatch = Self { vm_manager, key_expiry_chan, filter };
+    pub fn new(vm_manager: WorkerVmManager, filter: WorkerFilter) -> Self {
+        let dispatch = Self { vm_manager, filter };
 
         // Fire resume keys on creation
         let self_ref = dispatch.clone();
@@ -32,11 +30,6 @@ impl WorkerDispatch {
         });
 
         dispatch
-    }
-
-    /// Returns the underlying WorkerState
-    pub fn worker_state(&self) -> &WorkerState {
-        self.vm_manager.worker_state()
     }
 
     /// Dispatches startup events for all tenants
@@ -94,7 +87,6 @@ impl WorkerDispatch {
         let provider = TemplateContextProvider::new(
             id,
             vm_data.clone(),
-            self.key_expiry_chan.clone()
         );
         let context = vm_data.runtime.create_context(provider, event)?;
         match vm_data.runtime.call_in_scheduler::<_, KhronosValue>(func, context).await {
