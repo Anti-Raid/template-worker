@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM postgres:17.4-bookworm
+FROM postgres:18.1-bookworm
 
 RUN printf "deb http://httpredir.debian.org/debian bookworm-backports main non-free\ndeb-src http://httpredir.debian.org/debian bookworm-backports main non-free" > /etc/apt/sources.list.d/backports.list
 RUN apt-get update

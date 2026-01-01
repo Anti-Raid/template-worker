@@ -133,12 +133,26 @@ pub struct ArKVProvider {
     ratelimits: Rc<Ratelimits>,
 }
 
+const MAX_SCOPES: usize = 10;
+impl ArKVProvider {
+    fn parse_scopes(scopes: &[String]) -> Result<Vec<String>, crate::Error> {        
+        if scopes.len() > MAX_SCOPES {
+            return Err(format!("Scopes length may be at most {MAX_SCOPES} long").into())
+        }
+        let mut scopes = scopes.to_vec();
+        scopes.sort();
+        Ok(scopes)
+    }
+}
+
 impl KVProvider for ArKVProvider {
     fn attempt_action(&self, _scope: &[String], bucket: &str) -> Result<(), crate::Error> {
         self.ratelimits.kv.check(bucket)
     }
 
     async fn get(&self, scopes: &[String], key: String) -> Result<Option<KvRecord>, crate::Error> {
+        let scopes = Self::parse_scopes(scopes)?;
+
         // Check key length
         if key.len() > self.kv_constraints.max_key_length {
             return Err("Key length too long".into());
@@ -239,6 +253,8 @@ ORDER BY scope",
         key: String,
         data: KhronosValue,
     ) -> Result<(bool, String), crate::Error> {
+        let scopes = Self::parse_scopes(scopes)?;
+
         // Shouldn't happen but scopes must be non-empty
         if scopes.is_empty() {
             return Err("Scopes cannot be empty".into());
@@ -256,53 +272,22 @@ ORDER BY scope",
             return Err("Value length too long".into());
         }
 
-        let mut tx = self.state.pool.begin().await?;
+        let id = gen_random(64);
+        let rec = sqlx::query(
+            "INSERT INTO guild_templates_kv (id, guild_id, key, value, scopes) VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (guild_id, key, scopes) DO UPDATE value = EXCLUDED.value, last_updated = NOW()
+            RETURNING id, (old.id IS NOT NULL) as exists",
+        )
+        .bind(&id)
+        .bind(self.guild_id.to_string())
+        .bind(key)
+        .bind(serde_json::to_value(data)?)
+        .bind(scopes)
+        .fetch_one(&self.state.pool)
+        .await?;
 
-        let curr_id = {
-            let row = sqlx::query(
-                "SELECT id FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
-            )
-            .bind(self.guild_id.to_string())
-            .bind(&key)
-            .bind(scopes)
-            .fetch_optional(&mut *tx)
-            .await?;
-
-            match row {
-                Some(row) => Some(row.try_get::<String, _>("id")?),
-                None => None,
-            }
-        };
-
-        let (exists, id) = if let Some(curr_id) = curr_id {
-            // Update existing record
-            sqlx::query(
-                "UPDATE guild_templates_kv SET value = $1, last_updated_at = NOW() WHERE id = $2",
-            )
-            .bind(serde_json::to_value(data)?)
-            .bind(&curr_id)
-            .execute(&mut *tx)
-            .await?;
-
-            (true, curr_id)
-        } else {
-            // Insert new record
-            let id = gen_random(64);
-            sqlx::query(
-                "INSERT INTO guild_templates_kv (id, guild_id, key, value, scopes) VALUES ($1, $2, $3, $4, $5)",
-            )
-            .bind(&id)
-            .bind(self.guild_id.to_string())
-            .bind(key)
-            .bind(serde_json::to_value(data)?)
-            .bind(scopes)
-            .execute(&mut *tx)
-            .await?;
-
-            (false, id)
-        };
-
-        tx.commit().await?;
+        let id = rec.try_get("id")?;
+        let exists = rec.try_get("exists")?;
 
         Ok((exists, id))
     }
