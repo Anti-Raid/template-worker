@@ -1,76 +1,82 @@
-use std::rc::Rc;
+use std::time::Duration;
 
-use khronos_runtime::primitives::event::CreateEvent;
-use tokio::sync::Notify;
+use futures::{SinkExt, StreamExt};
+use tokio::time::interval;
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-use crate::worker::workerdispatch::WorkerDispatch;
+use crate::{mesophyll::{MESOPHYLL_DEFAULT_HEARTBEAT_MS, message::{ClientMessage, ServerMessage}}, worker::workerdispatch::WorkerDispatch};
 
 /// Mesophyll client, NOT THREAD SAFE
 #[derive(Clone)]
 pub struct MesophyllClient {
     dispatch: WorkerDispatch,
+    addr: String,
 }
 
 #[allow(dead_code)]
 impl MesophyllClient {
-    pub fn new(dispatch: WorkerDispatch) -> Self {
-        Self {
+    /// Creates a new Mesophyll client
+    pub fn new(addr: String, token: String, dispatch: WorkerDispatch) -> Self {
+        let s = Self {
             dispatch,
-        }
-    }
+            addr: format!("{}?token={}", addr, token),
+        };
 
-    pub fn send_message(&self, _message: MesophyllMessage) -> Result<(), crate::Error> {
-        todo!();
-    }
-
-    pub async fn process_message(&self, event: MesophyllMessage) -> Result<(), crate::Error> {
-        match event {
-            MesophyllMessage::Identify { id: _, session_key: _ } => {
-                // Nothing client can do.
-                log::warn!("Mesophyll client received unexpected Identify message");
-            },
-            MesophyllMessage::Ready {} => {
-                log::info!("Mesophyll client is now ready");
-                self.ready.notify_waiters();
-                self.handler.ready(self).await?;
-            },
-            MesophyllMessage::Relay { msg, req_id } => {
-                log::info!("Mesophyll client received relay message");
-                match self.handler.relay(self, msg).await {
-                    Ok(_) => {
-                        self.send_message(MesophyllMessage::ResponseAck { req_id })?;
-                    },
-                    Err(e) => {
-                        log::error!("Error handling relay message: {}", e);
-                        self.send_message(MesophyllMessage::ResponseError { error: format!("Error handling relay message: {}", e), req_id })?;
-                        return Err(e);  
-                    }
+        let self_ref = s.clone();
+        tokio::task::spawn_local(async move {
+            loop {
+                if let Err(e) = self_ref.handle_task().await {
+                    log::error!("Mesophyll client task error: {}", e);
                 }
             }
-            MesophyllMessage::DispatchEvent { id, event, req_id } => {
-                let result = self.handler.dispatch_result(self, id, event).await;
-                let response = MesophyllMessage::ResponseDispatchResult { result: result.into(), req_id };
-                self.send_message(response)?;
-            }
-            MesophyllMessage::DispatchScopedEvent { id, event, scopes, req_id } => {
-                let result = self.handler.dispatch_scoped_result(self, id, event, scopes).await;
-                let response = MesophyllMessage::ResponseDispatchResult { result: result.into(), req_id };
-                let _ = self.send_message(response);
-            },
-            MesophyllMessage::ResponseDispatchResult { .. } => {
-                // Nothing client can do.
-                log::warn!("Mesophyll client received unexpected ResponseDispatchResult message");
-            }
-            MesophyllMessage::ResponseAck { .. } => {
-                // Nothing client can do.
-                log::warn!("Mesophyll client received unexpected ResponseAck message");
-            }
-            MesophyllMessage::ResponseError { .. } => {
-                // Nothing client can do.
-                log::warn!("Mesophyll client received unexpected ResponseError message");
+        });
+
+        s
+    }
+
+    async fn handle_task(&self) -> Result<(), crate::Error> {
+        // Connect to the masters IP/port
+        let (ws_stream, _) = connect_async(&self.addr).await.map_err(|e| format!("Failed to connect: {:?}", e))?;
+        let (mut stream_tx, mut stream_rx) = ws_stream.split();
+        let mut hb_timer = interval(Duration::from_millis(MESOPHYLL_DEFAULT_HEARTBEAT_MS));
+        loop {
+            tokio::select! {
+                Some(Ok(msg)) = stream_rx.next() => {
+                    match msg {
+                        Message::Text(text) => {
+                            if let Ok(server_msg) = serde_json::from_str::<ServerMessage>(&text) {
+                                match server_msg {
+                                    ServerMessage::DispatchEvent { id, event, req_id } => {
+                                        let result = self.dispatch.dispatch_event(id, event).await;
+                                        let response = ClientMessage::DispatchResponse {
+                                            req_id,
+                                            result: result.map_err(|e| e.to_string()),
+                                        };
+                                        let json = serde_json::to_string(&response)
+                                            .map_err(|e| format!("Failed to serialize DispatchResponse: {}", e))?;
+                                        stream_tx.send(Message::Text(json.into())).await
+                                            .map_err(|e| format!("Failed to send DispatchResponse: {}", e))?;
+                                    },
+                                    ServerMessage::Hello { heartbeat_interval_ms } => {
+                                        log::info!("Mesophyll client received Hello, heartbeat interval: {} ms", heartbeat_interval_ms);
+                                        hb_timer = interval(Duration::from_millis(heartbeat_interval_ms));
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                _ = hb_timer.tick() => {
+                    let heartbeat = ClientMessage::Heartbeat {
+                        vm_count: self.dispatch.vm_manager().len(),
+                    };
+                    let json = serde_json::to_string(&heartbeat)
+                        .map_err(|e| format!("Failed to serialize Heartbeat: {}", e))?;
+                    stream_tx.send(Message::Text(json.into())).await
+                        .map_err(|e| format!("Failed to send Heartbeat: {}", e))?;
+                }
             }
         }
-
-        Ok(())
     }
 }

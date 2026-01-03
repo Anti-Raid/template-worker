@@ -1,9 +1,8 @@
 use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
-use crate::{events::StartupEvent, worker::workerfilter::WorkerFilter};
+use serde_json::json;
+use crate::worker::workerfilter::WorkerFilter;
 use super::workervmmanager::{Id, WorkerVmManager, VmData};
 use super::vmcontext::TemplateContextProvider;
-use crate::events::AntiraidEvent;
-use crate::dispatch::parse_event;
 use khronos_runtime::rt::mlua;
 
 /// A WorkerDispatch manages the dispatching of events to a Luau VM
@@ -32,6 +31,11 @@ impl WorkerDispatch {
         dispatch
     }
 
+    /// Returns the underlying WorkerVmManager
+    pub fn vm_manager(&self) -> &WorkerVmManager {
+        &self.vm_manager
+    }
+
     /// Dispatches startup events for all tenants
     pub async fn dispatch_startup_events(&self) -> Result<(), crate::Error> {
         let ids = self.vm_manager.worker_state().get_startup_event_tenants()?;
@@ -45,15 +49,13 @@ impl WorkerDispatch {
                 "Dispatching startup event for ID {id:?}",
             );
 
-            let event = AntiraidEvent::OnStartup(StartupEvent {
-                reason: "Worker startup".to_string(),
-            });
-
-            let tevent = parse_event(&event)?;
+            let event = CreateEvent::new("OnStartup".to_string(), None, json!({
+                "reason": "worker_startup"
+            }));
 
             let self_ref = self.clone();
             tokio::task::spawn_local(async move {
-                if let Err(e) = self_ref.dispatch_event(id, tevent).await {
+                if let Err(e) = self_ref.dispatch_event(id, event).await {
                     log::error!("Failed to dispatch startup event for ID {id:?}: {e}");
                 }
             });

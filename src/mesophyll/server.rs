@@ -9,13 +9,8 @@ use tokio_util::sync::CancellationToken;
 use crate::{mesophyll::message::{ClientMessage, ServerMessage}, worker::workervmmanager::Id};
 
 use axum::{
-    extract::{Path, State, WebSocketUpgrade, ws::WebSocket, ws::Message},
-    http::{StatusCode, HeaderMap},
-    response::IntoResponse,
-    routing::get,
-    Router,
+    Router, extract::{Path, Query, State, WebSocketUpgrade, ws::{Message, WebSocket}}, http::StatusCode, response::IntoResponse, routing::get
 };
-
 
 #[derive(Clone)]
 pub struct MesophyllServer {
@@ -54,25 +49,25 @@ impl MesophyllServer {
     }
 }
 
+#[derive(serde::Deserialize)]
+pub struct WorkerQuery {
+    token: String,
+}
+
 /// WebSocket handler for Mesophyll server
 async fn ws_handler(
     Path(worker_id): Path<usize>,
+    Query(worker_query): Query<WorkerQuery>,
     State(state): State<MesophyllServer>,
-    headers: HeaderMap,           // <--- 1. Extract Headers
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    let token = headers
-        .get("X-Mesophyll-Token")
-        .and_then(|val| val.to_str().ok())
-        .unwrap_or("");
-
     let Some(expected_key) = state.idents.get(&worker_id) else {
         log::warn!("Connection attempt from unknown worker ID: {}", worker_id);
         return StatusCode::NOT_FOUND.into_response();
     };
 
     // Verify token of the worker trying to connect to us before upgrading
-    if token != expected_key {
+    if worker_query.token != *expected_key {
         log::warn!("Invalid token for worker {}", worker_id);
         return StatusCode::UNAUTHORIZED.into_response();
     }
@@ -95,7 +90,7 @@ async fn handle_socket(socket: WebSocket, id: usize, state: MesophyllServer) {
 
 pub struct HeartbeatInfo {
     last_heartbeat: Instant,
-    vm_count: u64,
+    vm_count: usize,
 }
 
 /// A Mesophyll server connection
@@ -237,6 +232,7 @@ impl MesophyllServerConn {
         }
         match tokio::time::timeout(Duration::from_secs(30), rx).await {
             Ok(Ok(r)) => {
+                self.dispatch_response_handlers.remove(&req_id);
                 Ok(r?)
             },
             Ok(Err(_)) => {

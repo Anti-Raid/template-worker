@@ -26,6 +26,6 @@ pub enum ClientMessage {
     },
 
     Heartbeat { 
-        vm_count: u64 
+        vm_count: usize 
     },
 }

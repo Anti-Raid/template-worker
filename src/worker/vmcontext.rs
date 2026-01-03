@@ -1,6 +1,5 @@
 use super::workerstate::WorkerState;
 use super::workervmmanager::Id;
-use crate::events::AntiraidEvent;
 use crate::objectstore::{Bucket, BucketWithKey, BucketWithPrefix};
 use crate::worker::builtins::EXPOSED_VFS;
 use crate::worker::workerstate::TenantState;
@@ -796,18 +795,15 @@ impl RuntimeProvider for ArRuntimeProvider {
     }
 
     fn event_list(&self) -> Result<Vec<String>, khronos_runtime::Error> {
-        let mut vec = AntiraidEvent::variant_names()
+        let mut vec = dapi::EVENT_LIST
             .iter()
+            .copied()
             .map(|x| x.to_string())
             .collect::<Vec<String>>();
 
-        vec.extend(
-            dapi::EVENT_LIST
-                .iter()
-                .copied()
-                .map(|x| x.to_string())
-                .collect::<Vec<String>>(),
-        );
+
+        vec.push("OnStartup".to_string());
+        vec.push("KeyExpiry".to_string());
 
         Ok(vec)
     }

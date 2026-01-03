@@ -11,3 +11,5 @@
 pub mod message;
 pub mod client;
 pub mod server;
+
+pub(super) const MESOPHYLL_DEFAULT_HEARTBEAT_MS: u64 = 5000;
