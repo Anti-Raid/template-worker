@@ -70,12 +70,6 @@ struct CmdArgs {
     #[clap(long)]
     pub worker_id: Option<usize>,
 
-    /// The worker process communication type to use when running as a process pool worker
-    ///
-    /// Ignored unless `worker-type` is `processpoolworker`
-    #[clap(long)]
-    pub worker_comm_type: Option<String>,
-
     /// How many db connections should each worker within the process pool have
     #[clap(long, default_value = "3")]
     pub max_worker_db_connections: usize,
