@@ -78,7 +78,7 @@ struct CmdArgs {
     #[clap(long, default_value = "10")]
     pub tokio_threads_master: usize,
 
-    /// How many tokio threads to use for the workers
+    /// How many tokio threads to use for the workers main loop (note that each worker still uses a single WorkerThread for the actual luau vm's)
     #[clap(long, default_value = "3")]
     pub tokio_threads_worker: usize,
 
