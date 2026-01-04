@@ -44,53 +44,26 @@ discord_auth:
   token: "{faketoken}" # Discord Bot Token
   client_id: "{client_id}" # Discord Client ID - Main
   client_secret: "{client_secret}" # Discord Client Secret - Main
+  root_users:
+    - "728871946456137770" # burgerking
+    - "564164277251080208" # select
+    - "775855009421066262" # ilief
   allowed_redirects: # Change afterwards if desired
     - http://localhost:5173/authorize
     - http://localhost:5174/authorize
     - https://v6-beta.antiraid.xyz/authorize
     - https://antiraid.xyz/authorize
-  public_bot: 
-    staging: true # Still in beta 
-    prod: true # Public Bot
-  dp_secret: {dp_secret}
-  root_users:
-    - "728871946456137770" # burgerking
-    - "564164277251080208" # select
-    - "775855009421066262" # ilief
 
 sites:
   frontend: https://antiraid.xyz # Staging value
   api: http://localhost:5600 # Staging value
   docs: https://docs.antiraid.xyz # Documentation URL
 
-channels:
-  apps: "1216401068276060160" # Apps Channel, should be a staff only channel
-  ban_appeals: "1222823352771678249" # Ban Appeals Channel
-
-roles:
-  apps: "1222825827071426571" # Apps pings
-  awaiting_staff: "1222827385745838131"
-
-japi:
-  key: SOMETHING_FIX_LATER # JAPI Key. Get it from https://japi.rest
-
-notifications:
-  vapid_public_key: "{vapid_public_key}" # Vapid Public Key (https://www.stephane-quantin.com/en/tools/generators/vapid-keys)
-  vapid_private_key: "{vapid_private_key}" # Vapid Private Key (https://www.stephane-quantin.com/en/tools/generators/vapid-keys)
-
 servers:
   main: "1064135068928454766" # Main Server ID
 
 meta:
-  web_disable_ratelimits: true
   postgres_url: postgres://antiraid:AnTiRaId123!@postgres:5432/antiraid # Postgres URL
-  redis_url: redis://api_redis:6379/1 # Staging value
-  jobserver_port: 5602
-  port: 5600 
-  bot_port: 10000
-  cdn_path: /failuremgmt/cdn/antiraid # CDN Path
-  secure_storage: /failuremgmt/sec/antiraid # Blob Storage URL
-  urgent_mentions: <@&1061643797315993701> # Urgent mentions
   proxy: http://nirn_proxy:3221 # Proxy URL
   support_server_invite: https://discord.gg/9BJWSrEBBJ
   sandwich_http_api: http://sandwich:29334
@@ -106,17 +79,9 @@ object_storage:
   secure: false
   cdn_secure: false
 
-base_ports:
-  jobserver_base_addr: http://jobserver
-  bot_base_addr: http://bot
-  jobserver_bind_addr: 0.0.0.0
-  bot_bind_addr: 0.0.0.0
-  jobserver: 30000
-  bot: 20000
-  template_worker_base_addr: 0.0.0.0
-  template_worker_addr: template-worker
-  template_worker_port: 60000
-  template_worker_bind_addr: 0.0.0.0
+addrs:
+  template_worker: http://0.0.0.0:60000
+  mesophyll_server: http://127.0.0.1:70000
 """
 
 print("Saving config.docker.yaml")

@@ -31,11 +31,6 @@ impl WorkerDispatch {
         dispatch
     }
 
-    /// Returns the underlying WorkerVmManager
-    pub fn vm_manager(&self) -> &WorkerVmManager {
-        &self.vm_manager
-    }
-
     /// Dispatches startup events for all tenants
     pub async fn dispatch_startup_events(&self) -> Result<(), crate::Error> {
         let ids = self.vm_manager.worker_state().get_startup_event_tenants()?;

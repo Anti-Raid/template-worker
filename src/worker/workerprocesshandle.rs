@@ -1,74 +1,21 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use tokio::process::Command;
-use tokio::sync::oneshot::{Sender as OneshotSender};
-use tokio::sync::mpsc::{
-    UnboundedSender, UnboundedReceiver,
-    unbounded_channel
-};
-
+use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
+use crate::mesophyll::server::MesophyllServer;
 use crate::worker::workerfilter::WorkerFilter;
 use crate::worker::workerlike::WorkerLike;
 use crate::worker::workerpool::Poolable;
-use crate::worker::workerprocesscomm::{WorkerProcessCommServer, WorkerProcessCommServerCreator};
 use crate::worker::workervmmanager::Id;
-
-/// Message type for the worker process server monitor task
-enum ProcessServerMessage {
-    Kill {
-        tx: Option<OneshotSender<Result<(), crate::Error>>>,
-    },
-    DispatchEvent {
-        id: Id,
-        event: CreateEvent,
-        tx: Option<OneshotSender<Result<KhronosValue, crate::Error>>>,
-    },
-}
-
-trait PushableMessage {
-    type Response: Send + Sync + 'static;
-
-    fn into_message(self, tx: Option<OneshotSender<Self::Response>>) -> ProcessServerMessage;
-}
-
-pub struct Kill {}
-
-impl PushableMessage for Kill {
-    type Response = Result<(), crate::Error>;
-
-    fn into_message(self, tx: Option<OneshotSender<Self::Response>>) -> ProcessServerMessage {
-        ProcessServerMessage::Kill { tx }
-    }
-}
-
-pub struct DispatchEvent {
-    /// The id of the template to dispatch the event to 
-    pub id: Id,
-    /// The event to dispatch
-    pub event: CreateEvent,
-}
-
-impl PushableMessage for DispatchEvent {
-    type Response = Result<KhronosValue, crate::Error>;
-
-    fn into_message(self, tx: Option<OneshotSender<Self::Response>>) -> ProcessServerMessage {
-        ProcessServerMessage::DispatchEvent {
-            id: self.id,
-            event: self.event,
-            tx,
-        }
-    }
-}
 
 /// A WorkerProcessHandle is a handle to a worker process from the master process
 /// that stores the process handle and provides methods to interact with the worker process.
 #[derive(Clone)]
 pub struct WorkerProcessHandle {
-    /// The process handle for the worker process
-    process_handle: UnboundedSender<ProcessServerMessage>,
+    /// Mesophyll server handle to communicate with the worker process
+    mesophyll_server: MesophyllServer,
 
     /// The id of the worker process, used for routing
     id: usize,
@@ -77,42 +24,45 @@ pub struct WorkerProcessHandle {
     total: usize,
 
     /// Max DB connections for the worker process
-    max_db_conns: usize,
+    max_db_conns: usize,    
+
+    /// Kill message channel
+    kill_msg_tx: UnboundedSender<()>,
 }
 
 #[allow(unused)]
 impl WorkerProcessHandle {
     const MAX_CONSECUTIVE_FAILURES_BEFORE_CRASH: usize = 10;
 
-    /// Creates a new WorkerProcessHandle given the worker ID and a communication server backend
-    pub fn new(id: usize, total: usize, max_db_conns: usize, process_comm: Box<dyn WorkerProcessCommServer + Send + Sync>) -> Result<Self, crate::Error> {
-        let (tx, rx) = unbounded_channel();
-
+    /// Creates a new WorkerProcessHandle given the worker ID and a mesophyll server
+    pub fn new(id: usize, total: usize, max_db_conns: usize, mesophyll_server: MesophyllServer) -> Result<Self, crate::Error> {
+        let (kill_msg_tx, mut kill_msg_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
         let wps = Self {
-            process_handle: tx,
+            mesophyll_server,
             id,
             total,
-            max_db_conns
+            max_db_conns,
+            kill_msg_tx
         };
 
         let wps_ref = wps.clone();
-        tokio::task::spawn(async move {
-            wps_ref.run(rx, process_comm).await;
-        });
+        tokio::task::spawn(async move { wps_ref.run(kill_msg_rx).await });
 
         Ok(wps)
     }
 
     /// Runs the worker process server, spawning a new worker process and handling messages
     /// from the master process.
-    async fn run(
-        &self, 
-        mut rx: UnboundedReceiver<ProcessServerMessage>,
-        mut process_comm: Box<dyn WorkerProcessCommServer + Send + Sync>,
-    ) {
+    async fn run(&self, mut kill_msg_rx: UnboundedReceiver<()>) {
         let mut failed_attempts = 0;
         let mut consecutive_failures = 0;
+
         loop {
+            let Some(meso_token) = self.mesophyll_server.get_token_for_worker(self.id) else {
+                log::error!("No ident found for worker process with ID: {}", self.id);
+                return;
+            };
+
             if consecutive_failures >= Self::MAX_CONSECUTIVE_FAILURES_BEFORE_CRASH {
                 log::error!("Worker process with ID: {} has failed {} times in a row, crashing", self.id, consecutive_failures);
 
@@ -122,16 +72,6 @@ impl WorkerProcessHandle {
             }
 
             let sleep_duration = Duration::from_secs(3 * std::cmp::min(failed_attempts, 5));
-
-            // A reset_state call is required to reset the communication state and make sure
-            // the communication layer is ready for spinning up a new worker process.
-            if let Err(e) = process_comm.reset_state().await {
-                log::error!("Failed to reset worker process communication state: {}", e);
-                failed_attempts += 1;
-                consecutive_failures += 1;
-                tokio::time::sleep(sleep_duration).await;
-                continue;
-            }
 
             // The path to the current executable
             let current_exe = match std::env::current_exe() {
@@ -155,15 +95,7 @@ impl WorkerProcessHandle {
             command.arg(self.total.to_string());
             command.arg("--max-db-connections");
             command.arg(self.max_db_conns.to_string());
-
-            for arg in process_comm.start_args() {
-                command.arg(arg);
-            }
-
-            for (key, value) in process_comm.start_env() {
-                command.env(key, value);
-            }
-
+            command.env("MESOPHYLL_CLIENT_TOKEN", meso_token);
             command.kill_on_drop(true);
 
             let mut child = match command.spawn() {
@@ -179,85 +111,32 @@ impl WorkerProcessHandle {
                 }
             };
             log::info!("Spawned worker process with ID: {} and pid {:?}", self.id, child.id());
-            let mut is_killing = false;
 
+            failed_attempts = 0; // Reset failed attempts on successful start
             consecutive_failures = 0; // Reset consecutive failures on successful start
 
-            loop {
-                tokio::select! {
-                    _ = child.wait() => {
-                        if is_killing {
-                            return; // Do not attempt to restart the process if it was killed
-                        }
-
-                        log::info!("Worker process with ID: {} exited, restarting...", self.id);
-                        break; // Process exited, break out of inner loop to restart it
-                    }
-                    msg = rx.recv() => {
-                        if let Some(msg) = msg {
-                            // Handle the message
-                            match msg {
-                                ProcessServerMessage::Kill { tx } => {
-                                    log::info!("Killing worker process with ID: {}", self.id);
-                                    is_killing = true;
-                                    let res = child.kill().await.map_err(|x| x.into());
-                                    if let Some(tx) = tx {
-                                        let _ = tx.send(res);
-                                    }
-                                    return; // Exit the loop after killing the process
-                                },
-                                ProcessServerMessage::DispatchEvent { id, event, tx } => {
-                                    let res = process_comm.dispatch_event(id, event).await;
-                                    if let Some(tx) = tx {
-                                        let _ = tx.send(res);
-                                    }
-                                },
-                            }
-                        } else {
-                            // Channel closed, exit the loop after killing the process
-                            log::info!("Worker process server channel closed, exiting");
-                            is_killing = true;
-                            let _ = child.kill().await;
-                            return;
+            tokio::select! {
+                resp = child.wait() => {
+                    match resp {
+                        Ok(status) => {
+                            log::warn!("Worker process with ID: {} exited with status: {}", self.id, status);
+                        },
+                        Err(e) => {
+                            log::error!("Failed to wait for worker process with ID: {}: {}", self.id, e);
                         }
                     }
                 }
+                _ = kill_msg_rx.recv() => {
+                    log::info!("Received kill message for worker process with ID: {}, terminating process", self.id);
+                    if let Err(e) = child.kill().await {
+                        log::error!("Failed to kill worker process with ID: {}: {}", self.id, e);
+                    } else {
+                        log::info!("Successfully killed worker process with ID: {}", self.id);
+                    }
+                    return;
+                }
             }
         }
-    }
-
-    /// Sends a message to the worker thread
-    /// and waits for a response
-    async fn send<T: PushableMessage>(&self, msg: T) -> Result<T::Response, crate::Error> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let msg = msg.into_message(Some(tx));
-        self.process_handle.send(msg)
-            .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
-        rx.await.map_err(|e| format!("Failed to receive response from worker thread: {e}").into())
-    }
-
-    /// Sends a message to the worker thread 
-    /// and wait for a response with a timeout
-    #[allow(dead_code)]
-    async fn send_timeout<T: PushableMessage>(&self, msg: T, duration: Duration) -> Result<T::Response, crate::Error> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let msg = msg.into_message(Some(tx));
-        self.process_handle.send(msg)
-            .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
-
-        tokio::select! {
-            res = rx => res.map_err(|e| format!("Failed to receive response from worker thread: {e}").into()),
-            _ = tokio::time::sleep(duration) => Err("Timed out waiting for response from worker thread".into()),
-        }
-    }
-
-    /// Sends a message to the worker thread
-    async fn send_nowait<T: PushableMessage>(&self, msg: T) -> Result<(), crate::Error> {
-        let (tx, _rx) = tokio::sync::oneshot::channel();
-        let msg = msg.into_message(Some(tx));
-        self.process_handle.send(msg)
-            .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
-        Ok(())
     }
 }
 
@@ -268,33 +147,33 @@ impl WorkerLike for WorkerProcessHandle {
     }
 
     async fn kill(&self) -> Result<(), crate::Error> {
-        self.send(Kill {}).await?
+        self.kill_msg_tx.send(())
+        .map_err(|e| format!("Failed to send kill message to worker process with ID: {}: {}", self.id, e).into())
     }
 
     async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
-        self.send(DispatchEvent {
-            id,
-            event,
-        }).await?
+        let r = self.mesophyll_server.get_connection(self.id)
+            .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", self.id))?;
+        r.dispatch_event(id, event).await
     }
-    async fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
-        self.send_nowait(DispatchEvent {
-            id,
-            event,
-        }).await
+    
+    fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
+        let r = self.mesophyll_server.get_connection(self.id)
+            .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", self.id))?;
+        r.dispatch_event_nowait(id, event)
     }
 }
 
 pub struct WorkerProcessHandleCreateOpts {
-    pub(super) communication_layer: Arc<dyn WorkerProcessCommServerCreator>,
+    pub(super) mesophyll_server: MesophyllServer,
     pub(super) max_db_conns: usize,
 }
 
 impl WorkerProcessHandleCreateOpts {
     /// Creates a new WorkerProcessHandleCreateOpts with the given communication layer
-    pub fn new(communication_layer: Arc<dyn WorkerProcessCommServerCreator>, max_db_conns: usize,) -> Self {
+    pub fn new(mesophyll_server: MesophyllServer, max_db_conns: usize,) -> Self {
         Self {
-            communication_layer,
+            mesophyll_server,
             max_db_conns,
         }
     }
@@ -305,11 +184,9 @@ impl Poolable for WorkerProcessHandle {
     type ExtState = WorkerProcessHandleCreateOpts;
 
     fn new(_filter: WorkerFilter, id: usize, total: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
-        where
-            Self: Sized {
-        // Create a new WorkerProcessHandle with the given state and filter
-        let process_comm = ext_state.communication_layer.create()?;
-        Self::new(id, total, ext_state.max_db_conns, process_comm)
+    where Self: Sized 
+    {
+        Self::new(id, total, ext_state.max_db_conns, ext_state.mesophyll_server.clone())
     }
 }
 

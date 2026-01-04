@@ -12,12 +12,9 @@ mod migrations;
 use crate::config::CONFIG;
 use crate::data::Data;
 use crate::event_handler::EventFramework;
+use crate::mesophyll::client::MesophyllClient;
 use crate::worker::workerlike::WorkerLike;
 use crate::worker::workerpool::WorkerPool;
-use crate::worker::workerprocesscomm::WorkerProcessCommClient;
-use crate::worker::workerprocesscommhttp2::{
-    WorkerProcessCommHttp2ServerCreator, WorkerProcessCommHttp2Worker,
-};
 use crate::worker::workerprocesshandle::{WorkerProcessHandle, WorkerProcessHandleCreateOpts};
 use crate::worker::workerstate::CreateWorkerState;
 use crate::worker::workerthread::WorkerThread;
@@ -269,13 +266,7 @@ async fn main_impl(args: CmdArgs) {
 
                 let rpc_server = crate::api::server::create(data1, http1);
 
-                let addr = format!(
-                    "{}:{}",
-                    CONFIG.base_ports.template_worker_bind_addr,
-                    CONFIG.base_ports.template_worker_port
-                );
-
-                let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+                let listener = tokio::net::TcpListener::bind(&CONFIG.addrs.template_worker).await.unwrap();
 
                 axum::serve(listener, rpc_server).await.unwrap();
             });
@@ -295,18 +286,18 @@ async fn main_impl(args: CmdArgs) {
             }
         }
         WorkerType::ProcessPool => {
+            let mesophyll_server = mesophyll::server::MesophyllServer::new(
+                CONFIG.addrs.mesophyll_server.clone(),
+                args.worker_threads,
+            )
+            .await
+            .expect("Failed to create Mesophyll server");
+
             let worker_pool = Arc::new(
                 WorkerPool::<WorkerProcessHandle>::new(
                     args.worker_threads,
                     &WorkerProcessHandleCreateOpts::new(
-                        Arc::new(WorkerProcessCommHttp2ServerCreator::new(
-                            reqwest::Client::builder()
-                                .http2_prior_knowledge()
-                                .build()
-                                .expect(
-                                "Failed to create reqwest client for worker process communication",
-                            ),
-                        )),
+                        mesophyll_server,
                         args.max_worker_db_connections,
                     ),
                 )
@@ -328,13 +319,7 @@ async fn main_impl(args: CmdArgs) {
 
                 let rpc_server = crate::api::server::create(data1, http1);
 
-                let addr = format!(
-                    "{}:{}",
-                    CONFIG.base_ports.template_worker_bind_addr,
-                    CONFIG.base_ports.template_worker_port
-                );
-
-                let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+                let listener = tokio::net::TcpListener::bind(&CONFIG.addrs.template_worker).await.unwrap();
 
                 axum::serve(listener, rpc_server).await.unwrap();
             });
@@ -396,18 +381,9 @@ async fn main_impl(args: CmdArgs) {
                 .expect("Failed to create worker thread"),
             );
 
-            let Some(worker_comm_type) = args.worker_comm_type else {
-                panic!("Worker comm type must be set when worker type is processpoolworker");
-            };
+            let ident_token = std::env::var("MESOPHYLL_CLIENT_TOKEN").expect("Failed to find ident token for mesophyll");
 
-            let _comm_client: Arc<dyn WorkerProcessCommClient> = match worker_comm_type.as_str() {
-                "http2" => Arc::new(
-                    WorkerProcessCommHttp2Worker::new(worker_thread.clone())
-                        .await
-                        .expect("Failed to create HTTP/2 worker process communication client"),
-                ),
-                _ => panic!("Unknown worker comm type: {}", worker_comm_type),
-            };
+            let _meso_client = MesophyllClient::new(CONFIG.addrs.mesophyll_server.clone(), ident_token, worker_thread.clone());
 
             let data = Arc::new(Data {
                 object_store: object_storage,

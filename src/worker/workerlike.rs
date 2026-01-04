@@ -20,7 +20,7 @@ pub trait WorkerLike {
     async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error>;
 
     /// Dispatch an event to the templates managed by this worker without waiting for the result
-    async fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error>;
+    fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error>;
 
     /// For a pool, returns the length of the pool
     /// 

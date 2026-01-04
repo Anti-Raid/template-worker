@@ -105,16 +105,9 @@ pub struct Servers {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct BasePorts {
-    pub jobserver: u16,
-    pub bot: u16,
-    pub jobserver_base_addr: String,
-    pub jobserver_bind_addr: String,
-    pub bot_base_addr: String,
-    pub bot_bind_addr: String,
-    pub template_worker_bind_addr: String,
-    pub template_worker_addr: String,
-    pub template_worker_port: u16,
+pub struct Addrs {
+    pub template_worker: String,
+    pub mesophyll_server: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -124,7 +117,7 @@ pub struct Config {
     pub sites: Sites,
     pub servers: Servers,
     pub object_storage: ObjectStorage,
-    pub base_ports: BasePorts,
+    pub addrs: Addrs,
 
     #[serde(skip)]
     /// Setup by load() for statistics

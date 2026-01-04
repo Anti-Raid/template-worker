@@ -1,9 +1,9 @@
-use std::{collections::HashMap, sync::{Arc, RwLock, Weak}, time::{Duration, Instant}};
-
+use std::{collections::HashMap, sync::{Arc, Weak}, time::Instant};
+use rand::{distr::{Alphanumeric, SampleString}};
 use dashmap::DashMap;
 use futures::{SinkExt, StreamExt};
 use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
-use tokio::{select, spawn, sync::{Notify, mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel}, oneshot::{Receiver, Sender, channel}}};
+use tokio::{select, spawn, sync::{mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel}, oneshot::{Receiver, Sender, channel}}};
 use tokio_util::sync::CancellationToken;
 
 use crate::{mesophyll::message::{ClientMessage, ServerMessage}, worker::workervmmanager::Id};
@@ -14,22 +14,31 @@ use axum::{
 
 #[derive(Clone)]
 pub struct MesophyllServer {
-    cancel: CancellationToken,
     idents: Arc<HashMap<usize, String>>,
     conns: Arc<DashMap<usize, MesophyllServerConn>>,
 }
 
 impl MesophyllServer {
-    pub async fn new(addr: String, idents: HashMap<usize, String>) -> Result<Self, crate::Error> {
+    const TOKEN_LENGTH: usize = 64;
+
+    pub async fn new(addr: String, num_idents: usize) -> Result<Self, crate::Error> {
+        let mut idents = HashMap::new();
+        for i in 0..num_idents {
+            let ident = Alphanumeric.sample_string(&mut rand::rng(), Self::TOKEN_LENGTH);
+            idents.insert(i, ident);
+        }
+        Self::new_with(addr, idents).await
+    }
+
+    pub async fn new_with(addr: String, idents: HashMap<usize, String>) -> Result<Self, crate::Error> {
         let s = Self {
-            cancel: CancellationToken::new(),
             idents: Arc::new(idents),
             conns: Arc::new(DashMap::new()),
         };
 
         // Axum Router
         let app = Router::new()
-            .route("/:worker_id", get(ws_handler))
+            .route("/conn/:worker_id", get(ws_handler))
             .with_state(s.clone());
 
         let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -42,6 +51,10 @@ impl MesophyllServer {
         });
 
         Ok(s)
+    }
+
+    pub fn get_token_for_worker(&self, worker_id: usize) -> Option<&String> {
+        self.idents.get(&worker_id)
     }
 
     pub fn get_connection(&self, worker_id: usize) -> Option<MesophyllServerConn> {
@@ -88,21 +101,18 @@ async fn handle_socket(socket: WebSocket, id: usize, state: MesophyllServer) {
     log::info!("Worker {} connected", id);
 }
 
-pub struct HeartbeatInfo {
-    last_heartbeat: Instant,
-    vm_count: usize,
+enum MesophyllServerQueryMessage {
+    GetLastHeartbeat { tx: Sender<Option<Instant>> }
 }
 
 /// A Mesophyll server connection
 #[derive(Clone)]
 pub struct MesophyllServerConn {
     id: usize,
-    send_queue: UnboundedSender<ServerMessage>,
+    send_queue: UnboundedSender<Message>,
+    query_queue: UnboundedSender<MesophyllServerQueryMessage>,
     dispatch_response_handlers: Arc<DashMap<u64, Sender<Result<KhronosValue, String>>>>,
-    heartbeat_info: Arc<RwLock<Option<HeartbeatInfo>>>,
-    heartbeat_notify: Arc<Notify>,
     cancel: CancellationToken,
-    conns_map: Weak<DashMap<usize, MesophyllServerConn>>,
 }
 
 impl Drop for MesophyllServerConn {
@@ -111,22 +121,38 @@ impl Drop for MesophyllServerConn {
     }
 }
 
+struct DispatchHandlerDropGuard<'a> {
+    map: &'a DashMap<u64, Sender<Result<KhronosValue, String>>>,
+    req_id: u64,
+}
+
+impl<'a> DispatchHandlerDropGuard<'a> {
+    fn new(map: &'a DashMap<u64, Sender<Result<KhronosValue, String>>>, req_id: u64) -> Self {
+        Self { map, req_id }
+    }
+}
+
+impl<'a> Drop for DispatchHandlerDropGuard<'a> {
+    fn drop(&mut self) {
+        self.map.remove(&self.req_id);
+    }
+}
+
 impl MesophyllServerConn {
     fn new(id: usize, stream: WebSocket, conns_map: Weak<DashMap<usize, MesophyllServerConn>>) -> Self {
         let (send_queue, recv_queue) = unbounded_channel();
+        let (query_queue_tx, query_queue_rx) = unbounded_channel();
         let s = Self {
             id,
             send_queue,
             dispatch_response_handlers: Arc::new(DashMap::new()),
-            heartbeat_info: Arc::new(RwLock::new(None)),
-            heartbeat_notify: Arc::new(Notify::new()),
             cancel: CancellationToken::new(),
-            conns_map: conns_map.clone(),
+            query_queue: query_queue_tx,
         };
 
         let s_ref = s.clone();
         spawn(async move {
-            s_ref.run_loop(stream, recv_queue).await;
+            s_ref.run_loop(stream, recv_queue, query_queue_rx).await;
 
             if let Some(map) = conns_map.upgrade() {
                 map.remove(&id);
@@ -135,31 +161,42 @@ impl MesophyllServerConn {
         s
     }
 
-    async fn run_loop(&self, socket: WebSocket, mut rx: UnboundedReceiver<ServerMessage>) {
+    async fn run_loop(&self, socket: WebSocket, mut rx: UnboundedReceiver<Message>, mut query_queue_rx: UnboundedReceiver<MesophyllServerQueryMessage>) {
         let (mut stream_tx, mut stream_rx) = socket.split();
-
+        let mut last_hb = None;
         loop {
             select! {
                 Some(msg) = rx.recv() => {
-                    let Ok(json) = serde_json::to_string(&msg) else { 
-                        continue 
-                    };
-                    if let Err(e) = stream_tx.send(Message::Text(json.into())).await {
+                    if let Err(e) = stream_tx.send(msg).await {
                         log::error!("Failed to send Mesophyll message to worker {}: {}", self.id, e);
                     }
                 }
-                Some(Ok(msg)) = stream_rx.next() => {
+                Some(msg) = query_queue_rx.recv() => {
                     match msg {
-                        Message::Text(text) => {
-                            if let Ok(client_msg) = serde_json::from_str::<ClientMessage>(&text) {
-                                self.handle_message(client_msg).await;
+                        MesophyllServerQueryMessage::GetLastHeartbeat { tx } => {
+                            let _ = tx.send(last_hb);
+                        }
+                    }
+                }
+                Some(Ok(msg)) = stream_rx.next() => {
+                    if let Message::Close(_) = msg {
+                        log::info!("Mesophyll server connection {} closed by client", self.id);
+                        break;
+                    }
+
+                    let Some(client_msg) = decode_message::<ClientMessage>(&msg) else {
+                        continue;
+                    };
+
+                    match client_msg {
+                        ClientMessage::DispatchResponse { req_id, result } => {
+                            if let Some((_, tx)) = self.dispatch_response_handlers.remove(&req_id) {
+                                let _ = tx.send(result);
                             }
                         }
-                        Message::Close(_) => {
-                            log::info!("Mesophyll server connection {} closed by client", self.id);
-                            break;
-                        },
-                        _ => {}
+                        ClientMessage::Heartbeat { } => {
+                            last_hb = Some(Instant::now());
+                        }
                     }
                 }
                 _ = self.cancel.cancelled() => {
@@ -174,32 +211,10 @@ impl MesophyllServerConn {
         }
     }
 
-    async fn handle_message(&self, msg: ClientMessage) {
-        match msg {
-            ClientMessage::DispatchResponse { req_id, result } => {
-                if let Some((_, tx)) = self.dispatch_response_handlers.remove(&req_id) {
-                    let _ = tx.send(result);
-                }
-            }
-            ClientMessage::Heartbeat { vm_count } => {
-                // SAFETY: We do not hold the lock across an await point
-                let mut lock = self.heartbeat_info.write().expect("Failed to acquire heartbeat info write lock");
-                *lock = Some(HeartbeatInfo {
-                    last_heartbeat: Instant::now(),
-                    vm_count,
-                });
-            }
-        }
-    }
-
     // Sends a message to the connected client
-    fn send(&self, message: ServerMessage) -> Result<(), crate::Error> {
-        match self.send_queue.send(message) {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                Err(format!("Failed to send Mesophyll message to client: {}", e).into())
-            }
-        }
+    fn send(&self, msg: &ServerMessage) -> Result<(), crate::Error> {
+        let msg = encode_message(&msg)?;
+        self.send_queue.send(msg).map_err(|e| format!("Failed to send Mesophyll server message: {}", e).into())
     }
 
     // Internal helper method to register a response handler for the next req_id, returning the req_id
@@ -222,27 +237,41 @@ impl MesophyllServerConn {
     pub async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
         let (req_id, rx) = self.register_dispatch_response_handler();
 
-        let message = ServerMessage::DispatchEvent { id, event, req_id };
-        match self.send(message) {
-            Ok(_) => {},
-            Err(e) => {
-                self.dispatch_response_handlers.remove(&req_id);
-                return Err(e);
-            }
+        // Upon return, remove the handler from the map
+        let _guard = DispatchHandlerDropGuard::new(&self.dispatch_response_handlers, req_id);
+
+        let message = ServerMessage::DispatchEvent { id, event, req_id: Some(req_id) };
+        self.send(&message)?;
+        Ok(rx.await.map_err(|e| format!("Failed to receive dispatch event response: {}", e))??)
+    }
+
+    /// Dispatches an event without waiting for a response
+    pub fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
+        let message = ServerMessage::DispatchEvent { id, event, req_id: None };
+        self.send(&message)?;
+        Ok(())
+    }
+
+    /// Returns the last time a heartbeat was recieved from this client
+    #[allow(dead_code)]
+    pub async fn get_last_hb_instant(&self) -> Result<Option<Instant>, crate::Error> {
+        let (tx, rx) = channel();
+        self.query_queue.send(MesophyllServerQueryMessage::GetLastHeartbeat { tx })?;
+        Ok(rx.await?)
+    }
+}
+
+fn encode_message<T: serde::Serialize>(msg: &T) -> Result<Message, crate::Error> {
+    let json = serde_json::to_string(msg)
+        .map_err(|e| format!("Failed to serialize Mesophyll message: {}", e))?;
+    Ok(Message::Text(json.into()))
+}
+
+fn decode_message<T: for<'de> serde::Deserialize<'de>>(msg: &Message) -> Option<T> {
+    match msg {
+        Message::Text(text) => {
+            serde_json::from_str::<T>(text).ok()
         }
-        match tokio::time::timeout(Duration::from_secs(30), rx).await {
-            Ok(Ok(r)) => {
-                self.dispatch_response_handlers.remove(&req_id);
-                Ok(r?)
-            },
-            Ok(Err(_)) => {
-                self.dispatch_response_handlers.remove(&req_id);
-                Err("Dispatch event response channel closed unexpectedly".into())
-            }
-            Err(e) => {
-                self.dispatch_response_handlers.remove(&req_id);
-                return Err(format!("Dispatch event timed out: {}", e).into());
-            }
-        }
+        _ => None,
     }
 }

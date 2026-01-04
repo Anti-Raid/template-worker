@@ -92,8 +92,8 @@ impl<T: WorkerLike + Send + Sync> WorkerLike for WorkerPool<T> {
         self.get_worker_for(id).dispatch_event(id, event).await
     }
 
-    async fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
-        self.get_worker_for(id).dispatch_event_nowait(id, event).await
+    fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
+        self.get_worker_for(id).dispatch_event_nowait(id, event)
     }
 
     fn len(&self) -> usize {

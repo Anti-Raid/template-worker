@@ -31,6 +31,4 @@ pub mod workerlike;
 pub mod workerfilter;
 
 pub mod workerprocesshandle; // TODO: Replace with mesophyll
-pub mod workerprocesscommhttp2; // TODO: Replace with mesophyll
-pub mod workerprocesscomm; // TODO: Replace with mesophyll
 pub mod workerpool;

@@ -13,7 +13,7 @@ pub enum ServerMessage {
     DispatchEvent { 
         id: Id, 
         event: CreateEvent, 
-        req_id: u64 
+        req_id: Option<u64> 
     },
 }
 
@@ -25,7 +25,5 @@ pub enum ClientMessage {
         result: Result<KhronosValue, String> 
     },
 
-    Heartbeat { 
-        vm_count: usize 
-    },
+    Heartbeat { },
 }

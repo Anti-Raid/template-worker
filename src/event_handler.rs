@@ -57,8 +57,7 @@ pub async fn discord_event_dispatch(
             None,
             event.data,
         ),
-    )
-    .await?;
+    )?;
 
     Ok(())
 }

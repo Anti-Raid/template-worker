@@ -153,7 +153,7 @@ impl WorkerThread {
     }
 
     /// Sends a message to the worker thread
-    async fn send_nowait<T: PushableMessage>(&self, msg: T) -> Result<(), crate::Error> {
+    fn send_nowait<T: PushableMessage>(&self, msg: T) -> Result<(), crate::Error> {
         let (tx, _rx) = tokio::sync::oneshot::channel();
         let msg = msg.into_message(Some(tx));
         self.tx.send(msg)
@@ -179,11 +179,11 @@ impl WorkerLike for WorkerThread {
         }).await?
     }
 
-    async fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
+    fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
         self.send_nowait(DispatchEvent {
             id,
             event,
-        }).await
+        })
     }
 }
 
