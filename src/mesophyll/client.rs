@@ -1,10 +1,11 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use futures::{SinkExt, StreamExt, stream::FuturesUnordered};
+use khronos_runtime::utils::khronos_value::KhronosValue;
 use tokio::time::interval;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-use crate::{mesophyll::{MESOPHYLL_DEFAULT_HEARTBEAT_MS, message::{ClientMessage, ServerMessage}}, worker::{workerlike::WorkerLike, workerthread::WorkerThread}};
+use crate::{mesophyll::{MESOPHYLL_DEFAULT_HEARTBEAT_MS, message::{ClientMessage, ServerMessage}, server::SerdeKvRecord}, worker::{workerlike::WorkerLike, workerstate::TenantState, workerthread::WorkerThread, workervmmanager::Id}};
 
 /// Mesophyll client, NOT THREAD SAFE
 #[derive(Clone)]
@@ -20,7 +21,7 @@ impl MesophyllClient {
         let worker_id = wt.id();
         let s = Self {
             wt,
-            addr: format!("{}/conn/{}?token={}", addr, worker_id, token),
+            addr: format!("{}/ws?id={}?token={}", addr, worker_id, token),
         };
 
         let self_ref = s.clone();
@@ -89,6 +90,162 @@ impl MesophyllClient {
                 }
             }
         }
+    }
+}
+
+#[allow(dead_code)]
+pub struct MesophyllDbClient {
+    addr: String,
+    worker_id: usize,
+    token: String,
+    client: reqwest::Client,
+}
+
+#[allow(dead_code)]
+impl MesophyllDbClient {
+    /// Creates a new MesophyllDbClient
+    pub fn new(addr: String, worker_id: usize, token: String) -> Self {
+        Self {
+            addr,
+            worker_id,
+            token,
+            client: reqwest::Client::builder()
+            .http2_prior_knowledge()
+            .build()
+            .expect("Failed to create reqwest client"),
+        }
+    }
+
+    fn url_for(&self, path: &str, id: Option<Id>) -> String {
+        let mut base = format!("{}/db/{}?id={}&token={}", self.addr, self.worker_id, self.token, path);
+        match id {
+            Some(id) => {
+                match id {
+                    Id::GuildId(guild_id) => {
+                        base.push_str(&format!("&tenant_id={}&tenant_type=guild", guild_id));
+                    }
+                }
+            }
+            None => {}
+        }
+
+        base
+    }
+
+    async fn decode_no_resp(resp: reqwest::Response) -> Result<(), crate::Error> {
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text()
+                .await
+                .unwrap_or_default();
+            return Err(format!("request failed with status: {}: {}", status, text).into());
+        }
+
+        Ok(())
+    }
+
+    async fn decode_resp<T: for<'de> serde::Deserialize<'de>>(resp: reqwest::Response) -> Result<T, crate::Error> {
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(format!("request failed with status: {}: {}", status, text).into());
+        }
+
+        let resp_bytes = resp.bytes()
+            .await
+            .map_err(|e| format!("Failed to parse list_tenant_states response: {}", e))?;
+
+        rmp_serde::from_slice(&resp_bytes).map_err(|e| format!("Failed to decode response: {}", e).into())
+    }
+
+    fn encode_req<T: serde::Serialize>(&self, body: &T) -> Result<reqwest::Body, crate::Error> {
+        let encoded = rmp_serde::to_vec(body)
+            .map_err(|e| format!("Failed to encode request body: {}", e))?;
+        Ok(reqwest::Body::from(encoded))
+    }
+
+    /// Returns a list of all tenant states from the Mesophyll server
+    pub async fn list_tenant_states(&self) -> Result<HashMap<Id, TenantState>, crate::Error> {
+        let url = self.url_for("tenant-states", None);
+        let resp = self.client.get(&url)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to send list_tenant_states request: {}", e))?;
+
+        Self::decode_resp(resp).await
+    }
+
+    /// Sets the tenant state for a given tenant ID
+    pub async fn set_tenant_state_for(&self, id: Id, state: &TenantState) -> Result<(), crate::Error> {
+        let url = self.url_for("tenant-state", Some(id));
+        let body = self.encode_req(state)?;
+        let resp = self.client.post(&url)
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to send set_tenant_state_for request: {}", e))?;
+
+        Self::decode_no_resp(resp).await
+    }
+
+    pub async fn kv_get(&self, id: Id, scopes: Vec<String>, key: String) -> Result<Option<SerdeKvRecord>, crate::Error> {
+        let url = self.url_for("kv", Some(id));
+        let body = self.encode_req(&crate::mesophyll::message::KeyValueOp::Get { scopes, key })?;
+        let resp = self.client.post(&url)
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to send kv_get request: {}", e))?;
+
+        Self::decode_resp(resp).await
+    }
+
+    pub async fn kv_list_scopes(&self, id: Id) -> Result<Vec<String>, crate::Error> {
+        let url = self.url_for("kv", Some(id));
+        let body = self.encode_req(&crate::mesophyll::message::KeyValueOp::ListScopes {})?;
+        let resp = self.client.post(&url)
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to send kv_list_scopes request: {}", e))?;
+
+        Self::decode_resp(resp).await
+    }
+
+    pub async fn kv_set(&self, id: Id, scopes: Vec<String>, key: String, value: KhronosValue) -> Result<(), crate::Error> {
+        let url = self.url_for("kv", Some(id));
+        let body = self.encode_req(&crate::mesophyll::message::KeyValueOp::Set { scopes, key, value })?;
+        let resp = self.client.post(&url)
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to send kv_set request: {}", e))?;
+
+        Self::decode_no_resp(resp).await
+    }
+
+    pub async fn kv_delete(&self, id: Id, scopes: Vec<String>, key: String) -> Result<(), crate::Error> {
+        let url = self.url_for("kv", Some(id));
+        let body = self.encode_req(&crate::mesophyll::message::KeyValueOp::Delete { scopes, key })?;
+        let resp = self.client.post(&url)
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to send kv_delete request: {}", e))?;
+
+        Self::decode_no_resp(resp).await
+    }
+
+    pub async fn kv_find(&self, id: Id, scopes: Vec<String>, prefix: String) -> Result<Vec<SerdeKvRecord>, crate::Error> {
+        let url = self.url_for("kv", Some(id));
+        let body = self.encode_req(&crate::mesophyll::message::KeyValueOp::Find { scopes, prefix })?;
+        let resp = self.client.post(&url)
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to send kv_find request: {}", e))?;
+
+        Self::decode_resp(resp).await
     }
 }
 

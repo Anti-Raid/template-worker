@@ -27,3 +27,25 @@ pub enum ClientMessage {
 
     Heartbeat { },
 }
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub enum KeyValueOp {
+    Get { 
+        scopes: Vec<String>,
+        key: String 
+    },
+    ListScopes {},
+    Set { 
+        scopes: Vec<String>,
+        key: String, 
+        value: KhronosValue 
+    },
+    Delete { 
+        scopes: Vec<String>,
+        key: String 
+    },
+    Find { 
+        scopes: Vec<String>,
+        prefix: String
+    },
+}

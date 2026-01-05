@@ -12,7 +12,7 @@ mod migrations;
 use crate::config::CONFIG;
 use crate::data::Data;
 use crate::event_handler::EventFramework;
-use crate::mesophyll::client::MesophyllClient;
+use crate::mesophyll::client::{MesophyllClient, MesophyllDbClient};
 use crate::worker::workerlike::WorkerLike;
 use crate::worker::workerpool::WorkerPool;
 use crate::worker::workerprocesshandle::{WorkerProcessHandle, WorkerProcessHandleCreateOpts};
@@ -35,9 +35,6 @@ pub enum WorkerType {
     /// Dummy worker that applies a migration by name and exits
     #[clap(name = "migrate", alias = "apply-migration")]
     Migrate,
-    /// Worker that uses a thread pool for executing tasks
-    #[clap(name = "threadpool", alias = "thread-pool")]
-    ThreadPool,
     /// Worker that uses a process pool for executing tasks
     #[clap(name = "processpool", alias = "process-pool")]
     ProcessPool,
@@ -94,7 +91,6 @@ fn main() {
     let num_tokio_threads = match args.worker_type {
         WorkerType::RegisterCommands => 1,
         WorkerType::Migrate => 1,
-        WorkerType::ThreadPool => args.tokio_threads_master,
         WorkerType::ProcessPool => args.tokio_threads_master,
         WorkerType::ProcessPoolWorker => args.tokio_threads_worker,
     };
@@ -165,12 +161,6 @@ async fn main_impl(args: CmdArgs) {
 
     info!("Connecting to database");
 
-    let pg_pool = PgPoolOptions::new()
-        .max_connections(args.max_db_connections)
-        .connect(&CONFIG.meta.postgres_url)
-        .await
-        .expect("Could not initialize connection");
-
     let reqwest = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(30))
         .timeout(std::time::Duration::from_secs(90))
@@ -199,14 +189,6 @@ async fn main_impl(args: CmdArgs) {
             .expect("Could not initialize object store"),
     );
 
-    let worker_state = CreateWorkerState::new(
-        http.clone(),
-        reqwest.clone(),
-        object_storage.clone(),
-        pg_pool.clone(),
-        Arc::new(current_user.clone()),
-    );
-
     match args.worker_type {
         WorkerType::RegisterCommands => {
             info!("Getting registration data from builtins");
@@ -220,6 +202,12 @@ async fn main_impl(args: CmdArgs) {
                 .expect("Failed to register commands");
         }
         WorkerType::Migrate => {
+            let pg_pool = PgPoolOptions::new()
+                .max_connections(args.max_db_connections)
+                .connect(&CONFIG.meta.postgres_url)
+                .await
+                .expect("Could not initialize connection");
+
             let migration_name = args.migration;
             if migration_name.is_empty() {
                 panic!("Migration name must be provided when worker type is 'migrate'");
@@ -239,50 +227,17 @@ async fn main_impl(args: CmdArgs) {
 
             error!("Migration not found: {}", migration_name);
         }
-        WorkerType::ThreadPool => {
-            let worker_pool = Arc::new(
-                WorkerPool::<WorkerThread>::new(args.worker_threads, &worker_state)
-                    .expect("Failed to create worker thread pool"),
-            );
-
-            let data = Arc::new(Data {
-                object_store: object_storage,
-                pool: pg_pool.clone(),
-                reqwest,
-                current_user,
-                worker: worker_pool,
-            });
-
-            let data1 = data.clone();
-            let http1 = http.clone();
-            tokio::task::spawn(async move {
-                log::info!("Starting RPC server");
-
-                let rpc_server = crate::api::server::create(data1, http1);
-
-                let listener = tokio::net::TcpListener::bind(&CONFIG.addrs.template_worker).await.unwrap();
-
-                axum::serve(listener, rpc_server).await.unwrap();
-            });
-
-            let mut client = client_builder
-                .data(data)
-                .event_handler(EventFramework {})
-                .wait_time_between_shard_start(Duration::from_secs(0)) // Disable wait time between shard start due to Sandwich
-                .await
-                .expect("Error creating client");
-
-            info!("Starting using autosharding");
-
-            if let Err(why) = client.start_autosharded().await {
-                error!("Client error: {:?}", why);
-                std::process::exit(1); // Clean exit with status code of 1
-            }
-        }
         WorkerType::ProcessPool => {
+            let pg_pool = PgPoolOptions::new()
+                .max_connections(args.max_db_connections)
+                .connect(&CONFIG.meta.postgres_url)
+                .await
+                .expect("Could not initialize connection");
+
             let mesophyll_server = mesophyll::server::MesophyllServer::new(
                 CONFIG.addrs.mesophyll_server.clone(),
                 args.worker_threads,
+                pg_pool.clone()
             )
             .await
             .expect("Failed to create Mesophyll server");
@@ -300,7 +255,6 @@ async fn main_impl(args: CmdArgs) {
 
             let data = Arc::new(Data {
                 object_store: object_storage,
-                pool: pg_pool.clone(),
                 reqwest,
                 current_user,
                 worker: worker_pool.clone(),
@@ -311,7 +265,7 @@ async fn main_impl(args: CmdArgs) {
             tokio::task::spawn(async move {
                 log::info!("Starting RPC server");
 
-                let rpc_server = crate::api::server::create(data1, http1);
+                let rpc_server = crate::api::server::create(data1, pg_pool.clone(), http1);
 
                 let listener = tokio::net::TcpListener::bind(&CONFIG.addrs.template_worker).await.unwrap();
 
@@ -366,22 +320,29 @@ async fn main_impl(args: CmdArgs) {
                 panic!("Worker ID must be set when worker type is processpoolworker");
             };
 
+            let ident_token = std::env::var("MESOPHYLL_CLIENT_TOKEN").expect("Failed to find ident token for mesophyll");
+
+            let worker_state = CreateWorkerState::new(
+                http.clone(),
+                reqwest.clone(),
+                object_storage.clone(),
+                Arc::new(current_user.clone()),
+                Arc::new(MesophyllDbClient::new(CONFIG.addrs.mesophyll_server.clone(), worker_id, ident_token.clone())),
+            );
+
             let worker_thread = Arc::new(
                 WorkerThread::new(
-                    worker_state.clone(),
+                    worker_state,
                     WorkerPool::<WorkerProcessHandle>::filter_for(worker_id, args.worker_threads),
                     worker_id,
                 )
                 .expect("Failed to create worker thread"),
             );
 
-            let ident_token = std::env::var("MESOPHYLL_CLIENT_TOKEN").expect("Failed to find ident token for mesophyll");
-
             let _meso_client = MesophyllClient::new(CONFIG.addrs.mesophyll_server.clone(), ident_token, worker_thread.clone());
 
             let data = Arc::new(Data {
                 object_store: object_storage,
-                pool: pg_pool.clone(),
                 reqwest,
                 current_user,
                 worker: worker_thread,

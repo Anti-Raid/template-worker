@@ -137,6 +137,7 @@ pub(super) struct GetUserGuildsQuery {
 pub(super) async fn get_user_guilds(
         State(AppData {
         data,
+        pool,
         ..
     }): State<AppData>,
     AuthorizedUser { user_id, session_type, .. }: AuthorizedUser, // Internal endpoint
@@ -160,7 +161,7 @@ pub(super) async fn get_user_guilds(
         // Check for guilds cache
         let cached_guilds = sqlx::query("SELECT guilds_cache FROM users WHERE user_id = $1")
             .bind(&user_id)
-            .fetch_one(&data.pool)
+            .fetch_one(&pool)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
@@ -183,7 +184,7 @@ pub(super) async fn get_user_guilds(
 
             let access_token: AccessToken = sqlx::query_as("SELECT access_token FROM users WHERE user_id = $1")
                 .bind(&user_id)
-                .fetch_one(&data.pool)
+                .fetch_one(&pool)
                 .await
                 .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
@@ -238,7 +239,7 @@ pub(super) async fn get_user_guilds(
                 .bind(serde_json::to_value(&dashboard_guilds)
                     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?)
                 .bind(&user_id)
-                .execute(&data.pool)
+                .execute(&pool)
                 .await
                 .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
@@ -448,6 +449,7 @@ static OAUTH2_CODE_CACHE: LazyLock<Cache<String, ()>> = LazyLock::new(|| {
 pub(super) async fn create_oauth2_session(
     State(AppData {
         data,
+        pool,
         ..
     }): State<AppData>,
     Json(req): Json<AuthorizeRequest>,
@@ -554,14 +556,14 @@ pub(super) async fn create_oauth2_session(
 
     // Create a session for the user
     create_web_user_from_oauth2(
-        &data.pool,
+        &pool,
         &user_info.id,
         &token_response.access_token,
     ).await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to create user: {e:?}").into())))?;
 
     let session = create_web_session(
-        &data.pool,
+        &pool,
         &user_info.id,
         None, // No name for the session
         SessionType::Login,
@@ -630,10 +632,10 @@ pub(super) async fn get_authorized_session(
     )
 )]
 pub(super) async fn get_user_sessions_api(
-    State(AppData { data, .. }): State<AppData>,
+    State(AppData { pool, .. }): State<AppData>,
     AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
 ) -> ApiResponse<UserSessionList> {
-    let sessions = get_user_sessions(&data.pool, &user_id)
+    let sessions = get_user_sessions(&pool, &user_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get user sessions: {e:?}").into())))?;
 
@@ -657,7 +659,7 @@ pub(super) async fn get_user_sessions_api(
     )
 )]
 pub(super) async fn create_user_session(
-    State(AppData { data, .. }): State<AppData>,
+    State(AppData { pool, .. }): State<AppData>,
     AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
     Json(req): Json<CreateUserSession>,
 ) -> ApiResponse<CreateUserSessionResponse> {
@@ -683,7 +685,7 @@ pub(super) async fn create_user_session(
     }
 
     let session = create_web_session(
-        &data.pool,
+        &pool,
         &user_id,
         Some(req.name),
         SessionType::Api {
@@ -718,11 +720,11 @@ pub(super) async fn create_user_session(
     )
 )]
 pub(super) async fn delete_user_session_api(
-    State(AppData { data, .. }): State<AppData>,
+    State(AppData { pool, .. }): State<AppData>,
     AuthorizedUser { user_id, .. }: AuthorizedUser,
     Path(session_id): Path<String>, // Session ID to delete
 ) -> ApiResponse<()> {
-    delete_user_session(&data.pool, &user_id, &session_id)
+    delete_user_session(&pool, &user_id, &session_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to delete user session: {e:?}").into())))?;
 

@@ -1,12 +1,11 @@
 use std::{borrow::Cow, cell::RefCell, collections::{HashMap, HashSet}, rc::Rc, sync::{Arc, LazyLock}};
 use serde_json::Value;
 
-use crate::worker::workervmmanager::Id;
+use crate::{mesophyll::client::MesophyllDbClient, worker::workervmmanager::Id};
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct TenantState {
     pub events: HashSet<String>,
-    pub banned: bool,
     pub data: Value
 }
 
@@ -18,7 +17,6 @@ static DEFAULT_TENANT_STATE: LazyLock<TenantState> = LazyLock::new(|| TenantStat
         set.insert("WebExecuteSetting".to_string());
         set
     },
-    banned: false,
     data: Value::Object(serde_json::Map::new()),
 });
 
@@ -28,8 +26,8 @@ pub struct CreateWorkerState {
     pub serenity_http: Arc<serenity::http::Http>,
     pub reqwest_client: reqwest::Client,
     pub object_store: Arc<crate::objectstore::ObjectStore>,
-    pub pool: sqlx::PgPool,
     pub current_user: Arc<serenity::all::CurrentUser>,
+    pub mesophyll_db: Arc<MesophyllDbClient>
 }
 
 impl CreateWorkerState {
@@ -38,15 +36,15 @@ impl CreateWorkerState {
         serenity_http: Arc<serenity::http::Http>,
         reqwest_client: reqwest::Client,
         object_store: Arc<crate::objectstore::ObjectStore>,
-        pool: sqlx::PgPool,
         current_user: Arc<serenity::all::CurrentUser>,
+        mesophyll_db: Arc<MesophyllDbClient>
     ) -> Self {
         Self {
             serenity_http,
             reqwest_client,
             object_store,
-            pool,
             current_user,
+            mesophyll_db
         }
     }
 }
@@ -57,7 +55,7 @@ pub struct WorkerState {
     pub serenity_http: Arc<serenity::http::Http>,
     pub reqwest_client: reqwest::Client,
     pub object_store: Arc<crate::objectstore::ObjectStore>,
-    pub pool: sqlx::PgPool,
+    pub mesophyll_db: Arc<MesophyllDbClient>,
     pub current_user: Arc<serenity::all::CurrentUser>,
     tenant_state_cache: Rc<RefCell<HashMap<Id, TenantState>>>, // Maps tenant IDs to their states
     startup_events: Rc<RefCell<HashSet<Id>>>, // Tracks which tenants have had their startup events fired
@@ -72,7 +70,7 @@ impl WorkerState {
             serenity_http: cws.serenity_http,
             reqwest_client: cws.reqwest_client,
             object_store: cws.object_store,
-            pool: cws.pool,
+            mesophyll_db: cws.mesophyll_db,
             current_user: cws.current_user,
             tenant_state_cache,
             startup_events,
@@ -92,40 +90,14 @@ impl WorkerState {
     /// 
     /// Should only be called once, on startup, to initialize the tenant state cache
     async fn get_tenant_state(&self) -> Result<(HashMap<Id, TenantState>, HashSet<Id>), crate::Error> {
-        #[derive(sqlx::FromRow)]
-        struct TenantStatePartial {
-            events: Vec<String>,
-            banned: bool,
-            data: serde_json::Value,
-            owner_id: String,
-            owner_type: String,
-        }
+        let states = self.mesophyll_db.list_tenant_states().await?;
 
-        let partials: Vec<TenantStatePartial> =
-            sqlx::query_as("SELECT owner_id, owner_type, events, banned, data FROM tenant_state")
-            .fetch_all(&self.pool)
-            .await?;
-
-        let mut states = HashMap::new();  
         let mut startup_events = HashSet::new();  
-        for partial in partials {
-            let id = match partial.owner_type.as_str() {
-                "guild" => Id::GuildId(partial.owner_id.parse()?),
-                _ => continue, // Unknown type, skip
-            };
-
+        for (id, ts) in states.iter() {
             // Track startup events
-            if partial.events.contains(&"OnStartup".to_string()) {
+            if ts.events.contains(&"OnStartup".to_string()) {
                 startup_events.insert(id.clone());
             }
-
-            let state = TenantState {
-                events: HashSet::from_iter(partial.events),
-                banned: partial.banned,
-                data: partial.data,
-            };
-
-            states.insert(id, state);
         }
 
         Ok((states, startup_events))
@@ -150,18 +122,15 @@ impl WorkerState {
 
     /// Sets the tenant state for a specific tenant
     pub async fn set_tenant_state_for(&self, id: Id, state: TenantState) -> Result<(), crate::Error> {
-        let events = state.events.iter().collect::<Vec<_>>();
-        match id {
-            Id::GuildId(guild_id) => {
-                sqlx::query(
-                    "INSERT INTO tenant_state (owner_id, owner_type, events, banned, data) VALUES ($1, 'guild', $2, $3, $4) ON CONFLICT (owner_id, owner_type) DO UPDATE SET events = EXCLUDED.events, banned = EXCLUDED.banned, flags = EXCLUDED.flags",
-                )
-                .bind(guild_id.to_string())
-                .bind(&events)
-                .bind(state.banned)
-                .bind(&state.data)
-                .execute(&self.pool)
-                .await?;
+        self.mesophyll_db.set_tenant_state_for(id, &state).await?;
+
+        // Update startup events tracking
+        {
+            let mut startup_events = self.startup_events.borrow_mut();
+            if state.events.contains(&"OnStartup".to_string()) {
+                startup_events.insert(id);
+            } else {
+                startup_events.remove(&id);
             }
         }
 

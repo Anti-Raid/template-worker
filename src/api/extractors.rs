@@ -33,7 +33,7 @@ impl FromRequestParts<AppData> for AuthorizedUser {
                 )
             })?;
 
-        let auth_response = crate::api::auth::check_web_auth(&state.data.pool, token)
+        let auth_response = crate::api::auth::check_web_auth(&state.pool, token)
             .await
             .map_err(|e| {
                 (
@@ -108,7 +108,7 @@ impl FromRequestParts<AppData> for InternalEndpoint {
                 )
             })?;
 
-        let auth_response = crate::api::auth::check_web_auth(&state.data.pool, token)
+        let auth_response = crate::api::auth::check_web_auth(&state.pool, token)
             .await
             .map_err(|e| {
                 (

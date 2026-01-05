@@ -51,12 +51,13 @@ impl<'a> From<&'a str> for ApiError {
 #[derive(Clone)]
 pub struct AppData {
     pub data: Arc<crate::data::Data>,
+    pub pool: sqlx::PgPool,
     pub http: Arc<serenity::http::Http>,
 }
 
 impl AppData {
-    pub fn new(data: Arc<crate::data::Data>, http: Arc<serenity::http::Http>) -> Self {
-        Self { data, http }
+    pub fn new(data: Arc<crate::data::Data>, http: Arc<serenity::http::Http>, pool: sqlx::PgPool) -> Self {
+        Self { data, http, pool }
     }
 }
 
@@ -79,6 +80,7 @@ async fn logger(
 
 pub fn create(
     data: Arc<crate::data::Data>,
+    pool: sqlx::PgPool,
     http: Arc<serenity::http::Http>,
 ) -> axum::routing::IntoMakeService<Router> {
     let mut router = Router::new();
@@ -194,6 +196,6 @@ pub fn create(
         .layer(tower_http::cors::CorsLayer::very_permissive())
         .layer(axum::middleware::from_fn(logger));
 
-    let router: Router<()> = router.with_state(AppData::new(data, http));
+    let router: Router<()> = router.with_state(AppData::new(data, http, pool));
     router.into_make_service()
 }

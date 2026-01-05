@@ -17,7 +17,7 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub async fn new(
+    pub fn new(
         state: WorkerState,
         filter: WorkerFilter, // The worker filter, used to filter automatically dispatched events based on tenant ID and worker ID
     ) -> Result<Self, crate::Error> {        

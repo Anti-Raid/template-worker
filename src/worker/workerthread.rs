@@ -96,7 +96,7 @@ impl WorkerThread {
 
                     rt.block_on(async move {
                         let state = WorkerState::new(state).await.expect("Failed to create WorkerState");
-                        let worker = Worker::new(state, filter).await.expect("Failed to create Worker");
+                        let worker = Worker::new(state, filter).expect("Failed to create Worker");
 
                         // Listen to messages and handle them
                         while let Some(msg) = rx.recv().await {

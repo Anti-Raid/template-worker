@@ -1,44 +1,371 @@
-use std::{collections::HashMap, sync::{Arc, Weak}, time::Instant};
+use std::{collections::{HashMap, HashSet}, sync::{Arc, Weak}, time::Instant};
+use tokio::sync::RwLock;
 use rand::{distr::{Alphanumeric, SampleString}};
 use dashmap::DashMap;
 use futures::{SinkExt, StreamExt};
-use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
+use khronos_runtime::{primitives::event::CreateEvent, traits::ir::KvRecord, utils::khronos_value::KhronosValue};
 use tokio::{select, spawn, sync::{mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel}, oneshot::{Receiver, Sender, channel}}};
 use tokio_util::sync::CancellationToken;
 
-use crate::{mesophyll::message::{ClientMessage, ServerMessage}, worker::workervmmanager::Id};
+use crate::{mesophyll::message::{ClientMessage, KeyValueOp, ServerMessage}, worker::{workerstate::TenantState, workervmmanager::Id}};
 
 use axum::{
-    Router, extract::{Path, Query, State, WebSocketUpgrade, ws::{Message, WebSocket}}, http::StatusCode, response::IntoResponse, routing::get
+    Router, body::Bytes, extract::{Query, State, WebSocketUpgrade, ws::{Message, WebSocket}}, http::StatusCode, response::{IntoResponse, Response}, routing::{get, post}
 };
+use sqlx::Row;
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub struct SerdeKvRecord {
+    pub id: String,
+    pub key: String,
+    pub value: KhronosValue,
+    pub scopes: Vec<String>,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_updated_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl Into<KvRecord> for SerdeKvRecord {
+    fn into(self) -> KvRecord {
+        KvRecord {
+            id: self.id,
+            key: self.key,
+            value: self.value,
+            scopes: self.scopes,
+            created_at: self.created_at,
+            last_updated_at: self.last_updated_at,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct DbState {
+    pool: sqlx::PgPool,
+    tenant_state_cache: Arc<RwLock<HashMap<Id, TenantState>>> // server side tenant state cache
+}
+
+impl DbState {
+    async fn new(pool: sqlx::PgPool) -> Result<Self, crate::Error> {
+        let mut s = Self {
+            pool,
+            tenant_state_cache: Arc::new(RwLock::new(HashMap::new())),
+        };
+
+        s.tenant_state_cache = Arc::new(RwLock::new(s.get_tenant_state().await?));
+
+        Ok(s)
+    }
+
+    /// Returns the tenant state(s) for all guilds in the database as well as a set of guild IDs that have startup events enabled
+    /// 
+    /// Should only be called once, on startup, to initialize the tenant state cache
+    async fn get_tenant_state(&self) -> Result<HashMap<Id, TenantState>, crate::Error> {
+        #[derive(sqlx::FromRow)]
+        struct TenantStatePartial {
+            events: Vec<String>,
+            data: serde_json::Value,
+            owner_id: String,
+            owner_type: String,
+        }
+
+        let partials: Vec<TenantStatePartial> =
+            sqlx::query_as("SELECT owner_id, owner_type, events, data FROM tenant_state")
+            .fetch_all(&self.pool)
+            .await?;
+
+        let mut states = HashMap::new();  
+        for partial in partials {
+            let id = match partial.owner_type.as_str() {
+                "guild" => Id::GuildId(partial.owner_id.parse()?),
+                _ => continue, // Unknown type, skip
+            };
+
+            let state = TenantState {
+                events: HashSet::from_iter(partial.events),
+                data: partial.data,
+            };
+
+            states.insert(id, state);
+        }
+
+        Ok(states)
+    }
+
+    /// Sets the tenant state for a specific tenant and updates the internal cache
+    pub async fn set_tenant_state_for(&self, id: Id, state: TenantState) -> Result<(), crate::Error> {
+        let events = state.events.iter().collect::<Vec<_>>();
+        match id {
+            Id::GuildId(guild_id) => {
+                sqlx::query(
+                    "INSERT INTO tenant_state (owner_id, owner_type, events, data) VALUES ($1, 'guild', $2, $3) ON CONFLICT (owner_id, owner_type) DO UPDATE SET events = EXCLUDED.events, flags = EXCLUDED.flags",
+                )
+                .bind(guild_id.to_string())
+                .bind(&events)
+                .bind(&state.data)
+                .execute(&self.pool)
+                .await?;
+            }
+        }
+
+        let mut cache = self.tenant_state_cache.write().await;
+        cache.insert(id, state);
+
+        Ok(())
+    }
+
+    /// Gets a key-value record for a given tenant ID, scopes, and key
+    pub async fn kv_get(&self, tid: Id, mut scopes: Vec<String>, key: String) -> Result<Option<SerdeKvRecord>, crate::Error> {
+        scopes.sort();
+        match tid {
+            Id::GuildId(guild_id) => {
+                let rec = if scopes.is_empty() {
+                    sqlx::query(
+                    "SELECT id, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2",
+                    )
+                    .bind(guild_id.to_string())
+                    .bind(&key)
+                    .fetch_optional(&self.pool)
+                    .await?
+                } else {
+                    sqlx::query(
+                    "SELECT id, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
+                    )
+                    .bind(guild_id.to_string())
+                    .bind(&key)
+                    .bind(scopes)
+                    .fetch_optional(&self.pool)
+                    .await?
+                };
+
+                let Some(rec) = rec else {
+                    return Ok(None);
+                };
+
+                Ok(Some(SerdeKvRecord {
+                    id: rec.try_get::<String, _>("id")?,
+                    key,
+                    scopes: rec.try_get::<Vec<String>, _>("scopes")?,
+                    value: {
+                        let value = rec
+                            .try_get::<Option<serde_json::Value>, _>("value")?
+                            .unwrap_or(serde_json::Value::Null);
+
+                        serde_json::from_value(value)
+                            .map_err(|e| format!("Failed to deserialize value: {}", e))?
+                    },
+                    created_at: Some(rec.try_get("created_at")?),
+                    last_updated_at: Some(rec.try_get("last_updated_at")?),
+                }))
+            }
+        }
+    }
+
+    pub async fn kv_list_scopes(&self, id: Id) -> Result<Vec<String>, crate::Error> {
+        match id {
+            Id::GuildId(guild_id) => {
+                let rec = sqlx::query(
+                    "SELECT DISTINCT unnest_scope AS scope
+        FROM guild_templates_kv, unnest(scopes) AS unnest_scope
+        ORDER BY scope",
+                )
+                .bind(guild_id.to_string())
+                .fetch_all(&self.pool)
+                .await?;
+
+                let mut scopes = vec![];
+
+                for rec in rec {
+                    scopes.push(rec.try_get("scope")?);
+                }
+
+                Ok(scopes)
+            }
+        }
+    }
+
+    async fn kv_set(
+        &self,
+        tid: Id,
+        mut scopes: Vec<String>,
+        key: String,
+        data: KhronosValue,
+    ) -> Result<(), crate::Error> {
+        scopes.sort();
+
+        // Shouldn't happen but scopes must be non-empty
+        if scopes.is_empty() {
+            return Err("Scopes cannot be empty".into());
+        }
+        match tid {
+            Id::GuildId(guild_id) => {
+                let id = gen_random(64);
+                sqlx::query(
+                    "INSERT INTO guild_templates_kv (id, guild_id, key, value, scopes) VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (guild_id, key, scopes) DO UPDATE value = EXCLUDED.value, last_updated = NOW()",
+                )
+                .bind(&id)
+                .bind(guild_id.to_string())
+                .bind(key)
+                .bind(serde_json::to_value(data)?)
+                .bind(scopes)
+                .execute(&self.pool)
+                .await?;
+
+                Ok(())
+            }
+        }
+    }
+
+    async fn kv_delete(
+        &self,
+        tid: Id,
+        mut scopes: Vec<String>,
+        key: String,
+    ) -> Result<(), crate::Error> {
+        scopes.sort();
+        match tid {
+            Id::GuildId(guild_id) => {
+                if scopes.is_empty() {
+                    sqlx::query(
+                    "DELETE FROM guild_templates_kv WHERE guild_id = $1 AND key = $2",
+                    )
+                    .bind(guild_id.to_string())
+                    .bind(key)
+                    .execute(&self.pool)
+                    .await?;
+                } else {
+                    sqlx::query(
+                    "DELETE FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
+                    )
+                    .bind(guild_id.to_string())
+                    .bind(key)
+                    .bind(scopes)
+                    .execute(&self.pool)
+                    .await?;
+                };
+
+                Ok(())
+            }
+        }
+    }
+
+    async fn kv_find(
+        &self,
+        tid: Id,
+        mut scopes: Vec<String>,
+        query: String,
+    ) -> Result<Vec<SerdeKvRecord>, crate::Error> {
+        scopes.sort();
+        match tid {
+            Id::GuildId(guild_id) => {
+                let rec = {
+                    if query == "%%" {
+                        // Fast path, omit ILIKE if '%%' is used
+                        if scopes.is_empty() {
+                            // no query, no scopes
+                            sqlx::query(
+                            "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1",
+                            )
+                            .bind(guild_id.to_string())
+                            .fetch_all(&self.pool)
+                            .await?
+                        } else {
+                            // no query, scopes
+                            sqlx::query(
+                            "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2",
+                            )
+                            .bind(guild_id.to_string())
+                            .bind(scopes)
+                            .fetch_all(&self.pool)
+                            .await?
+                        }
+                    } else {
+                        if scopes.is_empty() {
+                            // query, no scopes
+                            sqlx::query(
+                            "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1 AND key ILIKE $2",
+                            )
+                            .bind(guild_id.to_string())
+                            .bind(query)
+                            .fetch_all(&self.pool)
+                            .await?
+                        } else {
+                            // query, scopes
+                            sqlx::query(
+                            "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2 AND key ILIKE $3",
+                            )
+                            .bind(guild_id.to_string())
+                            .bind(scopes)
+                            .bind(query)
+                            .fetch_all(&self.pool)
+                            .await?
+                        }
+                    }
+                };
+
+                let mut records = vec![];
+
+                for rec in rec {
+                    let record = SerdeKvRecord {
+                        id: rec.try_get::<String, _>("id")?,
+                        scopes: rec.try_get::<Vec<String>, _>("scopes")?,
+                        key: rec.try_get("key")?,
+                        value: {
+                            let rec = rec
+                                .try_get::<Option<serde_json::Value>, _>("value")?
+                                .unwrap_or(serde_json::Value::Null);
+
+                            serde_json::from_value(rec)
+                                .map_err(|e| format!("Failed to deserialize value: {}", e))?
+                        },
+                        created_at: Some(rec.try_get("created_at")?),
+                        last_updated_at: Some(rec.try_get("last_updated_at")?),
+                    };
+
+                    records.push(record);
+                }
+
+                Ok(records)
+            }
+        }
+    }
+}
+
+fn gen_random(length: usize) -> String {
+    Alphanumeric.sample_string(&mut rand::rng(), length)
+}
 
 #[derive(Clone)]
 pub struct MesophyllServer {
     idents: Arc<HashMap<usize, String>>,
     conns: Arc<DashMap<usize, MesophyllServerConn>>,
+    db_state: DbState,
 }
 
 impl MesophyllServer {
     const TOKEN_LENGTH: usize = 64;
 
-    pub async fn new(addr: String, num_idents: usize) -> Result<Self, crate::Error> {
+    pub async fn new(addr: String, num_idents: usize, pool: sqlx::PgPool) -> Result<Self, crate::Error> {
         let mut idents = HashMap::new();
         for i in 0..num_idents {
-            let ident = Alphanumeric.sample_string(&mut rand::rng(), Self::TOKEN_LENGTH);
+            let ident = gen_random(Self::TOKEN_LENGTH);
             idents.insert(i, ident);
         }
-        Self::new_with(addr, idents).await
+        Self::new_with(addr, idents, pool).await
     }
 
-    pub async fn new_with(addr: String, idents: HashMap<usize, String>) -> Result<Self, crate::Error> {
+    pub async fn new_with(addr: String, idents: HashMap<usize, String>, pool: sqlx::PgPool) -> Result<Self, crate::Error> {
         let s = Self {
             idents: Arc::new(idents),
             conns: Arc::new(DashMap::new()),
+            db_state: DbState::new(pool).await?,
         };
 
         // Axum Router
         let app = Router::new()
-            .route("/conn/:worker_id", get(ws_handler))
+            .route("/ws", get(ws_handler))
+            .route("/db/tenant-states", get(list_tenant_states))
+            .route("/db/tenant-state", post(set_tenant_state_for))
+            .route("/db/kv", post(kv_handler))
             .with_state(s.clone());
 
         let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -64,27 +391,176 @@ impl MesophyllServer {
 
 #[derive(serde::Deserialize)]
 pub struct WorkerQuery {
+    id: usize,
     token: String,
+}
+
+impl WorkerQuery {
+    /// Validates the worker query against the Mesophyll server state
+    fn validate(&self, state: &MesophyllServer) -> Option<Response> {
+        let Some(expected_key) = state.idents.get(&self.id) else {
+            log::warn!("Connection attempt from unknown worker ID: {}", self.id);
+            return Some(StatusCode::NOT_FOUND.into_response());
+        };
+
+        // Verify token of the worker trying to connect to us before upgrading
+        if self.token != *expected_key {
+            log::warn!("Invalid token for worker {}", self.id);
+            return Some(StatusCode::UNAUTHORIZED.into_response());
+        }
+
+        None
+    }
+}
+
+/// DB API to fetch all tenant states
+async fn list_tenant_states(
+    Query(worker_query): Query<WorkerQuery>,
+    State(state): State<MesophyllServer>,
+) -> impl IntoResponse {
+    if let Some(resp) = worker_query.validate(&state) {
+        return resp;
+    }
+
+    let cache = state.db_state.tenant_state_cache.read().await;
+    encode_db_resp(&*cache)
+}
+
+#[derive(serde::Deserialize)]
+pub struct WorkerQueryWithTenant {
+    id: usize,
+    token: String,
+    tenant_type: String,
+    tenant_id: String,
+}
+
+impl WorkerQueryWithTenant {
+    fn parse(self) -> Result<(Id, WorkerQuery), Response> {
+        let id = match self.tenant_type.as_str() {
+            "guild" => Id::GuildId(self.tenant_id.parse().map_err(|e| {
+                log::error!("Failed to parse guild ID from tenant_id: {}", e);
+                (StatusCode::BAD_REQUEST, "Invalid guild ID".to_string()).into_response()
+            })?),
+            _ => {
+                log::error!("Unknown tenant_type: {}", self.tenant_type);
+                return Err((StatusCode::BAD_REQUEST, "Unknown tenant_type".to_string()).into_response());
+            }
+        };
+
+        Ok((id, WorkerQuery { id: self.id, token: self.token }))
+    }
+}
+
+/// DB API to set tenant state
+#[axum::debug_handler]
+async fn set_tenant_state_for(
+    Query(worker_query): Query<WorkerQueryWithTenant>,
+    State(state): State<MesophyllServer>,
+    body: Bytes,
+) -> impl IntoResponse {
+    let (id, worker_query) = match worker_query.parse() {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+
+    if let Some(resp) = worker_query.validate(&state) {
+        return resp;
+    }
+
+    let tstate: TenantState = match decode_db_req(&body) {
+        Ok(s) => s,
+        Err(resp) => return resp,
+    };
+
+    match state.db_state.set_tenant_state_for(id, tstate).await {
+        Ok(_) => (StatusCode::OK).into_response(),
+        Err(e) => {
+            log::error!("Failed to set tenant state: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
+    }
+}
+
+/// DB API to perform a KV op
+async fn kv_handler(
+    Query(worker_query): Query<WorkerQueryWithTenant>,
+    State(state): State<MesophyllServer>,
+    body: Bytes,
+) -> impl IntoResponse {
+    let (id, worker_query) = match worker_query.parse() {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+
+    if let Some(resp) = worker_query.validate(&state) {
+        return resp;
+    }
+
+    let kvop: KeyValueOp = match decode_db_req(&body) {
+        Ok(s) => s,
+        Err(resp) => return resp,
+    };
+
+    match kvop {
+        KeyValueOp::Get { scopes, key } => {
+            match state.db_state.kv_get(id, scopes, key).await {
+                Ok(rec) => encode_db_resp(&rec),
+                Err(e) => {
+                    log::error!("Failed to get KV record: {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+                }
+            }
+        }
+        KeyValueOp::ListScopes {} => {
+            match state.db_state.kv_list_scopes(id).await {
+                Ok(scopes) => encode_db_resp(&scopes),
+                Err(e) => {
+                    log::error!("Failed to list KV scopes: {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+                }
+            }
+        }
+        KeyValueOp::Set { scopes, key, value } => {
+            match state.db_state.kv_set(id, scopes, key, value).await {
+                Ok(_) => (StatusCode::OK).into_response(),
+                Err(e) => {
+                    log::error!("Failed to set KV record: {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+                }
+            }
+        }
+        KeyValueOp::Delete { scopes, key } => {
+            match state.db_state.kv_delete(id, scopes, key).await {
+                Ok(_) => (StatusCode::OK).into_response(),
+                Err(e) => {
+                    log::error!("Failed to delete KV record: {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+                }
+            }
+        }
+        KeyValueOp::Find { scopes, prefix } => {
+            match state.db_state.kv_find(id, scopes, prefix).await {
+                Ok(records) => encode_db_resp(&records),
+                Err(e) => {
+                    log::error!("Failed to find KV records: {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+                }
+            }
+        }
+    }
 }
 
 /// WebSocket handler for Mesophyll server
 async fn ws_handler(
-    Path(worker_id): Path<usize>,
     Query(worker_query): Query<WorkerQuery>,
     State(state): State<MesophyllServer>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    let Some(expected_key) = state.idents.get(&worker_id) else {
-        log::warn!("Connection attempt from unknown worker ID: {}", worker_id);
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    // Verify token of the worker trying to connect to us before upgrading
-    if worker_query.token != *expected_key {
-        log::warn!("Invalid token for worker {}", worker_id);
-        return StatusCode::UNAUTHORIZED.into_response();
+    let worker_id = worker_query.id;
+    if let Some(resp) = worker_query.validate(&state) {
+        return resp;
     }
-
+    
     ws.on_upgrade(move |socket| handle_socket(socket, worker_id, state))
 }
 
@@ -274,4 +750,23 @@ fn decode_message<T: for<'de> serde::Deserialize<'de>>(msg: &Message) -> Option<
         }
         _ => None,
     }
+}
+
+fn encode_db_resp<T: serde::Serialize>(resp: &T) -> Response {
+    let encoded = rmp_serde::encode::to_vec(resp);
+    match encoded {
+        Ok(v) => (StatusCode::OK, axum::body::Bytes::from(v)).into_response(),
+        Err(e) => {
+            log::error!("Failed to encode tenant states: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
+    }
+}
+
+fn decode_db_req<T: for<'de> serde::Deserialize<'de>>(body: &Bytes) -> Result<T, Response> {
+    rmp_serde::from_slice(body)
+        .map_err(|e| {
+            log::error!("Failed to decode DB request: {}", e);
+            (StatusCode::BAD_REQUEST, format!("Failed to decode request: {}", e)).into_response()
+        })
 }

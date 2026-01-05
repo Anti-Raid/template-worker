@@ -18,17 +18,10 @@ use khronos_runtime::traits::kvprovider::KVProvider;
 use khronos_runtime::traits::objectstorageprovider::ObjectStorageProvider;
 use khronos_runtime::traits::runtimeprovider::RuntimeProvider;
 use khronos_runtime::utils::khronos_value::KhronosValue;
-use rand::distr::{Alphanumeric, SampleString};
 use serde_json::Value;
-use sqlx::Row;
 use std::collections::HashSet;
 use std::rc::Rc;
 use super::limits::{LuaKVConstraints, Ratelimits};
-
-/// Returns a random string of length ``length``
-fn gen_random(length: usize) -> String {
-    Alphanumeric.sample_string(&mut rand::rng(), length)
-}
 
 #[derive(Clone)]
 pub struct TemplateContextProvider {
@@ -157,92 +150,18 @@ impl KVProvider for ArKVProvider {
             return Err("Key length too long".into());
         }
 
-        let rec = if scopes.is_empty() {
-            sqlx::query(
-            "SELECT id, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2",
-            )
-            .bind(self.guild_id.to_string())
-            .bind(&key)
-            .fetch_optional(&self.state.pool)
-            .await?
-        } else {
-            sqlx::query(
-            "SELECT id, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
-            )
-            .bind(self.guild_id.to_string())
-            .bind(&key)
-            .bind(scopes)
-            .fetch_optional(&self.state.pool)
-            .await?
-        };
-
-        let Some(rec) = rec else {
-            return Ok(None);
-        };
-
-        Ok(Some(KvRecord {
-            id: rec.try_get::<String, _>("id")?,
+        self.state.mesophyll_db.kv_get(
+            Id::GuildId(self.guild_id),
+            scopes,
             key,
-            scopes: rec.try_get::<Vec<String>, _>("scopes")?,
-            value: {
-                let value = rec
-                    .try_get::<Option<serde_json::Value>, _>("value")?
-                    .unwrap_or(serde_json::Value::Null);
-
-                serde_json::from_value(value)
-                    .map_err(|e| format!("Failed to deserialize value: {}", e))?
-            },
-            created_at: Some(rec.try_get("created_at")?),
-            last_updated_at: Some(rec.try_get("last_updated_at")?),
-        }))
-    }
-
-    async fn get_by_id(&self, id: String) -> Result<Option<KvRecord>, crate::Error> {
-        let rec = sqlx::query(
-            "SELECT key, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND id = $2",
-        )
-        .bind(self.guild_id.to_string())
-        .bind(id.clone())
-        .fetch_optional(&self.state.pool)
-        .await?;
-
-        let Some(rec) = rec else {
-            return Ok(None);
-        };
-
-        Ok(Some(KvRecord {
-            id,
-            key: rec.try_get("key")?,
-            scopes: rec.try_get::<Vec<String>, _>("scopes")?,
-            value: {
-                let value = rec
-                    .try_get::<Option<serde_json::Value>, _>("value")?
-                    .unwrap_or(serde_json::Value::Null);
-
-                serde_json::from_value(value)
-                    .map_err(|e| format!("Failed to deserialize value: {}", e))?
-            },
-            created_at: Some(rec.try_get("created_at")?),
-            last_updated_at: Some(rec.try_get("last_updated_at")?),
-        }))
+        ).await
+        .map(|x| x.map(|y| y.into()))
     }
 
     async fn list_scopes(&self) -> Result<Vec<String>, crate::Error> {
-        let rec = sqlx::query(
-            "SELECT DISTINCT unnest_scope AS scope
-FROM guild_templates_kv, unnest(scopes) AS unnest_scope
-ORDER BY scope",
-        )
-        .bind(self.guild_id.to_string())
-        .fetch_all(&self.state.pool)
-        .await?;
-
-        let mut scopes = vec![];
-
-        for rec in rec {
-            scopes.push(rec.try_get("scope")?);
-        }
-
+        let scopes = self.state.mesophyll_db.kv_list_scopes(
+            Id::GuildId(self.guild_id),
+        ).await?;
         Ok(scopes)
     }
 
@@ -251,7 +170,7 @@ ORDER BY scope",
         scopes: &[String],
         key: String,
         data: KhronosValue,
-    ) -> Result<(bool, String), crate::Error> {
+    ) -> Result<(), crate::Error> {
         let scopes = Self::parse_scopes(scopes)?;
 
         // Shouldn't happen but scopes must be non-empty
@@ -271,200 +190,43 @@ ORDER BY scope",
             return Err("Value length too long".into());
         }
 
-        let id = gen_random(64);
-        let rec = sqlx::query(
-            "INSERT INTO guild_templates_kv (id, guild_id, key, value, scopes) VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (guild_id, key, scopes) DO UPDATE value = EXCLUDED.value, last_updated = NOW()
-            RETURNING id, (old.id IS NOT NULL) as exists",
-        )
-        .bind(&id)
-        .bind(self.guild_id.to_string())
-        .bind(key)
-        .bind(serde_json::to_value(data)?)
-        .bind(scopes)
-        .fetch_one(&self.state.pool)
-        .await?;
-
-        let id = rec.try_get("id")?;
-        let exists = rec.try_get("exists")?;
-
-        Ok((exists, id))
-    }
-
-    async fn set_by_id(
-        &self,
-        id: String,
-        data: KhronosValue,
-    ) -> Result<(), khronos_runtime::Error> {
-        // Check bytes length
-        let data_str = serde_json::to_string(&data)?;
-
-        if data_str.len() > self.kv_constraints.max_value_bytes {
-            return Err("Value length too long".into());
-        }
-
-        // Update existing record
-        sqlx::query(
-            "UPDATE guild_templates_kv SET value = $1, last_updated_at = NOW() WHERE id = $2",
-        )
-        .bind(serde_json::to_value(data)?)
-        .bind(&id)
-        .execute(&self.state.pool)
-        .await?;
-
-        Ok(())
+        self.state.mesophyll_db.kv_set(
+            Id::GuildId(self.guild_id),
+            scopes,
+            key,
+            data,
+        ).await
     }
 
     async fn delete(&self, scopes: &[String], key: String) -> Result<(), crate::Error> {
+        let scopes = Self::parse_scopes(scopes)?;
+
         // Check key length
         if key.len() > self.kv_constraints.max_key_length {
             return Err("Key length too long".into());
         }
 
-        if scopes.is_empty() {
-            sqlx::query(
-            "DELETE FROM guild_templates_kv WHERE guild_id = $1 AND key = $2",
-            )
-            .bind(self.guild_id.to_string())
-            .bind(key)
-            .execute(&self.state.pool)
-            .await?;
-        } else {
-            sqlx::query(
-            "DELETE FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
-            )
-            .bind(self.guild_id.to_string())
-            .bind(key)
-            .bind(scopes)
-            .execute(&self.state.pool)
-            .await?;
-        };
-
-        Ok(())
-    }
-
-    async fn delete_by_id(&self, id: String) -> Result<(), crate::Error> {
-        sqlx::query(
-            "DELETE FROM guild_templates_kv WHERE guild_id = $1 AND id = $2",
-        )
-        .bind(self.guild_id.to_string())
-        .bind(id)
-        .execute(&self.state.pool)
-        .await?;
-
-        Ok(())
+        self.state.mesophyll_db.kv_delete(
+            Id::GuildId(self.guild_id),
+            scopes,
+            key,
+        ).await
     }
 
     async fn find(&self, scopes: &[String], query: String) -> Result<Vec<KvRecord>, crate::Error> {
+        let scopes = Self::parse_scopes(scopes)?;
+
         // Check key length
         if query.len() > self.kv_constraints.max_key_length {
             return Err("Query length too long".into());
         }
 
-        let rec = {
-            if query == "%%" {
-                // Fast path, omit ILIKE if '%%' is used
-                if scopes.is_empty() {
-                    // no query, no scopes
-                    sqlx::query(
-                    "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1",
-                    )
-                    .bind(self.guild_id.to_string())
-                    .fetch_all(&self.state.pool)
-                    .await?
-                } else {
-                    // no query, scopes
-                    sqlx::query(
-                    "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2",
-                    )
-                    .bind(self.guild_id.to_string())
-                    .bind(scopes)
-                    .fetch_all(&self.state.pool)
-                    .await?
-                }
-            } else {
-                if scopes.is_empty() {
-                    // query, no scopes
-                    sqlx::query(
-                    "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1 AND key ILIKE $2",
-                    )
-                    .bind(self.guild_id.to_string())
-                    .bind(query)
-                    .fetch_all(&self.state.pool)
-                    .await?
-                } else {
-                    // query, scopes
-                    sqlx::query(
-                    "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2 AND key ILIKE $3",
-                    )
-                    .bind(self.guild_id.to_string())
-                    .bind(scopes)
-                    .bind(query)
-                    .fetch_all(&self.state.pool)
-                    .await?
-                }
-            }
-        };
-
-        let mut records = vec![];
-
-        for rec in rec {
-            let record = KvRecord {
-                id: rec.try_get::<String, _>("id")?,
-                scopes: rec.try_get::<Vec<String>, _>("scopes")?,
-                key: rec.try_get("key")?,
-                value: {
-                    let rec = rec
-                        .try_get::<Option<serde_json::Value>, _>("value")?
-                        .unwrap_or(serde_json::Value::Null);
-
-                    serde_json::from_value(rec)
-                        .map_err(|e| format!("Failed to deserialize value: {}", e))?
-                },
-                created_at: Some(rec.try_get("created_at")?),
-                last_updated_at: Some(rec.try_get("last_updated_at")?),
-            };
-
-            records.push(record);
-        }
-
-        Ok(records)
-    }
-
-    async fn exists(&self, scopes: &[String], key: String) -> Result<bool, crate::Error> {
-        // Check key length
-        if key.len() > self.kv_constraints.max_key_length {
-            return Err("Key length too long".into());
-        }
-
-        let rec = sqlx::query(
-            "SELECT id FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
-        )
-        .bind(self.guild_id.to_string())
-        .bind(key)
-        .bind(scopes)
-        .fetch_optional(&self.state.pool)
-        .await?
-        .is_some();
-
-        Ok(rec)
-    }
-
-    async fn keys(&self, scopes: &[String]) -> Result<Vec<String>, crate::Error> {
-        let rec =
-            sqlx::query("SELECT key FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2")
-                .bind(self.guild_id.to_string())
-                .bind(scopes)
-                .fetch_all(&self.state.pool)
-                .await?;
-
-        let mut keys = vec![];
-
-        for rec in rec {
-            keys.push(rec.try_get("key")?);
-        }
-
-        Ok(keys)
+        self.state.mesophyll_db.kv_find(
+            Id::GuildId(self.guild_id),
+            scopes,
+            query,
+        ).await
+        .map(|x| x.into_iter().map(|y| y.into()).collect())
     }
 }
 
@@ -826,7 +588,7 @@ impl RuntimeProvider for ArRuntimeProvider {
         let ts = self.state.get_cached_tenant_state_for(self.id)?.into_owned();
         Ok(runtime_ir::TenantState {
             events: ts.events.into_iter().collect(),
-            banned: ts.banned,
+            banned: false,
             data: ts.data,
         })
     }
@@ -837,7 +599,6 @@ impl RuntimeProvider for ArRuntimeProvider {
                 self.id,
                 TenantState {
                     events: HashSet::from_iter(state.events),
-                    banned: state.banned,
                     data: state.data,
                 },
             )
