@@ -3,8 +3,9 @@ use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 use tokio::sync::oneshot::Sender as OneShotSender;
+use std::sync::Arc;
 use std::time::Duration;
-use std::{panic::AssertUnwindSafe, thread::JoinHandle};
+use std::panic::AssertUnwindSafe;
 
 use crate::worker::limits::MAX_VM_THREAD_STACK_SIZE;
 use crate::worker::workerlike::WorkerLike;
@@ -61,14 +62,12 @@ impl PushableMessage for DispatchEvent {
 
 /// WorkerThread provides a simple thread implementation in which a ``Worker`` runs in its own thread with messages
 /// sent to it over a channel
-#[allow(unused)]
+#[derive(Clone)]
 pub struct WorkerThread {
     /// The tx channel for sending messages to the worker thread
     tx: UnboundedSender<WorkerThreadMessage>,
     /// The id of the worker thread, used for routing
     id: usize,
-    /// Handle to the worker thread
-    handle: JoinHandle<()>,
 }
 
 impl WorkerThread {
@@ -77,14 +76,14 @@ impl WorkerThread {
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         
-        let handle = Self::create_thread(id, state, filter, rx)?;
+        Self::create_thread(id, state, filter, rx)?;
         
-        let worker_thread = Self { tx, id, handle };
+        let worker_thread = Self { tx, id };
 
        Ok(worker_thread)
     }
 
-    fn create_thread(id: usize, state: CreateWorkerState, filter: WorkerFilter, mut rx: UnboundedReceiver<WorkerThreadMessage>) -> Result<JoinHandle<()>, crate::Error> {
+    fn create_thread(id: usize, state: CreateWorkerState, filter: WorkerFilter, mut rx: UnboundedReceiver<WorkerThreadMessage>) -> Result<(), crate::Error> {
         std::thread::Builder::new()
             .name(format!("lua-vm-threadpool-{id}"))
             .stack_size(MAX_VM_THREAD_STACK_SIZE)
@@ -125,7 +124,9 @@ impl WorkerThread {
                     std::process::abort(); // TODO: Handle this more gracefully
                 }
             })
-            .map_err(|e| format!("Failed to spawn worker thread: {e}").into())
+            .map_err(|e| format!("Failed to spawn worker thread: {e}"))?;
+
+        Ok(())
     }
 
     /// Sends a message to the worker thread
@@ -171,6 +172,10 @@ impl WorkerLike for WorkerThread {
 
     async fn kill(&self) -> Result<(), crate::Error> {
         self.send(Kill {}).await?
+    }
+
+    fn clone_to_arc(&self) -> Arc<dyn WorkerLike + Send + Sync> {
+        Arc::new(self.clone())
     }
 
     async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {

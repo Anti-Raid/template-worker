@@ -1,4 +1,5 @@
 use serenity::async_trait;
+use std::sync::Arc;
 use std::time::Duration;
 
 use khronos_runtime::primitives::event::CreateEvent;
@@ -24,9 +25,6 @@ pub struct WorkerProcessHandle {
     /// The total number of processes in the pool
     total: usize,
 
-    /// Max DB connections for the worker process
-    max_db_conns: usize,    
-
     /// Kill message channel
     kill_msg_tx: UnboundedSender<()>,
 }
@@ -36,13 +34,12 @@ impl WorkerProcessHandle {
     const MAX_CONSECUTIVE_FAILURES_BEFORE_CRASH: usize = 10;
 
     /// Creates a new WorkerProcessHandle given the worker ID and a mesophyll server
-    pub fn new(id: usize, total: usize, max_db_conns: usize, mesophyll_server: MesophyllServer) -> Result<Self, crate::Error> {
+    pub fn new(id: usize, total: usize, mesophyll_server: MesophyllServer) -> Result<Self, crate::Error> {
         let (kill_msg_tx, mut kill_msg_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
         let wps = Self {
             mesophyll_server,
             id,
             total,
-            max_db_conns,
             kill_msg_tx
         };
 
@@ -94,8 +91,6 @@ impl WorkerProcessHandle {
             command.arg(self.id.to_string());
             command.arg("--worker-threads");
             command.arg(self.total.to_string());
-            command.arg("--max-db-connections");
-            command.arg(self.max_db_conns.to_string());
             command.env("MESOPHYLL_CLIENT_TOKEN", meso_token);
             command.kill_on_drop(true);
 
@@ -152,6 +147,10 @@ impl WorkerLike for WorkerProcessHandle {
         .map_err(|e| format!("Failed to send kill message to worker process with ID: {}: {}", self.id, e).into())
     }
 
+    fn clone_to_arc(&self) -> Arc<dyn WorkerLike + Send + Sync> {
+        Arc::new(self.clone())
+    }
+
     async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
         let r = self.mesophyll_server.get_connection(self.id)
             .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", self.id))?;
@@ -167,15 +166,13 @@ impl WorkerLike for WorkerProcessHandle {
 
 pub struct WorkerProcessHandleCreateOpts {
     pub(super) mesophyll_server: MesophyllServer,
-    pub(super) max_db_conns: usize,
 }
 
 impl WorkerProcessHandleCreateOpts {
     /// Creates a new WorkerProcessHandleCreateOpts with the given communication layer
-    pub fn new(mesophyll_server: MesophyllServer, max_db_conns: usize,) -> Self {
+    pub fn new(mesophyll_server: MesophyllServer) -> Self {
         Self {
             mesophyll_server,
-            max_db_conns,
         }
     }
 }
@@ -187,7 +184,7 @@ impl Poolable for WorkerProcessHandle {
     fn new(_filter: WorkerFilter, id: usize, total: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
     where Self: Sized 
     {
-        Self::new(id, total, ext_state.max_db_conns, ext_state.mesophyll_server.clone())
+        Self::new(id, total, ext_state.mesophyll_server.clone())
     }
 }
 

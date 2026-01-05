@@ -3,6 +3,7 @@ mod config;
 mod data;
 mod event_handler;
 mod mesophyll;
+mod fauxpas;
 mod objectstore;
 mod register;
 mod sandwich;
@@ -66,10 +67,6 @@ struct CmdArgs {
     /// Ignored unless `worker-type` is `processpoolworker`
     #[clap(long)]
     pub worker_id: Option<usize>,
-
-    /// How many db connections should each worker within the process pool have
-    #[clap(long, default_value = "3")]
-    pub max_worker_db_connections: usize,
 
     /// How many tokio threads to use for the master
     #[clap(long, default_value = "10")]
@@ -245,10 +242,7 @@ async fn main_impl(args: CmdArgs) {
             let worker_pool = Arc::new(
                 WorkerPool::<WorkerProcessHandle>::new(
                     args.worker_threads,
-                    &WorkerProcessHandleCreateOpts::new(
-                        mesophyll_server,
-                        args.max_worker_db_connections,
-                    ),
+                    &WorkerProcessHandleCreateOpts::new(mesophyll_server),
                 )
                 .expect("Failed to create worker thread pool"),
             );

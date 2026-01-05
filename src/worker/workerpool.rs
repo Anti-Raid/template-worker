@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use serenity::async_trait;
 use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::utils::khronos_value::KhronosValue;
@@ -25,7 +27,7 @@ pub trait Poolable: WorkerLike + Send + Sync {
 /// 
 /// shard_id = (guild_id >> 22) % num_shards
 #[allow(dead_code)]
-pub struct WorkerPool<T: WorkerLike + Send + Sync> {
+pub struct WorkerPool<T: WorkerLike> {
     /// The workers in the pool
     workers: Vec<T>,
 }
@@ -47,7 +49,7 @@ impl<T: Poolable> WorkerPool<T> {
     }
 }
 
-impl<T: WorkerLike + Send + Sync> WorkerPool<T> {
+impl<T: WorkerLike> WorkerPool<T> {
     /// Defines a filter for a worker in the pool
     pub fn filter_for(id: usize, num_threads: usize) -> WorkerFilter {
         let closure = move |tenant_id: Id| {
@@ -77,7 +79,7 @@ impl<T: WorkerLike + Send + Sync> WorkerPool<T> {
 }
 
 #[async_trait]
-impl<T: WorkerLike + Send + Sync> WorkerLike for WorkerPool<T> {
+impl<T: WorkerLike> WorkerLike for WorkerPool<T> {
     fn id(&self) -> usize {
         0 // For a pool, return 0
     }
@@ -87,6 +89,14 @@ impl<T: WorkerLike + Send + Sync> WorkerLike for WorkerPool<T> {
             worker.kill().await?;
         }
         Ok(())
+    }
+
+    fn clone_to_arc(&self) -> Arc<dyn WorkerLike + Send + Sync> {
+        Arc::new(
+            WorkerPool {
+                workers: self.workers.iter().map(|w| w.clone_to_arc()).collect(),
+            }
+        )
     }
 
     async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {

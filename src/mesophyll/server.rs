@@ -660,7 +660,7 @@ impl MesophyllServerConn {
                         break;
                     }
 
-                    let Some(client_msg) = decode_message::<ClientMessage>(&msg) else {
+                    let Ok(client_msg) = decode_message::<ClientMessage>(&msg) else {
                         continue;
                     };
 
@@ -738,17 +738,19 @@ impl MesophyllServerConn {
 }
 
 fn encode_message<T: serde::Serialize>(msg: &T) -> Result<Message, crate::Error> {
-    let json = serde_json::to_string(msg)
+    let bytes = rmp_serde::encode::to_vec(msg)
         .map_err(|e| format!("Failed to serialize Mesophyll message: {}", e))?;
-    Ok(Message::Text(json.into()))
+    Ok(Message::Binary(bytes.into()))
 }
 
-fn decode_message<T: for<'de> serde::Deserialize<'de>>(msg: &Message) -> Option<T> {
+fn decode_message<T: for<'de> serde::Deserialize<'de>>(msg: &Message) -> Result<T, crate::Error> {
     match msg {
-        Message::Text(text) => {
-            serde_json::from_str::<T>(text).ok()
+        Message::Binary(b) => {
+            let decoded: T = rmp_serde::from_slice(b)
+                .map_err(|e| format!("Failed to deserialize Mesophyll message: {}", e))?;
+            Ok(decoded)
         }
-        _ => None,
+        _ => Err("Invalid Mesophyll message type".into()),
     }
 }
 

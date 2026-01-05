@@ -3,7 +3,7 @@ use crate::worker::workerlike::WorkerLike;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-/// This struct stores base/standard command data, which is stored and accessible in all command invocations
+/// This struct stores base/standard data to be used anywhere in template-worker
 #[derive(Clone)]
 pub struct Data {
     pub current_user: serenity::all::CurrentUser,
