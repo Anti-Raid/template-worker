@@ -1,3 +1,4 @@
+use serenity::async_trait;
 use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
@@ -162,7 +163,7 @@ impl WorkerThread {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl WorkerLike for WorkerThread {
     fn id(&self) -> usize {
         self.id

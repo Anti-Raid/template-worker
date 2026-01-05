@@ -1,3 +1,4 @@
+use serenity::async_trait;
 use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 
@@ -75,7 +76,7 @@ impl<T: WorkerLike + Send + Sync> WorkerPool<T> {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl<T: WorkerLike + Send + Sync> WorkerLike for WorkerPool<T> {
     fn id(&self) -> usize {
         0 // For a pool, return 0

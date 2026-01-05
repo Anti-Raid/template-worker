@@ -1,3 +1,4 @@
+use serenity::async_trait;
 use std::time::Duration;
 
 use khronos_runtime::primitives::event::CreateEvent;
@@ -140,7 +141,7 @@ impl WorkerProcessHandle {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl WorkerLike for WorkerProcessHandle {
     fn id(&self) -> usize {
         self.id

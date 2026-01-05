@@ -1,4 +1,4 @@
-use async_trait::async_trait;
+use serenity::async_trait;
 use khronos_runtime::primitives::event::CreateEvent;
 use serenity::all::{EventHandler, IEvent};
 use serenity::gateway::client::Context;
