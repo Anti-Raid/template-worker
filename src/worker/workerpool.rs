@@ -99,6 +99,10 @@ impl<T: WorkerLike> WorkerLike for WorkerPool<T> {
         )
     }
 
+    async fn run_script(&self, id: Id, name: String, code: String, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
+        self.get_worker_for(id).run_script(id, name, code, event).await
+    }
+
     async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
         self.get_worker_for(id).dispatch_event(id, event).await
     }

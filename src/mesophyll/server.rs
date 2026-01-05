@@ -727,6 +727,18 @@ impl MesophyllServerConn {
         Ok(rx.await.map_err(|e| format!("Failed to receive dispatch event response: {}", e))??)
     }
 
+    // Runs a script and waits for a response
+    pub async fn run_script(&self, id: Id, name: String, code: String, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
+        let (req_id, rx) = self.register_dispatch_response_handler();
+
+        // Upon return, remove the handler from the map
+        let _guard = DispatchHandlerDropGuard::new(&self.dispatch_response_handlers, req_id);
+
+        let message = ServerMessage::RunScript { id, name, code, event, req_id };
+        self.send(&message)?;
+        Ok(rx.await.map_err(|e| format!("Failed to receive dispatch event response: {}", e))??)
+    }
+
     /// Dispatches an event without waiting for a response
     pub fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
         let message = ServerMessage::DispatchEvent { id, event, req_id: None };

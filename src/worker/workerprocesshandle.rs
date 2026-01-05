@@ -151,6 +151,12 @@ impl WorkerLike for WorkerProcessHandle {
         Arc::new(self.clone())
     }
 
+    async fn run_script(&self, id: Id, name: String, code: String, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
+        let r = self.mesophyll_server.get_connection(self.id)
+            .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", self.id))?;
+        r.run_script(id, name, code, event).await
+    }
+
     async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
         let r = self.mesophyll_server.get_connection(self.id)
             .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", self.id))?;

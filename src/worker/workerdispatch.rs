@@ -58,6 +58,29 @@ impl WorkerDispatch {
         Ok(())
     }
 
+    /// Runs a script directly on the VM for the given tenant ID with the provided event
+    pub async fn run_script(&self, id: Id, name: String, code: String, event: CreateEvent) -> mlua::Result<KhronosValue> {
+        let vm_data = self.vm_manager.get_vm_for(id).await?;
+
+        if vm_data.runtime.is_broken() {
+            return Err(mlua::Error::external("Lua VM to dispatch to is broken"));
+        }
+
+        let func = vm_data
+            .runtime
+            .eval_chunk(&code, Some(&name), None)?;
+
+        let provider = TemplateContextProvider::new(
+            id,
+            vm_data.clone(),
+        );
+        let context = vm_data.runtime.create_context(provider, event)?;
+        match vm_data.runtime.call_in_scheduler::<_, KhronosValue>(func, context).await {
+            Ok(result) => Ok(result),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Dispatches an event to the appropriate VM based on the tenant ID
     pub async fn dispatch_event(&self, id: Id, event: CreateEvent) -> mlua::Result<KhronosValue> {
         use khronos_runtime::rt::mlua;

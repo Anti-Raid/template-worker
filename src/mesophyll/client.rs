@@ -46,6 +46,7 @@ impl MesophyllClient {
         let (mut stream_tx, mut stream_rx) = ws_stream.split();
         let mut hb_timer = interval(Duration::from_millis(MESOPHYLL_DEFAULT_HEARTBEAT_MS));
         let mut dispatches = FuturesUnordered::new();
+        let mut script_runs = FuturesUnordered::new();
         loop {
             tokio::select! {
                 Some(Ok(msg)) = stream_rx.next() => {
@@ -70,6 +71,13 @@ impl MesophyllClient {
                                 (req_id, resp)
                             });
                         },
+                        ServerMessage::RunScript { id, name, code, event, req_id } => {
+                            let fut = self.wt.run_script(id, name, code, event);
+                            script_runs.push(async move {
+                                let resp = fut.await;
+                                (req_id, resp)
+                            });
+                        },
                     }
                 }
                 Some((req_id, result)) = dispatches.next() => {
@@ -82,6 +90,14 @@ impl MesophyllClient {
                     })?;
                     stream_tx.send(response).await
                         .map_err(|e| format!("Failed to send DispatchResponse: {}", e))?;
+                }
+                Some((req_id, result)) = script_runs.next() => {
+                    let response = encode_message(&ClientMessage::DispatchResponse {
+                        req_id,
+                        result: result.map_err(|e| e.to_string()),
+                    })?;
+                    stream_tx.send(response).await
+                        .map_err(|e| format!("Failed to send DispatchResponse for RunScript: {}", e))?;
                 }
                 _ = hb_timer.tick() => {
                     let heartbeat = encode_message(&ClientMessage::Heartbeat {})?;

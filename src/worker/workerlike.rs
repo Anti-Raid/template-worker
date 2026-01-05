@@ -18,6 +18,12 @@ pub trait WorkerLike: Send + Sync + 'static {
 
     fn clone_to_arc(&self) -> Arc<dyn WorkerLike + Send + Sync>;
 
+    /// Runs a script with the given chunk name, code and event
+    /// 
+    /// This is the special version of dispatch event that directly enables for running arbitrary scripts
+    /// (which is useful for the fauxpas staff API and other future internal tooling etc.)
+    async fn run_script(&self, id: Id, name: String, code: String, event: CreateEvent) -> Result<KhronosValue, crate::Error>;
+
     /// Kill the worker like
     async fn kill(&self) -> Result<(), crate::Error>;
 
@@ -47,6 +53,10 @@ impl WorkerLike for Arc<dyn WorkerLike + Send + Sync> {
 
     fn clone_to_arc(&self) -> Arc<dyn WorkerLike + Send + Sync> {
         self.as_ref().clone_to_arc()
+    }
+
+    async fn run_script(&self, id: Id, name: String, code: String, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
+        self.as_ref().run_script(id, name, code, event).await
     }
 
     async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {

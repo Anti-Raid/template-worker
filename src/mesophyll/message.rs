@@ -15,6 +15,15 @@ pub enum ServerMessage {
         event: CreateEvent, 
         req_id: Option<u64> 
     },
+
+    /// Run a script in the worker
+    RunScript { 
+        id: Id, 
+        name: String, 
+        code: String, 
+        event: CreateEvent,
+        req_id: u64 
+    },
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
@@ -25,6 +34,7 @@ pub enum ClientMessage {
         result: Result<KhronosValue, String> 
     },
 
+    /// A heartbeat message to keep the connection alive
     Heartbeat { },
 }
 

@@ -4,7 +4,6 @@ use khronos_runtime::utils::khronos_value::KhronosValue;
 use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 use tokio::sync::oneshot::Sender as OneShotSender;
 use std::sync::Arc;
-use std::time::Duration;
 use std::panic::AssertUnwindSafe;
 
 use crate::worker::limits::MAX_VM_THREAD_STACK_SIZE;
@@ -16,48 +15,20 @@ use super::{workerstate::WorkerState, worker::Worker, workervmmanager::Id, worke
 /// WorkerThreadMessage is the message type that is sent to the worker thread
 enum WorkerThreadMessage {
     Kill {
-        tx: Option<OneShotSender<Result<(), crate::Error>>>,
+        tx: OneShotSender<Result<(), crate::Error>>,
+    },
+    RunScript {
+        id: Id,
+        name: String,
+        code: String,
+        event: CreateEvent,
+        tx: OneShotSender<Result<KhronosValue, crate::Error>>,
     },
     DispatchEvent {
         id: Id,
         event: CreateEvent,
         tx: Option<OneShotSender<Result<KhronosValue, crate::Error>>>,
     },
-}
-
-trait PushableMessage {
-    type Response: Send + Sync + 'static;
-
-    fn into_message(self, tx: Option<OneShotSender<Self::Response>>) -> WorkerThreadMessage;
-}
-
-pub struct Kill {}
-
-impl PushableMessage for Kill {
-    type Response = Result<(), crate::Error>;
-
-    fn into_message(self, tx: Option<OneShotSender<Self::Response>>) -> WorkerThreadMessage {
-        WorkerThreadMessage::Kill { tx }
-    }
-}
-
-pub struct DispatchEvent {
-    /// The id of the template to dispatch the event to 
-    pub id: Id,
-    /// The event to dispatch
-    pub event: CreateEvent,
-}
-
-impl PushableMessage for DispatchEvent {
-    type Response = Result<KhronosValue, crate::Error>;
-
-    fn into_message(self, tx: Option<OneShotSender<Self::Response>>) -> WorkerThreadMessage {
-        WorkerThreadMessage::DispatchEvent {
-            id: self.id,
-            event: self.event,
-            tx,
-        }
-    }
 }
 
 /// WorkerThread provides a simple thread implementation in which a ``Worker`` runs in its own thread with messages
@@ -103,9 +74,7 @@ impl WorkerThread {
                             match msg {
                                 WorkerThreadMessage::Kill { tx } => {
                                     log::info!("Killing worker thread with ID: {}", id);
-                                    if let Some(tx) = tx {
-                                        let _ = tx.send(Ok(()));
-                                    }
+                                    let _ = tx.send(Ok(()));
                                     return; // Exitting the loop will stop the thread automatically
                                 }
                                 WorkerThreadMessage::DispatchEvent { id, event, tx } => {
@@ -113,6 +82,10 @@ impl WorkerThread {
                                     if let Some(tx) = tx {
                                         let _ = tx.send(res.map_err(|e| e.to_string().into()));
                                     }
+                                }
+                                WorkerThreadMessage::RunScript { id, name, code, event, tx } => {
+                                    let res = worker.dispatch.run_script(id, name, code, event).await;
+                                    let _ = tx.send(res.map_err(|e| e.to_string().into()));
                                 }
                             }
                         }
@@ -128,40 +101,6 @@ impl WorkerThread {
 
         Ok(())
     }
-
-    /// Sends a message to the worker thread
-    /// and waits for a response
-    async fn send<T: PushableMessage>(&self, msg: T) -> Result<T::Response, crate::Error> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let msg = msg.into_message(Some(tx));
-        self.tx.send(msg)
-            .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
-        rx.await.map_err(|e| format!("Failed to receive response from worker thread: {e}").into())
-    }
-
-    /// Sends a message to the worker thread 
-    /// and wait for a response with a timeout
-    #[allow(dead_code)]
-    async fn send_timeout<T: PushableMessage>(&self, msg: T, duration: Duration) -> Result<T::Response, crate::Error> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let msg = msg.into_message(Some(tx));
-        self.tx.send(msg)
-            .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
-
-        tokio::select! {
-            res = rx => res.map_err(|e| format!("Failed to receive response from worker thread: {e}").into()),
-            _ = tokio::time::sleep(duration) => Err("Timed out waiting for response from worker thread".into()),
-        }
-    }
-
-    /// Sends a message to the worker thread
-    fn send_nowait<T: PushableMessage>(&self, msg: T) -> Result<(), crate::Error> {
-        let (tx, _rx) = tokio::sync::oneshot::channel();
-        let msg = msg.into_message(Some(tx));
-        self.tx.send(msg)
-            .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
-        Ok(())
-    }
 }
 
 #[async_trait]
@@ -171,25 +110,34 @@ impl WorkerLike for WorkerThread {
     }
 
     async fn kill(&self) -> Result<(), crate::Error> {
-        self.send(Kill {}).await?
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tx.send(WorkerThreadMessage::Kill { tx: tx })
+            .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
+        Ok(rx.await.map_err(|e| format!("Failed to receive response from worker thread: {e}"))??)
     }
 
     fn clone_to_arc(&self) -> Arc<dyn WorkerLike + Send + Sync> {
         Arc::new(self.clone())
     }
 
+    async fn run_script(&self, id: Id, name: String, code: String, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tx.send(WorkerThreadMessage::RunScript { id, name, code, event, tx })
+            .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
+        Ok(rx.await.map_err(|e| format!("Failed to receive response from worker thread: {e}"))??)
+    }
+
     async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
-        self.send(DispatchEvent {
-            id,
-            event,
-        }).await?
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tx.send(WorkerThreadMessage::DispatchEvent { id, event, tx: Some(tx) })
+            .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
+        Ok(rx.await.map_err(|e| format!("Failed to receive response from worker thread: {e}"))??)
     }
 
     fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
-        self.send_nowait(DispatchEvent {
-            id,
-            event,
-        })
+        self.tx.send(WorkerThreadMessage::DispatchEvent { id, event, tx: None })
+            .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
+        Ok(())
     }
 }
 
