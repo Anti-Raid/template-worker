@@ -38,13 +38,13 @@ impl Into<KvRecord> for SerdeKvRecord {
 }
 
 #[derive(Clone)]
-struct DbState {
+pub struct DbState {
     pool: sqlx::PgPool,
     tenant_state_cache: Arc<RwLock<HashMap<Id, TenantState>>> // server side tenant state cache
 }
 
 impl DbState {
-    async fn new(pool: sqlx::PgPool) -> Result<Self, crate::Error> {
+    pub async fn new(pool: sqlx::PgPool) -> Result<Self, crate::Error> {
         let mut s = Self {
             pool,
             tenant_state_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -88,6 +88,12 @@ impl DbState {
         }
 
         Ok(states)
+    }
+
+    /// Helper method to return all tenant states from the internal cache
+    pub async fn list_tenant_states(&self) -> Result<HashMap<Id, TenantState>, crate::Error> {
+        let cache = self.tenant_state_cache.read().await;
+        Ok(cache.clone())
     }
 
     /// Sets the tenant state for a specific tenant and updates the internal cache
@@ -182,7 +188,7 @@ impl DbState {
         }
     }
 
-    async fn kv_set(
+    pub async fn kv_set(
         &self,
         tid: Id,
         mut scopes: Vec<String>,
@@ -215,7 +221,7 @@ impl DbState {
         }
     }
 
-    async fn kv_delete(
+    pub async fn kv_delete(
         &self,
         tid: Id,
         mut scopes: Vec<String>,
@@ -248,7 +254,7 @@ impl DbState {
         }
     }
 
-    async fn kv_find(
+    pub async fn kv_find(
         &self,
         tid: Id,
         mut scopes: Vec<String>,

@@ -14,6 +14,8 @@ use crate::config::CONFIG;
 use crate::data::Data;
 use crate::event_handler::EventFramework;
 use crate::mesophyll::client::{MesophyllClient, MesophyllDbClient};
+use crate::mesophyll::server::DbState;
+use crate::worker::workerdb::WorkerDB;
 use crate::worker::workerlike::WorkerLike;
 use crate::worker::workerpool::WorkerPool;
 use crate::worker::workerprocesshandle::{WorkerProcessHandle, WorkerProcessHandleCreateOpts};
@@ -39,6 +41,9 @@ pub enum WorkerType {
     /// Worker that uses a process pool for executing tasks
     #[clap(name = "processpool", alias = "process-pool")]
     ProcessPool,
+    /// Worker that uses a thread pool for executing tasks
+    #[clap(name = "threadpool", alias = "thread-pool")]
+    ThreadPool,
     /// Single worker within a process pool system
     #[clap(name = "processpoolworker", alias = "process-pool-worker")]
     ProcessPoolWorker,
@@ -88,6 +93,7 @@ fn main() {
     let num_tokio_threads = match args.worker_type {
         WorkerType::RegisterCommands => 1,
         WorkerType::Migrate => 1,
+        WorkerType::ThreadPool => args.tokio_threads_master,
         WorkerType::ProcessPool => args.tokio_threads_master,
         WorkerType::ProcessPoolWorker => args.tokio_threads_worker,
     };
@@ -224,6 +230,65 @@ async fn main_impl(args: CmdArgs) {
 
             error!("Migration not found: {}", migration_name);
         }
+        WorkerType::ThreadPool => {
+            let pg_pool = PgPoolOptions::new()
+                .max_connections(args.max_db_connections)
+                .connect(&CONFIG.meta.postgres_url)
+                .await
+                .expect("Could not initialize connection");
+
+            let worker_state = CreateWorkerState::new(
+                http.clone(),
+                reqwest.clone(),
+                object_storage.clone(),
+                Arc::new(current_user.clone()),
+                Arc::new(
+                    WorkerDB::new_direct(
+                        DbState::new(pg_pool.clone())
+                            .await
+                            .expect("Failed to create DbState")
+                    )
+                ),
+            );
+
+            let worker_pool = Arc::new(
+                WorkerPool::<WorkerThread>::new(args.worker_threads, &worker_state)
+                    .expect("Failed to create worker thread pool"),
+            );
+
+            let data = Arc::new(Data {
+                object_store: object_storage,
+                reqwest,
+                current_user,
+                worker: worker_pool,
+            });
+
+            let data1 = data.clone();
+            let http1 = http.clone();
+            tokio::task::spawn(async move {
+                log::info!("Starting RPC server");
+
+                let rpc_server = crate::api::server::create(data1, pg_pool.clone(), http1);
+
+                let listener = tokio::net::TcpListener::bind(&CONFIG.addrs.template_worker).await.unwrap();
+
+                axum::serve(listener, rpc_server).await.unwrap();
+            });
+
+            let mut client = client_builder
+                .data(data)
+                .event_handler(EventFramework {})
+                .wait_time_between_shard_start(Duration::from_secs(0)) // Disable wait time between shard start due to Sandwich
+                .await
+                .expect("Error creating client");
+
+            info!("Starting using autosharding");
+
+            if let Err(why) = client.start_autosharded().await {
+                error!("Client error: {:?}", why);
+                std::process::exit(1); // Clean exit with status code of 1
+            }
+        }
         WorkerType::ProcessPool => {
             let pg_pool = PgPoolOptions::new()
                 .max_connections(args.max_db_connections)
@@ -321,7 +386,11 @@ async fn main_impl(args: CmdArgs) {
                 reqwest.clone(),
                 object_storage.clone(),
                 Arc::new(current_user.clone()),
-                Arc::new(MesophyllDbClient::new(CONFIG.addrs.mesophyll_server.clone(), worker_id, ident_token.clone())),
+                Arc::new(
+                    WorkerDB::new_mesophyll(
+                        MesophyllDbClient::new(CONFIG.addrs.mesophyll_server.clone(), worker_id, ident_token.clone())
+                    )
+                ),
             );
 
             let worker_thread = Arc::new(

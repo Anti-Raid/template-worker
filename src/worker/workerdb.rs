@@ -1,0 +1,70 @@
+use std::collections::HashMap;
+
+use khronos_runtime::utils::khronos_value::KhronosValue;
+
+use crate::{mesophyll::{client::MesophyllDbClient, server::{DbState, SerdeKvRecord}}, worker::{workerstate::TenantState, workervmmanager::Id}};
+
+/// An abstraction over the database access method for worker state
+pub enum WorkerDB {
+    Direct(DbState),
+    Mesophyll(MesophyllDbClient)
+}
+
+impl WorkerDB {
+    pub fn new_direct(db_state: DbState) -> Self {
+        WorkerDB::Direct(db_state)
+    }
+
+    pub fn new_mesophyll(client: MesophyllDbClient) -> Self {
+        WorkerDB::Mesophyll(client)
+    }
+
+    pub async fn list_tenant_states(&self) -> Result<HashMap<Id, TenantState>, crate::Error> {
+        match self {
+            WorkerDB::Direct(d) => d.list_tenant_states().await,
+            WorkerDB::Mesophyll(c) => c.list_tenant_states().await,
+        }
+    }
+
+    pub async fn set_tenant_state_for(&self, id: Id, state: &TenantState) -> Result<(), crate::Error> {
+        match self {
+            WorkerDB::Direct(d) => d.set_tenant_state_for(id, state.clone()).await,
+            WorkerDB::Mesophyll(c) => c.set_tenant_state_for(id, state).await,
+        }
+    }
+
+    pub async fn kv_get(&self, id: Id, scopes: Vec<String>, key: String) -> Result<Option<SerdeKvRecord>, crate::Error> {
+        match self {
+            WorkerDB::Direct(d) => d.kv_get(id, scopes, key).await,
+            WorkerDB::Mesophyll(c) => c.kv_get(id, scopes, key).await,
+        }
+    }
+
+    pub async fn kv_list_scopes(&self, id: Id) -> Result<Vec<String>, crate::Error> {
+        match self {
+            WorkerDB::Direct(d) => d.kv_list_scopes(id).await,
+            WorkerDB::Mesophyll(c) => c.kv_list_scopes(id).await,
+        }
+    }
+
+    pub async fn kv_set(&self, id: Id, scopes: Vec<String>, key: String, value: KhronosValue) -> Result<(), crate::Error> {
+        match self {
+            WorkerDB::Direct(d) => d.kv_set(id, scopes, key, value).await,
+            WorkerDB::Mesophyll(c) => c.kv_set(id, scopes, key, value).await,
+        }
+    }
+
+    pub async fn kv_delete(&self, id: Id, scopes: Vec<String>, key: String) -> Result<(), crate::Error> {
+        match self {
+            WorkerDB::Direct(d) => d.kv_delete(id, scopes, key).await,
+            WorkerDB::Mesophyll(c) => c.kv_delete(id, scopes, key).await,
+        }
+    }
+
+    pub async fn kv_find(&self, id: Id, scopes: Vec<String>, prefix: String) -> Result<Vec<SerdeKvRecord>, crate::Error> {
+        match self {
+            WorkerDB::Direct(d) => d.kv_find(id, scopes, prefix).await,
+            WorkerDB::Mesophyll(c) => c.kv_find(id, scopes, prefix).await,
+        }
+    }
+}

@@ -29,6 +29,7 @@ pub mod worker;
 pub mod workerthread;
 pub mod workerlike;
 pub mod workerfilter;
+pub mod workerdb;
 
 pub mod workerprocesshandle; // TODO: Replace with mesophyll
 pub mod workerpool;

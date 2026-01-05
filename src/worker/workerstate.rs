@@ -1,7 +1,7 @@
 use std::{borrow::Cow, cell::RefCell, collections::{HashMap, HashSet}, rc::Rc, sync::{Arc, LazyLock}};
 use serde_json::Value;
 
-use crate::{mesophyll::client::MesophyllDbClient, worker::workervmmanager::Id};
+use crate::worker::{workerdb::WorkerDB, workervmmanager::Id};
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct TenantState {
@@ -27,7 +27,7 @@ pub struct CreateWorkerState {
     pub reqwest_client: reqwest::Client,
     pub object_store: Arc<crate::objectstore::ObjectStore>,
     pub current_user: Arc<serenity::all::CurrentUser>,
-    pub mesophyll_db: Arc<MesophyllDbClient>
+    pub mesophyll_db: Arc<WorkerDB>
 }
 
 impl CreateWorkerState {
@@ -37,7 +37,7 @@ impl CreateWorkerState {
         reqwest_client: reqwest::Client,
         object_store: Arc<crate::objectstore::ObjectStore>,
         current_user: Arc<serenity::all::CurrentUser>,
-        mesophyll_db: Arc<MesophyllDbClient>
+        mesophyll_db: Arc<WorkerDB>
     ) -> Self {
         Self {
             serenity_http,
@@ -55,7 +55,7 @@ pub struct WorkerState {
     pub serenity_http: Arc<serenity::http::Http>,
     pub reqwest_client: reqwest::Client,
     pub object_store: Arc<crate::objectstore::ObjectStore>,
-    pub mesophyll_db: Arc<MesophyllDbClient>,
+    pub mesophyll_db: Arc<WorkerDB>,
     pub current_user: Arc<serenity::all::CurrentUser>,
     tenant_state_cache: Rc<RefCell<HashMap<Id, TenantState>>>, // Maps tenant IDs to their states
     startup_events: Rc<RefCell<HashSet<Id>>>, // Tracks which tenants have had their startup events fired
