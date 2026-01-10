@@ -945,6 +945,7 @@ pub(super) async fn get_bot_stats(
             })
         }).collect(),
         total_guilds,
+        total_users: sandwich_raw_stats.user_count
     };
 
     STATS_CACHE.insert((), stats.clone()).await;

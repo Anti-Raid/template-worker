@@ -257,6 +257,9 @@ pub struct GetStatusResponse {
     /// The total number of guilds the bot is connected to
     #[ts(type = "number")]
     pub total_guilds: i64,
+    /// The total number of users
+    #[ts(type = "number")]
+    pub total_users: i64,
 }
 
 /// Publicly accessible representation of a Discord command
