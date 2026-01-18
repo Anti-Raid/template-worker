@@ -351,31 +351,40 @@ pub enum KhronosValueApi {
     Null,
 }
 
-// A shop listing
-#[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema)]
+#[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema, sqlx::FromRow)]
 #[ts(export)]
-pub struct ShopListingV2 {
-    pub id: uuid::Uuid,
-    pub name: String,
-    pub short: String,
-    pub long: String,
-    pub review_state: String,
-    pub default_allowed_caps: Vec<String>,
-    pub language: String,
-    pub content: Option<HashMap<String, String>>,
+/// A global key-value entry that can be viewed by all guilds
+/// 
+/// Unlike normal key-values, these are not scoped to a specific guild or tenant,
+/// are immutable (new versions must be created, updates not allowed) and have both
+/// a public metadata and potentially private value. Only staff may create global kv's that
+/// have a price attached to them.
+/// 
+/// These are primarily used for things like the template shop but may be used for other
+/// things as well in the future beyond template shop as well such as global lists.
+pub struct PublicGlobalKv {
+    pub key: String,
+    pub version: i32,
+    pub owner_id: String,
+    pub owner_type: String,
+    pub price: Option<i64>, // will only be set for shop items, otherwise None
+    pub short: String, // short description for the key-value.
+    pub public_metadata: serde_json::Value, // public metadata about the key-value
+    pub scope: String,
     pub created_at: DateTime<Utc>,
     pub last_updated_at: DateTime<Utc>,
+    pub public_data: bool,
+    pub review_state: String,
+
+    #[sqlx(default)]
+    pub long: Option<String>, // long description for the key-value.
+    #[sqlx(default)]
+    pub data: serde_json::Value, // the actual value of the key-value, may be private
 }
 
-/// A list of shop listings
+/// A list of global key-values
 #[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema)]
 #[ts(export)]
-pub struct ShopListingV2List {
-    pub listings: Vec<ShopListingV2>,
-}
-
-#[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema)]
-#[ts(export)]
-pub struct GetTemplateShopQuery {
-    pub content: Option<bool>,
+pub struct PublicGlobalKvList {
+    pub items: Vec<PublicGlobalKv>,
 }

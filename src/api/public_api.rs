@@ -13,13 +13,12 @@ use crate::api::types::ApiPartialGuildChannel;
 use crate::api::types::ApiPartialRole;
 use crate::api::types::AuthorizeRequest;
 use crate::api::types::GetStatusResponse;
-use crate::api::types::GetTemplateShopQuery;
 use crate::api::types::GuildChannelWithPermissions;
 use crate::api::types::KhronosValueApi;
+use crate::api::types::PublicGlobalKv;
+use crate::api::types::PublicGlobalKvList;
 use crate::api::types::PublicLuauExecute;
 use crate::api::types::ShardConn;
-use crate::api::types::ShopListingV2;
-use crate::api::types::ShopListingV2List;
 use crate::api::types::UserSessionList;
 use crate::worker::workervmmanager::Id;
 use axum::{
@@ -27,7 +26,6 @@ use axum::{
     http::StatusCode,
 };
 use axum::Json;
-use chrono::DateTime;
 use chrono::Utc;
 use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::utils::khronos_value::KhronosValue;
@@ -879,142 +877,62 @@ pub(super) async fn get_bot_stats(
     Ok(Json(stats))
 }
 
-/// List Template Shop
+/// List Global KV
 /// 
-/// Lists the base metadata for the template shop
+/// Lists the global KV entries 
 #[utoipa::path(
     get, 
     tag = "Public API",
-    path = "/template-shop",
+    path = "/global-kvs",
     responses(
-        (status = 200, description = "The template shop listing", body = ShopListingV2List),
+        (status = 200, description = "The global kv listing", body = PublicGlobalKvList),
         (status = 400, description = "API Error", body = ApiError),
     )
 )]
-pub(super) async fn list_template_shop(
+pub(super) async fn list_global_kv(
     State(AppData { pool, .. }): State<AppData>,
-) -> ApiResponse<ShopListingV2List> {
-    #[derive(sqlx::FromRow)]
-    struct TemplateShopListingRow {
-        id: uuid::Uuid,
-        name: String,
-        short: String,
-        long: String,
-        review_state: String,
-        default_allowed_caps: Vec<String>,
-        language: String,
-        created_at: DateTime<Utc>,
-        last_updated_at: DateTime<Utc>,
-    }
-
-    let rows: Vec<TemplateShopListingRow> = sqlx::query_as(
-        "SELECT id, name, short, long, review_state, default_allowed_caps, language, created_at, last_updated_at FROM shop_listings_v2 WHERE review_state = 'approved'"
+) -> ApiResponse<PublicGlobalKvList> {
+    let items: Vec<PublicGlobalKv> = sqlx::query_as(
+        "SELECT key, version, owner_id, owner_type, short, public_metadata, public_data, scope, created_at, last_updated_at, price, review_state FROM global_kv WHERE review_state = 'approved'"
     )
     .fetch_all(&pool)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get template shop listings: {e:?}").into())))?;
 
-    let listings = rows.into_iter().map(|row| {
-        ShopListingV2 {
-            id: row.id,
-            name: row.name,
-            short: row.short,
-            long: row.long,
-            review_state: row.review_state,
-            default_allowed_caps: row.default_allowed_caps,
-            content: None,
-            language: row.language,
-            created_at: row.created_at,
-            last_updated_at: row.last_updated_at,
-        }
-    }).collect();
-
-    Ok(Json(ShopListingV2List { listings }))
+    Ok(Json(PublicGlobalKvList { items }))
 }
 
-/// Get Template Shop Listing By Name
+/// Get Global KV by Key-Version
 /// 
 /// Gets the data for a template shop listing. Include `content=true` query parameter to include the full content (if available)
 #[utoipa::path(
     get, 
     tag = "Public API",
-    path = "/template-shop/by-name/{name}",
+    path = "/global-kvs/{key}/{version}",
     params(
-        ("name" = String, description = "The ID of the listing to get"),
-        ("content" = bool, description = "Whether to include the full content of the listing")
+        ("key" = String, description = "The key of the global kv to get"),
+        ("version" = String, description = "The version of the global kv to get")
     ),
     responses(
-        (status = 200, description = "The template shop listing", body = ShopListingV2),
+        (status = 200, description = "The global kv", body = PublicGlobalKv),
         (status = 400, description = "API Error", body = ApiError),
     )
 )]
-pub(super) async fn get_template_shop_listing_by_name(
+pub(super) async fn get_global_kv(
     State(AppData { pool, .. }): State<AppData>,
-    Path(name): Path<String>,
-    Query(query): Query<GetTemplateShopQuery>,
-) -> ApiResponse<ShopListingV2> {
-    #[derive(sqlx::FromRow)]
-    struct TemplateShopListingRow {
-        id: uuid::Uuid,
-        name: String,
-        short: String,
-        long: String,
-        review_state: String,
-        default_allowed_caps: Vec<String>,
-        content: serde_json::Value,
-        language: String,
-        created_at: DateTime<Utc>,
-        last_updated_at: DateTime<Utc>,
-    }
+    Path((key, version)): Path<(String, String)>,
+) -> ApiResponse<PublicGlobalKv> {
+    let item: Option<PublicGlobalKv> = sqlx::query_as(
+        "SELECT key, version, owner_id, owner_type, short, long, public_metadata, public_data, scope, created_at, last_updated_at, price, review_state FROM global_kv WHERE review_state = 'approved' AND key = $1 AND version = $2"
+    )
+    .bind(&key)
+    .bind(&version)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get template shop listings: {e:?}").into())))?;
 
-    if query.content.unwrap_or(false) {
-        let row: TemplateShopListingRow = sqlx::query_as(
-            "SELECT id, name, short, long, review_state, default_allowed_caps, content, language, created_at, last_updated_at FROM shop_listings_v2 WHERE name = $1 AND review_state = 'approved'"
-        )
-        .bind(&name)
-        .fetch_one(&pool)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get template shop listing: {e:?}").into())))?;
-
-        let content = serde_json::from_value(row.content)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to parse listing content: {e:?}").into())))?;
-
-        let listing = ShopListingV2 {
-            id: row.id,
-            name: row.name,
-            short: row.short,
-            long: row.long,
-            review_state: row.review_state,
-            default_allowed_caps: row.default_allowed_caps,
-            content: Some(content),
-            language: row.language,
-            created_at: row.created_at,
-            last_updated_at: row.last_updated_at,
-        };
-
-        Ok(Json(listing))
-    } else {
-        let row: TemplateShopListingRow = sqlx::query_as(
-            "SELECT id, name, short, long, review_state, default_allowed_caps, '{}'::jsonb AS content, language, created_at, last_updated_at FROM shop_listings_v2 WHERE name = $1 AND review_state = 'approved'"
-        )
-        .bind(&name)
-        .fetch_one(&pool)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get template shop listing: {e:?}").into())))?;
-
-        let listing = ShopListingV2 {
-            id: row.id,
-            name: row.name,
-            short: row.short,
-            long: row.long,
-            review_state: row.review_state,
-            default_allowed_caps: row.default_allowed_caps,
-            content: None,
-            language: row.language,
-            created_at: row.created_at,
-            last_updated_at: row.last_updated_at,
-        };
-
-        Ok(Json(listing))
+    match item {
+        Some(item) => Ok(Json(item)),
+        None => Err((StatusCode::NOT_FOUND, Json("Global KV not found".into()))),
     }
 }

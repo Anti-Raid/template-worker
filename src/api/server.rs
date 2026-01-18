@@ -108,8 +108,8 @@ pub fn create(
         routes!(public_api::state),
         routes!(public_api::api_config),
         routes!(public_api::get_bot_stats),
-        routes!(public_api::list_template_shop),
-        routes!(public_api::get_template_shop_listing_by_name),
+        routes!(public_api::list_global_kv),
+        routes!(public_api::get_global_kv),
     ];
 
     let mut oapi_router = OpenApiRouter::new();

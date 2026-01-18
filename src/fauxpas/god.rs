@@ -46,13 +46,12 @@ impl<T: WorkerLike> LuaUserData for LuaGod<T> {
         });
 
         // Set shop listing review state
-        methods.add_scheduler_async_method("setshoplistingreviewstate", async move |_lua, this, (listing_id, review_state): (String, String)| {
+        methods.add_scheduler_async_method("setglobalkvreviewstate", async move |_lua, this, (key, version, review_state): (String, i32, String)| {
             this.ensure_secure()?;
-            let listing_id = listing_id.parse::<uuid::Uuid>()
-                .map_err(|e| LuaError::external(format!("Invalid listing ID: {e:?}")))?;
-            sqlx::query("UPDATE shop_listings_v2 SET review_state = $1 WHERE listing_id = $2")
+            sqlx::query("UPDATE global_kv SET review_state = $1 WHERE key = $2 AND version = $3")
                 .bind(review_state)
-                .bind(listing_id)
+                .bind(key)
+                .bind(version)
                 .execute(this.mesophyll_db_state.get_pool())
                 .await
                 .map_err(|e| LuaError::external(format!("Failed to set tenant ban state: {e:?}")))?;
