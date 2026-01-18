@@ -19,6 +19,22 @@ pub enum Id {
     GuildId(GuildId)
 }
 
+impl Id {
+    /// Returns the tenant id
+    pub fn tenant_id(&self) -> String {
+        match self {
+            Id::GuildId(guild_id) => guild_id.to_string(),
+        }
+    }
+
+    /// Returns the tenant type
+    pub fn tenant_type(&self) -> String {
+        match self {
+            Id::GuildId(_) => "guild".to_string(),
+        }
+    }
+}
+
 /// Represents the data associated with a VM, which includes the guild state and the Khronos runtime manager
 #[derive(Clone)]
 pub struct VmData {

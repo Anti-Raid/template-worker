@@ -350,3 +350,32 @@ pub enum KhronosValueApi {
     LazyStringMap(HashMap<String, String>), 
     Null,
 }
+
+// A shop listing
+#[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema)]
+#[ts(export)]
+pub struct ShopListingV2 {
+    pub id: uuid::Uuid,
+    pub name: String,
+    pub short: String,
+    pub long: String,
+    pub review_state: String,
+    pub default_allowed_caps: Vec<String>,
+    pub language: String,
+    pub content: Option<HashMap<String, String>>,
+    pub created_at: DateTime<Utc>,
+    pub last_updated_at: DateTime<Utc>,
+}
+
+/// A list of shop listings
+#[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema)]
+#[ts(export)]
+pub struct ShopListingV2List {
+    pub listings: Vec<ShopListingV2>,
+}
+
+#[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema)]
+#[ts(export)]
+pub struct GetTemplateShopQuery {
+    pub content: Option<bool>,
+}

@@ -13,10 +13,13 @@ use crate::api::types::ApiPartialGuildChannel;
 use crate::api::types::ApiPartialRole;
 use crate::api::types::AuthorizeRequest;
 use crate::api::types::GetStatusResponse;
+use crate::api::types::GetTemplateShopQuery;
 use crate::api::types::GuildChannelWithPermissions;
 use crate::api::types::KhronosValueApi;
 use crate::api::types::PublicLuauExecute;
 use crate::api::types::ShardConn;
+use crate::api::types::ShopListingV2;
+use crate::api::types::ShopListingV2List;
 use crate::api::types::UserSessionList;
 use crate::worker::workervmmanager::Id;
 use axum::{
@@ -24,6 +27,7 @@ use axum::{
     http::StatusCode,
 };
 use axum::Json;
+use chrono::DateTime;
 use chrono::Utc;
 use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::utils::khronos_value::KhronosValue;
@@ -873,4 +877,144 @@ pub(super) async fn get_bot_stats(
     STATS_CACHE.insert((), stats.clone()).await;
 
     Ok(Json(stats))
+}
+
+/// List Template Shop
+/// 
+/// Lists the base metadata for the template shop
+#[utoipa::path(
+    get, 
+    tag = "Public API",
+    path = "/template-shop",
+    responses(
+        (status = 200, description = "The template shop listing", body = ShopListingV2List),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
+pub(super) async fn list_template_shop(
+    State(AppData { pool, .. }): State<AppData>,
+) -> ApiResponse<ShopListingV2List> {
+    #[derive(sqlx::FromRow)]
+    struct TemplateShopListingRow {
+        id: uuid::Uuid,
+        name: String,
+        short: String,
+        long: String,
+        review_state: String,
+        default_allowed_caps: Vec<String>,
+        language: String,
+        created_at: DateTime<Utc>,
+        last_updated_at: DateTime<Utc>,
+    }
+
+    let rows: Vec<TemplateShopListingRow> = sqlx::query_as(
+        "SELECT id, name, short, long, review_state, default_allowed_caps, language, created_at, last_updated_at FROM shop_listings_v2 WHERE review_state = 'approved'"
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get template shop listings: {e:?}").into())))?;
+
+    let listings = rows.into_iter().map(|row| {
+        ShopListingV2 {
+            id: row.id,
+            name: row.name,
+            short: row.short,
+            long: row.long,
+            review_state: row.review_state,
+            default_allowed_caps: row.default_allowed_caps,
+            content: None,
+            language: row.language,
+            created_at: row.created_at,
+            last_updated_at: row.last_updated_at,
+        }
+    }).collect();
+
+    Ok(Json(ShopListingV2List { listings }))
+}
+
+/// Get Template Shop Listing By Name
+/// 
+/// Gets the data for a template shop listing. Include `content=true` query parameter to include the full content (if available)
+#[utoipa::path(
+    get, 
+    tag = "Public API",
+    path = "/template-shop/by-name/{name}",
+    params(
+        ("name" = String, description = "The ID of the listing to get"),
+        ("content" = bool, description = "Whether to include the full content of the listing")
+    ),
+    responses(
+        (status = 200, description = "The template shop listing", body = ShopListingV2),
+        (status = 400, description = "API Error", body = ApiError),
+    )
+)]
+pub(super) async fn get_template_shop_listing_by_name(
+    State(AppData { pool, .. }): State<AppData>,
+    Path(name): Path<String>,
+    Query(query): Query<GetTemplateShopQuery>,
+) -> ApiResponse<ShopListingV2> {
+    #[derive(sqlx::FromRow)]
+    struct TemplateShopListingRow {
+        id: uuid::Uuid,
+        name: String,
+        short: String,
+        long: String,
+        review_state: String,
+        default_allowed_caps: Vec<String>,
+        content: serde_json::Value,
+        language: String,
+        created_at: DateTime<Utc>,
+        last_updated_at: DateTime<Utc>,
+    }
+
+    if query.content.unwrap_or(false) {
+        let row: TemplateShopListingRow = sqlx::query_as(
+            "SELECT id, name, short, long, review_state, default_allowed_caps, content, language, created_at, last_updated_at FROM shop_listings_v2 WHERE name = $1 AND review_state = 'approved'"
+        )
+        .bind(&name)
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get template shop listing: {e:?}").into())))?;
+
+        let content = serde_json::from_value(row.content)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to parse listing content: {e:?}").into())))?;
+
+        let listing = ShopListingV2 {
+            id: row.id,
+            name: row.name,
+            short: row.short,
+            long: row.long,
+            review_state: row.review_state,
+            default_allowed_caps: row.default_allowed_caps,
+            content: Some(content),
+            language: row.language,
+            created_at: row.created_at,
+            last_updated_at: row.last_updated_at,
+        };
+
+        Ok(Json(listing))
+    } else {
+        let row: TemplateShopListingRow = sqlx::query_as(
+            "SELECT id, name, short, long, review_state, default_allowed_caps, '{}'::jsonb AS content, language, created_at, last_updated_at FROM shop_listings_v2 WHERE name = $1 AND review_state = 'approved'"
+        )
+        .bind(&name)
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get template shop listing: {e:?}").into())))?;
+
+        let listing = ShopListingV2 {
+            id: row.id,
+            name: row.name,
+            short: row.short,
+            long: row.long,
+            review_state: row.review_state,
+            default_allowed_caps: row.default_allowed_caps,
+            content: None,
+            language: row.language,
+            created_at: row.created_at,
+            last_updated_at: row.last_updated_at,
+        };
+
+        Ok(Json(listing))
+    }
 }

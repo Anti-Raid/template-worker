@@ -17,6 +17,10 @@ enum WorkerThreadMessage {
     Kill {
         tx: OneShotSender<Result<(), crate::Error>>,
     },
+    DropTenant {
+        id: Id,
+        tx: OneShotSender<Result<(), crate::Error>>,
+    },
     RunScript {
         id: Id,
         name: String,
@@ -87,6 +91,10 @@ impl WorkerThread {
                                     let res = worker.dispatch.run_script(id, name, code, event).await;
                                     let _ = tx.send(res.map_err(|e| e.to_string().into()));
                                 }
+                                WorkerThreadMessage::DropTenant { id, tx } => {
+                                    let res = worker.vm_manager.remove_vm_for(id);
+                                    let _ = tx.send(res.map_err(|e| e.to_string().into()));
+                                }
                             }
                         }
                     });
@@ -138,6 +146,13 @@ impl WorkerLike for WorkerThread {
         self.tx.send(WorkerThreadMessage::DispatchEvent { id, event, tx: None })
             .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
         Ok(())
+    }
+
+    async fn drop_tenant(&self, id: Id) -> Result<(), crate::Error> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tx.send(WorkerThreadMessage::DropTenant { id, tx })
+            .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
+        Ok(rx.await.map_err(|e| format!("Failed to receive response from worker thread: {e}"))??)
     }
 }
 

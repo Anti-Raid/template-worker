@@ -78,6 +78,19 @@ impl MesophyllClient {
                                 (req_id, resp)
                             });
                         },
+                        ServerMessage::DropWorker { id, req_id } => {
+                            log::info!("Mesophyll client received DropWorker for ID {:?}", id);
+                            let resp = self.wt.drop_tenant(id).await;
+                            let response = encode_message(&ClientMessage::DispatchResponse {
+                                req_id,
+                                result: match resp {
+                                    Ok(_) => Ok(KhronosValue::Null),
+                                    Err(e) => Err(e.to_string()),
+                                },
+                            })?;
+                            stream_tx.send(response).await
+                                .map_err(|e| format!("Failed to send DropWorker response: {}", e))?;
+                        }
                     }
                 }
                 Some((req_id, result)) = dispatches.next() => {

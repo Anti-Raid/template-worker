@@ -55,6 +55,11 @@ impl DbState {
         Ok(s)
     }
 
+    /// Returns the underlying SQLx Postgres pool
+    pub fn get_pool(&self) -> &sqlx::PgPool {
+        &self.pool
+    }
+
     /// Returns the tenant state(s) for all guilds in the database as well as a set of guild IDs that have startup events enabled
     /// 
     /// Should only be called once, on startup, to initialize the tenant state cache
@@ -743,6 +748,19 @@ impl MesophyllServerConn {
     pub fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
         let message = ServerMessage::DispatchEvent { id, event, req_id: None };
         self.send(&message)?;
+        Ok(())
+    }
+
+    /// Drops a tenant from the worker
+    pub async fn drop_tenant(&self, id: Id) -> Result<(), crate::Error> {
+        let (req_id, rx) = self.register_dispatch_response_handler();
+
+        // Upon return, remove the handler from the map
+        let _guard = DispatchHandlerDropGuard::new(&self.dispatch_response_handlers, req_id);
+
+        let message = ServerMessage::DropWorker { id, req_id };
+        self.send(&message)?;
+        rx.await.map_err(|e| format!("Failed to receive dispatch event response: {}", e))??;
         Ok(())
     }
 

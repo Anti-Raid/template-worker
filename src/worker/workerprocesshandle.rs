@@ -168,6 +168,12 @@ impl WorkerLike for WorkerProcessHandle {
             .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", self.id))?;
         r.dispatch_event_nowait(id, event)
     }
+
+    async fn drop_tenant(&self, id: Id) -> Result<(), crate::Error> {
+        let r = self.mesophyll_server.get_connection(self.id)
+            .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", self.id))?;
+        r.drop_tenant(id).await
+    }
 }
 
 pub struct WorkerProcessHandleCreateOpts {

@@ -33,6 +33,9 @@ pub trait WorkerLike: Send + Sync + 'static {
     /// Dispatch an event to the templates managed by this worker without waiting for the result
     fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error>;
 
+    /// Drop a tenant from the worker
+    async fn drop_tenant(&self, id: Id) -> Result<(), crate::Error>;
+
     /// For a pool, returns the length of the pool
     /// 
     /// Returns 0 for non-pool workers
@@ -65,6 +68,10 @@ impl WorkerLike for Arc<dyn WorkerLike + Send + Sync> {
 
     fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
         self.as_ref().dispatch_event_nowait(id, event)
+    }
+
+    async fn drop_tenant(&self, id: Id) -> Result<(), crate::Error> {
+        self.as_ref().drop_tenant(id).await
     }
 
     fn len(&self) -> usize {

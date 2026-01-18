@@ -24,6 +24,12 @@ pub enum ServerMessage {
         event: CreateEvent,
         req_id: u64 
     },
+
+    /// Requests that a worker be dropped
+    DropWorker { 
+        id: Id, 
+        req_id: u64 
+    },
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]

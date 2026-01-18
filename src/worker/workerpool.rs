@@ -111,6 +111,10 @@ impl<T: WorkerLike> WorkerLike for WorkerPool<T> {
         self.get_worker_for(id).dispatch_event_nowait(id, event)
     }
 
+    async fn drop_tenant(&self, id: Id) -> Result<(), crate::Error> {
+        self.get_worker_for(id).drop_tenant(id).await
+    }
+
     fn len(&self) -> usize {
         self.workers.len()
     }
