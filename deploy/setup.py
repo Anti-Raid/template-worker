@@ -12,9 +12,15 @@ parser = argparse.ArgumentParser(
     description='Sets up Anti-Raid configuration files',
     epilog='https://github.com/anti-raid/template-worker')
 parser.add_argument('--output_path', type=str, default="./deploy/dockerconf", help='Output path for configuration files')
+
+# Docker
 parser.add_argument('--docker', action='store_true', help='Setup for docker (default)')
 parser.add_argument('--no-docker', dest='docker', action='store_false', help='Setup for non-docker')
 parser.set_defaults(docker=True)
+
+# Seaweed
+parser.add_argument('--local_fs_path', type=str, default='', help="If this is set, use local filesystem storage at the given path instead of SeaweedFS")
+
 args = parser.parse_args()
 
 if args.docker and args.output_path != "./deploy/dockerconf":
@@ -22,6 +28,14 @@ if args.docker and args.output_path != "./deploy/dockerconf":
     exit(1)
 
 os.mkdir(args.output_path) if not os.path.exists(args.output_path) else None
+if args.local_fs_path:
+    print("Using local filesystem storage at", args.local_fs_path)
+    os.mkdir(args.local_fs_path) if not os.path.exists(args.local_fs_path) else None
+
+if args.docker:
+    print("Setting up for Docker...")
+else:
+    print("Setting up for non-Docker...")
 
 # Get bot token, client id and client secret
 def get_var(prompt: str, env_var: str) -> str:
@@ -75,6 +89,24 @@ nirn_secrets_filename = "secrets.docker.json" if args.docker else "nirn_secrets.
 sandwich_url = "sandwich.docker.yaml" if args.docker else "sandwich.yaml"
 s3_json_filename = "deploy/docker/seaweed/s3.json" if args.docker else f"{args.output_path}/seaweed_s3.json"
 
+SEAWEED_DATA = """
+object_storage:
+  type: s3-like # Type of object storage. Can be s3-like or local
+  base_path: 
+  endpoint: {seaweed_endpoint} # Endpoint for Seaweed
+  cdn_endpoint: {seaweed_cdn_endpoint} # CDN Endpoint for Seaweed
+  access_key: {s3_access_key} # Access Key for Seaweed
+  secret_key: {s3_secret_key} # Secret Key for Seaweed
+  secure: false
+  cdn_secure: false
+"""
+if args.local_fs_path:
+    SEAWEED_DATA = f"""
+object_storage:
+  type: local # Type of object storage. Can be s3-like or local
+  base_path: {args.local_fs_path} # Base path for local storage
+"""
+
 BASE_CONFIG_FILE = f"""
 discord_auth:
   token: "{faketoken}" # Discord Bot Token
@@ -103,15 +135,7 @@ meta:
   sandwich_http_api: {sandwich_url}
   default_error_channel: "{default_error_channel}" # Change this
 
-object_storage:
-  type: s3-like # Type of object storage. Can be s3-like or local
-  base_path: 
-  endpoint: {seaweed_endpoint} # Endpoint for Seaweed
-  cdn_endpoint: {seaweed_cdn_endpoint} # CDN Endpoint for Seaweed
-  access_key: {s3_access_key} # Access Key for Seaweed
-  secret_key: {s3_secret_key} # Secret Key for Seaweed
-  secure: false
-  cdn_secure: false
+{SEAWEED_DATA}
 
 addrs:
   template_worker: http://0.0.0.0:60000

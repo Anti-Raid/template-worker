@@ -8,3 +8,4 @@
 /deploy/docker/state
 **.docker.yaml
 **.docker.json
+/data

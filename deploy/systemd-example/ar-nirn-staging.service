@@ -1,9 +1,9 @@
 [Service]
 Type=simple
-ExecStart=/home/antiraid/splashtail/staging/infra/nirn-proxy/nirn-proxy cache-endpoints=false ws-proxy=ws://127.0.0.1:3600 port=3221 ratelimit-over-408 endpoint-rewrite=/api/gateway/bot@http://127.0.0.1:29334/antiraid,/api/v*/gateway/bot@http://127.0.0.1:29334/antiraid
-User=antiraid
-Group=antiraid
-WorkingDirectory=/home/antiraid/splashtail/staging/infra/nirn-proxy
+ExecStart=/home/antiraid-secure/nirn-proxy/nirn-proxy cache-endpoints=false port=3221 ratelimit-over-408 endpoint-rewrite=/api/gateway/bot@http://127.0.0.1:29334/antiraid,/api/v*/gateway/bot@http://127.0.0.1:29334/antiraid token-map-file=secrets.json
+User=antiraid-secure
+Group=antiraid-secure
+WorkingDirectory=/home/antiraid-secure/nirn-proxy
 ExecReload=/bin/kill -s HUP $MAINPID
 KillMode=mixed
 TimeoutStopSec=5

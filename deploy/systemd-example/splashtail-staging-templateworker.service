@@ -17,4 +17,4 @@ WantedBy=multi-user.target
 [Unit]
 PartOf=antiraid-v6.target
 Description="AntiRaid template worker service"
-After=ibl-maint.service
+After=network.service
