@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use khronos_runtime::utils::khronos_value::KhronosValue;
 
-use crate::{mesophyll::{client::MesophyllDbClient, server::{DbState, SerdeKvRecord}}, worker::{workerstate::TenantState, workervmmanager::Id}};
+use crate::{mesophyll::{client::MesophyllDbClient, server::{DbState, GlobalKv, SerdeKvRecord}}, worker::{workerstate::TenantState, workervmmanager::Id}};
 
 /// An abstraction over the database access method for worker state
 pub enum WorkerDB {
@@ -65,6 +65,20 @@ impl WorkerDB {
         match self {
             WorkerDB::Direct(d) => d.kv_find(id, scopes, prefix).await,
             WorkerDB::Mesophyll(c) => c.kv_find(id, scopes, prefix).await,
+        }
+    }
+
+    pub async fn global_kv_find(&self, scope: String, query: String) -> Result<Vec<GlobalKv>, crate::Error> {
+        match self {
+            WorkerDB::Direct(d) => d.global_kv_find(scope, query).await,
+            WorkerDB::Mesophyll(c) => c.global_kv_find(scope, query).await,
+        }
+    }
+
+    pub async fn global_kv_get(&self, key: String, version: i32, scope: String) -> Result<Option<GlobalKv>, crate::Error> {
+        match self {
+            WorkerDB::Direct(d) => d.global_kv_get(key, version, scope).await,
+            WorkerDB::Mesophyll(c) => c.global_kv_get(key, version, scope).await,
         }
     }
 }

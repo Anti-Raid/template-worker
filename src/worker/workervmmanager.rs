@@ -16,21 +16,34 @@ use super::limits::{MAX_TEMPLATE_MEMORY_USAGE, MAX_TEMPLATES_EXECUTION_TIME};
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]
 /// Represents the ID of a tenant, which can currently only be a GuildId
 pub enum Id {
-    GuildId(GuildId)
+    Guild(GuildId)
 }
 
 impl Id {
     /// Returns the tenant id
     pub fn tenant_id(&self) -> String {
         match self {
-            Id::GuildId(guild_id) => guild_id.to_string(),
+            Id::Guild(guild_id) => guild_id.to_string(),
         }
     }
 
     /// Returns the tenant type
     pub fn tenant_type(&self) -> String {
         match self {
-            Id::GuildId(_) => "guild".to_string(),
+            Id::Guild(_) => "guild".to_string(),
+        }
+    }
+
+    /// Create a new Id from type/id pair
+    pub fn from_parts(tenant_type: &str, tenant_id: &str) -> Option<Self> {
+        match tenant_type {
+            "guild" => {
+                let Some(gid) = tenant_id.parse::<GuildId>().ok() else {
+                    return None;
+                };
+                Some(Id::Guild(gid))
+            },
+            _ => None
         }
     }
 }
@@ -163,8 +176,7 @@ impl WorkerVmManager {
                 vfs::EmbeddedFS::<Builtins>::new().into(),
                 vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
             ])
-        )
-        .await?;
+        )?;
 
         rt.set_memory_limit(MAX_TEMPLATE_MEMORY_USAGE)?;
         Ok(rt)

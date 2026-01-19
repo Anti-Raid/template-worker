@@ -8,6 +8,8 @@ use khronos_runtime::core::typesext::Vfs;
 use khronos_runtime::traits::context::{
     KhronosContext, Limitations,
 };
+use khronos_runtime::traits::globalkvprovider::GlobalKVProvider;
+use khronos_runtime::traits::ir::globalkv::{AttachResult, CreateGlobalKv, GlobalKv};
 use khronos_runtime::traits::ir::runtime as runtime_ir;
 use dapi::controller::DiscordProvider;
 use khronos_runtime::traits::httpclientprovider::HTTPClientProvider;
@@ -49,10 +51,22 @@ impl TemplateContextProvider {
             ratelimits: vm_data.ratelimits,
         }
     }
+
+    #[deprecated = "Use id() method instead where possible"]
+    fn guild_id(&self) -> Option<serenity::all::GuildId> {
+        match self.id {
+            Id::Guild(guild_id) => Some(guild_id),
+        }
+    }
+
+    fn id(&self) -> Id {
+        self.id.clone()
+    }
 }
 
 impl KhronosContext for TemplateContextProvider {
     type KVProvider = ArKVProvider;
+    type GlobalKVProvider = ArGlobalKvProvider;
     type DiscordProvider = ArDiscordProvider;
     type ObjectStorageProvider = ArObjectStorageProvider;
     type HTTPClientProvider = ArHTTPClientProvider;
@@ -64,17 +78,19 @@ impl KhronosContext for TemplateContextProvider {
         Limitations::new(vec!["*".to_string()])
     }
 
-    fn guild_id(&self) -> Option<serenity::all::GuildId> {
-        match self.id {
-            Id::GuildId(gid) => Some(gid),
-        }
-    }
-
     fn kv_provider(&self) -> Option<Self::KVProvider> {
         Some(ArKVProvider {
-            guild_id: self.guild_id()?,
+            id: self.id(),
             state: self.state.clone(),
             kv_constraints: self.kv_constraints.clone(),
+            ratelimits: self.ratelimits.clone(),
+        })
+    }
+
+    fn global_kv_provider(&self) -> Option<Self::GlobalKVProvider> {
+        Some(ArGlobalKvProvider {
+            id: self.id(),
+            state: self.state.clone(),
             ratelimits: self.ratelimits.clone(),
         })
     }
@@ -89,7 +105,7 @@ impl KhronosContext for TemplateContextProvider {
 
     fn runtime_provider(&self) -> Option<Self::RuntimeProvider> {
         Some(ArRuntimeProvider {
-            id: Id::GuildId(self.guild_id()?),
+            id: self.id(),
             state: self.state.clone(),
             ratelimits: self.ratelimits.clone(),
         })
@@ -106,7 +122,7 @@ impl KhronosContext for TemplateContextProvider {
 
     fn httpclient_provider(&self) -> Option<Self::HTTPClientProvider> {
         Some(ArHTTPClientProvider {
-            guild_id: self.guild_id()?,
+            id: self.id(),
             state: self.state.clone(),
             ratelimits: self.ratelimits.clone(),
         })
@@ -119,7 +135,7 @@ impl KhronosContext for TemplateContextProvider {
 
 #[derive(Clone)]
 pub struct ArKVProvider {
-    guild_id: serenity::all::GuildId,
+    id: Id,
     state: WorkerState,
     kv_constraints: LuaKVConstraints,
     ratelimits: Rc<Ratelimits>,
@@ -151,7 +167,7 @@ impl KVProvider for ArKVProvider {
         }
 
         self.state.mesophyll_db.kv_get(
-            Id::GuildId(self.guild_id),
+            self.id,
             scopes,
             key,
         ).await
@@ -159,9 +175,7 @@ impl KVProvider for ArKVProvider {
     }
 
     async fn list_scopes(&self) -> Result<Vec<String>, crate::Error> {
-        let scopes = self.state.mesophyll_db.kv_list_scopes(
-            Id::GuildId(self.guild_id),
-        ).await?;
+        let scopes = self.state.mesophyll_db.kv_list_scopes(self.id).await?;
         Ok(scopes)
     }
 
@@ -191,7 +205,7 @@ impl KVProvider for ArKVProvider {
         }
 
         self.state.mesophyll_db.kv_set(
-            Id::GuildId(self.guild_id),
+            self.id,
             scopes,
             key,
             data,
@@ -207,7 +221,7 @@ impl KVProvider for ArKVProvider {
         }
 
         self.state.mesophyll_db.kv_delete(
-            Id::GuildId(self.guild_id),
+            self.id,
             scopes,
             key,
         ).await
@@ -222,7 +236,7 @@ impl KVProvider for ArKVProvider {
         }
 
         self.state.mesophyll_db.kv_find(
-            Id::GuildId(self.guild_id),
+            self.id,
             scopes,
             query,
         ).await
@@ -497,7 +511,7 @@ impl ObjectStorageProvider for ArObjectStorageProvider {
 #[derive(Clone)]
 #[allow(dead_code)]
 pub struct ArHTTPClientProvider {
-    guild_id: serenity::all::GuildId,
+    id: Id,
     state: WorkerState,
     ratelimits: Rc<Ratelimits>,
 }
@@ -604,5 +618,46 @@ impl RuntimeProvider for ArRuntimeProvider {
             )
             .await?;
         Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct ArGlobalKvProvider {
+    id: Id,
+    state: WorkerState,
+    ratelimits: Rc<Ratelimits>,
+}
+
+impl GlobalKVProvider for ArGlobalKvProvider {
+    fn attempt_action(&self, bucket: &str) -> Result<(), khronos_runtime::Error> {
+        self.ratelimits.globalkv.check(bucket)
+    }
+
+    async fn find(&self, scope: String, query: String) -> Result<Vec<GlobalKv>, khronos_runtime::Error> {
+        let globals = self.state.mesophyll_db.global_kv_find(scope, query).await?;
+        Ok(globals.into_iter().map(|x| x.into()).collect())
+    }
+
+    async fn get(&self, key: String, version: i32, scope: String) -> Result<Option<GlobalKv>, khronos_runtime::Error> {
+        let Some(global) = self.state.mesophyll_db.global_kv_get(key, version, scope).await? else {
+            return Ok(None);
+        };
+        Ok(Some(global.into()))
+    }
+
+    async fn list_attached(&self, _scopes: &[String], _query: String) -> Result<Vec<GlobalKv>, khronos_runtime::Error> {
+        todo!()
+    }
+
+    async fn create(&self, _entry: CreateGlobalKv) -> Result<(), khronos_runtime::Error> {
+        todo!()
+    }
+
+    async fn attach(&self, _key: String, _version: i32, _scope: String) -> Result<AttachResult, khronos_runtime::Error> {
+        todo!()
+    }
+
+    async fn delete(&self, _key: String, _version: i32, _scope: String) -> Result<(), khronos_runtime::Error> {
+        todo!()
     }
 }

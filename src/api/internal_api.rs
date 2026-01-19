@@ -45,7 +45,7 @@ pub(super) async fn dispatch_event(
     let event = CreateEvent::new_khronos_value(req.name, Some(user_id.to_string()), req.data);
 
     let resp = data.worker.dispatch_event(
-        Id::GuildId(guild_id),
+        Id::Guild(guild_id), // TODO: make this tenant-agnostic in the future
         event,
     )
     .await

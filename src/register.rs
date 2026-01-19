@@ -5,6 +5,7 @@ use crate::worker::limits::TEMPLATE_GIVE_TIME;
 use khronos_runtime::rt::mlua::prelude::*;
 use khronos_runtime::rt::KhronosRuntime;
 use khronos_runtime::rt::RuntimeCreateOpts;
+use khronos_runtime::rt::mlua_scheduler::taskmgr::SchedulerImpl;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serenity::all::*;
@@ -100,7 +101,6 @@ fn register() -> Result<RegisterResult, crate::Error> {
                         vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
                     ]),
                 )
-                .await
                 .expect("Failed to create KhronosRuntime");
 
                 let builtins_register = rt

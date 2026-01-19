@@ -1,3 +1,5 @@
+use crate::mesophyll::server::DbState;
+
 use super::internal_api;
 use super::public_api;
 use axum::{
@@ -51,13 +53,14 @@ impl<'a> From<&'a str> for ApiError {
 #[derive(Clone)]
 pub struct AppData {
     pub data: Arc<crate::data::Data>,
+    pub mesophyll_db_state: DbState,
     pub pool: sqlx::PgPool,
     pub http: Arc<serenity::http::Http>,
 }
 
 impl AppData {
-    pub fn new(data: Arc<crate::data::Data>, http: Arc<serenity::http::Http>, pool: sqlx::PgPool) -> Self {
-        Self { data, http, pool }
+    pub fn new(data: Arc<crate::data::Data>, http: Arc<serenity::http::Http>, pool: sqlx::PgPool, mesophyll_db_state: DbState) -> Self {
+        Self { data, http, pool, mesophyll_db_state }
     }
 }
 
@@ -80,6 +83,7 @@ async fn logger(
 
 pub fn create(
     data: Arc<crate::data::Data>,
+    mesophyll_db_state: DbState,
     pool: sqlx::PgPool,
     http: Arc<serenity::http::Http>,
 ) -> axum::routing::IntoMakeService<Router> {
@@ -198,6 +202,6 @@ pub fn create(
         .layer(tower_http::cors::CorsLayer::very_permissive())
         .layer(axum::middleware::from_fn(logger));
 
-    let router: Router<()> = router.with_state(AppData::new(data, http, pool));
+    let router: Router<()> = router.with_state(AppData::new(data, http, pool, mesophyll_db_state));
     router.into_make_service()
 }

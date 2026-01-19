@@ -47,7 +47,7 @@ pub async fn discord_event_dispatch(
 
     data.worker
     .dispatch_event_nowait(
-        Id::GuildId(guild_id),
+        Id::Guild(guild_id), // TODO: make this tenant-agnostic in the future
         CreateEvent::new_raw_value(
             if event.ty.as_str() == "MESSAGE_CREATE" {
                 "MESSAGE".to_string() // Message events are called MESSAGE and not MESSAGE_CREATE in AntiRaid for backwards compatibility

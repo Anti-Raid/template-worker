@@ -35,7 +35,7 @@ pub enum WorkerType {
     /// Dummy worker for registering commands only
     #[clap(name = "register", alias = "register-commands")]
     RegisterCommands,
-    /// Dummy worker that applies a migration by name and exits
+    /// Dummy worker that applies a migration and exits
     #[clap(name = "migrate", alias = "apply-migration")]
     Migrate,
     /// Worker that uses a process pool for executing tasks
@@ -80,10 +80,6 @@ struct CmdArgs {
     /// How many tokio threads to use for the workers main loop (note that each worker still uses a single WorkerThread for the actual luau vm's)
     #[clap(long, default_value = "3")]
     pub tokio_threads_worker: usize,
-
-    /// Migration to apply (only used when worker-type is "migrate")
-    #[clap(long, default_value = "")]
-    pub migration: String,
 }
 
 /// Simple main function that initializes the tokio runtime and then calls the main (async) implementation
@@ -211,24 +207,40 @@ async fn main_impl(args: CmdArgs) {
                 .await
                 .expect("Could not initialize connection");
 
-            let migration_name = args.migration;
-            if migration_name.is_empty() {
-                panic!("Migration name must be provided when worker type is 'migrate'");
-            }
-
-            info!("Applying migration: {}", migration_name);
+            // Create table storing applied migrations if it doesn't exist
+            sqlx::query(
+                r#"
+                CREATE TABLE IF NOT EXISTS _migrations_applied (
+                    id TEXT PRIMARY KEY,
+                    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                "#,
+            )
+            .execute(&pg_pool)
+            .await
+            .expect("Failed to create _migrations_applied table");
 
             for migration in migrations::MIGRATIONS {
-                if migration.id == migration_name {
-                    (migration.up)(pg_pool.clone())
-                        .await
-                        .expect("Failed to apply migration");
-                    info!("Migration applied successfully");
-                    return;
-                }
-            }
+                // Check if migration has already been applied
+                let already_applied: (i64,) = sqlx::query_as(
+                    "SELECT COUNT(*) FROM _migrations_applied WHERE id = $1",
+                )
+                .bind(migration.id)
+                .fetch_one(&pg_pool)
+                .await
+                .expect("Failed to check applied migrations");
 
-            error!("Migration not found: {}", migration_name);
+                if already_applied.0 > 0 {
+                    info!("Migration already applied: {}", migration.id);
+                    continue;
+                }
+
+                (migration.up)(pg_pool.clone())
+                    .await
+                    .expect("Failed to apply migration");
+                info!("Migration applied successfully");
+                return;
+            }
         }
         WorkerType::ThreadPool => {
             let pg_pool = PgPoolOptions::new()
@@ -237,6 +249,10 @@ async fn main_impl(args: CmdArgs) {
                 .await
                 .expect("Could not initialize connection");
 
+            let db_state = DbState::new(pg_pool.clone())
+            .await
+            .expect("Failed to create DbState");
+
             let worker_state = CreateWorkerState::new(
                 http.clone(),
                 reqwest.clone(),
@@ -244,9 +260,7 @@ async fn main_impl(args: CmdArgs) {
                 Arc::new(current_user.clone()),
                 Arc::new(
                     WorkerDB::new_direct(
-                        DbState::new(pg_pool.clone())
-                            .await
-                            .expect("Failed to create DbState")
+                        db_state.clone()
                     )
                 ),
             );
@@ -265,10 +279,11 @@ async fn main_impl(args: CmdArgs) {
 
             let data1 = data.clone();
             let http1 = http.clone();
+            let db_state1 = db_state.clone();
             tokio::task::spawn(async move {
                 log::info!("Starting RPC server");
 
-                let rpc_server = crate::api::server::create(data1, pg_pool.clone(), http1);
+                let rpc_server = crate::api::server::create(data1, db_state1, pg_pool.clone(), http1);
 
                 let listener = tokio::net::TcpListener::bind(&CONFIG.addrs.template_worker).await.unwrap();
 
@@ -303,6 +318,7 @@ async fn main_impl(args: CmdArgs) {
             )
             .await
             .expect("Failed to create Mesophyll server");
+            let db_state = mesophyll_server.db_state().clone();
 
             let worker_pool = Arc::new(
                 WorkerPool::<WorkerProcessHandle>::new(
@@ -321,10 +337,11 @@ async fn main_impl(args: CmdArgs) {
 
             let data1 = data.clone();
             let http1 = http.clone();
+            let db_state1 = db_state.clone();
             tokio::task::spawn(async move {
                 log::info!("Starting RPC server");
 
-                let rpc_server = crate::api::server::create(data1, pg_pool.clone(), http1);
+                let rpc_server = crate::api::server::create(data1, db_state1, pg_pool.clone(), http1);
 
                 let listener = tokio::net::TcpListener::bind(&CONFIG.addrs.template_worker).await.unwrap();
 

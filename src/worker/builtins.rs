@@ -23,14 +23,8 @@ pub struct BuiltinsPatches;
 
 pub static EXPOSED_VFS: LazyLock<HashMap<String, Vfs>> = LazyLock::new(|| {
     let mut map = HashMap::new();
-    map.insert("Builtins".to_string(), Vfs {
-        vfs: Arc::new(vfs::EmbeddedFS::<Builtins>::new()),
-    });
-    map.insert("TemplatingTypes".to_string(), Vfs {
-        vfs: Arc::new(vfs::EmbeddedFS::<TemplatingTypes>::new()),
-    });
-    map.insert("BuiltinsPatches".to_string(), Vfs {
-        vfs: Arc::new(vfs::EmbeddedFS::<BuiltinsPatches>::new()),
-    });
+    map.insert("Builtins".to_string(), Vfs::new(Arc::new(vfs::EmbeddedFS::<Builtins>::new()), false));
+    map.insert("TemplatingTypes".to_string(), Vfs::new(Arc::new(vfs::EmbeddedFS::<TemplatingTypes>::new()), false));
+    map.insert("BuiltinsPatches".to_string(), Vfs::new(Arc::new(vfs::EmbeddedFS::<BuiltinsPatches>::new()), false));
     map
 });

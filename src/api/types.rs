@@ -16,6 +16,8 @@ use serenity::all::CommandType;
 use ts_rs::TS;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 
+use crate::mesophyll::server::GlobalKv;
+
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema, TS)]
 #[ts(export)]
 pub struct GuildChannelWithPermissions {
@@ -351,40 +353,9 @@ pub enum KhronosValueApi {
     Null,
 }
 
-#[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema, sqlx::FromRow)]
-#[ts(export)]
-/// A global key-value entry that can be viewed by all guilds
-/// 
-/// Unlike normal key-values, these are not scoped to a specific guild or tenant,
-/// are immutable (new versions must be created, updates not allowed) and have both
-/// a public metadata and potentially private value. Only staff may create global kv's that
-/// have a price attached to them.
-/// 
-/// These are primarily used for things like the template shop but may be used for other
-/// things as well in the future beyond template shop as well such as global lists.
-pub struct PublicGlobalKv {
-    pub key: String,
-    pub version: i32,
-    pub owner_id: String,
-    pub owner_type: String,
-    pub price: Option<i64>, // will only be set for shop items, otherwise None
-    pub short: String, // short description for the key-value.
-    pub public_metadata: serde_json::Value, // public metadata about the key-value
-    pub scope: String,
-    pub created_at: DateTime<Utc>,
-    pub last_updated_at: DateTime<Utc>,
-    pub public_data: bool,
-    pub review_state: String,
-
-    #[sqlx(default)]
-    pub long: Option<String>, // long description for the key-value.
-    #[sqlx(default)]
-    pub data: serde_json::Value, // the actual value of the key-value, may be private
-}
-
 /// A list of global key-values
 #[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema)]
 #[ts(export)]
-pub struct PublicGlobalKvList {
-    pub items: Vec<PublicGlobalKv>,
+pub struct GlobalKvList {
+    pub items: Vec<GlobalKv>,
 }

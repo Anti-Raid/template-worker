@@ -1,13 +1,16 @@
 use std::{collections::{HashMap, HashSet}, sync::{Arc, Weak}, time::Instant};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use rand::{distr::{Alphanumeric, SampleString}};
 use dashmap::DashMap;
 use futures::{SinkExt, StreamExt};
-use khronos_runtime::{primitives::event::CreateEvent, traits::ir::KvRecord, utils::khronos_value::KhronosValue};
+use khronos_runtime::{primitives::event::CreateEvent, traits::ir::KvRecord, traits::ir::globalkv as gkv_ir, utils::khronos_value::KhronosValue};
 use tokio::{select, spawn, sync::{mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel}, oneshot::{Receiver, Sender, channel}}};
 use tokio_util::sync::CancellationToken;
+use ts_rs::TS;
 
-use crate::{mesophyll::message::{ClientMessage, KeyValueOp, ServerMessage}, worker::{workerstate::TenantState, workervmmanager::Id}};
+use crate::{mesophyll::message::{ClientMessage, PublicGlobalKeyValueOp, KeyValueOp, ServerMessage}, worker::{workerstate::TenantState, workervmmanager::Id}};
 
 use axum::{
     Router, body::Bytes, extract::{Query, State, WebSocketUpgrade, ws::{Message, WebSocket}}, http::StatusCode, response::{IntoResponse, Response}, routing::{get, post}
@@ -33,6 +36,58 @@ impl Into<KvRecord> for SerdeKvRecord {
             scopes: self.scopes,
             created_at: self.created_at,
             last_updated_at: self.last_updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema, sqlx::FromRow)]
+#[ts(export)]
+/// A global key-value entry that can be viewed by all guilds
+/// 
+/// Unlike normal key-values, these are not scoped to a specific guild or tenant,
+/// are immutable (new versions must be created, updates not allowed) and have both
+/// a public metadata and potentially private value. Only staff may create global kv's that
+/// have a price attached to them.
+/// 
+/// These are primarily used for things like the template shop but may be used for other
+/// things as well in the future beyond template shop as well such as global lists.
+pub struct GlobalKv {
+    pub key: String,
+    pub version: i32,
+    pub owner_id: String,
+    pub owner_type: String,
+    pub price: Option<i64>, // will only be set for shop items, otherwise None
+    pub short: String, // short description for the key-value.
+    pub public_metadata: serde_json::Value, // public metadata about the key-value
+    pub scope: String,
+    pub created_at: DateTime<Utc>,
+    pub last_updated_at: DateTime<Utc>,
+    pub public_data: bool,
+    pub review_state: String,
+
+    #[sqlx(default)]
+    pub long: Option<String>, // long description for the key-value.
+    #[sqlx(default)]
+    pub data: serde_json::Value, // the actual value of the key-value, may be private
+}
+
+impl Into<gkv_ir::GlobalKv> for GlobalKv {
+    fn into(self) -> gkv_ir::GlobalKv {
+        gkv_ir::GlobalKv {
+            key: self.key,
+            version: self.version,
+            owner_id: self.owner_id,
+            owner_type: self.owner_type,
+            price: self.price,
+            short: self.short,
+            public_metadata: self.public_metadata,
+            scope: self.scope,
+            created_at: self.created_at,
+            last_updated_at: self.last_updated_at,
+            public_data: self.public_data,
+            review_state: self.review_state,
+            long: self.long,
+            data: self.data,
         }
     }
 }
@@ -79,11 +134,9 @@ impl DbState {
 
         let mut states = HashMap::new();  
         for partial in partials {
-            let id = match partial.owner_type.as_str() {
-                "guild" => Id::GuildId(partial.owner_id.parse()?),
-                _ => continue, // Unknown type, skip
+            let Some(id) = Id::from_parts(&partial.owner_type, &partial.owner_id) else {
+                continue;
             };
-
             let state = TenantState {
                 events: HashSet::from_iter(partial.events),
                 data: partial.data,
@@ -104,18 +157,15 @@ impl DbState {
     /// Sets the tenant state for a specific tenant and updates the internal cache
     pub async fn set_tenant_state_for(&self, id: Id, state: TenantState) -> Result<(), crate::Error> {
         let events = state.events.iter().collect::<Vec<_>>();
-        match id {
-            Id::GuildId(guild_id) => {
-                sqlx::query(
-                    "INSERT INTO tenant_state (owner_id, owner_type, events, data) VALUES ($1, 'guild', $2, $3) ON CONFLICT (owner_id, owner_type) DO UPDATE SET events = EXCLUDED.events, flags = EXCLUDED.flags",
-                )
-                .bind(guild_id.to_string())
-                .bind(&events)
-                .bind(&state.data)
-                .execute(&self.pool)
-                .await?;
-            }
-        }
+        sqlx::query(
+            "INSERT INTO tenant_state (owner_id, owner_type, events, data) VALUES ($1, $2, $3, $4) ON CONFLICT (owner_id, owner_type) DO UPDATE SET events = EXCLUDED.events, data = EXCLUDED.data",
+        )
+        .bind(id.tenant_id())
+        .bind(id.tenant_type())
+        .bind(&events)
+        .bind(&state.data)
+        .execute(&self.pool)
+        .await?;
 
         let mut cache = self.tenant_state_cache.write().await;
         cache.insert(id, state);
@@ -126,71 +176,63 @@ impl DbState {
     /// Gets a key-value record for a given tenant ID, scopes, and key
     pub async fn kv_get(&self, tid: Id, mut scopes: Vec<String>, key: String) -> Result<Option<SerdeKvRecord>, crate::Error> {
         scopes.sort();
-        match tid {
-            Id::GuildId(guild_id) => {
-                let rec = if scopes.is_empty() {
-                    sqlx::query(
-                    "SELECT id, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2",
-                    )
-                    .bind(guild_id.to_string())
-                    .bind(&key)
-                    .fetch_optional(&self.pool)
-                    .await?
-                } else {
-                    sqlx::query(
-                    "SELECT id, scopes, value, created_at, last_updated_at FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
-                    )
-                    .bind(guild_id.to_string())
-                    .bind(&key)
-                    .bind(scopes)
-                    .fetch_optional(&self.pool)
-                    .await?
-                };
-
-                let Some(rec) = rec else {
-                    return Ok(None);
-                };
-
-                Ok(Some(SerdeKvRecord {
-                    id: rec.try_get::<String, _>("id")?,
-                    key,
-                    scopes: rec.try_get::<Vec<String>, _>("scopes")?,
-                    value: {
-                        let value = rec
-                            .try_get::<Option<serde_json::Value>, _>("value")?
-                            .unwrap_or(serde_json::Value::Null);
-
-                        serde_json::from_value(value)
-                            .map_err(|e| format!("Failed to deserialize value: {}", e))?
-                    },
-                    created_at: Some(rec.try_get("created_at")?),
-                    last_updated_at: Some(rec.try_get("last_updated_at")?),
-                }))
-            }
+        
+        // Shouldn't happen but scopes must be non-empty
+        if scopes.is_empty() {
+            return Err("Scopes cannot be empty".into());
         }
+
+        let rec = sqlx::query(
+            "SELECT id, scopes, value, created_at, last_updated_at FROM tenant_kv WHERE owner_id = $1 AND owner_type = $2 AND key = $3 AND scopes @> $4",
+            )
+            .bind(tid.tenant_id())
+            .bind(tid.tenant_type())
+            .bind(&key)
+            .bind(scopes)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        let Some(rec) = rec else {
+            return Ok(None);
+        };
+
+        Ok(Some(SerdeKvRecord {
+            id: rec.try_get::<String, _>("id")?,
+            key,
+            scopes: rec.try_get::<Vec<String>, _>("scopes")?,
+            value: {
+                let value = rec
+                    .try_get::<Option<serde_json::Value>, _>("value")?
+                    .unwrap_or(serde_json::Value::Null);
+
+                serde_json::from_value(value)
+                    .map_err(|e| format!("Failed to deserialize value: {}", e))?
+            },
+            created_at: Some(rec.try_get("created_at")?),
+            last_updated_at: Some(rec.try_get("last_updated_at")?),
+        }))
     }
 
     pub async fn kv_list_scopes(&self, id: Id) -> Result<Vec<String>, crate::Error> {
-        match id {
-            Id::GuildId(guild_id) => {
-                let rec = sqlx::query(
-                    "SELECT DISTINCT unnest_scope AS scope
-        FROM guild_templates_kv, unnest(scopes) AS unnest_scope
-        ORDER BY scope",
-                )
-                .bind(guild_id.to_string())
-                .fetch_all(&self.pool)
-                .await?;
+        let rec = sqlx::query(
+            "SELECT DISTINCT unnest_scope AS scope
+FROM tenant_kv, unnest(scopes) AS unnest_scope
+WHERE owner_id = $1
+AND owner_type = $2
+ORDER BY scope",
+        )
+        .bind(id.tenant_id())
+        .bind(id.tenant_type())
+        .fetch_all(&self.pool)
+        .await?;
 
-                let mut scopes = vec![];
+        let mut scopes = vec![];
 
-                for rec in rec {
-                    scopes.push(rec.try_get("scope")?);
-                }
-
-                Ok(scopes)
-            }
+        for rec in rec {
+            scopes.push(rec.try_get("scope")?);
         }
+
+        Ok(scopes)
     }
 
     pub async fn kv_set(
@@ -206,24 +248,22 @@ impl DbState {
         if scopes.is_empty() {
             return Err("Scopes cannot be empty".into());
         }
-        match tid {
-            Id::GuildId(guild_id) => {
-                let id = gen_random(64);
-                sqlx::query(
-                    "INSERT INTO guild_templates_kv (id, guild_id, key, value, scopes) VALUES ($1, $2, $3, $4, $5)
-                    ON CONFLICT (guild_id, key, scopes) DO UPDATE value = EXCLUDED.value, last_updated = NOW()",
-                )
-                .bind(&id)
-                .bind(guild_id.to_string())
-                .bind(key)
-                .bind(serde_json::to_value(data)?)
-                .bind(scopes)
-                .execute(&self.pool)
-                .await?;
 
-                Ok(())
-            }
-        }
+        let id = gen_random(64);
+        sqlx::query(
+            "INSERT INTO tenant_kv (id, owner_id, owner_type, key, value, scopes) VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (owner_id, owner_type, key, scopes) DO UPDATE value = EXCLUDED.value, last_updated = NOW()",
+        )
+        .bind(&id)
+        .bind(tid.tenant_id())
+        .bind(tid.tenant_type())
+        .bind(key)
+        .bind(serde_json::to_value(data)?)
+        .bind(scopes)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 
     pub async fn kv_delete(
@@ -233,30 +273,23 @@ impl DbState {
         key: String,
     ) -> Result<(), crate::Error> {
         scopes.sort();
-        match tid {
-            Id::GuildId(guild_id) => {
-                if scopes.is_empty() {
-                    sqlx::query(
-                    "DELETE FROM guild_templates_kv WHERE guild_id = $1 AND key = $2",
-                    )
-                    .bind(guild_id.to_string())
-                    .bind(key)
-                    .execute(&self.pool)
-                    .await?;
-                } else {
-                    sqlx::query(
-                    "DELETE FROM guild_templates_kv WHERE guild_id = $1 AND key = $2 AND scopes @> $3",
-                    )
-                    .bind(guild_id.to_string())
-                    .bind(key)
-                    .bind(scopes)
-                    .execute(&self.pool)
-                    .await?;
-                };
 
-                Ok(())
-            }
+        // Shouldn't happen but scopes must be non-empty
+        if scopes.is_empty() {
+            return Err("Scopes cannot be empty".into());
         }
+
+        sqlx::query(
+        "DELETE FROM tenant_kv WHERE owner_id = $1 AND owner_type = $2 AND key = $3 AND scopes @> $4",
+        )
+        .bind(tid.tenant_id())
+        .bind(tid.tenant_type())
+        .bind(key)
+        .bind(scopes)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 
     pub async fn kv_find(
@@ -266,78 +299,94 @@ impl DbState {
         query: String,
     ) -> Result<Vec<SerdeKvRecord>, crate::Error> {
         scopes.sort();
-        match tid {
-            Id::GuildId(guild_id) => {
-                let rec = {
-                    if query == "%%" {
-                        // Fast path, omit ILIKE if '%%' is used
-                        if scopes.is_empty() {
-                            // no query, no scopes
-                            sqlx::query(
-                            "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1",
-                            )
-                            .bind(guild_id.to_string())
-                            .fetch_all(&self.pool)
-                            .await?
-                        } else {
-                            // no query, scopes
-                            sqlx::query(
-                            "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2",
-                            )
-                            .bind(guild_id.to_string())
-                            .bind(scopes)
-                            .fetch_all(&self.pool)
-                            .await?
-                        }
-                    } else {
-                        if scopes.is_empty() {
-                            // query, no scopes
-                            sqlx::query(
-                            "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1 AND key ILIKE $2",
-                            )
-                            .bind(guild_id.to_string())
-                            .bind(query)
-                            .fetch_all(&self.pool)
-                            .await?
-                        } else {
-                            // query, scopes
-                            sqlx::query(
-                            "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM guild_templates_kv WHERE guild_id = $1 AND scopes @> $2 AND key ILIKE $3",
-                            )
-                            .bind(guild_id.to_string())
-                            .bind(scopes)
-                            .bind(query)
-                            .fetch_all(&self.pool)
-                            .await?
-                        }
-                    }
-                };
 
-                let mut records = vec![];
-
-                for rec in rec {
-                    let record = SerdeKvRecord {
-                        id: rec.try_get::<String, _>("id")?,
-                        scopes: rec.try_get::<Vec<String>, _>("scopes")?,
-                        key: rec.try_get("key")?,
-                        value: {
-                            let rec = rec
-                                .try_get::<Option<serde_json::Value>, _>("value")?
-                                .unwrap_or(serde_json::Value::Null);
-
-                            serde_json::from_value(rec)
-                                .map_err(|e| format!("Failed to deserialize value: {}", e))?
-                        },
-                        created_at: Some(rec.try_get("created_at")?),
-                        last_updated_at: Some(rec.try_get("last_updated_at")?),
-                    };
-
-                    records.push(record);
-                }
-
-                Ok(records)
-            }
+        // Shouldn't happen but scopes must be non-empty
+        if scopes.is_empty() {
+            return Err("Scopes cannot be empty".into());
         }
+
+        let rec = {
+            if query == "%%" {
+                // Fast path, omit ILIKE if '%%' is used
+                sqlx::query(
+                "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM tenant_kv WHERE owner_id = $1 AND owner_type = $2 AND scopes @> $3",
+                )
+                .bind(tid.tenant_id())
+                .bind(tid.tenant_type())
+                .bind(scopes)
+                .fetch_all(&self.pool)
+                .await?
+            } else {
+                // with query
+                sqlx::query(
+                "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM tenant_kv WHERE owner_id = $1 AND owner_type = $2 AND scopes @> $3 AND key ILIKE $4",
+                )
+                .bind(tid.tenant_id())
+                .bind(tid.tenant_type())
+                .bind(scopes)
+                .bind(query)
+                .fetch_all(&self.pool)
+                .await?
+            }
+        };
+
+        let mut records = vec![];
+
+        for rec in rec {
+            let record = SerdeKvRecord {
+                id: rec.try_get::<String, _>("id")?,
+                scopes: rec.try_get::<Vec<String>, _>("scopes")?,
+                key: rec.try_get("key")?,
+                value: {
+                    let rec = rec
+                        .try_get::<Option<serde_json::Value>, _>("value")?
+                        .unwrap_or(serde_json::Value::Null);
+
+                    serde_json::from_value(rec)
+                        .map_err(|e| format!("Failed to deserialize value: {}", e))?
+                },
+                created_at: Some(rec.try_get("created_at")?),
+                last_updated_at: Some(rec.try_get("last_updated_at")?),
+            };
+
+            records.push(record);
+        }
+
+        Ok(records)
+    }
+
+    pub async fn global_kv_find(&self, scope: String, query: String) -> Result<Vec<GlobalKv>, crate::Error> {
+        let items: Vec<GlobalKv> = if query == "%%" {
+            sqlx::query_as(
+                "SELECT key, version, owner_id, owner_type, short, public_metadata, public_data, scope, created_at, last_updated_at, price, review_state FROM global_kv WHERE scope = $1 AND review_state = 'approved'"
+            )
+            .bind(scope)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as(
+                "SELECT key, version, owner_id, owner_type, short, public_metadata, public_data, scope, created_at, last_updated_at, price, review_state FROM global_kv WHERE scope = $1 AND review_state = 'approved' AND key ILIKE $2"
+            )
+            .bind(scope)
+            .bind(query)
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        Ok(items)
+    }
+    
+    pub async fn global_kv_get(&self, key: String, version: i32, scope: String) -> Result<Option<GlobalKv>, crate::Error> {
+        let item: Option<GlobalKv> = sqlx::query_as(
+            "SELECT key, version, owner_id, owner_type, short, long, public_metadata, public_data, scope, created_at, last_updated_at, price, review_state FROM global_kv WHERE review_state = 'approved' AND key = $1 AND version = $2 AND scope = $3",
+        )
+        .bind(&key)
+        .bind(version)
+        .bind(scope)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(item)
     }
 }
 
@@ -377,6 +426,7 @@ impl MesophyllServer {
             .route("/db/tenant-states", get(list_tenant_states))
             .route("/db/tenant-state", post(set_tenant_state_for))
             .route("/db/kv", post(kv_handler))
+            .route("/db/public-global-kv", post(public_global_kv_handler))
             .with_state(s.clone());
 
         let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -397,6 +447,10 @@ impl MesophyllServer {
 
     pub fn get_connection(&self, worker_id: usize) -> Option<MesophyllServerConn> {
         self.conns.get(&worker_id).map(|r| r.value().clone())
+    }
+
+    pub fn db_state(&self) -> &DbState {
+        &self.db_state
     }
 }
 
@@ -447,15 +501,9 @@ pub struct WorkerQueryWithTenant {
 
 impl WorkerQueryWithTenant {
     fn parse(self) -> Result<(Id, WorkerQuery), Response> {
-        let id = match self.tenant_type.as_str() {
-            "guild" => Id::GuildId(self.tenant_id.parse().map_err(|e| {
-                log::error!("Failed to parse guild ID from tenant_id: {}", e);
-                (StatusCode::BAD_REQUEST, "Invalid guild ID".to_string()).into_response()
-            })?),
-            _ => {
-                log::error!("Unknown tenant_type: {}", self.tenant_type);
-                return Err((StatusCode::BAD_REQUEST, "Unknown tenant_type".to_string()).into_response());
-            }
+        let Some(id) = Id::from_parts(&self.tenant_type, &self.tenant_id) else {
+            log::error!("Failed to parse tenant ID from tenant_type: {}, tenant_id: {}", self.tenant_type, self.tenant_id);
+            return Err((StatusCode::BAD_REQUEST, "Invalid tenant ID".to_string()).into_response());
         };
 
         Ok((id, WorkerQuery { id: self.id, token: self.token }))
@@ -554,6 +602,43 @@ async fn kv_handler(
                 Ok(records) => encode_db_resp(&records),
                 Err(e) => {
                     log::error!("Failed to find KV records: {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+                }
+            }
+        }
+    }
+}
+
+/// DB API to perform a KV op
+async fn public_global_kv_handler(
+    Query(worker_query): Query<WorkerQuery>,
+    State(state): State<MesophyllServer>,
+    body: Bytes,
+) -> impl IntoResponse {
+    if let Some(resp) = worker_query.validate(&state) {
+        return resp;
+    }
+
+    let kvop: PublicGlobalKeyValueOp = match decode_db_req(&body) {
+        Ok(s) => s,
+        Err(resp) => return resp,
+    };
+
+    match kvop {
+        PublicGlobalKeyValueOp::Find { query, scope } => {
+            match state.db_state.global_kv_find(scope, query).await {
+                Ok(records) => encode_db_resp(&records),
+                Err(e) => {
+                    log::error!("Failed to list global KV records: {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+                }
+            }
+        }
+        PublicGlobalKeyValueOp::Get { key, version, scope } => {
+            match state.db_state.global_kv_get(key, version, scope).await {
+                Ok(record) => encode_db_resp(&record),
+                Err(e) => {
+                    log::error!("Failed to get global KV record: {}", e);
                     (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
                 }
             }

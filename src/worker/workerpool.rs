@@ -55,7 +55,7 @@ impl<T: WorkerLike> WorkerPool<T> {
         let closure = move |tenant_id: Id| {
             match tenant_id {
                 // This is safe as AntiRaid workers does not currently support 32 bit platforms
-                Id::GuildId(guild_id) => ((guild_id.get() >> 22) as usize) % num_threads == id
+                Id::Guild(guild_id) => ((guild_id.get() >> 22) as usize) % num_threads == id
             }
         };
 
@@ -66,7 +66,7 @@ impl<T: WorkerLike> WorkerPool<T> {
     pub fn get_worker_for(&self, id: Id) -> &T {
         let index = match id {
             // This is safe as AntiRaid workers does not currently support 32 bit platforms
-            Id::GuildId(guild_id) => (guild_id.get() >> 22) as usize % self.workers.len(),
+            Id::Guild(guild_id) => (guild_id.get() >> 22) as usize % self.workers.len(),
         };
         &self.workers[index]
     }

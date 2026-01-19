@@ -15,8 +15,8 @@ use crate::api::types::AuthorizeRequest;
 use crate::api::types::GetStatusResponse;
 use crate::api::types::GuildChannelWithPermissions;
 use crate::api::types::KhronosValueApi;
-use crate::api::types::PublicGlobalKv;
-use crate::api::types::PublicGlobalKvList;
+use crate::mesophyll::server::GlobalKv;
+use crate::api::types::GlobalKvList;
 use crate::api::types::PublicLuauExecute;
 use crate::api::types::ShardConn;
 use crate::api::types::UserSessionList;
@@ -107,7 +107,7 @@ pub(super) async fn dispatch_event(
     let event = CreateEvent::new_khronos_value(req.name, Some(user_id.to_string()), req.data);
 
     let resp = data.worker.dispatch_event(
-        Id::GuildId(guild_id),
+        Id::Guild(guild_id), // TODO: make this tenant-agnostic in the future
         event,
     )
     .await
@@ -877,6 +877,12 @@ pub(super) async fn get_bot_stats(
     Ok(Json(stats))
 }
 
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+pub(super) struct ListGlobalKvParams {
+    scope: String,
+    query: Option<String>,
+}
+
 /// List Global KV
 /// 
 /// Lists the global KV entries 
@@ -884,22 +890,24 @@ pub(super) async fn get_bot_stats(
     get, 
     tag = "Public API",
     path = "/global-kvs",
+    params(
+        ("scope" = String, Query, description = "Scope to use for filtering"),
+        ("query" = Option<String>, Query, description = "Optional query to filter keys. Defaults to '%%' which lists all keys.")
+    ),
     responses(
-        (status = 200, description = "The global kv listing", body = PublicGlobalKvList),
+        (status = 200, description = "The global kv listing", body = GlobalKvList),
         (status = 400, description = "API Error", body = ApiError),
     )
 )]
 pub(super) async fn list_global_kv(
-    State(AppData { pool, .. }): State<AppData>,
-) -> ApiResponse<PublicGlobalKvList> {
-    let items: Vec<PublicGlobalKv> = sqlx::query_as(
-        "SELECT key, version, owner_id, owner_type, short, public_metadata, public_data, scope, created_at, last_updated_at, price, review_state FROM global_kv WHERE review_state = 'approved'"
-    )
-    .fetch_all(&pool)
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get template shop listings: {e:?}").into())))?;
+    State(AppData { mesophyll_db_state, .. }): State<AppData>,
+    Query(params): Query<ListGlobalKvParams>,
+) -> ApiResponse<GlobalKvList> {
+    let items = mesophyll_db_state.global_kv_find(params.scope, params.query.unwrap_or_else(|| "%".to_string()))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to list global kvs: {e:?}").into())))?;
 
-    Ok(Json(PublicGlobalKvList { items }))
+    Ok(Json(GlobalKvList { items }))
 }
 
 /// Get Global KV by Key-Version
@@ -908,30 +916,25 @@ pub(super) async fn list_global_kv(
 #[utoipa::path(
     get, 
     tag = "Public API",
-    path = "/global-kvs/{key}/{version}",
+    path = "/global-kvs/{scope}/{key}/{version}",
     params(
         ("key" = String, description = "The key of the global kv to get"),
         ("version" = String, description = "The version of the global kv to get")
     ),
     responses(
-        (status = 200, description = "The global kv", body = PublicGlobalKv),
+        (status = 200, description = "The global kv", body = GlobalKv),
         (status = 400, description = "API Error", body = ApiError),
     )
 )]
 pub(super) async fn get_global_kv(
-    State(AppData { pool, .. }): State<AppData>,
-    Path((key, version)): Path<(String, String)>,
-) -> ApiResponse<PublicGlobalKv> {
-    let item: Option<PublicGlobalKv> = sqlx::query_as(
-        "SELECT key, version, owner_id, owner_type, short, long, public_metadata, public_data, scope, created_at, last_updated_at, price, review_state FROM global_kv WHERE review_state = 'approved' AND key = $1 AND version = $2"
-    )
-    .bind(&key)
-    .bind(&version)
-    .fetch_optional(&pool)
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get template shop listings: {e:?}").into())))?;
+    State(AppData { mesophyll_db_state, .. }): State<AppData>,
+    Path((scope, key, version)): Path<(String, String, i32)>,
+) -> ApiResponse<GlobalKv> {
+    let item = mesophyll_db_state.global_kv_get(key, version, scope)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get global kv: {e:?}").into())))?;
 
-    match item {
+        match item {
         Some(item) => Ok(Json(item)),
         None => Err((StatusCode::NOT_FOUND, Json("Global KV not found".into()))),
     }

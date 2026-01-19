@@ -1,4 +1,5 @@
 mod khronosvalue_v2;
+mod kv_generic;
 
 use futures::future::BoxFuture;
 
@@ -10,6 +11,8 @@ pub struct Migration {
     pub up: fn(sqlx::Pool<sqlx::Postgres>) -> BoxFuture<'static, Result<(), crate::Error>>,
 }
 
-pub const MIGRATIONS: [Migration; 1] = [
+pub const MIGRATIONS: [Migration; 2] = [
+    // This relies on kv_generic not being applied yet
     khronosvalue_v2::MIGRATION,
+    kv_generic::MIGRATION,
 ];

@@ -65,3 +65,16 @@ pub enum KeyValueOp {
         prefix: String
     },
 }
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub enum PublicGlobalKeyValueOp {
+    Find {
+        query: String,
+        scope: String
+    },
+    Get { 
+        key: String,
+        version: i32,
+        scope: String
+    },
+}

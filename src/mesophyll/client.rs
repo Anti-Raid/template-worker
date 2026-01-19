@@ -5,7 +5,7 @@ use khronos_runtime::utils::khronos_value::KhronosValue;
 use tokio::time::interval;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-use crate::{mesophyll::{MESOPHYLL_DEFAULT_HEARTBEAT_MS, message::{ClientMessage, ServerMessage}, server::SerdeKvRecord}, worker::{workerlike::WorkerLike, workerstate::TenantState, workerthread::WorkerThread, workervmmanager::Id}};
+use crate::{mesophyll::{MESOPHYLL_DEFAULT_HEARTBEAT_MS, message::{ClientMessage, ServerMessage}, server::{GlobalKv, SerdeKvRecord}}, worker::{workerlike::WorkerLike, workerstate::TenantState, workerthread::WorkerThread, workervmmanager::Id}};
 
 /// Mesophyll client, NOT THREAD SAFE
 #[derive(Clone)]
@@ -149,11 +149,7 @@ impl MesophyllDbClient {
         let mut base = format!("{}/db/{}?id={}&token={}", self.addr, self.worker_id, self.token, path);
         match id {
             Some(id) => {
-                match id {
-                    Id::GuildId(guild_id) => {
-                        base.push_str(&format!("&tenant_id={}&tenant_type=guild", guild_id));
-                    }
-                }
+                base.push_str(&format!("&tenant_id={}&tenant_type={}", id.tenant_id(), id.tenant_type()));
             }
             None => {}
         }
@@ -273,6 +269,30 @@ impl MesophyllDbClient {
             .send()
             .await
             .map_err(|e| format!("Failed to send kv_find request: {}", e))?;
+
+        Self::decode_resp(resp).await
+    }
+
+    pub async fn global_kv_find(&self, scope: String, query: String) -> Result<Vec<GlobalKv>, crate::Error> {
+        let url = self.url_for("public-global-kv", None);
+        let body = self.encode_req(&crate::mesophyll::message::PublicGlobalKeyValueOp::Find { scope, query })?;
+        let resp = self.client.post(&url)
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to send kv_global_list request: {}", e))?;
+
+        Self::decode_resp(resp).await
+    }
+
+    pub async fn global_kv_get(&self, key: String, version: i32, scope: String) -> Result<Option<GlobalKv>, crate::Error> {
+        let url = self.url_for("public-global-kv", None);
+        let body = self.encode_req(&crate::mesophyll::message::PublicGlobalKeyValueOp::Get { key, version, scope })?;
+        let resp = self.client.post(&url)
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to send kv_global_get request: {}", e))?;
 
         Self::decode_resp(resp).await
     }
