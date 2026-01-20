@@ -86,7 +86,7 @@ seaweed_cdn_endpoint = "$DOCKER:localhost:5601" if args.docker else "localhost:8
 # Determine config file names based on docker or not
 tw_config_filename = "config.docker.yaml" if args.docker else f"{args.output_path}/tw_config.yaml"
 nirn_secrets_filename = "secrets.docker.json" if args.docker else "nirn_secrets.json"
-sandwich_url = "sandwich.docker.yaml" if args.docker else "sandwich.yaml"
+sandwich_filename = "sandwich.docker.yaml" if args.docker else "sandwich.yaml"
 s3_json_filename = "deploy/docker/seaweed/s3.json" if args.docker else f"{args.output_path}/seaweed_s3.json"
 
 SEAWEED_DATA = """
@@ -233,8 +233,8 @@ managers:
 """
 
 # Save to sandwich.docker.yaml
-print(f"Saving {sandwich_url}")
-with open(f"{args.output_path}/{sandwich_url}", "w") as f:
+print(f"Saving {sandwich_filename}")
+with open(f"{args.output_path}/{sandwich_filename}", "w") as f:
     f.write(SANDWICH_YAML)
 
 # Finally seaweed
