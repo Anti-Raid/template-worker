@@ -10,7 +10,7 @@ use tokio::{select, spawn, sync::{mpsc::{UnboundedReceiver, UnboundedSender, unb
 use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 
-use crate::{mesophyll::message::{ClientMessage, PublicGlobalKeyValueOp, KeyValueOp, ServerMessage}, worker::{workerstate::TenantState, workervmmanager::Id}};
+use crate::{mesophyll::message::{ClientMessage, GlobalKeyValueOp, KeyValueOp, PublicGlobalKeyValueOp, ServerMessage}, worker::{workerstate::TenantState, workervmmanager::Id}};
 
 use axum::{
     Router, body::Bytes, extract::{Query, State, WebSocketUpgrade, ws::{Message, WebSocket}}, http::StatusCode, response::{IntoResponse, Response}, routing::{get, post}
@@ -88,6 +88,53 @@ impl Into<gkv_ir::GlobalKv> for GlobalKv {
             review_state: self.review_state,
             long: self.long,
             data: self.data,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum AttachResult {
+    PurchaseRequired { url: String },
+    Ok(()),
+}
+
+impl Into<gkv_ir::AttachResult> for AttachResult {
+    fn into(self) -> gkv_ir::AttachResult {
+        match self {
+            AttachResult::PurchaseRequired { url } => gkv_ir::AttachResult::PurchaseRequired { url },
+            AttachResult::Ok(()) => gkv_ir::AttachResult::Ok(()),
+        }
+    }
+}
+
+/// NOTE: Global KV's created publicly cannot have a price associated to them for legal reasons.
+/// Only staff may create priced global KV's.
+/// NOTE 2: All Global KV's undergo staff review before being made available. When this occurs,
+/// review state will be updated accordingly from 'pending' to 'approved' or otherwise if rejected.
+#[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema, sqlx::FromRow)]
+#[ts(export)]
+pub struct CreateGlobalKv {
+    pub key: String,
+    pub version: i32,
+    pub short: String, // short description for the key-value.
+    pub public_metadata: serde_json::Value, // public metadata about the key-value
+    pub scope: String,
+    pub public_data: bool,
+    pub long: Option<String>, // long description for the key-value.
+    pub data: serde_json::Value, // the actual value of the key-value, may be private
+}
+
+impl From<gkv_ir::CreateGlobalKv> for CreateGlobalKv {
+    fn from(g: gkv_ir::CreateGlobalKv) -> Self {
+        Self {
+            key: g.key,
+            version: g.version,
+            short: g.short,
+            public_metadata: g.public_metadata,
+            scope: g.scope,
+            public_data: g.public_data,
+            long: g.long,
+            data: g.data,
         }
     }
 }
@@ -388,6 +435,118 @@ ORDER BY scope",
 
         Ok(item)
     }
+
+    pub async fn global_kv_create(&self, id: Id, gkv: CreateGlobalKv) -> Result<(), crate::Error> {
+        let inserted = sqlx::query(
+            "INSERT INTO global_kv (key, version, owner_id, owner_type, short, long, public_metadata, public_data, scope, data) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT (key, version, scope) DO NOTHING",
+        )
+        .bind(&gkv.key)
+        .bind(gkv.version)
+        .bind(id.tenant_id())
+        .bind(id.tenant_type())
+        .bind(&gkv.short)
+        .bind(&gkv.long)
+        .bind(&gkv.public_metadata)
+        .bind(gkv.public_data)
+        .bind(&gkv.scope)
+        .bind(&gkv.data)
+        .execute(&self.pool)
+        .await?;
+
+        if inserted.rows_affected() == 0 {
+            return Err("Global KV with the same key, version, and scope already exists".into());
+        }
+
+        Ok(())
+    }
+
+    pub async fn global_kv_delete(&self, id: Id, key: String, version: i32, scope: String) -> Result<(), crate::Error> {
+        let res = sqlx::query(
+        "DELETE FROM global_kv WHERE key = $1 AND version = $2 AND scope = $3 AND owner_id = $4 AND owner_type = $5",
+        )
+        .bind(key)
+        .bind(version)
+        .bind(scope)
+        .bind(id.tenant_id())
+        .bind(id.tenant_type())
+        .execute(&self.pool)
+        .await?;
+
+        if res.rows_affected() == 0 {
+            return Err("No matching Global KV found to delete or insufficient permissions".into());
+        }
+
+        Ok(())
+    }
+
+    pub async fn global_kv_attach(&self, id: Id, key: String, version: i32, scope: String) -> Result<AttachResult, crate::Error> {
+        let mut tx = self.pool.begin().await?;
+
+        // First, check if the attachment already exists
+        #[derive(sqlx::FromRow)]
+        struct AttachmentCheck {
+            count: i64,
+        }
+
+        let atc: AttachmentCheck = sqlx::query_as(
+            "SELECT COUNT(*) AS count FROM global_kv_attachments WHERE owner_id = $1 AND owner_type = $2 AND key = $3 AND version = $4 AND scope = $5",
+        )
+        .bind(id.tenant_id())
+        .bind(id.tenant_type())
+        .bind(&key)
+        .bind(version)
+        .bind(&scope)
+        .fetch_one(&mut *tx)
+        .await?;
+        
+        if atc.count > 0 {
+            return Err("Global KV attachment already exists".into());
+        }
+
+        // Then check if this global KV has a price associated to it
+        // required for attachment
+        #[derive(sqlx::FromRow)]
+        struct MdCheck {
+            price: Option<i64>,
+        }
+
+        let data: Option<MdCheck> = sqlx::query_as(
+            "SELECT price FROM global_kv WHERE key = $1 AND version = $2 AND scope = $3",
+        )
+        .bind(&key)
+        .bind(version)
+        .bind(&scope)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        let Some(data) = data else {
+            return Err("Global KV entry does not exist".into());
+        };
+        
+        if data.price.is_some() {
+            // TODO: Get a proper URL here
+            return Ok(AttachResult::PurchaseRequired { url: "todo url".to_string() })
+        }
+
+        let inserted = sqlx::query(
+            "INSERT INTO global_kv_attachments (owner_id, owner_type, key, version, scope) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (owner_id, owner_type, key, version, scope) DO NOTHING",
+        )
+        .bind(id.tenant_id())
+        .bind(id.tenant_type())
+        .bind(&key)
+        .bind(version)
+        .bind(&scope)
+        .execute(&mut *tx)
+        .await?;
+
+        if inserted.rows_affected() == 0 {
+            return Err("Global KV attachment already exists".into());
+        }
+
+        tx.commit().await?;
+
+        Ok(AttachResult::Ok(()))
+    }
 }
 
 fn gen_random(length: usize) -> String {
@@ -427,6 +586,7 @@ impl MesophyllServer {
             .route("/db/tenant-state", post(set_tenant_state_for))
             .route("/db/kv", post(kv_handler))
             .route("/db/public-global-kv", post(public_global_kv_handler))
+            .route("/db/global-kv", post(global_kv_handler))
             .with_state(s.clone());
 
         let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -639,6 +799,57 @@ async fn public_global_kv_handler(
                 Ok(record) => encode_db_resp(&record),
                 Err(e) => {
                     log::error!("Failed to get global KV record: {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+                }
+            }
+        }
+    }
+}
+
+/// DB API to perform a KV op
+async fn global_kv_handler(
+    Query(worker_query): Query<WorkerQueryWithTenant>,
+    State(state): State<MesophyllServer>,
+    body: Bytes,
+) -> impl IntoResponse {
+    let (id, worker_query) = match worker_query.parse() {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+
+    if let Some(resp) = worker_query.validate(&state) {
+        return resp;
+    }
+
+    let kvop: GlobalKeyValueOp = match decode_db_req(&body) {
+        Ok(s) => s,
+        Err(resp) => return resp,
+    };
+
+    match kvop {
+        GlobalKeyValueOp::Create { entry } => {
+            match state.db_state.global_kv_create(id, entry).await {
+                Ok(_) => (StatusCode::OK).into_response(),
+                Err(e) => {
+                    log::error!("Failed to create global KV record: {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+                }
+            }
+        }
+        GlobalKeyValueOp::Delete { key, version, scope } => {
+            match state.db_state.global_kv_delete(id, key, version, scope).await {
+                Ok(_) => (StatusCode::OK).into_response(),
+                Err(e) => {
+                    log::error!("Failed to delete global KV record: {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+                }
+            }
+        }
+        GlobalKeyValueOp::Attach { key, version, scope } => {
+            match state.db_state.global_kv_attach(id, key, version, scope).await {
+                Ok(result) => encode_db_resp(&result),
+                Err(e) => {
+                    log::error!("Failed to attach global KV record: {}", e);
                     (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
                 }
             }

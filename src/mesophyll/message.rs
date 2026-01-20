@@ -1,6 +1,6 @@
 use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
 
-use crate::worker::workervmmanager::Id;
+use crate::{mesophyll::server::CreateGlobalKv, worker::workervmmanager::Id};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub enum ServerMessage {
@@ -73,6 +73,23 @@ pub enum PublicGlobalKeyValueOp {
         scope: String
     },
     Get { 
+        key: String,
+        version: i32,
+        scope: String
+    },
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub enum GlobalKeyValueOp {
+    Create {
+        entry: CreateGlobalKv
+    },
+    Delete {
+        key: String,
+        version: i32,
+        scope: String
+    },
+    Attach {
         key: String,
         version: i32,
         scope: String

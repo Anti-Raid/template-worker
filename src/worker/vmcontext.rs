@@ -635,15 +635,15 @@ impl GlobalKVProvider for ArGlobalKvProvider {
         todo!()
     }
 
-    async fn create(&self, _entry: CreateGlobalKv) -> Result<(), khronos_runtime::Error> {
-        todo!()
+    async fn create(&self, entry: CreateGlobalKv) -> Result<(), khronos_runtime::Error> {
+        self.state.mesophyll_db.global_kv_create(self.id, entry.into()).await
     }
 
     async fn attach(&self, _key: String, _version: i32, _scope: String) -> Result<AttachResult, khronos_runtime::Error> {
-        todo!()
+        self.state.mesophyll_db.global_kv_attach(self.id, _key, _version, _scope).await.map(|x|x.into())
     }
 
-    async fn delete(&self, _key: String, _version: i32, _scope: String) -> Result<(), khronos_runtime::Error> {
-        todo!()
+    async fn delete(&self, key: String, version: i32, scope: String) -> Result<(), khronos_runtime::Error> {
+        self.state.mesophyll_db.global_kv_delete(self.id, key, version, scope).await
     }
 }
