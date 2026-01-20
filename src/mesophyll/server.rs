@@ -192,7 +192,8 @@ impl From<gkv_ir::CreateGlobalKv> for CreateGlobalKv {
 #[derive(Clone)]
 pub struct DbState {
     pool: sqlx::PgPool,
-    tenant_state_cache: Arc<RwLock<HashMap<Id, TenantState>>> // server side tenant state cache
+    tenant_state_cache: Arc<RwLock<HashMap<Id, TenantState>>>, // server side tenant state cache
+    purchased_cache: Arc<RwLock<HashSet<(String, Id)>>>, // cache of purchased global kvs (key, tenant id)
 }
 
 impl DbState {
@@ -200,6 +201,7 @@ impl DbState {
         let mut s = Self {
             pool,
             tenant_state_cache: Arc::new(RwLock::new(HashMap::new())),
+            purchased_cache: Arc::new(RwLock::new(HashSet::new())),
         };
 
         s.tenant_state_cache = Arc::new(RwLock::new(s.get_tenant_state().await?));
@@ -212,7 +214,7 @@ impl DbState {
         &self.pool
     }
 
-    /// Returns the tenant state(s) for all guilds in the database as well as a set of guild IDs that have startup events enabled
+    /// Returns the tenant state(s) for all tenant in the database as well as a set of tenant IDs that have startup events enabled
     /// 
     /// Should only be called once, on startup, to initialize the tenant state cache
     async fn get_tenant_state(&self) -> Result<HashMap<Id, TenantState>, crate::Error> {
@@ -452,6 +454,16 @@ ORDER BY scope",
         Ok(records)
     }
 
+    async fn global_kv_is_purchased(&self, key: String, tid: Id) -> bool {
+        let cache = self.purchased_cache.read().await;
+        cache.contains(&(key, tid))
+    }
+
+    async fn global_kv_to_url(&self, key: &str) -> String {
+        // TODO: Replace with actual purchase URL generation logic
+        format!("https://example.com/purchase/{key}")
+    }
+
     pub async fn global_kv_find(&self, scope: String, query: String) -> Result<Vec<PartialGlobalKv>, crate::Error> {
         let items: Vec<PartialGlobalKv> = if query == "%%" {
             sqlx::query_as(
@@ -473,7 +485,7 @@ ORDER BY scope",
         Ok(items)
     }
     
-    pub async fn global_kv_get(&self, key: String, version: i32, scope: String) -> Result<Option<GlobalKv>, crate::Error> {
+    pub async fn global_kv_get(&self, key: String, version: i32, scope: String, id: Option<Id>) -> Result<Option<GlobalKv>, crate::Error> {
         let item: Option<GlobalKv> = sqlx::query_as(
             "SELECT key, version, owner_id, owner_type, short, long, data, public_metadata, public_data, scope, created_at, last_updated_at, price, review_state FROM global_kv WHERE review_state = 'approved' AND key = $1 AND version = $2 AND scope = $3",
         )
@@ -487,9 +499,31 @@ ORDER BY scope",
             return Ok(None);
         };
 
-        // TODO: Check ownership here
-
+        // Drop data immediately here to ensure it is not leaked
         let data = std::mem::replace(&mut gkv.raw_data, serde_json::Value::Null);
+
+        if gkv.partial.price.is_some() {
+            match id {
+                Some(tid) => {
+                    // Check if purchased
+                    let is_purchased = self.global_kv_is_purchased(key, tid).await;
+                    if !is_purchased {
+                        gkv.data = GlobalKvData::PurchaseRequired {
+                            purchase_url: self.global_kv_to_url(&gkv.partial.key).await,
+                        };
+                        return Ok(Some(gkv));
+                    }
+                }
+                None => {
+                    // No tenant ID provided, cannot verify purchase
+                    gkv.data = GlobalKvData::PurchaseRequired {
+                        purchase_url: self.global_kv_to_url(&gkv.partial.key).await,
+                    };
+                    return Ok(Some(gkv));
+                }
+            }
+        }
+
         let opaque = gkv.partial.price.is_some() || !gkv.partial.public_data;
         gkv.data = GlobalKvData::Value { data, opaque };
 
@@ -785,8 +819,8 @@ async fn public_global_kv_handler(
                 }
             }
         }
-        PublicGlobalKeyValueOp::Get { key, version, scope } => {
-            match state.db_state.global_kv_get(key, version, scope).await {
+        PublicGlobalKeyValueOp::Get { key, version, scope, id } => {
+            match state.db_state.global_kv_get(key, version, scope, id).await {
                 Ok(record) => encode_db_resp(&record),
                 Err(e) => {
                     log::error!("Failed to get global KV record: {}", e);

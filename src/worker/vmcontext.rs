@@ -625,7 +625,7 @@ impl GlobalKVProvider for ArGlobalKvProvider {
     }
 
     async fn get(&self, key: String, version: i32, scope: String) -> Result<Option<GlobalKv>, khronos_runtime::Error> {
-        let Some(global) = self.state.mesophyll_db.global_kv_get(key, version, scope).await? else {
+        let Some(global) = self.state.mesophyll_db.global_kv_get(key, version, scope, Some(self.id)).await? else {
             return Ok(None);
         };
         Ok(Some(global.into()))

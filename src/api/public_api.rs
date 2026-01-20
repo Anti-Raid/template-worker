@@ -619,7 +619,7 @@ pub(super) async fn get_authorized_session(
 )]
 pub(super) async fn get_user_sessions_api(
     State(AppData { pool, .. }): State<AppData>,
-    AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
+    AuthorizedUser { user_id, .. }: AuthorizedUser, 
 ) -> ApiResponse<UserSessionList> {
     let sessions = get_user_sessions(&pool, &user_id)
         .await
@@ -896,7 +896,7 @@ pub(super) async fn list_global_kv(
 
 /// Get Global KV by Key-Version
 /// 
-/// Gets the data for a template shop listing. Include `content=true` query parameter to include the full content (if available)
+/// Gets the data for a template shop listing
 #[utoipa::path(
     get, 
     tag = "Public API",
@@ -914,7 +914,7 @@ pub(super) async fn get_global_kv(
     State(AppData { mesophyll_db_state, .. }): State<AppData>,
     Path((scope, key, version)): Path<(String, String, i32)>,
 ) -> ApiResponse<GlobalKv> {
-    let item = mesophyll_db_state.global_kv_get(key, version, scope)
+    let item = mesophyll_db_state.global_kv_get(key, version, scope, None)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get global kv: {e:?}").into())))?;
 

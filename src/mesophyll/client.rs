@@ -285,9 +285,9 @@ impl MesophyllDbClient {
         Self::decode_resp(resp).await
     }
 
-    pub async fn global_kv_get(&self, key: String, version: i32, scope: String) -> Result<Option<GlobalKv>, crate::Error> {
+    pub async fn global_kv_get(&self, key: String, version: i32, scope: String, id: Option<Id>) -> Result<Option<GlobalKv>, crate::Error> {
         let url = self.url_for("public-global-kv", None);
-        let body = self.encode_req(&crate::mesophyll::message::PublicGlobalKeyValueOp::Get { key, version, scope })?;
+        let body = self.encode_req(&crate::mesophyll::message::PublicGlobalKeyValueOp::Get { key, version, scope, id })?;
         let resp = self.client.post(&url)
             .body(body)
             .send()

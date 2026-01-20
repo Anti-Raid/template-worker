@@ -75,10 +75,10 @@ impl WorkerDB {
         }
     }
 
-    pub async fn global_kv_get(&self, key: String, version: i32, scope: String) -> Result<Option<GlobalKv>, crate::Error> {
+    pub async fn global_kv_get(&self, key: String, version: i32, scope: String, id: Option<Id>) -> Result<Option<GlobalKv>, crate::Error> {
         match self {
-            WorkerDB::Direct(d) => d.global_kv_get(key, version, scope).await,
-            WorkerDB::Mesophyll(c) => c.global_kv_get(key, version, scope).await,
+            WorkerDB::Direct(d) => d.global_kv_get(key, version, scope, id).await,
+            WorkerDB::Mesophyll(c) => c.global_kv_get(key, version, scope, id).await,
         }
     }
 

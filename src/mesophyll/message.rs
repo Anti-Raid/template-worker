@@ -75,7 +75,8 @@ pub enum PublicGlobalKeyValueOp {
     Get { 
         key: String,
         version: i32,
-        scope: String
+        scope: String,
+        id: Option<Id>,
     },
 }
 
@@ -87,6 +88,6 @@ pub enum GlobalKeyValueOp {
     Delete {
         key: String,
         version: i32,
-        scope: String
+        scope: String,
     },
 }
