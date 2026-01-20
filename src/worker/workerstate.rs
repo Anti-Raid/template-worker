@@ -1,7 +1,7 @@
 use std::{borrow::Cow, cell::RefCell, collections::{HashMap, HashSet}, rc::Rc, sync::{Arc, LazyLock}};
 use serde_json::Value;
 
-use crate::worker::{workerdb::WorkerDB, workervmmanager::Id};
+use crate::{sandwich::Sandwich, worker::{workerdb::WorkerDB, workervmmanager::Id}};
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct TenantState {
@@ -27,7 +27,8 @@ pub struct CreateWorkerState {
     pub reqwest_client: reqwest::Client,
     pub object_store: Arc<crate::objectstore::ObjectStore>,
     pub current_user: Arc<serenity::all::CurrentUser>,
-    pub mesophyll_db: Arc<WorkerDB>
+    pub mesophyll_db: Arc<WorkerDB>,
+    pub sandwich: Sandwich,
 }
 
 impl CreateWorkerState {
@@ -37,14 +38,16 @@ impl CreateWorkerState {
         reqwest_client: reqwest::Client,
         object_store: Arc<crate::objectstore::ObjectStore>,
         current_user: Arc<serenity::all::CurrentUser>,
-        mesophyll_db: Arc<WorkerDB>
+        mesophyll_db: Arc<WorkerDB>,
+        sandwich: Sandwich,
     ) -> Self {
         Self {
             serenity_http,
             reqwest_client,
             object_store,
             current_user,
-            mesophyll_db
+            mesophyll_db,
+            sandwich,
         }
     }
 }
@@ -53,10 +56,11 @@ impl CreateWorkerState {
 /// Represents the state of the worker, which includes the serenity context, reqwest client, object store, and database pool
 pub struct WorkerState {
     pub serenity_http: Arc<serenity::http::Http>,
-    pub reqwest_client: reqwest::Client,
+    pub _reqwest_client: reqwest::Client,
     pub object_store: Arc<crate::objectstore::ObjectStore>,
     pub mesophyll_db: Arc<WorkerDB>,
     pub current_user: Arc<serenity::all::CurrentUser>,
+    pub sandwich: Sandwich,
     tenant_state_cache: Rc<RefCell<HashMap<Id, TenantState>>>, // Maps tenant IDs to their states
     startup_events: Rc<RefCell<HashSet<Id>>>, // Tracks which tenants have had their startup events fired
 }
@@ -68,10 +72,11 @@ impl WorkerState {
         let startup_events = Rc::new(RefCell::new(HashSet::new()));
         let s = Self {
             serenity_http: cws.serenity_http,
-            reqwest_client: cws.reqwest_client,
+            _reqwest_client: cws.reqwest_client,
             object_store: cws.object_store,
             mesophyll_db: cws.mesophyll_db,
             current_user: cws.current_user,
+            sandwich: cws.sandwich,
             tenant_state_cache,
             startup_events,
         };

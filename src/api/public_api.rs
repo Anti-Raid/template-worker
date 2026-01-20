@@ -54,7 +54,7 @@ async fn check_guild_has_bot(
     guild_id: serenity::all::GuildId,
 ) -> Result<(), ApiResponseError> {
     if !BOT_HAS_GUILD_CACHE.contains_key(&guild_id) {
-        let guild_exists = crate::sandwich::has_guilds(&data.reqwest, vec![guild_id])
+        let guild_exists = data.sandwich.has_guilds(&[guild_id])
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
@@ -255,10 +255,7 @@ pub(super) async fn get_user_guilds(
             .map_err(|e: serenity::all::ParseIdError| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?);
     }
 
-    let guilds_exist = crate::sandwich::has_guilds(
-        &data.reqwest,
-        guild_ids.clone(),
-    )
+    let guilds_exist = data.sandwich.has_guilds(&guild_ids)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
@@ -303,7 +300,6 @@ pub(super) async fn get_user_guilds(
 pub(super) async fn base_guild_user_info(
     State(AppData {
         data,
-        http,
         ..
     }): State<AppData>,
     AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
@@ -313,11 +309,7 @@ pub(super) async fn base_guild_user_info(
         .map_err(|e: serenity::all::ParseIdError| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
     let bot_user_id = data.current_user.id;
-    let guild_json = crate::sandwich::guild(
-        &http,
-        &data.reqwest,
-        guild_id,
-    )
+    let guild_json = data.sandwich.guild(guild_id)
     .await
     .map_err(|e| {
         (
@@ -330,9 +322,7 @@ pub(super) async fn base_guild_user_info(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
     // Next fetch the member and bot_user
-    let member_json = match crate::sandwich::member_in_guild(
-        &http,
-        &data.reqwest,
+    let member_json = match data.sandwich.member_in_guild(
         guild_id,
         user_id,
     )
@@ -353,9 +343,7 @@ pub(super) async fn base_guild_user_info(
     let member = serde_json::from_value::<serenity::all::Member>(member_json)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
-    let bot_user_json = match crate::sandwich::member_in_guild(
-        &http,
-        &data.reqwest,
+    let bot_user_json = match data.sandwich.member_in_guild(
         guild_id,
         bot_user_id,
     )
@@ -377,11 +365,7 @@ pub(super) async fn base_guild_user_info(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
     // Fetch the channels
-    let channels_json = crate::sandwich::guild_channels(
-        &http,
-        &data.reqwest,
-        guild_id,
-    )
+    let channels_json = data.sandwich.guild_channels(guild_id)
     .await
     .map_err(|e| {
         (
@@ -849,7 +833,7 @@ pub(super) async fn get_bot_stats(
         return Ok(Json(stats));
     }
 
-    let sandwich_raw_stats = crate::sandwich::get_status(&data.reqwest)
+    let sandwich_raw_stats = data.sandwich.get_status()
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get bot stats: {e:?}").into())))?;
 

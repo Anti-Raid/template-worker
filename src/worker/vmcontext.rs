@@ -259,11 +259,7 @@ impl DiscordProvider for ArDiscordProvider {
     async fn get_guild(
         &self,
     ) -> serenity::Result<Value, crate::Error> {
-        Ok(crate::sandwich::guild(
-            &self.state.serenity_http,
-            &self.state.reqwest_client,
-            self.guild_id,
-        )
+        Ok(self.state.sandwich.guild(self.guild_id)
         .await
         .map_err(|e| format!("Failed to fetch guild information from sandwich: {}", e))?)
     }
@@ -280,9 +276,7 @@ impl DiscordProvider for ArDiscordProvider {
         &self,
         user_id: serenity::all::UserId,
     ) -> serenity::Result<Value, crate::Error> {
-        let member = crate::sandwich::member_in_guild(
-            &self.state.serenity_http,
-            &self.state.reqwest_client,
+        let member = self.state.sandwich.member_in_guild(
             self.guild_id,
             user_id,
         )
@@ -299,9 +293,7 @@ impl DiscordProvider for ArDiscordProvider {
     async fn get_guild_channels(
         &self,
     ) -> serenity::Result<Value, crate::Error> {
-        let channels = crate::sandwich::guild_channels(
-            &self.state.serenity_http,
-            &self.state.reqwest_client,
+        let channels = self.state.sandwich.guild_channels(
             self.guild_id,
         )
         .await
@@ -314,11 +306,7 @@ impl DiscordProvider for ArDiscordProvider {
         &self,
     ) -> serenity::Result<Value, crate::Error>
     {
-        let roles = crate::sandwich::guild_roles(
-            &self.state.serenity_http,
-            &self.state.reqwest_client,
-            self.guild_id,
-        )
+        let roles = self.state.sandwich.guild_roles(self.guild_id)
         .await
         .map_err(|e| format!("Failed to fetch role information from sandwich: {}", e))?;
 
@@ -329,9 +317,7 @@ impl DiscordProvider for ArDiscordProvider {
         &self,
         channel_id: serenity::all::GenericChannelId,
     ) -> serenity::Result<Value, crate::Error> {
-        let channel = crate::sandwich::channel(
-            &self.state.serenity_http,
-            &self.state.reqwest_client,
+        let channel = self.state.sandwich.channel(
             Some(self.guild_id),
             channel_id,
         )
@@ -549,8 +535,7 @@ impl RuntimeProvider for ArRuntimeProvider {
     }
 
     async fn stats(&self) -> Result<runtime_ir::RuntimeStats, khronos_runtime::Error> {
-        let sandwich_resp =
-        crate::sandwich::get_status(&self.state.reqwest_client).await?;
+        let sandwich_resp = self.state.sandwich.get_status().await?;
 
         let total_guilds = {
             let mut guild_count: i64 = 0;

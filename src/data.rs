@@ -1,4 +1,5 @@
 use crate::objectstore::ObjectStore;
+use crate::sandwich::Sandwich;
 use crate::worker::workerlike::WorkerLike;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -11,6 +12,7 @@ pub struct Data {
     #[allow(dead_code)]
     pub object_store: Arc<ObjectStore>,
     pub worker: Arc<dyn WorkerLike + Send + Sync>,
+    pub sandwich: Sandwich,
 }
 
 impl Debug for Data {

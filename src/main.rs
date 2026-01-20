@@ -15,6 +15,8 @@ use crate::data::Data;
 use crate::event_handler::EventFramework;
 use crate::mesophyll::client::{MesophyllClient, MesophyllDbClient};
 use crate::mesophyll::server::DbState;
+use crate::migrations::apply_migrations;
+use crate::sandwich::Sandwich;
 use crate::worker::workerdb::WorkerDB;
 use crate::worker::workerlike::WorkerLike;
 use crate::worker::workerpool::WorkerPool;
@@ -61,7 +63,10 @@ struct CmdArgs {
 
     /// Number of threads to use for the worker thread pool
     #[clap(long, default_value = "30")]
-    pub worker_threads: usize,
+    pub thread_workers: usize,
+
+    #[clap(long, default_value = None)]
+    pub process_workers: Option<usize>,
 
     /// Type of worker to use
     #[clap(long, default_value = "processpool", value_enum)]
@@ -166,20 +171,31 @@ async fn main_impl(args: CmdArgs) {
         .build()
         .expect("Could not initialize reqwest client");
 
-    let current_user = sandwich::current_user(&reqwest)
-        .await
-        .expect("Failed to get current user");
+    let sandwich = Sandwich::new(reqwest.clone(), http.clone());
 
-    if current_user.id == UserId::new(0) {
-        // TODO: Figure out why this happens sometimes
-        log::error!("current_user.id == 0, this is a known bug that may cause issues");
-    }
+    let current_user = loop {
+        let current_user = match sandwich.current_user()
+        .await {
+            Ok(user) => user,
+            Err(e) => {
+                error!("Failed to get current user from Sandwich: {:?}, retrying in 5 seconds...", e);
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
 
-    let current_user_id = current_user.id;
+        if current_user.id == UserId::new(0) {
+            // TODO: Figure out why this happens sometimes
+            log::error!("current_user.id == 0, this is a known bug with Sandwich, retrying in 5 seconds...");
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            continue;
+        }
 
-    info!("Current user: {} ({})", current_user.name, current_user_id);
+        info!("Current user: {} ({})", current_user.name, current_user.id);
 
-    http.set_application_id(ApplicationId::new(current_user_id.get()));
+        http.set_application_id(ApplicationId::new(current_user.id.get()));
+        break current_user;
+    };
 
     let object_storage = Arc::new(
         CONFIG
@@ -207,40 +223,7 @@ async fn main_impl(args: CmdArgs) {
                 .await
                 .expect("Could not initialize connection");
 
-            // Create table storing applied migrations if it doesn't exist
-            sqlx::query(
-                r#"
-                CREATE TABLE IF NOT EXISTS _migrations_applied (
-                    id TEXT PRIMARY KEY,
-                    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                "#,
-            )
-            .execute(&pg_pool)
-            .await
-            .expect("Failed to create _migrations_applied table");
-
-            for migration in migrations::MIGRATIONS {
-                // Check if migration has already been applied
-                let already_applied: (i64,) = sqlx::query_as(
-                    "SELECT COUNT(*) FROM _migrations_applied WHERE id = $1",
-                )
-                .bind(migration.id)
-                .fetch_one(&pg_pool)
-                .await
-                .expect("Failed to check applied migrations");
-
-                if already_applied.0 > 0 {
-                    info!("Migration already applied: {}", migration.id);
-                    continue;
-                }
-
-                (migration.up)(pg_pool.clone())
-                    .await
-                    .expect("Failed to apply migration");
-                info!("Migration applied successfully");
-                return;
-            }
+            apply_migrations(pg_pool).await.expect("Failed to apply migrations");
         }
         WorkerType::ThreadPool => {
             let pg_pool = PgPoolOptions::new()
@@ -263,10 +246,11 @@ async fn main_impl(args: CmdArgs) {
                         db_state.clone()
                     )
                 ),
+                sandwich.clone()
             );
 
             let worker_pool = Arc::new(
-                WorkerPool::<WorkerThread>::new(args.worker_threads, &worker_state)
+                WorkerPool::<WorkerThread>::new(args.thread_workers, &worker_state)
                     .expect("Failed to create worker thread pool"),
             );
 
@@ -275,6 +259,7 @@ async fn main_impl(args: CmdArgs) {
                 reqwest,
                 current_user,
                 worker: worker_pool,
+                sandwich: sandwich.clone()
             });
 
             let data1 = data.clone();
@@ -305,6 +290,20 @@ async fn main_impl(args: CmdArgs) {
             }
         }
         WorkerType::ProcessPool => {
+            // Ask sandwich how many shards we should use
+            let shards = loop {
+                let shard_count = match sandwich.get_shard_count().await {
+                    Ok(count) => count,
+                    Err(e) => {
+                        error!("Failed to get shard count from Sandwich: {:?}, retrying in 5 seconds...", e);
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        continue;
+                    }
+                };
+
+                break shard_count;
+            };
+
             let pg_pool = PgPoolOptions::new()
                 .max_connections(args.max_db_connections)
                 .connect(&CONFIG.meta.postgres_url)
@@ -313,7 +312,7 @@ async fn main_impl(args: CmdArgs) {
 
             let mesophyll_server = mesophyll::server::MesophyllServer::new(
                 CONFIG.addrs.mesophyll_server.clone(),
-                args.worker_threads,
+                shards,
                 pg_pool.clone()
             )
             .await
@@ -322,7 +321,7 @@ async fn main_impl(args: CmdArgs) {
 
             let worker_pool = Arc::new(
                 WorkerPool::<WorkerProcessHandle>::new(
-                    args.worker_threads,
+                    shards,
                     &WorkerProcessHandleCreateOpts::new(mesophyll_server),
                 )
                 .expect("Failed to create worker thread pool"),
@@ -333,6 +332,7 @@ async fn main_impl(args: CmdArgs) {
                 reqwest,
                 current_user,
                 worker: worker_pool.clone(),
+                sandwich: sandwich.clone()
             });
 
             let data1 = data.clone();
@@ -395,6 +395,9 @@ async fn main_impl(args: CmdArgs) {
             let Some(worker_id) = args.worker_id else {
                 panic!("Worker ID must be set when worker type is processpoolworker");
             };
+            let Some(process_workers) = args.process_workers else {
+                panic!("Process workers must be set when worker type is processpoolworker");
+            };
 
             let ident_token = std::env::var("MESOPHYLL_CLIENT_TOKEN").expect("Failed to find ident token for mesophyll");
 
@@ -408,12 +411,13 @@ async fn main_impl(args: CmdArgs) {
                         MesophyllDbClient::new(CONFIG.addrs.mesophyll_server.clone(), worker_id, ident_token.clone())
                     )
                 ),
+                sandwich.clone()
             );
 
             let worker_thread = Arc::new(
                 WorkerThread::new(
                     worker_state,
-                    WorkerPool::<WorkerProcessHandle>::filter_for(worker_id, args.worker_threads),
+                    WorkerPool::<WorkerProcessHandle>::filter_for(worker_id, process_workers),
                     worker_id,
                 )
                 .expect("Failed to create worker thread"),
@@ -426,6 +430,7 @@ async fn main_impl(args: CmdArgs) {
                 reqwest,
                 current_user,
                 worker: worker_thread,
+                sandwich: sandwich.clone()
             });
 
             let mut client = client_builder
@@ -441,7 +446,7 @@ async fn main_impl(args: CmdArgs) {
             if let Err(why) = client
                 .start_shard(
                     worker_id.try_into().unwrap(),
-                    args.worker_threads.try_into().unwrap(),
+                    process_workers.try_into().unwrap(),
                 )
                 .await
             {

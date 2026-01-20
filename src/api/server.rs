@@ -55,12 +55,12 @@ pub struct AppData {
     pub data: Arc<crate::data::Data>,
     pub mesophyll_db_state: DbState,
     pub pool: sqlx::PgPool,
-    pub http: Arc<serenity::http::Http>,
+    pub _http: Arc<serenity::http::Http>,
 }
 
 impl AppData {
     pub fn new(data: Arc<crate::data::Data>, http: Arc<serenity::http::Http>, pool: sqlx::PgPool, mesophyll_db_state: DbState) -> Self {
-        Self { data, http, pool, mesophyll_db_state }
+        Self { data, _http: http, pool, mesophyll_db_state }
     }
 }
 

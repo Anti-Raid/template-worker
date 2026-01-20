@@ -176,10 +176,7 @@ pub(super) async fn guilds_exist(
     InternalEndpoint { .. }: InternalEndpoint, // Internal endpoint
     Json(guilds): Json<Vec<serenity::all::GuildId>>,
 ) -> ApiResponse<Vec<u8>> {
-    let guilds_exist = crate::sandwich::has_guilds(
-        &data.reqwest,
-        guilds,
-    )
+    let guilds_exist = data.sandwich.has_guilds(&guilds)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
