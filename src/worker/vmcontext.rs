@@ -56,6 +56,7 @@ impl TemplateContextProvider {
     fn guild_id(&self) -> Option<serenity::all::GuildId> {
         match self.id {
             Id::Guild(guild_id) => Some(guild_id),
+            Id::User(_) => None,
         }
     }
 

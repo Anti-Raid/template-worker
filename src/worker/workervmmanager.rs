@@ -1,6 +1,6 @@
 use khronos_runtime::rt::{KhronosRuntime, RuntimeCreateOpts};
 use serde::{Deserialize, Serialize};
-use serenity::all::GuildId;
+use serenity::all::{GuildId, UserId};
 use std::cell::RefCell;
 use std::{collections::HashMap, rc::Rc};
 use khronos_runtime::rt::mlua::prelude::*;
@@ -16,7 +16,8 @@ use super::limits::{MAX_TEMPLATE_MEMORY_USAGE, MAX_TEMPLATES_EXECUTION_TIME};
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]
 /// Represents the ID of a tenant, which can currently only be a GuildId
 pub enum Id {
-    Guild(GuildId)
+    Guild(GuildId),
+    User(UserId), // User-owned VMs (user-installed apps etc.)
 }
 
 impl Id {
@@ -24,6 +25,7 @@ impl Id {
     pub fn tenant_id(&self) -> String {
         match self {
             Id::Guild(guild_id) => guild_id.to_string(),
+            Id::User(user_id) => user_id.to_string(),
         }
     }
 
@@ -31,6 +33,7 @@ impl Id {
     pub fn tenant_type(&self) -> String {
         match self {
             Id::Guild(_) => "guild".to_string(),
+            Id::User(_) => "user".to_string(),
         }
     }
 
