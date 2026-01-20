@@ -1422,7 +1422,7 @@ dependencies = [
 [[package]]
 name = "dapi"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#1207cd2585cf714aee1b10419d1587cf92ec1e8e"
+source = "git+https://github.com/anti-raid/khronos#800eba70f8ae6583a5666d1ce237108b0c4fe0e8"
 dependencies = [
  "async-trait",
  "bitflags 2.10.0",
@@ -2888,7 +2888,7 @@ dependencies = [
 [[package]]
 name = "khronos_runtime"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#1207cd2585cf714aee1b10419d1587cf92ec1e8e"
+source = "git+https://github.com/anti-raid/khronos#800eba70f8ae6583a5666d1ce237108b0c4fe0e8"
 dependencies = [
  "aes-gcm",
  "argon2",

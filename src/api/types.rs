@@ -16,7 +16,7 @@ use serenity::all::CommandType;
 use ts_rs::TS;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 
-use crate::mesophyll::server::GlobalKv;
+use crate::mesophyll::server::PartialGlobalKv;
 
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema, TS)]
 #[ts(export)]
@@ -356,6 +356,6 @@ pub enum KhronosValueApi {
 /// A list of global key-values
 #[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema)]
 #[ts(export)]
-pub struct GlobalKvList {
-    pub items: Vec<GlobalKv>,
+pub struct PartialGlobalKvList {
+    pub items: Vec<PartialGlobalKv>,
 }

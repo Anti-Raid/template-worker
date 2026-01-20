@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use khronos_runtime::utils::khronos_value::KhronosValue;
 
-use crate::{mesophyll::{client::MesophyllDbClient, server::{CreateGlobalKv, DbState, GlobalKv, SerdeKvRecord}}, worker::{workerstate::TenantState, workervmmanager::Id}};
+use crate::{mesophyll::{client::MesophyllDbClient, server::{CreateGlobalKv, DbState, PartialGlobalKv, GlobalKv, SerdeKvRecord}}, worker::{workerstate::TenantState, workervmmanager::Id}};
 
 /// An abstraction over the database access method for worker state
 pub enum WorkerDB {
@@ -68,7 +68,7 @@ impl WorkerDB {
         }
     }
 
-    pub async fn global_kv_find(&self, scope: String, query: String) -> Result<Vec<GlobalKv>, crate::Error> {
+    pub async fn global_kv_find(&self, scope: String, query: String) -> Result<Vec<PartialGlobalKv>, crate::Error> {
         match self {
             WorkerDB::Direct(d) => d.global_kv_find(scope, query).await,
             WorkerDB::Mesophyll(c) => c.global_kv_find(scope, query).await,
@@ -93,13 +93,6 @@ impl WorkerDB {
         match self {
             WorkerDB::Direct(d) => d.global_kv_delete(id, key, version, scope).await,
             WorkerDB::Mesophyll(c) => c.global_kv_delete(id, key, version, scope).await,
-        }
-    }
-
-    pub async fn global_kv_attach(&self, id: Id, key: String, version: i32, scope: String) -> Result<crate::mesophyll::server::AttachResult, crate::Error> {
-        match self {
-            WorkerDB::Direct(d) => d.global_kv_attach(id, key, version, scope).await,
-            WorkerDB::Mesophyll(c) => c.global_kv_attach(id, key, version, scope).await,
         }
     }
 }

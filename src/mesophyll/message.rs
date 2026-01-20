@@ -89,9 +89,4 @@ pub enum GlobalKeyValueOp {
         version: i32,
         scope: String
     },
-    Attach {
-        key: String,
-        version: i32,
-        scope: String
-    },
 }

@@ -5,7 +5,7 @@ use khronos_runtime::utils::khronos_value::KhronosValue;
 use tokio::time::interval;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-use crate::{mesophyll::{MESOPHYLL_DEFAULT_HEARTBEAT_MS, message::{ClientMessage, ServerMessage}, server::{AttachResult, CreateGlobalKv, GlobalKv, SerdeKvRecord}}, worker::{workerlike::WorkerLike, workerstate::TenantState, workerthread::WorkerThread, workervmmanager::Id}};
+use crate::{mesophyll::{MESOPHYLL_DEFAULT_HEARTBEAT_MS, message::{ClientMessage, ServerMessage}, server::{CreateGlobalKv, GlobalKv, PartialGlobalKv, SerdeKvRecord}}, worker::{workerlike::WorkerLike, workerstate::TenantState, workerthread::WorkerThread, workervmmanager::Id}};
 
 /// Mesophyll client, NOT THREAD SAFE
 #[derive(Clone)]
@@ -273,7 +273,7 @@ impl MesophyllDbClient {
         Self::decode_resp(resp).await
     }
 
-    pub async fn global_kv_find(&self, scope: String, query: String) -> Result<Vec<GlobalKv>, crate::Error> {
+    pub async fn global_kv_find(&self, scope: String, query: String) -> Result<Vec<PartialGlobalKv>, crate::Error> {
         let url = self.url_for("public-global-kv", None);
         let body = self.encode_req(&crate::mesophyll::message::PublicGlobalKeyValueOp::Find { scope, query })?;
         let resp = self.client.post(&url)
@@ -317,17 +317,6 @@ impl MesophyllDbClient {
             .await
             .map_err(|e| format!("Failed to send kv_global_delete request: {}", e))?;
         Self::decode_no_resp(resp).await
-    }
-
-    pub async fn global_kv_attach(&self, id: Id, key: String, version: i32, scope: String) -> Result<AttachResult, crate::Error> {
-        let url = self.url_for("global-kv", Some(id));
-        let body = self.encode_req(&crate::mesophyll::message::GlobalKeyValueOp::Attach { key, version, scope })?;
-        let resp = self.client.post(&url)
-            .body(body)
-            .send()
-            .await
-            .map_err(|e| format!("Failed to send kv_global_attach request: {}", e))?;
-        Self::decode_resp(resp).await
     }
 }
 

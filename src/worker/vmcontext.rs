@@ -9,7 +9,7 @@ use khronos_runtime::traits::context::{
     KhronosContext, Limitations,
 };
 use khronos_runtime::traits::globalkvprovider::GlobalKVProvider;
-use khronos_runtime::traits::ir::globalkv::{AttachResult, CreateGlobalKv, GlobalKv};
+use khronos_runtime::traits::ir::globalkv::{PartialGlobalKv, CreateGlobalKv, GlobalKv};
 use khronos_runtime::traits::ir::runtime as runtime_ir;
 use dapi::controller::DiscordProvider;
 use khronos_runtime::traits::httpclientprovider::HTTPClientProvider;
@@ -619,7 +619,7 @@ impl GlobalKVProvider for ArGlobalKvProvider {
         self.ratelimits.globalkv.check(bucket)
     }
 
-    async fn find(&self, scope: String, query: String) -> Result<Vec<GlobalKv>, khronos_runtime::Error> {
+    async fn find(&self, scope: String, query: String) -> Result<Vec<PartialGlobalKv>, khronos_runtime::Error> {
         let globals = self.state.mesophyll_db.global_kv_find(scope, query).await?;
         Ok(globals.into_iter().map(|x| x.into()).collect())
     }
@@ -631,16 +631,8 @@ impl GlobalKVProvider for ArGlobalKvProvider {
         Ok(Some(global.into()))
     }
 
-    async fn list_attached(&self, _scopes: &[String], _query: String) -> Result<Vec<GlobalKv>, khronos_runtime::Error> {
-        todo!()
-    }
-
     async fn create(&self, entry: CreateGlobalKv) -> Result<(), khronos_runtime::Error> {
         self.state.mesophyll_db.global_kv_create(self.id, entry.into()).await
-    }
-
-    async fn attach(&self, _key: String, _version: i32, _scope: String) -> Result<AttachResult, khronos_runtime::Error> {
-        self.state.mesophyll_db.global_kv_attach(self.id, _key, _version, _scope).await.map(|x|x.into())
     }
 
     async fn delete(&self, key: String, version: i32, scope: String) -> Result<(), khronos_runtime::Error> {

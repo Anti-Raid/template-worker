@@ -51,7 +51,7 @@ impl Into<KvRecord> for SerdeKvRecord {
 /// 
 /// These are primarily used for things like the template shop but may be used for other
 /// things as well in the future beyond template shop as well such as global lists.
-pub struct GlobalKv {
+pub struct PartialGlobalKv {
     pub key: String,
     pub version: i32,
     pub owner_id: String,
@@ -67,13 +67,11 @@ pub struct GlobalKv {
 
     #[sqlx(default)]
     pub long: Option<String>, // long description for the key-value.
-    #[sqlx(default)]
-    pub data: serde_json::Value, // the actual value of the key-value, may be private
 }
 
-impl Into<gkv_ir::GlobalKv> for GlobalKv {
-    fn into(self) -> gkv_ir::GlobalKv {
-        gkv_ir::GlobalKv {
+impl Into<gkv_ir::PartialGlobalKv> for PartialGlobalKv {
+    fn into(self) -> gkv_ir::PartialGlobalKv {
+        gkv_ir::PartialGlobalKv {
             key: self.key,
             version: self.version,
             owner_id: self.owner_id,
@@ -87,22 +85,74 @@ impl Into<gkv_ir::GlobalKv> for GlobalKv {
             public_data: self.public_data,
             review_state: self.review_state,
             long: self.long,
-            data: self.data,
         }
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum AttachResult {
-    PurchaseRequired { url: String },
-    Ok(()),
+#[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema, sqlx::FromRow)]
+pub struct GlobalKv {
+    #[sqlx(flatten)]
+    pub partial: PartialGlobalKv,
+    #[serde(skip)]
+    #[sqlx(rename = "data")]
+    #[ts(skip)]
+    raw_data: serde_json::Value, // the actual value of the key-value, may be private
+    #[sqlx(skip)]
+    pub data: GlobalKvData,
 }
 
-impl Into<gkv_ir::AttachResult> for AttachResult {
-    fn into(self) -> gkv_ir::AttachResult {
+impl GlobalKv {
+    /// Drop sensitive data from the GlobalKv, replacing it with null if it's opaque
+    pub fn drop_sensitive(mut self) -> Self {
+        match self.data {
+            GlobalKvData::Value { data: _, opaque: true } => {
+                self.data = GlobalKvData::Value {
+                    data: serde_json::Value::Null,
+                    opaque: true,
+                };
+            }
+            _ => { /* do nothing */ }
+        }
+        self
+    }
+}
+
+impl Into<gkv_ir::GlobalKv> for GlobalKv {
+    fn into(self) -> gkv_ir::GlobalKv {
+        gkv_ir::GlobalKv {
+            partial: self.partial.into(),
+            data: self.data.into(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema)]
+#[ts(export)]
+#[serde(tag = "type")]
+pub enum GlobalKvData {
+    Value {
+        data: serde_json::Value,
+        opaque: bool,
+    },
+    PurchaseRequired {
+        purchase_url: String,
+    },
+}
+
+impl Default for GlobalKvData {
+    fn default() -> Self {
+        GlobalKvData::Value {
+            data: serde_json::Value::Null,
+            opaque: true,
+        }
+    }
+}
+
+impl Into<gkv_ir::GlobalKvData> for GlobalKvData {
+    fn into(self) -> gkv_ir::GlobalKvData {
         match self {
-            AttachResult::PurchaseRequired { url } => gkv_ir::AttachResult::PurchaseRequired { url },
-            AttachResult::Ok(()) => gkv_ir::AttachResult::Ok(()),
+            GlobalKvData::Value { data, opaque } => gkv_ir::GlobalKvData::Value { data, opaque },
+            GlobalKvData::PurchaseRequired { purchase_url } => gkv_ir::GlobalKvData::PurchaseRequired { purchase_url },
         }
     }
 }
@@ -402,8 +452,8 @@ ORDER BY scope",
         Ok(records)
     }
 
-    pub async fn global_kv_find(&self, scope: String, query: String) -> Result<Vec<GlobalKv>, crate::Error> {
-        let items: Vec<GlobalKv> = if query == "%%" {
+    pub async fn global_kv_find(&self, scope: String, query: String) -> Result<Vec<PartialGlobalKv>, crate::Error> {
+        let items: Vec<PartialGlobalKv> = if query == "%%" {
             sqlx::query_as(
                 "SELECT key, version, owner_id, owner_type, short, public_metadata, public_data, scope, created_at, last_updated_at, price, review_state FROM global_kv WHERE scope = $1 AND review_state = 'approved'"
             )
@@ -425,7 +475,7 @@ ORDER BY scope",
     
     pub async fn global_kv_get(&self, key: String, version: i32, scope: String) -> Result<Option<GlobalKv>, crate::Error> {
         let item: Option<GlobalKv> = sqlx::query_as(
-            "SELECT key, version, owner_id, owner_type, short, long, public_metadata, public_data, scope, created_at, last_updated_at, price, review_state FROM global_kv WHERE review_state = 'approved' AND key = $1 AND version = $2 AND scope = $3",
+            "SELECT key, version, owner_id, owner_type, short, long, data, public_metadata, public_data, scope, created_at, last_updated_at, price, review_state FROM global_kv WHERE review_state = 'approved' AND key = $1 AND version = $2 AND scope = $3",
         )
         .bind(&key)
         .bind(version)
@@ -433,7 +483,17 @@ ORDER BY scope",
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(item)
+        let Some(mut gkv) = item else {
+            return Ok(None);
+        };
+
+        // TODO: Check ownership here
+
+        let data = std::mem::replace(&mut gkv.raw_data, serde_json::Value::Null);
+        let opaque = gkv.partial.price.is_some() || !gkv.partial.public_data;
+        gkv.data = GlobalKvData::Value { data, opaque };
+
+        Ok(Some(gkv))
     }
 
     pub async fn global_kv_create(&self, id: Id, gkv: CreateGlobalKv) -> Result<(), crate::Error> {
@@ -477,75 +537,6 @@ ORDER BY scope",
         }
 
         Ok(())
-    }
-
-    pub async fn global_kv_attach(&self, id: Id, key: String, version: i32, scope: String) -> Result<AttachResult, crate::Error> {
-        let mut tx = self.pool.begin().await?;
-
-        // First, check if the attachment already exists
-        #[derive(sqlx::FromRow)]
-        struct AttachmentCheck {
-            count: i64,
-        }
-
-        let atc: AttachmentCheck = sqlx::query_as(
-            "SELECT COUNT(*) AS count FROM global_kv_attachments WHERE owner_id = $1 AND owner_type = $2 AND key = $3 AND version = $4 AND scope = $5",
-        )
-        .bind(id.tenant_id())
-        .bind(id.tenant_type())
-        .bind(&key)
-        .bind(version)
-        .bind(&scope)
-        .fetch_one(&mut *tx)
-        .await?;
-        
-        if atc.count > 0 {
-            return Err("Global KV attachment already exists".into());
-        }
-
-        // Then check if this global KV has a price associated to it
-        // required for attachment
-        #[derive(sqlx::FromRow)]
-        struct MdCheck {
-            price: Option<i64>,
-        }
-
-        let data: Option<MdCheck> = sqlx::query_as(
-            "SELECT price FROM global_kv WHERE key = $1 AND version = $2 AND scope = $3",
-        )
-        .bind(&key)
-        .bind(version)
-        .bind(&scope)
-        .fetch_optional(&mut *tx)
-        .await?;
-
-        let Some(data) = data else {
-            return Err("Global KV entry does not exist".into());
-        };
-        
-        if data.price.is_some() {
-            // TODO: Get a proper URL here
-            return Ok(AttachResult::PurchaseRequired { url: "todo url".to_string() })
-        }
-
-        let inserted = sqlx::query(
-            "INSERT INTO global_kv_attachments (owner_id, owner_type, key, version, scope) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (owner_id, owner_type, key, version, scope) DO NOTHING",
-        )
-        .bind(id.tenant_id())
-        .bind(id.tenant_type())
-        .bind(&key)
-        .bind(version)
-        .bind(&scope)
-        .execute(&mut *tx)
-        .await?;
-
-        if inserted.rows_affected() == 0 {
-            return Err("Global KV attachment already exists".into());
-        }
-
-        tx.commit().await?;
-
-        Ok(AttachResult::Ok(()))
     }
 }
 
@@ -841,15 +832,6 @@ async fn global_kv_handler(
                 Ok(_) => (StatusCode::OK).into_response(),
                 Err(e) => {
                     log::error!("Failed to delete global KV record: {}", e);
-                    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
-                }
-            }
-        }
-        GlobalKeyValueOp::Attach { key, version, scope } => {
-            match state.db_state.global_kv_attach(id, key, version, scope).await {
-                Ok(result) => encode_db_resp(&result),
-                Err(e) => {
-                    log::error!("Failed to attach global KV record: {}", e);
                     (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
                 }
             }
