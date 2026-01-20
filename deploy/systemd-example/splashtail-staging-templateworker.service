@@ -1,6 +1,6 @@
 [Service]
 Type=simple
-ExecStart=/home/antiraid/splashtail/staging/out/template-worker start
+ExecStart=/home/antiraid/splashtail/staging/out/template-worker --worker-threads 15
 User=antiraid
 Group=antiraid
 WorkingDirectory=/home/antiraid/splashtail/staging
@@ -17,4 +17,4 @@ WantedBy=multi-user.target
 [Unit]
 PartOf=antiraid-v6.target
 Description="AntiRaid template worker service"
-After=network.service
+After=ibl-maint.service
