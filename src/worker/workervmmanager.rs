@@ -8,7 +8,6 @@ use crate::worker::builtins::{Builtins, BuiltinsPatches, TemplatingTypes};
 use crate::worker::limits::TEMPLATE_GIVE_TIME;
 
 use super::limits::{LuaKVConstraints, Ratelimits};
-use tokio::sync::OnceCell;
 
 use super::workerstate::WorkerState;
 use super::limits::{MAX_TEMPLATE_MEMORY_USAGE, MAX_TEMPLATES_EXECUTION_TIME};
@@ -46,6 +45,12 @@ impl Id {
                 };
                 Some(Id::Guild(gid))
             },
+            "user" => {
+                let Some(uid) = tenant_id.parse::<UserId>().ok() else {
+                    return None;
+                };
+                Some(Id::User(uid))
+            },
             _ => None
         }
     }
@@ -71,7 +76,7 @@ pub struct WorkerVmManager {
     /// The state all VMs in the WorkerVmManager share
     worker_state: WorkerState,
     /// The VMs managed by this WorkerVmManager, keyed by their tenant ID
-    vms: Rc<RefCell<HashMap<Id, Rc<OnceCell<VmData>>>>>
+    vms: Rc<RefCell<HashMap<Id, VmData>>>
 }
 
 impl WorkerVmManager {
@@ -89,34 +94,22 @@ impl WorkerVmManager {
     }
 
     /// Returns the VM for the given tenant ID creating it if needed
-    pub async fn get_vm_for(&self, id: Id) -> LuaResult<VmData> {
-        let cell = {
-            let mut vms = self.vms.borrow_mut();
-            vms.entry(id)
-                .or_insert_with(|| Rc::new(OnceCell::new()))
-                .clone()
-        };
-
-        // Initialize if empty, or wait for the existing initialization to finish
-        // get_or_try_init handles the concurrent locking automatically.
-        let result = cell.get_or_try_init(|| async {
-            self.create_vm().await
-        }).await;
-
-        match result {
-            Ok(vm) => Ok(vm.clone()),
-            Err(e) => {
-                // If creation failed, remove the empty/failed cell so we can retry later
-                self.vms.borrow_mut().remove(&id);
-                Err(e)
-            }
+    pub fn get_vm_for(&self, id: Id) -> LuaResult<VmData> {
+        let mut vms = self.vms.borrow_mut();
+        if let Some(vm) = vms.get(&id) {
+            return Ok(vm.clone());
         }
+
+        let vm = self.create_vm()?;
+        vms.insert(id, vm.clone());
+
+        Ok(vm)
     }
 
     /// Creates a new VmData
-    async fn create_vm(&self) -> LuaResult<VmData> {
+    fn create_vm(&self) -> LuaResult<VmData> {
         // If it doesn't exist, create a new VM
-        let runtime = Self::configure_runtime().await
+        let runtime = Self::configure_runtime()
             .map_err(|e| LuaError::external(e))?;
 
         let vmd = VmData {
@@ -136,10 +129,8 @@ impl WorkerVmManager {
         let cell_opt = self.vms.borrow_mut().remove(&id);
 
         // If it existed and was initialized, mark it broken
-        if let Some(cell) = cell_opt {
-            if let Some(vmd) = cell.get() {
-                vmd.runtime.mark_broken(true)?;
-            }
+        if let Some(vm) = cell_opt {
+            vm.runtime.mark_broken(true)?;
         }
         
         Ok(())
@@ -164,7 +155,7 @@ impl WorkerVmManager {
     }
 
     /// Configures a new khronos runtime
-    async fn configure_runtime() -> LuaResult<KhronosRuntime> {
+    fn configure_runtime() -> LuaResult<KhronosRuntime> {
         let rt = KhronosRuntime::new(
             RuntimeCreateOpts {
                 disable_task_lib: false,

@@ -60,7 +60,7 @@ impl WorkerDispatch {
 
     /// Runs a script directly on the VM for the given tenant ID with the provided event
     pub async fn run_script(&self, id: Id, name: String, code: String, event: CreateEvent) -> mlua::Result<KhronosValue> {
-        let vm_data = self.vm_manager.get_vm_for(id).await?;
+        let vm_data = self.vm_manager.get_vm_for(id)?;
 
         if vm_data.runtime.is_broken() {
             return Err(mlua::Error::external("Lua VM to dispatch to is broken"));
@@ -93,7 +93,7 @@ impl WorkerDispatch {
             return Ok(KhronosValue::Null);
         }
 
-        let vm_data = self.vm_manager.get_vm_for(id).await
+        let vm_data = self.vm_manager.get_vm_for(id)
             .map_err(|e| mlua::Error::external(format!("Failed to get VM for ID {id:?}: {e}")))?;
 
         if vm_data.runtime.is_broken() {
