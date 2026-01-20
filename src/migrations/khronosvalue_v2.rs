@@ -150,7 +150,7 @@ impl KhronosValueV2 {
 }
 
 pub static MIGRATION: Migration = Migration {
-    id: "migrate_khronos_value",
+    id: "khronosvalue_v2",
     description: "Migrate from KhronosValue v1 to KhronosValue v2 format (which is slightly larger but more robust)",
     up: |pool| {
         Box::pin(async move {
