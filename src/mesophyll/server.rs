@@ -351,7 +351,7 @@ ORDER BY scope",
         let id = gen_random(64);
         sqlx::query(
             "INSERT INTO tenant_kv (id, owner_id, owner_type, key, value, scopes) VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (owner_id, owner_type, key, scopes) DO UPDATE value = EXCLUDED.value, last_updated = NOW()",
+            ON CONFLICT (owner_id, owner_type, key, scopes) DO UPDATE SET value = EXCLUDED.value, last_updated_at = NOW()",
         )
         .bind(&id)
         .bind(tid.tenant_id())

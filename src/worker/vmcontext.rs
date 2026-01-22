@@ -536,6 +536,7 @@ impl RuntimeProvider for ArRuntimeProvider {
     }
 
     async fn stats(&self) -> Result<runtime_ir::RuntimeStats, khronos_runtime::Error> {
+        log::info!("Fetching runtime stats for tenant {:?}", self.id);
         let sandwich_resp = self.state.sandwich.get_status().await?;
 
         let total_guilds = {

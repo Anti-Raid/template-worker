@@ -1422,7 +1422,7 @@ dependencies = [
 [[package]]
 name = "dapi"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#800eba70f8ae6583a5666d1ce237108b0c4fe0e8"
+source = "git+https://github.com/anti-raid/khronos#5848617f2c496e79a88bcec101f09fc4403f7569"
 dependencies = [
  "async-trait",
  "bitflags 2.10.0",
@@ -2888,7 +2888,7 @@ dependencies = [
 [[package]]
 name = "khronos_runtime"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#800eba70f8ae6583a5666d1ce237108b0c4fe0e8"
+source = "git+https://github.com/anti-raid/khronos#5848617f2c496e79a88bcec101f09fc4403f7569"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -3191,7 +3191,7 @@ dependencies = [
 [[package]]
 name = "mlua-sys"
 version = "0.9.0"
-source = "git+https://github.com/mluau/mluau#ab5c3581795141f0e5db3e35c9ac30a3abe826b6"
+source = "git+https://github.com/mluau/mluau#9958bd27cbedc2a5a88bbd34f307f246368bbca1"
 dependencies = [
  "cc",
  "cfg-if",
@@ -3215,7 +3215,7 @@ dependencies = [
 [[package]]
 name = "mluau"
 version = "0.11.5"
-source = "git+https://github.com/mluau/mluau#ab5c3581795141f0e5db3e35c9ac30a3abe826b6"
+source = "git+https://github.com/mluau/mluau#9958bd27cbedc2a5a88bbd34f307f246368bbca1"
 dependencies = [
  "bstr",
  "either",
@@ -3517,9 +3517,9 @@ checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
 
 [[package]]
 name = "openssl-probe"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f50d9b3dabb09ecd771ad0aa242ca6894994c130308ca3d7684634df8037391"
+checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "openssl-sys"
@@ -3794,9 +3794,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.105"
+version = "1.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "535d180e0ecab6268a3e718bb9fd44db66bbbc256257165fc699dadf70d16fe7"
+checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
 ]
@@ -4427,7 +4427,7 @@ version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "612460d5f7bea540c490b2b6395d8e34a953e52b491accd6c86c8164c5932a63"
 dependencies = [
- "openssl-probe 0.2.0",
+ "openssl-probe 0.2.1",
  "rustls-pki-types",
  "schannel",
  "security-framework 3.5.1",
@@ -6775,9 +6775,9 @@ checksum = "40990edd51aae2c2b6907af74ffb635029d5788228222c4bb811e9351c0caad3"
 
 [[package]]
 name = "zmij"
-version = "1.0.15"
+version = "1.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94f63c051f4fe3c1509da62131a678643c5b6fbdc9273b2b79d4378ebda003d2"
+checksum = "dfcd145825aace48cff44a8844de64bf75feec3080e0aa5cdbde72961ae51a65"
 
 [[package]]
 name = "zopfli"

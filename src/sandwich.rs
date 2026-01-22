@@ -59,9 +59,10 @@ impl Sandwich {
                 continue;
             } else {
                 let status = resp.status();
+                let url = resp.url().clone();
                 let resp = resp.text().await?;
                 return Err(format!(
-                    "Failed to request Sandwich proxy (status: {}): {}",
+                    "Failed to request Sandwich proxy (status: {}): {} [url: {url}]",
                     status, resp
                 ).into());
             }
@@ -111,9 +112,10 @@ impl Sandwich {
                 continue;
             } else {
                 let status = resp.status();
+                let url = resp.url().clone();
                 let resp = resp.text().await?;
                 return Err(format!(
-                    "Failed to request Sandwich proxy (status: {}): {}",
+                    "Failed to request Sandwich proxy (status: {}): {} [url: {url}]",
                     status, resp
                 ).into());
             }
@@ -410,7 +412,7 @@ impl Sandwich {
     }
 
     pub async fn get_status(&self) -> Result<GetStatusResponse, Error> {
-        let res = self.get::<Resp<StatusEndpointResponse>>("antiraid/api/status").await?;
+        let res = self.get::<Resp<StatusEndpointResponse>>("api/status").await?;
         if !res.ok {
             return Err("Sandwich API returned not ok".into());
         }
