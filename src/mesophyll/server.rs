@@ -454,11 +454,13 @@ ORDER BY scope",
         Ok(records)
     }
 
+    // TODO: Actually implement this
     async fn global_kv_is_purchased(&self, key: String, tid: Id) -> bool {
         let cache = self.purchased_cache.read().await;
         cache.contains(&(key, tid))
     }
 
+    // TODO: Actually implement this
     async fn global_kv_to_url(&self, key: &str) -> String {
         // TODO: Replace with actual purchase URL generation logic
         format!("https://example.com/purchase/{key}")
@@ -531,6 +533,22 @@ ORDER BY scope",
     }
 
     pub async fn global_kv_create(&self, id: Id, gkv: CreateGlobalKv) -> Result<(), crate::Error> {
+        // Validate key
+        //
+        // Rules:
+        // 1. Between 3 and 64 characters long
+        // 2. May not start or end with a dot (.)
+        // 3. May only contain (ASCII) alphanumeric characters, dots (.), dashes (-), and underscores (_)
+        if gkv.key.len() < 3 || gkv.key.len() > 64 {
+            return Err("keys must be between 3 and 64 characters long".into());
+        }
+        if gkv.key.starts_with('.') || gkv.key.ends_with('.') {
+            return Err("keys may not start or end with a dot".into());
+        }
+        if !gkv.key.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_') {
+            return Err("keys may only contain alphanumeric characters, dots, dashes, and underscores".into());
+        }
+
         let inserted = sqlx::query(
             "INSERT INTO global_kv (key, version, owner_id, owner_type, short, long, public_metadata, public_data, scope, data) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT (key, version, scope) DO NOTHING",
         )
