@@ -6,8 +6,10 @@ pub static MIGRATION: Migration = Migration {
     up: |pool| {
         Box::pin(async move {
             let mut tx = pool.begin().await?;
-            sqlx::query("
-                DROP TABLE IF EXISTS tenant_state; -- Drop any WIP tenant state table
+
+            let stmts = [
+                "DROP TABLE IF EXISTS tenant_state; -- Drop any WIP tenant state table",
+                r#"
                 CREATE TABLE tenant_state (
                     owner_id TEXT NOT NULL,
                     owner_type TEXT NOT NULL,
@@ -16,9 +18,16 @@ pub static MIGRATION: Migration = Migration {
                     data JSONB NOT NULL DEFAULT '{}'::jsonb,
                     PRIMARY KEY (owner_id, owner_type)
                 );
-            ")
-            .execute(&mut *tx)
-            .await?;
+                "#
+            ];
+
+            for stmt in stmts.iter() {
+                sqlx::query(stmt)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+
+            tx.commit().await?;
 
             Ok(())
         })

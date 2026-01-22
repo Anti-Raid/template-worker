@@ -138,8 +138,8 @@ meta:
 {SEAWEED_DATA}
 
 addrs:
-  template_worker: http://0.0.0.0:60000
-  mesophyll_server: http://127.0.0.1:70000
+  template_worker: 0.0.0.0:60000
+  mesophyll_server: 127.0.0.1:30000
 """
 
 print(f"Saving {tw_config_filename}")
@@ -187,7 +187,7 @@ managers:
     - identifier: antiraid
       virtual_shards:
         enabled: true
-        count: 30
+        count: 2
         dm_shard: 0
       producer_identifier: antiraid_producer
       friendly_name: Anti Raid

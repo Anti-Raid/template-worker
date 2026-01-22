@@ -54,7 +54,17 @@ pub async fn apply_migrations(pool: sqlx::PgPool) -> Result<(), crate::Error> {
         (migration.up)(pool.clone())
             .await
             .expect("Failed to apply migration");
+
         info!("Migration applied successfully");
+
+        // Record that the migration has been applied
+        sqlx::query(
+            "INSERT INTO _migrations_applied (id) VALUES ($1)",
+        )
+        .bind(migration.id)
+        .execute(&pool)
+        .await
+        .expect("Failed to record applied migration");
     }
 
     info!("All migrations applied successfully");

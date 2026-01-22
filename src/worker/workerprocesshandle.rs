@@ -66,6 +66,7 @@ impl WorkerProcessHandle {
 
                 // Abort the master process
                 // TODO: Handle this more gracefully in the future
+                std::thread::sleep(Duration::from_secs(1));
                 std::process::abort(); 
             }
 
@@ -89,7 +90,7 @@ impl WorkerProcessHandle {
             command.arg("processpoolworker");
             command.arg("--worker-id");
             command.arg(self.id.to_string());
-            command.arg("--worker-threads");
+            command.arg("--process-workers");
             command.arg(self.total.to_string());
             command.env("MESOPHYLL_CLIENT_TOKEN", meso_token);
             command.kill_on_drop(true);

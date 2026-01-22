@@ -336,6 +336,7 @@ pub struct PublicLuauExecute {
 
 // Type for documentation and TypeScript generation purposes
 #[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema)]
+#[schema(no_recursion)]
 pub enum KhronosValueApi {
     Text(String),
     Integer(i64),
@@ -344,7 +345,9 @@ pub enum KhronosValueApi {
     Boolean(bool),
     Buffer(Vec<u8>),   
     Vector((f32, f32, f32)), 
+    #[schema(value_type = Object)]
     Map(Vec<(KhronosValueApi, KhronosValueApi)>),
+    #[schema(value_type = Object)]
     List(Vec<KhronosValueApi>),
     Timestamptz(chrono::DateTime<chrono::Utc>),
     Interval(chrono::Duration),

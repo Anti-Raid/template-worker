@@ -6,15 +6,24 @@ pub static MIGRATION: Migration = Migration {
     up: |pool| {
         Box::pin(async move {
             let mut tx = pool.begin().await?;
-            sqlx::query("
-                DROP TABLE IF EXISTS template_shop_listings; -- replaced by global_kv
-                DROP TABLE IF EXISTS guild_templates; -- replaced by tenant_kv + luau (templatemanager)
-                DROP TABLE IF EXISTS attached_templates; -- replaced by tenant_kv + luau (templatemanager)
-                DROP TABLE IF EXISTS jobs; -- deprecated for a long time now
-                DROP TABLE IF EXISTS ongoing_jobs; -- deprecated for a long time now
-            ")
-            .execute(&mut *tx)
-            .await?;
+
+            let stmts = [
+                "DROP TABLE IF EXISTS guild_templates; -- replaced by tenant_kv + luau (templatemanager)",
+                "DROP TABLE IF EXISTS attached_templates; -- replaced by tenant_kv + luau (templatemanager)",
+                "DROP TABLE IF EXISTS template_shop_listings; -- replaced by global_kv",
+                "DROP TABLE IF EXISTS jobs; -- deprecated for a long time now",
+                "DROP TABLE IF EXISTS ongoing_jobs; -- deprecated for a long time now",
+                "ALTER TABLE tenant_kv DROP COLUMN IF EXISTS resume;",
+                "ALTER TABLE tenant_kv DROP COLUMN IF EXISTS expiry_event_call_attempts;",
+            ];
+
+            for stmt in stmts.iter() {
+                sqlx::query(stmt)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+
+            tx.commit().await?;
 
             Ok(())
         })

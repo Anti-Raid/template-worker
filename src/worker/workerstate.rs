@@ -84,7 +84,8 @@ impl WorkerState {
         // Initialize the tenant state cache with the current tenant states from the database
         //
         // The tenant state cache acts as a routing table
-        let (t_states, startup_events) = s.get_tenant_state().await?;
+        let (t_states, startup_events) = s.get_tenant_state().await
+            .map_err(|e| format!("Failed to initialize tenant state cache: {}", e))?;
         *s.tenant_state_cache.borrow_mut() = t_states;
         *s.startup_events.borrow_mut() = startup_events;
 

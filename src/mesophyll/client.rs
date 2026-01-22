@@ -21,11 +21,11 @@ impl MesophyllClient {
         let worker_id = wt.id();
         let s = Self {
             wt,
-            addr: format!("{}/ws?id={}?token={}", addr, worker_id, token),
+            addr: format!("ws://{}/ws?id={}&token={}", addr, worker_id, token),
         };
 
         let self_ref = s.clone();
-        tokio::task::spawn_local(async move {
+        tokio::task::spawn(async move {
             loop {
                 if let Err(e) = self_ref.handle_task().await {
                     log::error!("Mesophyll client task error: {}", e);
@@ -146,7 +146,7 @@ impl MesophyllDbClient {
     }
 
     fn url_for(&self, path: &str, id: Option<Id>) -> String {
-        let mut base = format!("{}/db/{}?id={}&token={}", self.addr, self.worker_id, self.token, path);
+        let mut base = format!("http://{}/{}?id={}&token={}", self.addr, path, self.worker_id, self.token);
         match id {
             Some(id) => {
                 base.push_str(&format!("&tenant_id={}&tenant_type={}", id.tenant_id(), id.tenant_type()));
@@ -159,11 +159,12 @@ impl MesophyllDbClient {
 
     async fn decode_no_resp(resp: reqwest::Response) -> Result<(), crate::Error> {
         if !resp.status().is_success() {
+            let url = resp.url().clone();
             let status = resp.status();
             let text = resp.text()
                 .await
                 .unwrap_or_default();
-            return Err(format!("request failed with status: {}: {}", status, text).into());
+            return Err(format!("request failed with status: {status}: {text} and url {url}").into());
         }
 
         Ok(())
@@ -171,9 +172,10 @@ impl MesophyllDbClient {
 
     async fn decode_resp<T: for<'de> serde::Deserialize<'de>>(resp: reqwest::Response) -> Result<T, crate::Error> {
         if !resp.status().is_success() {
+            let url = resp.url().clone();
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            return Err(format!("request failed with status: {}: {}", status, text).into());
+            return Err(format!("request failed with status: {status}: {text} and url {url}").into());
         }
 
         let resp_bytes = resp.bytes()
@@ -191,7 +193,7 @@ impl MesophyllDbClient {
 
     /// Returns a list of all tenant states from the Mesophyll server
     pub async fn list_tenant_states(&self) -> Result<HashMap<Id, TenantState>, crate::Error> {
-        let url = self.url_for("tenant-states", None);
+        let url = self.url_for("db/tenant-states", None);
         let resp = self.client.get(&url)
             .send()
             .await
@@ -202,7 +204,7 @@ impl MesophyllDbClient {
 
     /// Sets the tenant state for a given tenant ID
     pub async fn set_tenant_state_for(&self, id: Id, state: &TenantState) -> Result<(), crate::Error> {
-        let url = self.url_for("tenant-state", Some(id));
+        let url = self.url_for("db/tenant-state", Some(id));
         let body = self.encode_req(state)?;
         let resp = self.client.post(&url)
             .body(body)
@@ -214,7 +216,7 @@ impl MesophyllDbClient {
     }
 
     pub async fn kv_get(&self, id: Id, scopes: Vec<String>, key: String) -> Result<Option<SerdeKvRecord>, crate::Error> {
-        let url = self.url_for("kv", Some(id));
+        let url = self.url_for("db/kv", Some(id));
         let body = self.encode_req(&crate::mesophyll::message::KeyValueOp::Get { scopes, key })?;
         let resp = self.client.post(&url)
             .body(body)
@@ -226,7 +228,7 @@ impl MesophyllDbClient {
     }
 
     pub async fn kv_list_scopes(&self, id: Id) -> Result<Vec<String>, crate::Error> {
-        let url = self.url_for("kv", Some(id));
+        let url = self.url_for("db/kv", Some(id));
         let body = self.encode_req(&crate::mesophyll::message::KeyValueOp::ListScopes {})?;
         let resp = self.client.post(&url)
             .body(body)
@@ -238,7 +240,7 @@ impl MesophyllDbClient {
     }
 
     pub async fn kv_set(&self, id: Id, scopes: Vec<String>, key: String, value: KhronosValue) -> Result<(), crate::Error> {
-        let url = self.url_for("kv", Some(id));
+        let url = self.url_for("db/kv", Some(id));
         let body = self.encode_req(&crate::mesophyll::message::KeyValueOp::Set { scopes, key, value })?;
         let resp = self.client.post(&url)
             .body(body)
@@ -250,7 +252,7 @@ impl MesophyllDbClient {
     }
 
     pub async fn kv_delete(&self, id: Id, scopes: Vec<String>, key: String) -> Result<(), crate::Error> {
-        let url = self.url_for("kv", Some(id));
+        let url = self.url_for("db/kv", Some(id));
         let body = self.encode_req(&crate::mesophyll::message::KeyValueOp::Delete { scopes, key })?;
         let resp = self.client.post(&url)
             .body(body)
@@ -262,7 +264,7 @@ impl MesophyllDbClient {
     }
 
     pub async fn kv_find(&self, id: Id, scopes: Vec<String>, prefix: String) -> Result<Vec<SerdeKvRecord>, crate::Error> {
-        let url = self.url_for("kv", Some(id));
+        let url = self.url_for("db/kv", Some(id));
         let body = self.encode_req(&crate::mesophyll::message::KeyValueOp::Find { scopes, prefix })?;
         let resp = self.client.post(&url)
             .body(body)
@@ -274,7 +276,7 @@ impl MesophyllDbClient {
     }
 
     pub async fn global_kv_find(&self, scope: String, query: String) -> Result<Vec<PartialGlobalKv>, crate::Error> {
-        let url = self.url_for("public-global-kv", None);
+        let url = self.url_for("db/public-global-kv", None);
         let body = self.encode_req(&crate::mesophyll::message::PublicGlobalKeyValueOp::Find { scope, query })?;
         let resp = self.client.post(&url)
             .body(body)
@@ -286,7 +288,7 @@ impl MesophyllDbClient {
     }
 
     pub async fn global_kv_get(&self, key: String, version: i32, scope: String, id: Option<Id>) -> Result<Option<GlobalKv>, crate::Error> {
-        let url = self.url_for("public-global-kv", None);
+        let url = self.url_for("db/public-global-kv", None);
         let body = self.encode_req(&crate::mesophyll::message::PublicGlobalKeyValueOp::Get { key, version, scope, id })?;
         let resp = self.client.post(&url)
             .body(body)
@@ -298,7 +300,7 @@ impl MesophyllDbClient {
     }
 
     pub async fn global_kv_create(&self, id: Id, entry: CreateGlobalKv) -> Result<(), crate::Error> {
-        let url = self.url_for("global-kv", Some(id));
+        let url = self.url_for("db/global-kv", Some(id));
         let body = self.encode_req(&crate::mesophyll::message::GlobalKeyValueOp::Create { entry })?;
         let resp = self.client.post(&url)
             .body(body)
@@ -309,7 +311,7 @@ impl MesophyllDbClient {
     }
 
     pub async fn global_kv_delete(&self, id: Id, key: String, version: i32, scope: String) -> Result<(), crate::Error> {
-        let url = self.url_for("global-kv", Some(id));
+        let url = self.url_for("db/global-kv", Some(id));
         let body = self.encode_req(&crate::mesophyll::message::GlobalKeyValueOp::Delete { key, version, scope })?;
         let resp = self.client.post(&url)
             .body(body)

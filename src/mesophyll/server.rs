@@ -632,7 +632,9 @@ impl MesophyllServer {
             .route("/db/global-kv", post(global_kv_handler))
             .with_state(s.clone());
 
-        let listener = tokio::net::TcpListener::bind(addr).await?;
+        println!("Binding Mesophyll server to address: {}", addr);
+        let listener = tokio::net::TcpListener::bind(addr).await
+        .map_err(|e| format!("Failed to bind Mesophyll server to address: {}", e))?;
         
         log::info!("Mesophyll server listening...");
         
@@ -897,6 +899,7 @@ async fn ws_handler(
     State(state): State<MesophyllServer>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
+    //println!("Worker {} attempting to connect to Mesophyll server...", worker_query.id);
     let worker_id = worker_query.id;
     if let Some(resp) = worker_query.validate(&state) {
         return resp;
@@ -908,7 +911,7 @@ async fn ws_handler(
 /// Handles a new Mesophyll server WebSocket connection
 async fn handle_socket(socket: WebSocket, id: usize, state: MesophyllServer) {
     if state.conns.contains_key(&id) {
-        log::warn!("Worker {id} reconnection - overwriting old connection.");
+        log::debug!("Worker {id} reconnection - overwriting old connection.");
     }
 
     let weak_map = Arc::downgrade(&state.conns);

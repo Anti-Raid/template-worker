@@ -65,6 +65,7 @@ struct CmdArgs {
     #[clap(long, default_value = "30")]
     pub thread_workers: usize,
 
+    /// Number of process workers to use for the process pool
     #[clap(long, default_value = None)]
     pub process_workers: Option<usize>,
 
