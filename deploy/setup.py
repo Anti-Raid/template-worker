@@ -77,7 +77,7 @@ dp_secret = secrets.token_urlsafe(128)
 default_error_channel = get_var("Default Error Channel ID", "DEFAULT_ERROR_CHANNEL")
 
 # Determine URLs based on docker or not
-sandwich_url = "http://sandwich:29334" if args.docker else "http://localhost:3600"
+sandwich_url = "http://sandwich:29334" if args.docker else "http://localhost:29334"
 proxy_url = "http://nirn_proxy:3221" if args.docker else "http://localhost:3221"
 pg_url = "postgres://antiraid:AnTiRaId123!@postgres:5432/antiraid" if args.docker else "postgres:///antiraid"
 seaweed_endpoint = "seaweed:8333" if args.docker else "localhost:8333"
