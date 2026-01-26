@@ -29,6 +29,7 @@ pub struct CreateWorkerState {
     pub current_user: Arc<serenity::all::CurrentUser>,
     pub mesophyll_db: Arc<WorkerDB>,
     pub sandwich: Sandwich,
+    pub worker_print: bool,
 }
 
 impl CreateWorkerState {
@@ -40,6 +41,7 @@ impl CreateWorkerState {
         current_user: Arc<serenity::all::CurrentUser>,
         mesophyll_db: Arc<WorkerDB>,
         sandwich: Sandwich,
+        worker_print: bool
     ) -> Self {
         Self {
             serenity_http,
@@ -48,6 +50,7 @@ impl CreateWorkerState {
             current_user,
             mesophyll_db,
             sandwich,
+            worker_print
         }
     }
 }
@@ -61,6 +64,7 @@ pub struct WorkerState {
     pub mesophyll_db: Arc<WorkerDB>,
     pub current_user: Arc<serenity::all::CurrentUser>,
     pub sandwich: Sandwich,
+    pub worker_print: bool,
     tenant_state_cache: Rc<RefCell<HashMap<Id, TenantState>>>, // Maps tenant IDs to their states
     startup_events: Rc<RefCell<HashSet<Id>>>, // Tracks which tenants have had their startup events fired
 }
@@ -77,6 +81,7 @@ impl WorkerState {
             mesophyll_db: cws.mesophyll_db,
             current_user: cws.current_user,
             sandwich: cws.sandwich,
+            worker_print: cws.worker_print,
             tenant_state_cache,
             startup_events,
         };

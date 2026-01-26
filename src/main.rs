@@ -59,7 +59,14 @@ struct CmdArgs {
     pub max_db_connections: u32,
 
     #[clap(long, default_value_t = false)]
+    /// Whether to use tokio console for debugging
+    /// 
+    /// May increase resource usage, so only enable when needed
     pub use_tokio_console: bool,
+
+    /// Enables debug logging for luau in workers
+    #[clap(long, default_value_t = false)]
+    pub worker_debug: bool,
 
     /// Number of threads to use for the worker thread pool
     #[clap(long, default_value = "30")]
@@ -247,7 +254,8 @@ async fn main_impl(args: CmdArgs) {
                         db_state.clone()
                     )
                 ),
-                sandwich.clone()
+                sandwich.clone(),
+                args.worker_debug
             );
 
             let worker_pool = Arc::new(
@@ -412,7 +420,8 @@ async fn main_impl(args: CmdArgs) {
                         MesophyllDbClient::new(CONFIG.addrs.mesophyll_server.clone(), worker_id, ident_token.clone())
                     )
                 ),
-                sandwich.clone()
+                sandwich.clone(),
+                args.worker_debug
             );
 
             let worker_thread = Arc::new(

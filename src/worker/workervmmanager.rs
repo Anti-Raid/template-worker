@@ -109,7 +109,7 @@ impl WorkerVmManager {
     /// Creates a new VmData
     fn create_vm(&self) -> LuaResult<VmData> {
         // If it doesn't exist, create a new VM
-        let runtime = Self::configure_runtime()
+        let runtime = self.configure_runtime()
             .map_err(|e| LuaError::external(e))?;
 
         let vmd = VmData {
@@ -155,7 +155,7 @@ impl WorkerVmManager {
     }
 
     /// Configures a new khronos runtime
-    fn configure_runtime() -> LuaResult<KhronosRuntime> {
+    fn configure_runtime(&self) -> LuaResult<KhronosRuntime> {
         let rt = KhronosRuntime::new(
             RuntimeCreateOpts {
                 disable_task_lib: false,
@@ -173,6 +173,36 @@ impl WorkerVmManager {
         )?;
 
         rt.set_memory_limit(MAX_TEMPLATE_MEMORY_USAGE)?;
+
+        if self.worker_state.worker_print {
+            let gtab = rt.global_table().clone();
+            rt.with_lua(|lua| {
+                gtab.set("_debug", lua.create_function(|_, values: LuaMultiValue| {
+                    if !values.is_empty() {
+                        println!(
+                            "{}",
+                            values
+                                .iter()
+                                .map(|value| {
+                                    match value {
+                                        LuaValue::String(s) => format!("{}", s.display()),
+                                        _ => format!("{value:#?}"),
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\t")
+                        );
+                    } else {
+                        println!("nil");
+                    }
+
+                    Ok(())
+                })?)?;
+                
+                Ok(())
+            })?;
+        }
+
         Ok(rt)
     }
 }

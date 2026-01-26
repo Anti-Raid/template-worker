@@ -64,5 +64,4 @@ branch = "next"
 features = ["model", "http", "cache", "rustls_backend", "unstable"]
 
 [features]
-default = ["worker-staticref"]
-worker-staticref = [] # Use &'static T references for internal worker data
+default = []
