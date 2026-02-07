@@ -418,7 +418,7 @@ ORDER BY scope",
             } else {
                 // with query
                 sqlx::query(
-                "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM tenant_kv WHERE owner_id = $1 AND owner_type = $2 AND scopes @> $3 AND key ILIKE $4",
+                "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM tenant_kv WHERE owner_id = $1 AND owner_type = $2 AND scopes @> $3 AND key LIKE $4",
                 )
                 .bind(tid.tenant_id())
                 .bind(tid.tenant_type())
@@ -476,7 +476,7 @@ ORDER BY scope",
             .await?
         } else {
             sqlx::query_as(
-                "SELECT key, version, owner_id, owner_type, short, public_metadata, public_data, scope, created_at, last_updated_at, price, review_state FROM global_kv WHERE scope = $1 AND review_state = 'approved' AND key ILIKE $2"
+                "SELECT key, version, owner_id, owner_type, short, public_metadata, public_data, scope, created_at, last_updated_at, price, review_state FROM global_kv WHERE scope = $1 AND review_state = 'approved' AND key LIKE $2"
             )
             .bind(scope)
             .bind(query)
