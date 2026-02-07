@@ -114,7 +114,7 @@ impl KhronosContext for TemplateContextProvider {
 
     fn objectstorage_provider(&self) -> Option<Self::ObjectStorageProvider> {
         Some(ArObjectStorageProvider {
-            bucket: Bucket::Guild(self.guild_id()?),
+            bucket: Bucket::from_id(self.id()),
             state: self.state.clone(),
             kv_constraints: self.kv_constraints.clone(),
             ratelimits: self.ratelimits.clone(),

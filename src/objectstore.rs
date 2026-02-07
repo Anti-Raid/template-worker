@@ -1,4 +1,6 @@
-use serenity::all::GuildId;
+use serenity::all::{GuildId, UserId};
+
+use crate::worker::workervmmanager::Id;
 
 const CHUNK_SIZE: usize = 5 * 1024 * 1024;
 const MULTIPART_MIN_SIZE: usize = 50 * 1024 * 1024;
@@ -98,19 +100,29 @@ pub struct ListObjectsResponse {
 /// Represents a bucket in the object store
 #[derive(Clone, Copy, Debug)]
 pub enum Bucket {
-    Guild(GuildId)
+    Guild(GuildId),
+    User(UserId),
 }
 
 impl Bucket {
+    pub fn from_id(id: Id) -> Self {
+        match id {
+            Id::Guild(guild_id) => Bucket::Guild(guild_id),
+            Id::User(user_id) => Bucket::User(user_id),
+        }
+    }
+
     pub fn bucket(&self) -> &'static str {
         match self {
             Bucket::Guild(_) => "antiraid.guilds",
+            Bucket::User(_) => "antiraid.users",
         }
     }
 
     pub fn prefix(&self) -> String {
         match self {
             Bucket::Guild(guild_id) => format!("{}", guild_id),
+            Bucket::User(user_id) => format!("{}", user_id),
         }
     }
 
