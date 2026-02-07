@@ -1,3 +1,4 @@
+use dapi::controller::DiscordProviderContext;
 use khronos_runtime::rt::{KhronosRuntime, RuntimeCreateOpts};
 use serde::{Deserialize, Serialize};
 use serenity::all::{GuildId, UserId};
@@ -52,6 +53,14 @@ impl Id {
                 Some(Id::User(uid))
             },
             _ => None
+        }
+    }
+
+    /// Converts an Id into a khronos DiscordProviderContext
+    pub fn to_provider_context(self) -> DiscordProviderContext {
+        match self {
+            Id::Guild(guild_id) => DiscordProviderContext::Guild(guild_id),
+            Id::User(user_id) => DiscordProviderContext::User(user_id),
         }
     }
 }

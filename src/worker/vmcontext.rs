@@ -11,7 +11,7 @@ use khronos_runtime::traits::context::{
 use khronos_runtime::traits::globalkvprovider::GlobalKVProvider;
 use khronos_runtime::traits::ir::globalkv::{PartialGlobalKv, CreateGlobalKv, GlobalKv};
 use khronos_runtime::traits::ir::runtime as runtime_ir;
-use dapi::controller::DiscordProvider;
+use dapi::controller::{DiscordProvider, DiscordProviderContext};
 use khronos_runtime::traits::httpclientprovider::HTTPClientProvider;
 use khronos_runtime::traits::httpserverprovider::HTTPServerProvider;
 use khronos_runtime::traits::ir::kv::KvRecord;
@@ -49,14 +49,6 @@ impl TemplateContextProvider {
             state: vm_data.state,
             kv_constraints: vm_data.kv_constraints,
             ratelimits: vm_data.ratelimits,
-        }
-    }
-
-    #[deprecated = "Use id() method instead where possible"]
-    fn guild_id(&self) -> Option<serenity::all::GuildId> {
-        match self.id {
-            Id::Guild(guild_id) => Some(guild_id),
-            Id::User(_) => None,
         }
     }
 
@@ -98,7 +90,7 @@ impl KhronosContext for TemplateContextProvider {
 
     fn discord_provider(&self) -> Option<Self::DiscordProvider> {
         Some(ArDiscordProvider {
-            guild_id: self.guild_id()?,
+            id: self.id(),
             state: self.state.clone(),
             ratelimits: self.ratelimits.clone(),
         })
@@ -247,9 +239,18 @@ impl KVProvider for ArKVProvider {
 
 #[derive(Clone)]
 pub struct ArDiscordProvider {
-    guild_id: serenity::all::GuildId,
+    id: Id,
     state: WorkerState,
     ratelimits: Rc<Ratelimits>,
+}
+
+impl ArDiscordProvider {
+    fn guild_id(&self) -> Result<serenity::all::GuildId, crate::Error> {
+        match self.id {
+            Id::Guild(guild_id) => Ok(guild_id),
+            Id::User(_) => Err("Current context is not a guild".into()),
+        }
+    }
 }
 
 impl DiscordProvider for ArDiscordProvider {
@@ -260,7 +261,8 @@ impl DiscordProvider for ArDiscordProvider {
     async fn get_guild(
         &self,
     ) -> serenity::Result<Value, crate::Error> {
-        Ok(self.state.sandwich.guild(self.guild_id)
+        let guild_id = self.guild_id()?;
+        Ok(self.state.sandwich.guild(guild_id)
         .await
         .map_err(|e| format!("Failed to fetch guild information from sandwich: {}", e))?)
     }
@@ -277,8 +279,9 @@ impl DiscordProvider for ArDiscordProvider {
         &self,
         user_id: serenity::all::UserId,
     ) -> serenity::Result<Value, crate::Error> {
+        let guild_id = self.guild_id()?;
         let member = self.state.sandwich.member_in_guild(
-            self.guild_id,
+            guild_id,
             user_id,
         )
         .await
@@ -294,8 +297,9 @@ impl DiscordProvider for ArDiscordProvider {
     async fn get_guild_channels(
         &self,
     ) -> serenity::Result<Value, crate::Error> {
+        let guild_id = self.guild_id()?;
         let channels = self.state.sandwich.guild_channels(
-            self.guild_id,
+            guild_id,
         )
         .await
         .map_err(|e| format!("Failed to fetch channel information from sandwich: {}", e))?;
@@ -307,7 +311,8 @@ impl DiscordProvider for ArDiscordProvider {
         &self,
     ) -> serenity::Result<Value, crate::Error>
     {
-        let roles = self.state.sandwich.guild_roles(self.guild_id)
+        let guild_id = self.guild_id()?;
+        let roles = self.state.sandwich.guild_roles(guild_id)
         .await
         .map_err(|e| format!("Failed to fetch role information from sandwich: {}", e))?;
 
@@ -318,8 +323,9 @@ impl DiscordProvider for ArDiscordProvider {
         &self,
         channel_id: serenity::all::GenericChannelId,
     ) -> serenity::Result<Value, crate::Error> {
+        let guild_id = self.guild_id()?;
         let channel = self.state.sandwich.channel(
-            Some(self.guild_id),
+            Some(guild_id),
             channel_id,
         )
         .await
@@ -333,15 +339,15 @@ impl DiscordProvider for ArDiscordProvider {
             return Err(format!("Channel {channel_id} does not belong to a guild").into());
         };
 
-        if guild_id != &self.guild_id.to_string() {
+        if guild_id != &guild_id.to_string() {
             return Err(format!("Channel {channel_id} does not belong to the guild").into());
         }
 
         Ok(channel)
     }
 
-    fn guild_id(&self) -> serenity::all::GuildId {
-        self.guild_id
+    fn context(&self) -> DiscordProviderContext {
+        self.id.to_provider_context()
     }
 
     fn serenity_http(&self) -> &serenity::http::Http {
