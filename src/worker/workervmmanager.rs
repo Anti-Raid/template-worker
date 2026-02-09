@@ -15,6 +15,7 @@ use super::limits::{MAX_TEMPLATE_MEMORY_USAGE, MAX_TEMPLATES_EXECUTION_TIME};
 
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]
 /// Represents the ID of a tenant, which can currently only be a GuildId
+#[serde(tag = "type", content = "id")]
 pub enum Id {
     Guild(GuildId),
     User(UserId), // User-owned VMs (user-installed apps etc.)

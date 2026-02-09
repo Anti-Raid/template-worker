@@ -3,6 +3,7 @@ mod config;
 mod data;
 mod event_handler;
 mod mesophyll;
+mod securelua;
 mod fauxpas;
 mod objectstore;
 mod register;
