@@ -25,10 +25,10 @@ macro_rules! db_index_map {
                 let mut values = Vec::new();
                 match value {
                     LuaValue::UserData(ud) => {
-                        let Ok(ov) = ud.take::<OpaqueValue>() else {
+                        let Ok(ov) = ud.borrow::<OpaqueValue>() else {
                             return Err(LuaError::external("Expected OpaqueValue userdata"));
                         };
-                        values.push(ov);
+                        values.push(ov.clone());
                     }
                     _ => return Err(LuaError::external("Expected a table of OpaqueValue userdata")),
                 }
@@ -37,6 +37,28 @@ macro_rules! db_index_map {
         }
 
         impl OpaqueValue {
+            /// Creates an OpaqueValue from a database row, given the column index and expected type name.
+            pub fn from_row(row: &sqlx::postgres::PgRow, idx: usize, type_name: &str) -> sqlx::Result<Self> {
+                match type_name {
+                    $(
+                        $typestr => {
+                            let val = row.try_get::<$type, _>(idx)?;
+                            Ok(OpaqueValue::$base(val))
+                        },
+                        concat!($typestr, "?") => {
+                            let val = row.try_get::<Option<$type>, _>(idx)?;
+                            Ok(OpaqueValue::$opt(val))
+                        },
+                        concat!("{", $typestr, "}") => {
+                            let val = row.try_get::<Vec<$type>, _>(idx)?;
+                            Ok(OpaqueValue::$list(val))
+                        },
+                    )*
+                    _ => Err(sqlx::Error::ColumnNotFound(format!("Unknown type for OpaqueValue conversion: {}", type_name))),
+                }
+            }
+            
+            /// Creates an OpaqueValue from a Lua value, given the expected type name.
             pub fn from_lua(lua: &Lua, value: LuaValue, type_name: &str) -> LuaResult<Self> {
                 match type_name {
                     $(
@@ -73,24 +95,25 @@ macro_rules! db_index_map {
                 }
             }
 
-            pub fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+            /// Converts the OpaqueValue back into a Lua value.
+            pub fn into_lua(&self, lua: &Lua) -> LuaResult<LuaValue> {
                 match self {
                     $(
                         OpaqueValue::$base(v) => {
-                            let func = |$luaf: &Lua, $opaque: $type| $luaconvf;
+                            let func = |$luaf: &Lua, $opaque: &$type| $luaconvf;
                             func(lua, v)
                         },
                         OpaqueValue::$opt(v) => {
-                            let func = |$luaf: &Lua, $opaque: $type| $luaconvf;
+                            let func = |$luaf: &Lua, $opaque: &$type| $luaconvf;
                             let Some(v) = v else {
                                 return Ok(LuaValue::Nil);
                             };
                             func(lua, v)
                         },
                         OpaqueValue::$list(v) => {
-                            let func = |$luaf: &Lua, $opaque: $type| $luaconvf;
+                            let func = |$luaf: &Lua, $opaque: &$type| $luaconvf;
                             let table = lua.create_table()?;
-                            for item in v {
+                            for item in v.iter() {
                                 let lua_val = func(lua, item)?;
                                 table.push(lua_val)?;
                             }
@@ -130,58 +153,15 @@ macro_rules! db_index_map {
                     Ok(this.type_name())
                 });
                 methods.add_method("get", |lua, this, ()| {
-                    lua.to_value(this)
-                });
-                methods.add_method("clone", |_lua, this, ()| {
-                    Ok(this.clone())
+                    this.into_lua(lua)
                 });
             }
         }
-
-        pub struct DbIndexMapper {
-            map: fn(&sqlx::postgres::PgRow, i32) -> Result<OpaqueValue, crate::Error>,
-        }
-
-        impl DbIndexMapper {
-            fn new(typ: &str) -> Option<Self> {
-                match typ {
-                    $(
-                        $typestr => {
-                            let map_fn = |row: &sqlx::postgres::PgRow, idx: i32| {
-                                let v = OpaqueValue::$base(row.try_get(idx as usize)?);
-                                Ok(v)
-                            };
-
-                            Some(Self { map: map_fn })
-                        },
-                        concat!($typestr, "?") => {
-                            let map_fn = |row: &sqlx::postgres::PgRow, idx: i32| {
-                                let v = OpaqueValue::$opt(row.try_get(idx as usize)?);
-                                Ok(v)
-                            };
-
-                            Some(Self { map: map_fn })
-                        },
-                        concat!("{", $typestr, "}") => {
-                            let map_fn = |row: &sqlx::postgres::PgRow, idx: i32| {
-                                let v = OpaqueValue::$list(row.try_get(idx as usize)?);
-                                Ok(v)
-                            };
-
-                            Some(Self { map: map_fn })
-                        },
-                    )*
-                    _ => return None,
-                }
-            }
-        }
-
-        impl LuaUserData for DbIndexMapper {}
     };
 }
 
 db_index_map! {
-    i32 => { I32, I32Opt, I32List, "i32", |lua, value| { lua.from_value(value) }, |lua, opaque| { lua.to_value(&opaque) } },
+    i32 => { I32, I32Opt, I32List, "i32", |lua, value| { lua.from_value(value) }, |lua, opaque| { lua.to_value(opaque) } },
     i64 => { I64, I64Opt, I64List, "i64", |lua, value| { 
         match value {
             LuaValue::UserData(ud) => {
@@ -194,9 +174,9 @@ db_index_map! {
             _ => lua.from_value(value)
         }
     }, |lua, opaque| { lua.to_value(&opaque) } },
-    String => { String, StringOpt, StringList, "string", |lua, value| { lua.from_value(value) }, |lua, opaque| { lua.to_value(&opaque) } },
-    bool => { Bool, BoolOpt, BoolList, "boolean", |lua, value| { lua.from_value(value) }, |_lua, opaque| { Ok::<_, LuaError>(LuaValue::Boolean(opaque)) } },
-    f64 => { F64, F64Opt, F64List, "f64", |lua, value| { lua.from_value(value) }, |lua, opaque| { lua.to_value(&opaque) } },
+    String => { String, StringOpt, StringList, "string", |lua, value| { lua.from_value(value) }, |lua, opaque| { lua.to_value(opaque) } },
+    bool => { Bool, BoolOpt, BoolList, "boolean", |lua, value| { lua.from_value(value) }, |_lua, opaque| { Ok::<_, LuaError>(LuaValue::Boolean(*opaque)) } },
+    f64 => { F64, F64Opt, F64List, "f64", |lua, value| { lua.from_value(value) }, |lua, opaque| { lua.to_value(opaque) } },
     DateTime<Utc> => { DateTime, DateTimeOpt, DateTimeList, "datetime", |lua, value| { 
         match value {
             LuaValue::UserData(s) => {
@@ -208,9 +188,9 @@ db_index_map! {
             }
             _ => lua.from_value(value)
         }    
-    }, |lua, opaque| { lua.to_value(&opaque) } },
-    JsonValue => { Json, JsonOpt, JsonList, "json", |lua, value| { lua.from_value(value) }, |lua, opaque| { lua.to_value(&opaque) } },
-    Uuid => { Uuid, UuidOpt, UuidList, "uuid", |lua, value| { lua.from_value(value) }, |lua, opaque| { lua.to_value(&opaque) } },
+    }, |lua, opaque| { lua.to_value(opaque) } },
+    JsonValue => { Json, JsonOpt, JsonList, "json", |lua, value| { lua.from_value(value) }, |lua, opaque| { lua.to_value(opaque) } },
+    Uuid => { Uuid, UuidOpt, UuidList, "uuid", |lua, value| { lua.from_value(value) }, |lua, opaque| { lua.to_value(opaque) } },
 }
 
 #[allow(dead_code)]
@@ -220,13 +200,6 @@ pub struct Db {
 
 impl LuaUserData for Db {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("indexmap", |_lua, _this, typ: String| {
-            match DbIndexMapper::new(&typ) {
-                Some(mapper) => Ok(mapper),
-                None => Err(LuaError::external(format!("Unsupported type for index mapping: {typ}"))),
-            }
-        });
-
         methods.add_method("cast", |lua, _this: &Db, (value, typ): (LuaValue, String)| {
             OpaqueValue::from_lua(lua, value, &typ)
         });
@@ -248,11 +221,8 @@ pub struct PgRow {
 
 impl LuaUserData for PgRow {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("get", |_lua, this, (idx, mapper): (i32, LuaUserDataRef<DbIndexMapper>)| {
-            match (mapper.map)(&this.row, idx) {
-                Ok(value) => Ok(value),
-                Err(e) => Err(LuaError::external(format!("Failed to get column at index {}: {}", idx, e))),
-            }
+        methods.add_method("get", |_lua, this, (idx, typ): (usize, String)| {
+            OpaqueValue::from_row(&this.row, idx as usize, &typ).map_err(|e| LuaError::external(format!("Failed to get column {}: {}", idx, e)))
         });
     }
 }
