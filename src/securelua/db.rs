@@ -4,7 +4,9 @@ use chrono::{DateTime, Utc};
 use serde_json::Value as JsonValue;
 use sqlx::types::Uuid;
 
-macro_rules! db_index_map {
+#[macro_export]
+/// Macro to setup the db plugin with a list of supported types and their conversions.
+macro_rules! db_plugin {
     ($($type:ty => { $base:ident, $opt:ident, $list:ident, $typestr:literal, |$lua:ident, $val:ident| $luaconv:block, |$luaf:ident, $opaque:ident| $luaconvf:block }),* $(,)?) => {
         use serde::{Serialize, Deserialize};
         use sqlx::Row;
@@ -157,10 +159,44 @@ macro_rules! db_index_map {
                 });
             }
         }
+
+        #[allow(dead_code)]
+        pub struct Db {
+            pub pool: PgPool,
+        }
+
+        impl LuaUserData for Db {
+            fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
+                methods.add_method("cast", |lua, _this: &Db, (value, typ): (LuaValue, String)| {
+                    OpaqueValue::from_lua(lua, value, &typ)
+                });
+
+                methods.add_scheduler_async_method("fetchall", async |_lua, this, (query, params): (String, OpaqueValueTaker)| {
+                    let mut q = sqlx::query(&query);
+                    for param in params.0 {
+                        q = param.bind(q);
+                    }
+                    let rows = q.fetch_all(&this.pool).await.map_err(|e| LuaError::external(format!("Database query failed: {}", e)))?;
+                    Ok(rows.into_iter().map(|row| PgRow { row }).collect::<Vec<_>>())
+                });
+            }
+        }
+
+        pub struct PgRow {
+            row: sqlx::postgres::PgRow,
+        }
+
+        impl LuaUserData for PgRow {
+            fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
+                methods.add_method("get", |_lua, this, (idx, typ): (usize, String)| {
+                    OpaqueValue::from_row(&this.row, idx as usize, &typ).map_err(|e| LuaError::external(format!("Failed to get column {}: {}", idx, e)))
+                });
+            }
+        }
     };
 }
 
-db_index_map! {
+db_plugin! {
     i32 => { I32, I32Opt, I32List, "i32", |lua, value| { lua.from_value(value) }, |lua, opaque| { lua.to_value(opaque) } },
     i64 => { I64, I64Opt, I64List, "i64", |lua, value| { 
         match value {
@@ -193,36 +229,3 @@ db_index_map! {
     Uuid => { Uuid, UuidOpt, UuidList, "uuid", |lua, value| { lua.from_value(value) }, |lua, opaque| { lua.to_value(opaque) } },
 }
 
-#[allow(dead_code)]
-pub struct Db {
-    pub pool: PgPool,
-}
-
-impl LuaUserData for Db {
-    fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("cast", |lua, _this: &Db, (value, typ): (LuaValue, String)| {
-            OpaqueValue::from_lua(lua, value, &typ)
-        });
-
-        methods.add_scheduler_async_method("fetchall", async |_lua, this, (query, params): (String, OpaqueValueTaker)| {
-            let mut q = sqlx::query(&query);
-            for param in params.0 {
-                q = param.bind(q);
-            }
-            let rows = q.fetch_all(&this.pool).await.map_err(|e| LuaError::external(format!("Database query failed: {}", e)))?;
-            Ok(rows.into_iter().map(|row| PgRow { row }).collect::<Vec<_>>())
-        });
-    }
-}
-
-pub struct PgRow {
-    row: sqlx::postgres::PgRow,
-}
-
-impl LuaUserData for PgRow {
-    fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("get", |_lua, this, (idx, typ): (usize, String)| {
-            OpaqueValue::from_row(&this.row, idx as usize, &typ).map_err(|e| LuaError::external(format!("Failed to get column {}: {}", idx, e)))
-        });
-    }
-}
