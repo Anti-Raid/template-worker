@@ -1,5 +1,5 @@
 use khronos_runtime::rt::{mlua::prelude::*, mlua_scheduler::LuaSchedulerAsyncUserData};
-use crate::{fauxpas::base::LuaId, mesophyll::server::DbState, worker::workerlike::WorkerLike};
+use crate::{fauxpas::base::LuaId, mesophyll::dbstate::DbState, worker::workerlike::WorkerLike};
 
 /// LuaGod is a special God-level entity that provides access to everything else in the staff lua api
 /// 

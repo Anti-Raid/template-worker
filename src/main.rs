@@ -15,7 +15,7 @@ use crate::config::CONFIG;
 use crate::data::Data;
 use crate::event_handler::EventFramework;
 use crate::mesophyll::client::{MesophyllClient, MesophyllDbClient};
-use crate::mesophyll::server::DbState;
+use crate::mesophyll::dbstate::DbState;
 use crate::migrations::apply_migrations;
 use crate::sandwich::Sandwich;
 use crate::worker::workerdb::WorkerDB;

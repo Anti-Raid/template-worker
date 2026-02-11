@@ -11,5 +11,7 @@
 pub mod message;
 pub mod client;
 pub mod server;
+pub mod dbstate;
+pub mod dbtypes;
 
 pub(super) const MESOPHYLL_DEFAULT_HEARTBEAT_MS: u64 = 5000;

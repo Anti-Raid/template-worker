@@ -1,6 +1,6 @@
 use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
 
-use crate::{mesophyll::server::CreateGlobalKv, worker::workervmmanager::Id};
+use crate::{mesophyll::dbtypes::CreateGlobalKv, worker::workervmmanager::Id};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub enum ServerMessage {

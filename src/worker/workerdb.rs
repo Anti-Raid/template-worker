@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use khronos_runtime::utils::khronos_value::KhronosValue;
 
-use crate::{mesophyll::{client::MesophyllDbClient, server::{CreateGlobalKv, DbState, PartialGlobalKv, GlobalKv, SerdeKvRecord}}, worker::{workerstate::TenantState, workervmmanager::Id}};
+use crate::{mesophyll::{client::MesophyllDbClient, dbtypes::{CreateGlobalKv, PartialGlobalKv, GlobalKv, SerdeKvRecord}, dbstate::DbState}, worker::{workerstate::TenantState, workervmmanager::Id}};
 
 /// An abstraction over the database access method for worker state
 pub enum WorkerDB {

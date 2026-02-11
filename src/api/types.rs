@@ -16,7 +16,7 @@ use serenity::all::CommandType;
 use ts_rs::TS;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 
-use crate::mesophyll::server::PartialGlobalKv;
+use crate::mesophyll::dbtypes::PartialGlobalKv;
 
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema, TS)]
 #[ts(export)]

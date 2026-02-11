@@ -1,4 +1,4 @@
-use crate::mesophyll::server::DbState;
+use crate::mesophyll::dbstate::DbState;
 
 use super::internal_api;
 use super::public_api;

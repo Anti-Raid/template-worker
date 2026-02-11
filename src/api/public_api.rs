@@ -15,7 +15,7 @@ use crate::api::types::AuthorizeRequest;
 use crate::api::types::GetStatusResponse;
 use crate::api::types::GuildChannelWithPermissions;
 use crate::api::types::KhronosValueApi;
-use crate::mesophyll::server::GlobalKv;
+use crate::mesophyll::dbtypes::GlobalKv;
 use crate::api::types::PartialGlobalKvList;
 use crate::api::types::PublicLuauExecute;
 use crate::api::types::ShardConn;
