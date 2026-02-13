@@ -1446,7 +1446,7 @@ dependencies = [
 [[package]]
 name = "dapi"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#2920658a26ba0186eb8e0963fb3d0b00c324994a"
+source = "git+https://github.com/anti-raid/khronos#4e5e79ac59f6e11fb300ba8662c2280a7925e0c6"
 dependencies = [
  "async-trait",
  "bitflags 2.10.0",
@@ -2911,7 +2911,7 @@ dependencies = [
 [[package]]
 name = "khronos_runtime"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#2920658a26ba0186eb8e0963fb3d0b00c324994a"
+source = "git+https://github.com/anti-raid/khronos#4e5e79ac59f6e11fb300ba8662c2280a7925e0c6"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -3028,7 +3028,7 @@ dependencies = [
 [[package]]
 name = "linkify"
 version = "0.10.0"
-source = "git+https://github.com/robinst/linkify#5239e12e26c633f42323e51ed81b0ff534528077"
+source = "git+https://github.com/robinst/linkify#eccbe3888bda78970d87031095d587719d97a255"
 dependencies = [
  "memchr",
 ]

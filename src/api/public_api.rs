@@ -217,6 +217,7 @@ pub(super) async fn get_user_guilds(
                 name: String,
                 icon: Option<String>,
                 permissions: String,
+                owner: bool,
             }
 
             let guilds: Vec<OauthGuild> = resp.json()
@@ -231,6 +232,7 @@ pub(super) async fn get_user_guilds(
                     name: guild.name,
                     icon: guild.icon,
                     permissions: guild.permissions,
+                    owner: guild.owner,
                 };
 
                 dashboard_guilds.push(dashboard_guild);

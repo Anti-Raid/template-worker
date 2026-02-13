@@ -103,6 +103,7 @@ pub struct DashboardGuild {
     pub name: String,
     pub icon: Option<String>,
     pub permissions: String,
+    pub owner: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema, TS)]

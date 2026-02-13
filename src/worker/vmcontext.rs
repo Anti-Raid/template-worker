@@ -245,6 +245,8 @@ pub struct ArDiscordProvider {
 }
 
 impl ArDiscordProvider {
+    const DISCLAIMER: &str = "Content provided by users is the sole responsibility of the author. AntiRaid does not monitor, verify, or endorse any user-generated messages.";
+
     fn guild_id(&self) -> Result<serenity::all::GuildId, crate::Error> {
         match self.id {
             Id::Guild(guild_id) => Ok(guild_id),
@@ -256,6 +258,18 @@ impl ArDiscordProvider {
 impl DiscordProvider for ArDiscordProvider {
     fn attempt_action(&self, bucket: &str) -> serenity::Result<(), crate::Error> {
         self.ratelimits.discord.check(bucket)
+    }
+
+    // inject disclaimer into messages sent by the bot that are not interaction responses
+    fn superuser_transform_message_before_send(&self, msg: dapi::controller::SuperUserMessageTransform, flags: dapi::controller::SuperUserMessageTransformFlags) -> Result<dapi::controller::SuperUserMessageTransform, dapi::Error> {
+        if flags.is_interaction_response() {
+            return Ok(msg) // Do not inject disclaimer in interaction responses (for now)
+        }
+
+        dapi::ensure_safe::inject_disclaimer(
+            msg,
+            Self::DISCLAIMER,
+        )
     }
 
     async fn get_guild(
