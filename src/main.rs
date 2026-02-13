@@ -69,10 +69,6 @@ struct CmdArgs {
     #[clap(long, default_value_t = false)]
     pub worker_debug: bool,
 
-    /// Number of threads to use for the worker thread pool
-    #[clap(long, default_value = "30")]
-    pub thread_workers: usize,
-
     /// Number of process workers to use for the process pool
     #[clap(long, default_value = None)]
     pub process_workers: Option<usize>,
@@ -235,13 +231,27 @@ async fn main_impl(args: CmdArgs) {
             apply_migrations(pg_pool).await.expect("Failed to apply migrations");
         }
         WorkerType::ThreadPool => {
+            // Ask sandwich how many shards we should use
+            let shards = loop {
+                let shard_count = match sandwich.get_shard_count().await {
+                    Ok(count) => count,
+                    Err(e) => {
+                        error!("Failed to get shard count from Sandwich: {:?}, retrying in 5 seconds...", e);
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        continue;
+                    }
+                };
+
+                break shard_count;
+            };
+
             let pg_pool = PgPoolOptions::new()
                 .max_connections(args.max_db_connections)
                 .connect(&CONFIG.meta.postgres_url)
                 .await
                 .expect("Could not initialize connection");
 
-            let db_state = DbState::new(pg_pool.clone())
+            let db_state = DbState::new(shards, pg_pool.clone())
             .await
             .expect("Failed to create DbState");
 
@@ -260,7 +270,7 @@ async fn main_impl(args: CmdArgs) {
             );
 
             let worker_pool = Arc::new(
-                WorkerPool::<WorkerThread>::new(args.thread_workers, &worker_state)
+                WorkerPool::<WorkerThread>::new(shards, &worker_state)
                     .expect("Failed to create worker thread pool"),
             );
 
@@ -360,43 +370,38 @@ async fn main_impl(args: CmdArgs) {
 
             // Loop indefinitely until Ctrl+C is pressed
             #[allow(clippy::never_loop)] // loop here is for documenting semantics
-            loop {
-                // On Unix, listen for *both* SIGINT and SIGTERM
-                #[cfg(unix)]
-                {
-                    use tokio::signal::unix::{signal, SignalKind};
+            // On Unix, listen for *both* SIGINT and SIGTERM
+            #[cfg(unix)]
+            {
+                use tokio::signal::unix::{signal, SignalKind};
 
-                    let mut sigint =
-                        signal(SignalKind::interrupt()).expect("Failed to set up SIGINT handler");
-                    let mut sigterm =
-                        signal(SignalKind::terminate()).expect("Failed to set up SIGTERM handler");
+                let mut sigint =
+                    signal(SignalKind::interrupt()).expect("Failed to set up SIGINT handler");
+                let mut sigterm =
+                    signal(SignalKind::terminate()).expect("Failed to set up SIGTERM handler");
 
-                    tokio::select! {
-                        _ = sigint.recv() => {
-                            // Kill the worker pool
-                            info!("Received SIGINT, shutting down worker pool");
-                            worker_pool.kill().await.expect("Failed to kill worker pool");
-                            break; // Exit the loop
-                        }
-                        _ = sigterm.recv() => {
-                            // Kill the worker pool
-                            info!("Received SIGTERM, shutting down worker pool");
-                            worker_pool.kill().await.expect("Failed to kill worker pool");
-                            break; // Exit the loop
-                        }
+                tokio::select! {
+                    _ = sigint.recv() => {
+                        // Kill the worker pool
+                        info!("Received SIGINT, shutting down worker pool");
+                        worker_pool.kill().await.expect("Failed to kill worker pool");
+                    }
+                    _ = sigterm.recv() => {
+                        // Kill the worker pool
+                        info!("Received SIGTERM, shutting down worker pool");
+                        worker_pool.kill().await.expect("Failed to kill worker pool");
                     }
                 }
+            }
 
-                // Fallback for non-unix systems
-                #[cfg(not(unix))]
-                {
-                    tokio::select! {
-                        _ = tokio::signal::ctrl_c() => {
-                            // Kill the worker pool
-                            info!("Received Ctrl+C, shutting down worker pool");
-                            worker_pool.kill().await.expect("Failed to kill worker pool");
-                            break; // Exit the loop
-                        }
+            // Fallback for non-unix systems
+            #[cfg(not(unix))]
+            {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {
+                        // Kill the worker pool
+                        info!("Received Ctrl+C, shutting down worker pool");
+                        worker_pool.kill().await.expect("Failed to kill worker pool");
                     }
                 }
             }
@@ -428,7 +433,6 @@ async fn main_impl(args: CmdArgs) {
             let worker_thread = Arc::new(
                 WorkerThread::new(
                     worker_state,
-                    WorkerPool::<WorkerProcessHandle>::filter_for(worker_id, process_workers),
                     worker_id,
                 )
                 .expect("Failed to create worker thread"),

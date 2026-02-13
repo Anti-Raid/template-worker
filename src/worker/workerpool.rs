@@ -6,18 +6,15 @@ use khronos_runtime::utils::khronos_value::KhronosValue;
 
 use crate::worker::workerlike::WorkerLike;
 use crate::worker::workerthread::WorkerThread;
-
 use super::workervmmanager::Id;
-
-use super::workerfilter::WorkerFilter;
 
 /// The Poolable trait provides the needed operations a WorkerLike needs to additionally
 /// implement to be used in a worker thread pool
 pub trait Poolable: WorkerLike + Send + Sync {
     type ExtState: Send + Sync;
 
-    /// Returns a new `Poolable` object given `state`, `filters` and `id`
-    fn new(filter: WorkerFilter, id: usize, total: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
+    /// Returns a new `Poolable` object given a `id`
+    fn new(id: usize, total: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
     where
         Self: Sized;
 }
@@ -38,8 +35,7 @@ impl<T: Poolable> WorkerPool<T> {
         let mut workers = Vec::with_capacity(num_threads);
 
         for id in 0..num_threads {
-            let filter = Self::filter_for(id, num_threads);
-            let thread = T::new(filter, id, num_threads, ext_state)?;
+            let thread = T::new(id, num_threads, ext_state)?;
             workers.push(thread);
         }
 
@@ -50,37 +46,9 @@ impl<T: Poolable> WorkerPool<T> {
 }
 
 impl<T: WorkerLike> WorkerPool<T> {
-    /// Defines a filter for a worker in the pool
-    pub fn filter_for(id: usize, num_threads: usize) -> WorkerFilter {
-        let closure = move |tenant_id: Id| {
-            match tenant_id {
-                // This is safe as AntiRaid workers does not currently support 32 bit platforms
-                Id::Guild(guild_id) => ((guild_id.get() >> 22) as usize) % num_threads == id,
-                // TODO: Come up with a potentially better sharding formula for user IDs
-                // or just use 0 always (what discord does for DMs)
-                Id::User(user_id) => ((user_id.get() >> 22) as usize) % num_threads == id,
-            }
-        };
-
-        WorkerFilter::new(closure)
-    }
-
     /// Returns a reference to the WorkerThread in the pool for a given tenant ID
     pub fn get_worker_for(&self, id: Id) -> &T {
-        let index = match id {
-            // This is safe as AntiRaid workers does not currently support 32 bit platforms
-            Id::Guild(guild_id) => (guild_id.get() >> 22) as usize % self.workers.len(),
-            // TODO: Come up with a potentially better sharding formula for user IDs
-            // or just use 0 always (what discord does for DMs)
-            Id::User(user_id) => (user_id.get() >> 22) as usize % self.workers.len(),
-        };
-        &self.workers[index]
-    }
-
-    /// Returns the number of workers in the pool
-    #[allow(dead_code)]
-    pub fn len(&self) -> usize {
-        self.workers.len()
+        &self.workers[id.worker_id(self.workers.len())]
     }
 }
 

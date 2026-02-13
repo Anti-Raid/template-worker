@@ -64,6 +64,17 @@ impl Id {
             Id::User(user_id) => DiscordProviderContext::User(user_id),
         }
     }
+
+    /// Returns a the worker ID given tenant ID
+    pub fn worker_id(&self, num_workers: usize) -> usize {
+        match self {
+            // This is safe as AntiRaid workers does not currently support 32 bit platforms
+            Id::Guild(guild_id) => (guild_id.get() >> 22) as usize % num_workers,
+            // TODO: Come up with a potentially better sharding formula for user IDs
+            // or just use 0 always (what discord does for DMs)
+            Id::User(user_id) => (user_id.get() >> 22) as usize % num_workers,
+        }
+    }
 }
 
 /// Represents the data associated with a VM, which includes the guild state and the Khronos runtime manager

@@ -1,3 +1,4 @@
+use aws_sdk_s3::{primitives::ByteStream, types::{CompletedMultipartUpload, CompletedPart}};
 use serenity::all::{GuildId, UserId};
 
 use crate::worker::workervmmanager::Id;
@@ -391,110 +392,40 @@ impl ObjectStore {
     ) -> Result<(), crate::Error> {
         match self {
             ObjectStore::S3 { client, .. } => {
-                if data.len() > MULTIPART_MIN_SIZE {
-                    let cmuo = client
-                        .create_multipart_upload()
-                        .bucket(b.bucket())
-                        .key(b.key()?)
-                        .send()
-                        .await?;
+                let bucket = b.bucket();
+                let key = b.key()?;
+                if data.len() < MULTIPART_MIN_SIZE {
+                    client.put_object().bucket(bucket).key(&key).body(ByteStream::from(data)).send().await?;
+                    return Ok(());
+                }
 
-                    let Some(upload_id) = cmuo.upload_id else {
-                        return Err("Failed to get upload id".into());
-                    };
+                let upload_id = client.create_multipart_upload().bucket(bucket).key(&key).send().await?
+                    .upload_id.ok_or("No upload ID")?;
 
-                    // Upload parts
-                    let mut error: Option<crate::Error> = None;
-                    let mut parts = vec![];
-                    loop {
-                        let mut action = client
-                            .upload_part()
-                            .bucket(b.bucket())
-                            .upload_id(upload_id.clone())
-                            .key(b.key()?)
-                            .part_number(match parts.len().try_into() {
-                                Ok(part_number) => part_number,
-                                Err(_) => {
-                                    error = Some("Failed to convert part number".into());
-                                    break;
-                                }
-                            });
+                let mut completed_parts = Vec::new();
+                for (i, chunk) in data.chunks(CHUNK_SIZE).enumerate() {
+                    let part_number = (i + 1) as i32;
+                    let resp = client.upload_part()
+                        .bucket(bucket).key(&key).upload_id(&upload_id)
+                        .part_number(part_number)
+                        .body(ByteStream::from(chunk.to_vec()))
+                        .send().await;
 
-                        // Split into 5 mb parts
-                        let range = std::ops::Range {
-                            start: parts.len() * CHUNK_SIZE,
-                            end: std::cmp::min(data.len(), (parts.len() + 1) * CHUNK_SIZE),
-                        };
-
-                        let send_data = &data[range.start..range.end];
-
-                        action = action.body(aws_smithy_types::byte_stream::ByteStream::from(
-                            send_data.to_vec(),
-                        ));
-
-                        let resp = match action.send().await {
-                            Ok(resp) => resp,
-                            Err(e) => {
-                                error = Some(format!("Failed to upload part: {}", e).into());
-                                break;
-                            }
-                        };
-
-                        let Some(e_tag) = resp.e_tag else {
-                            error = Some("Failed to get e_tag".into());
-                            break;
-                        };
-
-                        parts.push(
-                            aws_sdk_s3::types::CompletedPart::builder()
-                                .e_tag(e_tag)
-                                .part_number(parts.len().try_into()?)
-                                .build(),
-                        );
-
-                        if range.end == data.len() {
-                            break;
+                    match resp {
+                        Ok(r) => completed_parts.push(CompletedPart::builder().e_tag(r.e_tag.unwrap_or_default()).part_number(part_number).build()),
+                        Err(e) => {
+                            let _ = client.abort_multipart_upload().bucket(bucket).key(&key).upload_id(&upload_id).send().await;
+                            return Err(format!("Upload part failed: {}", e).into());
                         }
                     }
-
-                    if let Some(error) = error {
-                        client
-                            .abort_multipart_upload()
-                            .bucket(b.bucket())
-                            .key(b.key()?)
-                            .upload_id(upload_id)
-                            .send()
-                            .await?;
-
-                        return Err(error);
-                    }
-
-                    let completed_multipart_upload =
-                        aws_sdk_s3::types::CompletedMultipartUpload::builder()
-                            .set_parts(Some(parts))
-                            .build();
-
-                    client
-                        .complete_multipart_upload()
-                        .bucket(b.bucket())
-                        .key(b.key()?)
-                        .upload_id(upload_id)
-                        .multipart_upload(completed_multipart_upload)
-                        .send()
-                        .await?;
-
-                    Ok(())
-                } else {
-                    client
-                        .put_object()
-                        .bucket(b.bucket())
-                        .key(b.key()?)
-                        .body(aws_smithy_types::byte_stream::ByteStream::from(data))
-                        .send()
-                        .await?;
-
-                    Ok(())
                 }
+
+                client.complete_multipart_upload()
+                    .bucket(bucket).key(&key).upload_id(upload_id)
+                    .multipart_upload(CompletedMultipartUpload::builder().set_parts(Some(completed_parts)).build())
+                    .send().await?;
+
+                    Ok(())
             }
             ObjectStore::Local { dir } => {
                 let path = std::path::Path::new(dir).join(b.bucket()).join(b.key()?);

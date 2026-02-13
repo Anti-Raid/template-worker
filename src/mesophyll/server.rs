@@ -33,9 +33,9 @@ impl MesophyllServer {
 
     pub async fn new_with(addr: String, idents: HashMap<usize, String>, pool: sqlx::PgPool) -> Result<Self, crate::Error> {
         let s = Self {
+            db_state: DbState::new(idents.len(), pool).await?,
             idents: Arc::new(idents),
             conns: Arc::new(DashMap::new()),
-            db_state: DbState::new(pool).await?,
         };
 
         // Axum Router
@@ -99,7 +99,7 @@ impl WorkerQuery {
     }
 }
 
-/// DB API to fetch all tenant states
+/// DB API to fetch the tenant states assigned to the given worker
 async fn list_tenant_states(
     Query(worker_query): Query<WorkerQuery>,
     State(state): State<MesophyllServer>,
@@ -108,7 +108,7 @@ async fn list_tenant_states(
         return resp;
     }
 
-    state.db_state.tenant_state_cache(|c| encode_db_resp(&c)).await
+    encode_db_resp(&state.db_state.tenant_state_cache_for(worker_query.id).await)
 }
 
 #[derive(serde::Deserialize)]

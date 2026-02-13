@@ -66,14 +66,12 @@ pub struct WorkerState {
     pub sandwich: Sandwich,
     pub worker_print: bool,
     tenant_state_cache: Rc<RefCell<HashMap<Id, TenantState>>>, // Maps tenant IDs to their states
-    startup_events: Rc<RefCell<HashSet<Id>>>, // Tracks which tenants have had their startup events fired
 }
 
 impl WorkerState {
     /// Creates a new WorkerState with the given serenity context, reqwest client, object store, and database pool
-    pub async fn new(cws: CreateWorkerState) -> Result<Self, crate::Error> {
+    pub async fn new(cws: CreateWorkerState, worker_id: usize) -> Result<Self, crate::Error> {
         let tenant_state_cache = Rc::new(RefCell::new(HashMap::new()));
-        let startup_events = Rc::new(RefCell::new(HashSet::new()));
         let s = Self {
             serenity_http: cws.serenity_http,
             _reqwest_client: cws.reqwest_client,
@@ -83,40 +81,31 @@ impl WorkerState {
             sandwich: cws.sandwich,
             worker_print: cws.worker_print,
             tenant_state_cache,
-            startup_events,
         };
 
         // Initialize the tenant state cache with the current tenant states from the database
         //
         // The tenant state cache acts as a routing table
-        let (t_states, startup_events) = s.get_tenant_state().await
-            .map_err(|e| format!("Failed to initialize tenant state cache: {}", e))?;
+        let t_states = match &*s.mesophyll_db {
+            WorkerDB::Direct(ref db) => db.tenant_state_cache_for(worker_id).await,
+            WorkerDB::Mesophyll(ref client) => client.list_tenant_states().await?,
+        };
         *s.tenant_state_cache.borrow_mut() = t_states;
-        *s.startup_events.borrow_mut() = startup_events;
 
         Ok(s)
     }
 
-    /// Returns the tenant state(s) for all guilds in the database as well as a set of guild IDs that have startup events enabled
-    /// 
-    /// Should only be called once, on startup, to initialize the tenant state cache
-    async fn get_tenant_state(&self) -> Result<(HashMap<Id, TenantState>, HashSet<Id>), crate::Error> {
-        let states = self.mesophyll_db.list_tenant_states().await?;
-
+    /// Returns the set of tenant IDs that have startup events enabled
+    pub fn get_startup_event_tenants(&self) -> HashSet<Id> {
         let mut startup_events = HashSet::new();  
-        for (id, ts) in states.iter() {
+        let ts = self.tenant_state_cache.borrow();
+        for (id, ts) in ts.iter() {
             // Track startup events
             if ts.events.contains(&"OnStartup".to_string()) {
-                startup_events.insert(id.clone());
+                startup_events.insert(*id);
             }
         }
-
-        Ok((states, startup_events))
-    }
-
-    /// Returns the set of tenant IDs that have startup events enabled
-    pub fn get_startup_event_tenants(&self) -> Result<std::cell::Ref<'_, HashSet<Id>>, crate::Error> {
-        Ok(self.startup_events.try_borrow()?)
+        startup_events
     }
 
     /// Gets the tenant state for a specific tenant
@@ -134,16 +123,6 @@ impl WorkerState {
     /// Sets the tenant state for a specific tenant
     pub async fn set_tenant_state_for(&self, id: Id, state: TenantState) -> Result<(), crate::Error> {
         self.mesophyll_db.set_tenant_state_for(id, &state).await?;
-
-        // Update startup events tracking
-        {
-            let mut startup_events = self.startup_events.borrow_mut();
-            if state.events.contains(&"OnStartup".to_string()) {
-                startup_events.insert(id);
-            } else {
-                startup_events.remove(&id);
-            }
-        }
 
         // Update the cache
         {

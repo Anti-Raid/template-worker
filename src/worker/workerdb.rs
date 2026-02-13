@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use khronos_runtime::utils::khronos_value::KhronosValue;
 
 use crate::{mesophyll::{client::MesophyllDbClient, dbtypes::{CreateGlobalKv, PartialGlobalKv, GlobalKv, SerdeKvRecord}, dbstate::DbState}, worker::{workerstate::TenantState, workervmmanager::Id}};
@@ -17,13 +15,6 @@ impl WorkerDB {
 
     pub fn new_mesophyll(client: MesophyllDbClient) -> Self {
         WorkerDB::Mesophyll(client)
-    }
-
-    pub async fn list_tenant_states(&self) -> Result<HashMap<Id, TenantState>, crate::Error> {
-        match self {
-            WorkerDB::Direct(d) => d.list_tenant_states().await,
-            WorkerDB::Mesophyll(c) => c.list_tenant_states().await,
-        }
     }
 
     pub async fn set_tenant_state_for(&self, id: Id, state: &TenantState) -> Result<(), crate::Error> {

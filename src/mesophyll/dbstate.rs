@@ -8,14 +8,16 @@ use sqlx::Row;
 #[derive(Clone)]
 pub struct DbState {
     pool: sqlx::PgPool,
-    tenant_state_cache: Arc<RwLock<HashMap<Id, TenantState>>>, // server side tenant state cache
+    num_workers: usize,
+    tenant_state_cache: Arc<RwLock<HashMap<Id, TenantState>>>, // global tenant state cache
     purchased_cache: Arc<RwLock<HashSet<(String, Id)>>>, // cache of purchased global kvs (key, tenant id)
 }
 
 impl DbState {
-    pub async fn new(pool: sqlx::PgPool) -> Result<Self, crate::Error> {
+    pub async fn new(num_workers: usize, pool: sqlx::PgPool) -> Result<Self, crate::Error> {
         let mut s = Self {
             pool,
+            num_workers,
             tenant_state_cache: Arc::new(RwLock::new(HashMap::new())),
             purchased_cache: Arc::new(RwLock::new(HashSet::new())),
         };
@@ -31,12 +33,18 @@ impl DbState {
     }
 
     /// Returns the underlying tenant state cache
-    pub async fn tenant_state_cache<R>(&self, f: impl FnOnce(&HashMap<Id, TenantState>) -> R) -> R {
+    pub async fn tenant_state_cache_for(&self, worker_id: usize) -> HashMap<Id, TenantState> {
         let cache = self.tenant_state_cache.read().await;
-        f(&cache)
+        let mut tenant_states_for_worker = HashMap::new();
+        for (id, ts) in cache.iter() {
+            if id.worker_id(self.num_workers) == worker_id {
+                tenant_states_for_worker.insert(*id, ts.clone());
+            }
+        }
+        tenant_states_for_worker
     }
 
-    /// Returns the tenant state(s) for all tenant in the database as well as a set of tenant IDs that have startup events enabled
+    /// Returns the tenant state(s) for all tenant in the database
     /// 
     /// Should only be called once, on startup, to initialize the tenant state cache
     async fn get_tenant_state(&self) -> Result<HashMap<Id, TenantState>, crate::Error> {
@@ -67,12 +75,6 @@ impl DbState {
         }
 
         Ok(states)
-    }
-
-    /// Helper method to return all tenant states from the internal cache
-    pub async fn list_tenant_states(&self) -> Result<HashMap<Id, TenantState>, crate::Error> {
-        let cache = self.tenant_state_cache.read().await;
-        Ok(cache.clone())
     }
 
     /// Sets the tenant state for a specific tenant and updates the internal cache

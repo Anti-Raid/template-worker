@@ -1,6 +1,5 @@
 use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
 use serde_json::json;
-use crate::worker::workerfilter::WorkerFilter;
 use super::workervmmanager::{Id, WorkerVmManager, VmData};
 use super::vmcontext::TemplateContextProvider;
 use khronos_runtime::rt::mlua;
@@ -11,35 +10,24 @@ use khronos_runtime::rt::mlua;
 pub struct WorkerDispatch {
     /// VM Manager for the worker
     vm_manager: WorkerVmManager,
-    /// Worker filter
-    filter: WorkerFilter,
 }
 
 impl WorkerDispatch {
     /// Creates a new WorkerDispatch with the given WorkerVmManager
-    pub fn new(vm_manager: WorkerVmManager, filter: WorkerFilter) -> Self {
-        let dispatch = Self { vm_manager, filter };
+    pub fn new(vm_manager: WorkerVmManager) -> Self {
+        let dispatch = Self { vm_manager };
 
-        // Fire resume keys on creation
-        let self_ref = dispatch.clone();
-        tokio::task::spawn_local(async move {
-            if let Err(e) = self_ref.dispatch_startup_events().await {
-                log::error!("Failed to dispatch startup events on WorkerDispatch creation: {}", e);
-            }
-        });
+        // Dispatch startup events for all tenants in the background upon creation of the WorkerDispatch
+        dispatch.dispatch_startup_events();
 
         dispatch
     }
 
     /// Dispatches startup events for all tenants
-    pub async fn dispatch_startup_events(&self) -> Result<(), crate::Error> {
-        let ids = self.vm_manager.worker_state().get_startup_event_tenants()?;
+    pub fn dispatch_startup_events(&self) {
+        let ids = self.vm_manager.worker_state().get_startup_event_tenants();
         for id in ids.iter() {
             let id = *id;
-            if !self.filter.is_allowed(id) {
-                continue;
-            }
-            
             log::info!(
                 "Dispatching startup event for ID {id:?}",
             );
@@ -55,7 +43,6 @@ impl WorkerDispatch {
                 }
             });
         }
-        Ok(())
     }
 
     /// Runs a script directly on the VM for the given tenant ID with the provided event

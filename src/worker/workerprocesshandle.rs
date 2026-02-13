@@ -7,7 +7,6 @@ use khronos_runtime::utils::khronos_value::KhronosValue;
 use tokio::process::Command;
 use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 use crate::mesophyll::server::MesophyllServer;
-use crate::worker::workerfilter::WorkerFilter;
 use crate::worker::workerlike::WorkerLike;
 use crate::worker::workerpool::Poolable;
 use crate::worker::workervmmanager::Id;
@@ -194,7 +193,7 @@ impl WorkerProcessHandleCreateOpts {
 impl Poolable for WorkerProcessHandle {
     type ExtState = WorkerProcessHandleCreateOpts;
 
-    fn new(_filter: WorkerFilter, id: usize, total: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
+    fn new(id: usize, total: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
     where Self: Sized 
     {
         Self::new(id, total, ext_state.mesophyll_server.clone())
