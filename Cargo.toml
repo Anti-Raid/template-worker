@@ -25,6 +25,7 @@ moka = { version = "0.12", features = ["future", "futures-util", "sync"] }
 indexmap = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 khronos_runtime = { git = "https://github.com/anti-raid/khronos" }
+khronos_ext = { git = "https://github.com/anti-raid/khronos" }
 dapi = { git = "https://github.com/anti-raid/khronos" }
 vfs = { git = "https://github.com/Anti-Raid/rust-vfs", features = ["embedded-fs"] }
 rust-embed = { version = "8.7.0", features = ["debug-embed", "interpolate-folder-path"] }
