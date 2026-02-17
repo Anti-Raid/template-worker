@@ -136,6 +136,8 @@ pub struct AuthorizeRequest {
     pub code: String,
     /// The redirect URI to return to after authorization
     pub redirect_uri: String,
+    /// Code verifier for PKCE
+    pub code_verifier: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema, TS)]

@@ -474,14 +474,26 @@ pub(super) async fn create_oauth2_session(
 
     OAUTH2_CODE_CACHE.insert(req.code.clone(), ()).await;
 
+    #[derive(serde::Serialize)]
+    pub struct Response<'a> {
+        client_id: UserId,
+        client_secret: &'a str,
+        grant_type: &'static str,
+        code: String,
+        redirect_uri: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code_verifier: Option<String>,
+    }
+
     let resp = data.reqwest.post(format!("{}/api/v10/oauth2/token", crate::CONFIG.meta.proxy))
-        .form(&[
-            ("client_id", &data.current_user.id.to_string()),
-            ("client_secret", &crate::CONFIG.discord_auth.client_secret),
-            ("grant_type", &"authorization_code".to_string()),
-            ("code", &req.code),
-            ("redirect_uri", &req.redirect_uri),
-        ])
+        .form(&Response {
+            client_id: data.current_user.id,
+            client_secret: &crate::CONFIG.discord_auth.client_secret,
+            grant_type: "authorization_code",
+            code: req.code,
+            redirect_uri: req.redirect_uri,
+            code_verifier: req.code_verifier,
+        })
         .send()
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get access token: {e:?}").into())))?;
