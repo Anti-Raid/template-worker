@@ -8,8 +8,8 @@ function pullCommand {
 
 git submodule init && git submodule update --init --recursive
 
-cd luau/builtins
+cd ../luau/builtins
 pullCommand
 
-cd templatting-types
+cd templating-types
 pullCommand
