@@ -232,7 +232,7 @@ ORDER BY scope",
             if query == "%%" {
                 // Fast path, omit ILIKE if '%%' is used
                 sqlx::query(
-                "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM tenant_kv WHERE owner_id = $1 AND owner_type = $2 AND scopes @> $3",
+                "SELECT id, key, value, created_at, last_updated_at, scopes FROM tenant_kv WHERE owner_id = $1 AND owner_type = $2 AND scopes @> $3",
                 )
                 .bind(tid.tenant_id())
                 .bind(tid.tenant_type())
@@ -242,7 +242,7 @@ ORDER BY scope",
             } else {
                 // with query
                 sqlx::query(
-                "SELECT id, key, value, created_at, last_updated_at, scopes, resume FROM tenant_kv WHERE owner_id = $1 AND owner_type = $2 AND scopes @> $3 AND key LIKE $4",
+                "SELECT id, key, value, created_at, last_updated_at, scopes FROM tenant_kv WHERE owner_id = $1 AND owner_type = $2 AND scopes @> $3 AND key LIKE $4",
                 )
                 .bind(tid.tenant_id())
                 .bind(tid.tenant_type())
