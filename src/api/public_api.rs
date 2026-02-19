@@ -48,6 +48,9 @@ static BOT_HAS_GUILD_CACHE: LazyLock<Cache<serenity::all::GuildId, ()>> = LazyLo
         .build()
 });
 
+// For App
+const APP_OAUTH2_REDIRECT_URI: &str = "antiraid://oauth-callback";
+
 /// Helper function to check if the bot is in a guild
 async fn check_guild_has_bot(
     data: &crate::data::Data,
@@ -474,6 +477,8 @@ pub(super) async fn create_oauth2_session(
 
     OAUTH2_CODE_CACHE.insert(req.code.clone(), ()).await;
 
+    let app_login = req.redirect_uri == APP_OAUTH2_REDIRECT_URI && req.code_verifier.is_some();
+
     #[derive(serde::Serialize)]
     pub struct Response<'a> {
         client_id: UserId,
@@ -566,7 +571,11 @@ pub(super) async fn create_oauth2_session(
         &pool,
         &user_info.id,
         None, // No name for the session
-        SessionType::Login,
+        if app_login {
+            SessionType::AppLogin
+        } else {
+            SessionType::Login
+        },
     )
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to create session: {e:?}").into())))?;

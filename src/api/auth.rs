@@ -123,6 +123,7 @@ pub struct ICreatedWebSession {
 
 pub enum SessionType {
     Login,
+    AppLogin,
     Api {
         expires_at: DateTime<Utc>,
     }
@@ -130,6 +131,8 @@ pub enum SessionType {
 
 /// 1 hour expiry time
 const LOGIN_EXPIRY_TIME: Duration = Duration::seconds(3600);
+/// 14 day expiry time for app logins
+const APP_LOGIN_EXPIRY_TIME: Duration = Duration::days(14);
 
 /// Create a new session for a web user
 pub async fn create_web_session(
@@ -148,6 +151,7 @@ pub async fn create_web_session(
 
     let (session_type, expiry) = match session_type {
         SessionType::Login => ("login", Utc::now() + LOGIN_EXPIRY_TIME),
+        SessionType::AppLogin => ("app_login", Utc::now() + APP_LOGIN_EXPIRY_TIME),
         SessionType::Api { expires_at } => ("api", expires_at),
     };
 
