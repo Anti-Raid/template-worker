@@ -89,6 +89,10 @@ local function Ask(ctx: shellctx.ShellContext, prompt: string): string
     while true do 
         local res = ctx:GetInput(prompt)
         if res == nil then error("Unexpected EOF") end
+        if res == "" then 
+            ctx:Log("Input cannot be empty, please try again.")
+            continue
+        end
 
         return res
     end
