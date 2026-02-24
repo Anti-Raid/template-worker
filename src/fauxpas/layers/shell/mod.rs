@@ -1,10 +1,11 @@
-mod globalcommand;
-
 use std::sync::Arc;
-use khronos_ext::mlua_scheduler_ext::{LuaSchedulerAsyncUserData, taskmgr::SchedulerImpl};
-use khronos_runtime::rt::{KhronosRuntime, RuntimeCreateOpts, mluau::prelude::*};
-use crate::{fauxpas::god::LuaKvGod, mesophyll::dbstate::KeyValueDb, worker::{builtins::TemplatingTypes, limits::{MAX_VM_THREAD_STACK_SIZE, TEMPLATE_GIVE_TIME}}};
+use dapi::types::CreateCommand;
+use khronos_ext::mlua_scheduler_ext::LuaSchedulerAsyncUserData;
+use khronos_runtime::rt::{KhronosRuntime, mluau::prelude::*};
+use tokio::sync::{oneshot::Sender as OneshotSender, mpsc::{unbounded_channel, UnboundedSender}};
+use crate::{fauxpas::god::LuaKvGod, mesophyll::dbstate::KeyValueDb, worker::{builtins::TemplatingTypes}};
 use rust_embed::Embed;
+use crate::fauxpas::mainthread::{run_in_thread, RunInThreadFn};
 
 #[derive(Embed, Debug)]
 #[folder = "$CARGO_MANIFEST_DIR/luau/twshell"]
@@ -25,8 +26,54 @@ pub struct ShellData {
     pub sandwich: crate::sandwich::Sandwich,
 }
 
+type ShellInputValue = Result<Option<String>, String>;
+
 pub struct ShellContext {
     pub data: ShellData,
+    pub input_handle: UnboundedSender<(String, OneshotSender<ShellInputValue>)>,
+    pub _jh: std::thread::JoinHandle<()>, // Ensure input thread is dropped when ShellContext is dropped
+}
+
+impl ShellContext {
+    pub fn new(data: ShellData) -> Self {
+        let (tx, mut rx) = unbounded_channel::<(String, OneshotSender<ShellInputValue>)>();
+        let jh = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("Failed to create Tokio runtime for shell input");
+
+            rt.block_on(async move {
+                let mut editor = match rustyline::DefaultEditor::new() {
+                    Ok(e) => e,
+                    Err(e) => {
+                        log::error!("Failed to create editor: {e}");
+                        return;
+                    }
+                };
+
+                while let Some((prompt, responder)) = rx.recv().await {
+                    match editor.readline(&prompt) {
+                        Ok(i) => {
+                            let _ = editor.add_history_entry(&i);
+                            let _ = responder.send(Ok(Some(i)));
+                        },
+                        Err(e) => {
+                            match e {
+                                rustyline::error::ReadlineError::Interrupted | rustyline::error::ReadlineError::Eof => {
+                                    let _ = responder.send(Ok(None));
+                                }
+                                _ => {
+                                    let _ = responder.send(Err(format!("Error reading line: {e}")));
+                                }
+                            }
+                        }
+                    };
+                }
+            });
+        });
+        Self { data, input_handle: tx, _jh: jh }
+    }
 }
 
 impl std::ops::Deref for ShellContext {
@@ -47,7 +94,7 @@ impl LuaUserData for ShellContext {
         });
 
         methods.add_scheduler_async_method("RegisterGlobalCommands", async move |lua, this, value: LuaValue| {
-            let res: Vec<globalcommand::CreateCommand> = lua.from_value(value)
+            let res: Vec<CreateCommand> = lua.from_value(value)
                 .map_err(|e| LuaError::external(format!("Failed to parse command definitions: {e:?}")))?;
 
             let resp = this.http.create_global_commands(&res)
@@ -57,84 +104,23 @@ impl LuaUserData for ShellContext {
             lua.to_value(&resp)
         });
 
-        methods.add_scheduler_async_method("GetInput", async move |_lua, _this, (prompt,): (String,)| {
+        methods.add_scheduler_async_method("GetInput", async move |_lua, this, (prompt,): (String,)| {
             let (tx, rx) = tokio::sync::oneshot::channel();
-
-            std::thread::spawn(move || {
-                let mut editor = match rustyline::DefaultEditor::new() {
-                    Ok(e) => e,
-                    Err(e) => {
-                        let _ = tx.send(Err(format!("Failed to create editor: {e}")));
-                        return;
-                    }
-                };
-
-                let input = match editor.readline(&prompt) {
-                    Ok(i) => i,
-                    Err(e) => {
-                        let _ = tx.send(Err(format!("Failed to read input: {e}")));
-                        return;
-                    }
-                };
-
-                let _ = tx.send(Ok(input));
-            });
+            this.input_handle.send((prompt, tx))
+                .map_err(|e| LuaError::external(format!("Failed to send input request: {e}")))?;
 
             match rx.await {
                 Ok(Ok(input)) => Ok(input),
-                Ok(Err(e)) => Err(LuaError::external(e)),
-                Err(_) => Err(LuaError::external("Failed to receive input")),
+                Ok(Err(e)) => Err(LuaError::external(format!("Error getting input: {e}"))),
+                Err(e) => Err(LuaError::external(format!("Input request was cancelled: {e}"))),
             }
         });
+
+        methods.add_method("Log", |_lua, _this, values: LuaMultiValue| {
+            khronos_runtime::utils::pp::pretty_print(values);
+            Ok(())
+        });
     }
-}
-
-pub trait RunInThreadFn<Data, Resp> 
-where Data: Send + 'static, 
-Resp: Send + 'static 
-{
-    async fn run(rt: &KhronosRuntime, data: Data) -> Resp;
-}
-
-/// Helper method to run a function in a new thread with a KhronosRuntime, used for shell, command registration etc.
-pub fn run_in_thread<R, RD, RR, FS>(vfs: FS, data: RD) -> RR
-where R: RunInThreadFn<RD, RR> + 'static,
-    RD: Send + 'static,
-    RR: Send + 'static,
-    FS: khronos_runtime::mluau_require::vfs::FileSystem + 'static
-{
-    let (tx, rx) = std::sync::mpsc::channel();
-
-    std::thread::Builder::new()
-        .stack_size(MAX_VM_THREAD_STACK_SIZE) // Increase stack size for the thread
-        .spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build_local(tokio::runtime::LocalOptions::default())
-                .expect("Failed to create tokio runtime");
-            rt.block_on(async move {
-                let rt = KhronosRuntime::new(
-                    RuntimeCreateOpts {
-                        disable_task_lib: false,
-                        time_limit: None,
-                        give_time: TEMPLATE_GIVE_TIME
-                    },
-                    None::<(fn(&Lua, LuaThread) -> Result<(), LuaError>, fn(LuaLightUserData) -> ())>,
-                    vfs,
-                )
-                .expect("Failed to create KhronosRuntime");
-
-                let resp = R::run(&rt, data).await;
-                let _ = tx.send(resp);
-
-                rt.scheduler().stop();            
-            });
-        })
-        .expect("Failed to spawn thread")
-        .join()
-        .expect("Failed to join thread");
-
-    rx.recv().expect("Failed to receive response from thread")
 }
 
 pub fn init_shell(ctx: ShellData) {
@@ -143,11 +129,11 @@ pub fn init_shell(ctx: ShellData) {
         async fn run(rt: &KhronosRuntime, data: ShellData) -> () {
             let func = rt
             .eval_script::<LuaFunction>(
-                "./shell",
+                "./entrypoint.shell",
             )
             .expect("Failed to import shell");
 
-            let s_ctx = ShellContext { data };
+            let s_ctx = ShellContext::new(data);
 
             let ud = rt.call_in_scheduler::<_, LuaMultiValue>(func, s_ctx).await.expect("Failed to call shell main function");
             println!("Shell main function returned: {:?}", ud);

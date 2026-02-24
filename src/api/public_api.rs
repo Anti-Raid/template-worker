@@ -27,6 +27,9 @@ use axum::{
 };
 use axum::Json;
 use chrono::Utc;
+use dapi::types::CreateCommand;
+use dapi::types::CreateCommandOption;
+use dapi::types::CreateCommandOptionChoice;
 use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use moka::future::Cache;
@@ -742,7 +745,7 @@ pub(super) async fn delete_user_session_api(
 
 static STATE_CACHE: std::sync::LazyLock<Arc<TwState>> = std::sync::LazyLock::new(|| {
     fn command_option_choice_into_api_command_option_choice(
-        choice: crate::register::CreateCommandOptionChoice,
+        choice: CreateCommandOptionChoice,
     ) -> ApiCreateCommandOptionChoice {
         ApiCreateCommandOptionChoice {
             name: choice.name,
@@ -751,7 +754,7 @@ static STATE_CACHE: std::sync::LazyLock<Arc<TwState>> = std::sync::LazyLock::new
         }
     }
     
-    fn command_option_into_api_command_option(option: crate::register::CreateCommandOption) -> ApiCreateCommandOption {
+    fn command_option_into_api_command_option(option: CreateCommandOption) -> ApiCreateCommandOption {
         ApiCreateCommandOption {
             kind: option.kind,
             name: option.name,
@@ -770,16 +773,16 @@ static STATE_CACHE: std::sync::LazyLock<Arc<TwState>> = std::sync::LazyLock::new
         }
     }
     
-    fn command_into_api_command(command: crate::register::CreateCommand) -> ApiCreateCommand {
+    fn command_into_api_command(command: CreateCommand) -> ApiCreateCommand {
         ApiCreateCommand {
             kind: command.kind,
-            name: command.name,
-            name_localizations: command.name_localizations,
-            description: command.description,
-            description_localizations: command.description_localizations,
-            integration_types: command.integration_types,
-            nsfw: command.nsfw,
-            options: command.options.into_iter().map(command_option_into_api_command_option).collect(),
+            name: command.fields.name,
+            name_localizations: command.fields.name_localizations,
+            description: command.fields.description,
+            description_localizations: command.fields.description_localizations,
+            integration_types: command.fields.integration_types,
+            nsfw: command.fields.nsfw,
+            options: command.fields.options.into_iter().map(command_option_into_api_command_option).collect(),
         }
     }
     
