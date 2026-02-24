@@ -182,7 +182,7 @@ async fn kv_handler(
 
     match kvop {
         KeyValueOp::Get { scopes, key } => {
-            match state.db_state.kv_get(id, scopes, key).await {
+            match state.db_state.key_value_db().kv_get(id, scopes, key).await {
                 Ok(rec) => encode_db_resp(&rec),
                 Err(e) => {
                     log::error!("Failed to get KV record: {}", e);
@@ -191,7 +191,7 @@ async fn kv_handler(
             }
         }
         KeyValueOp::ListScopes {} => {
-            match state.db_state.kv_list_scopes(id).await {
+            match state.db_state.key_value_db().kv_list_scopes(id).await {
                 Ok(scopes) => encode_db_resp(&scopes),
                 Err(e) => {
                     log::error!("Failed to list KV scopes: {}", e);
@@ -200,7 +200,7 @@ async fn kv_handler(
             }
         }
         KeyValueOp::Set { scopes, key, value } => {
-            match state.db_state.kv_set(id, scopes, key, value).await {
+            match state.db_state.key_value_db().kv_set(id, scopes, key, value).await {
                 Ok(_) => (StatusCode::OK).into_response(),
                 Err(e) => {
                     log::error!("Failed to set KV record: {}", e);
@@ -209,7 +209,7 @@ async fn kv_handler(
             }
         }
         KeyValueOp::Delete { scopes, key } => {
-            match state.db_state.kv_delete(id, scopes, key).await {
+            match state.db_state.key_value_db().kv_delete(id, scopes, key).await {
                 Ok(_) => (StatusCode::OK).into_response(),
                 Err(e) => {
                     log::error!("Failed to delete KV record: {}", e);
@@ -218,7 +218,7 @@ async fn kv_handler(
             }
         }
         KeyValueOp::Find { scopes, prefix } => {
-            match state.db_state.kv_find(id, scopes, prefix).await {
+            match state.db_state.key_value_db().kv_find(id, scopes, prefix).await {
                 Ok(records) => encode_db_resp(&records),
                 Err(e) => {
                     log::error!("Failed to find KV records: {}", e);

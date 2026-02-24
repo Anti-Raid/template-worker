@@ -3,7 +3,6 @@ mod config;
 mod data;
 mod event_handler;
 mod mesophyll;
-mod securelua;
 mod fauxpas;
 mod objectstore;
 mod register;
@@ -14,6 +13,7 @@ mod migrations;
 use crate::config::CONFIG;
 use crate::data::Data;
 use crate::event_handler::EventFramework;
+use crate::fauxpas::layers::shell::ShellData;
 use crate::mesophyll::client::{MesophyllClient, MesophyllDbClient};
 use crate::mesophyll::dbstate::DbState;
 use crate::migrations::apply_migrations;
@@ -41,6 +41,9 @@ pub enum WorkerType {
     /// Dummy worker that applies a migration and exits
     #[clap(name = "migrate", alias = "apply-migration")]
     Migrate,
+    /// Dummy worker that spawns a fauxpas shell instead of running the worker
+    #[clap(name = "shell", alias = "fauxpas")]
+    Shell,
     /// Worker that uses a process pool for executing tasks
     #[clap(name = "processpool", alias = "process-pool")]
     ProcessPool,
@@ -99,6 +102,7 @@ fn main() {
     let num_tokio_threads = match args.worker_type {
         WorkerType::RegisterCommands => 1,
         WorkerType::Migrate => 1,
+        WorkerType::Shell => args.tokio_threads_master,
         WorkerType::ThreadPool => args.tokio_threads_master,
         WorkerType::ProcessPool => args.tokio_threads_master,
         WorkerType::ProcessPoolWorker => args.tokio_threads_worker,
@@ -229,6 +233,22 @@ async fn main_impl(args: CmdArgs) {
                 .expect("Could not initialize connection");
 
             apply_migrations(pg_pool).await.expect("Failed to apply migrations");
+        }
+        WorkerType::Shell => {
+            let pg_pool = PgPoolOptions::new()
+                .max_connections(args.max_db_connections)
+                .connect(&CONFIG.meta.postgres_url)
+                .await
+                .expect("Could not initialize connection");
+
+
+            // If we're running the shell, just run the shell and exit
+            crate::fauxpas::layers::shell::init_shell(ShellData {
+                pg_pool,
+                http,
+                reqwest,
+                sandwich,
+            });
         }
         WorkerType::ThreadPool => {
             // Ask sandwich how many shards we should use

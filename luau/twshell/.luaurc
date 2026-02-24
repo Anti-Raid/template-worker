@@ -1,0 +1,15 @@
+{
+    "languageMode": "strict",
+    "lint": {
+        "*": true
+    },
+    "lintErrors": false,
+    "typeErrors": true,
+    "globals": [],
+    "aliases": {
+        "antiraid": "../builtins/templating-types/@antiraid/",
+        "antiraid-core": "../builtins/templating-types/@antiraid-core/",
+        "discord-types": "../builtins/templating-types/discord-luau-corrections/",
+        "antiraid-ext": "../builtins/templating-types/@antiraid-ext/"
+    }
+}
