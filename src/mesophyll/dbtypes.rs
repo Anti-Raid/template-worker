@@ -1,30 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use khronos_runtime::{traits::ir::KvRecord, traits::ir::globalkv as gkv_ir, utils::khronos_value::KhronosValue};
+use khronos_runtime::traits::ir::globalkv as gkv_ir;
 use ts_rs::TS;
-
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub struct SerdeKvRecord {
-    pub id: String,
-    pub key: String,
-    pub value: KhronosValue,
-    pub scopes: Vec<String>,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub last_updated_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-impl Into<KvRecord> for SerdeKvRecord {
-    fn into(self) -> KvRecord {
-        KvRecord {
-            id: self.id,
-            key: self.key,
-            value: self.value,
-            scopes: self.scopes,
-            created_at: self.created_at,
-            last_updated_at: self.last_updated_at,
-        }
-    }
-}
 
 #[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema, sqlx::FromRow)]
 #[ts(export)]

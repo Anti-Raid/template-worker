@@ -1,7 +1,7 @@
 use std::{borrow::Cow, cell::RefCell, collections::{HashMap, HashSet}, rc::Rc, sync::{Arc, LazyLock}};
 use serde_json::Value;
 
-use crate::{sandwich::Sandwich, worker::{workerdb::WorkerDB, workervmmanager::Id}};
+use crate::{geese::sandwich::Sandwich, geese::objectstore::ObjectStore, worker::{workerdb::WorkerDB, workervmmanager::Id}};
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct TenantState {
@@ -25,7 +25,7 @@ static DEFAULT_TENANT_STATE: LazyLock<TenantState> = LazyLock::new(|| TenantStat
 pub struct CreateWorkerState {
     pub serenity_http: Arc<serenity::http::Http>,
     pub reqwest_client: reqwest::Client,
-    pub object_store: Arc<crate::objectstore::ObjectStore>,
+    pub object_store: Arc<ObjectStore>,
     pub current_user: Arc<serenity::all::CurrentUser>,
     pub mesophyll_db: Arc<WorkerDB>,
     pub sandwich: Sandwich,
@@ -37,7 +37,7 @@ impl CreateWorkerState {
     pub fn new(
         serenity_http: Arc<serenity::http::Http>,
         reqwest_client: reqwest::Client,
-        object_store: Arc<crate::objectstore::ObjectStore>,
+        object_store: Arc<ObjectStore>,
         current_user: Arc<serenity::all::CurrentUser>,
         mesophyll_db: Arc<WorkerDB>,
         sandwich: Sandwich,
@@ -60,7 +60,7 @@ impl CreateWorkerState {
 pub struct WorkerState {
     pub serenity_http: Arc<serenity::http::Http>,
     pub _reqwest_client: reqwest::Client,
-    pub object_store: Arc<crate::objectstore::ObjectStore>,
+    pub object_store: Arc<ObjectStore>,
     pub mesophyll_db: Arc<WorkerDB>,
     pub current_user: Arc<serenity::all::CurrentUser>,
     pub sandwich: Sandwich,

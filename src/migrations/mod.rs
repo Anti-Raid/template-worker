@@ -2,6 +2,7 @@ mod khronosvalue_v2;
 mod kv_generic;
 mod tenantstate;
 mod cleanup_v8;
+mod drop_tenant_kv_expires_at;
 
 use futures::future::BoxFuture;
 use log::info;
@@ -13,12 +14,15 @@ pub struct Migration {
     pub up: fn(sqlx::Pool<sqlx::Postgres>) -> BoxFuture<'static, Result<(), crate::Error>>,
 }
 
-pub const MIGRATIONS: [Migration; 4] = [
+pub const MIGRATIONS: [Migration; 5] = [
     // This relies on kv_generic not being applied yet so order matters
+    //
+    // Do not change this list without verifying order
     khronosvalue_v2::MIGRATION,
     kv_generic::MIGRATION,
     tenantstate::MIGRATION,
     cleanup_v8::MIGRATION,
+    drop_tenant_kv_expires_at::MIGRATION,
 ];
 
 pub async fn apply_migrations(pool: sqlx::PgPool) -> Result<(), crate::Error> {

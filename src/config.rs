@@ -1,4 +1,4 @@
-use crate::objectstore::ObjectStore;
+use crate::geese::objectstore::ObjectStore;
 use serde::{Deserialize, Serialize};
 use serenity::all::UserId;
 use std::fs::File;

@@ -1,5 +1,5 @@
-use crate::objectstore::ObjectStore;
-use crate::sandwich::Sandwich;
+use crate::geese::objectstore::ObjectStore;
+use crate::geese::sandwich::Sandwich;
 use crate::worker::workerlike::WorkerLike;
 use std::fmt::Debug;
 use std::sync::Arc;

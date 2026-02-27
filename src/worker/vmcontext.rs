@@ -1,6 +1,6 @@
 use super::workerstate::WorkerState;
 use super::workervmmanager::Id;
-use crate::objectstore::{Bucket, BucketWithKey, BucketWithPrefix};
+use crate::geese::objectstore::{Bucket, BucketWithKey, BucketWithPrefix};
 use crate::worker::builtins::EXPOSED_VFS;
 use crate::worker::workerstate::TenantState;
 use crate::worker::workervmmanager::VmData;
