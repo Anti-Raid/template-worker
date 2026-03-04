@@ -1,0 +1,199 @@
+syntax = "proto3";
+
+package mesophyll;
+
+message KhronosValue {
+  // msgpack encoded value
+  bytes value = 1;
+}
+
+message AnyValue {
+  // msgpack encoded value
+  bytes value = 1;
+}
+
+message AnyValueResponse {
+  oneof ret {
+    AnyValue value = 1;
+    string error = 2;
+  }
+}
+
+message ResultResponse {
+  oneof ret {
+    bool success = 1;
+    string error = 2;
+  }
+}
+
+message Id {
+  string tenant_id = 1;
+  string tenant_type = 2;
+}
+
+message Worker {
+  // The worker ID
+  uint64 worker_id = 1;
+  // The token for the worker. In the event that a worker crashes, this token may be regenerated etc which will autokill
+  // other workers the moment they try to send anything to the master, prompting them to shutdown.
+  string token = 2;
+}
+
+message CreateEvent {
+  string name = 1; 
+  optional string author = 2;
+  KhronosValue value = 3; // msgpack khronos value
+}
+
+message DispatchEvent {
+  Id id = 1; 
+  
+  // Expressed as a raw byte array
+  CreateEvent event_payload = 2;
+}
+
+message DispatchEventResponse {
+  oneof resp {
+    KhronosValue value = 1; // msgpack khronos value
+    string error = 2;
+  }
+}
+
+// RunScript is a message sent from the master to a worker to instruct it to run a script. The worker will execute the script and respond with a DispatchEventResponse containing the result of the script execution or an error message if the execution failed.
+message RunScript {
+  Id id = 1; 
+  string name = 2; 
+  string code = 3; 
+  CreateEvent event = 4;
+}
+
+message MTWMessage { // master-to-worker message
+  optional uint64 id = 1; // Unique identifier for the message, used for tracking and correlation if needed.
+  oneof payload {
+    // Dispatch a (custom) template event to a worker
+    // 
+    // Discord related events are dispatched via Sandwich
+    DispatchEvent dispatch = 2;
+
+    // Run a script in the worker
+    RunScript run_script = 3;
+
+    // Requests that a tenant be dropped
+    Id drop_tenant = 4;
+  }
+}
+
+message WTMMessage { // worker-to-master message
+  optional uint64 resp_id = 1; // If set, this corresponds to the id of the MasterToWorkerMessage being responded to.
+  oneof payload {
+    Worker worker_ident = 2; // Authenticate the worker
+    DispatchEventResponse dispatch_response = 3;
+    DispatchEventResponse run_script_response = 4;
+    int32 drop_tenant_ack = 5; // 0 for success, non-zero for failure 
+  }
+}
+
+message WTMKvGet {
+  Worker worker = 1;
+  Id id = 2;
+  repeated string scopes = 3;
+  string key = 4;
+}
+
+message WTMKvListScopes {
+  Worker worker = 1;
+  Id id = 2;
+}
+
+message StringList {
+  repeated string items = 1;
+}
+
+message KvListScopesResponse {
+  oneof ret {
+    StringList scopes = 1;
+    string error = 2;
+  }
+}
+
+message WTMKvSet {
+  Worker worker = 1;
+  Id id = 2;
+  repeated string scopes = 3;
+  string key = 4;
+  KhronosValue value = 5;
+}
+
+message WTMKvDelete {
+  Worker worker = 1;
+  Id id = 2;
+  repeated string scopes = 3;
+  string key = 4;
+}
+
+message WTMKvFind {
+  Worker worker = 1;
+  Id id = 2;
+  repeated string scopes = 3;
+  string prefix = 4;
+}
+
+message WTMGlobalKvFind {
+  string query = 1;
+  string scope = 2;
+}
+
+message WTMGlobalKvGet {
+  string key = 1;
+  int32 version = 2;
+  string scope = 3;
+  optional Id id = 4;
+}
+
+message WTMGlobalKvCreate {
+  Worker worker = 1;
+  // Must be a CreateGlobalKv
+  AnyValue data = 2;
+}
+
+message WTMGlobalKvDelete {
+  Worker worker = 1;
+  string key = 2;
+  int32 version = 3;
+  string scope = 4;
+}
+
+// Mesophyll service (runs on master and called by worker)
+service MesophyllMaster {
+  // WorkerInit establishes a bidirectional stream between the master and worker. The master sends MasterToWorkerMessage messages to the worker, and the worker responds with WorkerToMasterMessage messages. 
+  //
+  // This stream remains open for the duration of the worker's lifecycle, allowing for continuous communication between the master and worker.
+  rpc WorkerInit(stream WTMMessage) returns (stream MTWMessage) {}
+
+  // KvGet is called by the worker to retrieve a value from the key-value store.
+  //
+  // @returns KvRecord? (msgpack encoded)
+  rpc KvGet(WTMKvGet) returns (AnyValueResponse) {}
+  // KvListScopes is called by the worker to retrieve a list of scopes that have been used for a given tenant.
+  rpc KvListScopes(WTMKvListScopes) returns (KvListScopesResponse) {}
+  // KvSet is called by the worker to set a value in the key-value store.
+  rpc KvSet(WTMKvSet) returns (ResultResponse) {}
+  // KvDelete is called by the worker to delete a value from the key-value store.
+  rpc KvDelete(WTMKvDelete) returns (ResultResponse) {}
+  // KvFind is called by the worker to find all key-value pairs with keys that start with a given prefix.
+  //
+  // @returns Vec<KvRecord> (msgpack encoded)
+  rpc KvFind(WTMKvFind) returns (AnyValueResponse) {}
+
+  // GlobalKvFind finds all global kv pairs with a given query/scope pair
+  //
+  // @returns Vec<GlobalKvRecord> (msgpack encoded)
+  rpc GlobalKvFind(WTMGlobalKvFind) returns (AnyValueResponse) {}
+  // GlobalKvGet retrieves a global kv pair with a given scope/key
+  // @returns GlobalKvRecord? (msgpack encoded)
+  rpc GlobalKvGet(WTMGlobalKvGet) returns (AnyValueResponse) {}
+  // GlobalKvCreate creates a new global kv pair with the given scope and data.
+  rpc GlobalKvCreate(WTMGlobalKvCreate) returns (ResultResponse) {}
+  // GlobalKvDelete deletes a global kv pair with the given scope and key, if the version matches.
+  rpc GlobalKvDelete(WTMGlobalKvDelete) returns (ResultResponse) {}
+}
