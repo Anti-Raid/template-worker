@@ -2,33 +2,19 @@ syntax = "proto3";
 
 package mesophyll;
 
-message KhronosValue {
-  // msgpack encoded value
-  bytes value = 1;
-}
-
 message AnyValue {
   // msgpack encoded value
   bytes value = 1;
 }
 
-message AnyValueResponse {
-  oneof ret {
-    AnyValue value = 1;
-    string error = 2;
-  }
-}
-
-message ResultResponse {
-  oneof ret {
-    bool success = 1;
-    string error = 2;
-  }
+enum TenantType {
+  USER = 0;
+  GUILD = 1;
 }
 
 message Id {
-  string tenant_id = 1;
-  string tenant_type = 2;
+  uint64 tenant_id = 1;
+  TenantType tenant_type = 2;
 }
 
 message Worker {
@@ -42,7 +28,7 @@ message Worker {
 message CreateEvent {
   string name = 1; 
   optional string author = 2;
-  KhronosValue value = 3; // msgpack khronos value
+  AnyValue value = 3; // msgpack khronos value
 }
 
 message DispatchEvent {
@@ -54,7 +40,7 @@ message DispatchEvent {
 
 message DispatchEventResponse {
   oneof resp {
-    KhronosValue value = 1; // msgpack khronos value
+    AnyValue value = 1; // msgpack khronos value
     string error = 2;
   }
 }
@@ -88,8 +74,7 @@ message WTMMessage { // worker-to-master message
   oneof payload {
     Worker worker_ident = 2; // Authenticate the worker
     DispatchEventResponse dispatch_response = 3;
-    DispatchEventResponse run_script_response = 4;
-    int32 drop_tenant_ack = 5; // 0 for success, non-zero for failure 
+    int32 drop_tenant_ack = 4; // 0 for success, non-zero for failure 
   }
 }
 
@@ -105,15 +90,8 @@ message WTMKvListScopes {
   Id id = 2;
 }
 
-message StringList {
-  repeated string items = 1;
-}
-
 message KvListScopesResponse {
-  oneof ret {
-    StringList scopes = 1;
-    string error = 2;
-  }
+  repeated string scopes = 1;
 }
 
 message WTMKvSet {
@@ -121,7 +99,7 @@ message WTMKvSet {
   Id id = 2;
   repeated string scopes = 3;
   string key = 4;
-  KhronosValue value = 5;
+  AnyValue value = 5;
 }
 
 message WTMKvDelete {
@@ -152,15 +130,21 @@ message WTMGlobalKvGet {
 
 message WTMGlobalKvCreate {
   Worker worker = 1;
+  Id id = 2;
   // Must be a CreateGlobalKv
-  AnyValue data = 2;
+  AnyValue data = 3;
 }
 
 message WTMGlobalKvDelete {
   Worker worker = 1;
-  string key = 2;
-  int32 version = 3;
-  string scope = 4;
+  Id id = 2;
+  string key = 3;
+  int32 version = 4;
+  string scope = 5;
+}
+
+message WTMBool {
+  bool value = 1;
 }
 
 // Mesophyll service (runs on master and called by worker)
@@ -173,27 +157,27 @@ service MesophyllMaster {
   // KvGet is called by the worker to retrieve a value from the key-value store.
   //
   // @returns KvRecord? (msgpack encoded)
-  rpc KvGet(WTMKvGet) returns (AnyValueResponse) {}
+  rpc KvGet(WTMKvGet) returns (AnyValue) {}
   // KvListScopes is called by the worker to retrieve a list of scopes that have been used for a given tenant.
   rpc KvListScopes(WTMKvListScopes) returns (KvListScopesResponse) {}
   // KvSet is called by the worker to set a value in the key-value store.
-  rpc KvSet(WTMKvSet) returns (ResultResponse) {}
+  rpc KvSet(WTMKvSet) returns (WTMBool) {}
   // KvDelete is called by the worker to delete a value from the key-value store.
-  rpc KvDelete(WTMKvDelete) returns (ResultResponse) {}
+  rpc KvDelete(WTMKvDelete) returns (WTMBool) {}
   // KvFind is called by the worker to find all key-value pairs with keys that start with a given prefix.
   //
   // @returns Vec<KvRecord> (msgpack encoded)
-  rpc KvFind(WTMKvFind) returns (AnyValueResponse) {}
+  rpc KvFind(WTMKvFind) returns (AnyValue) {}
 
   // GlobalKvFind finds all global kv pairs with a given query/scope pair
   //
   // @returns Vec<GlobalKvRecord> (msgpack encoded)
-  rpc GlobalKvFind(WTMGlobalKvFind) returns (AnyValueResponse) {}
+  rpc GlobalKvFind(WTMGlobalKvFind) returns (AnyValue) {}
   // GlobalKvGet retrieves a global kv pair with a given scope/key
   // @returns GlobalKvRecord? (msgpack encoded)
-  rpc GlobalKvGet(WTMGlobalKvGet) returns (AnyValueResponse) {}
+  rpc GlobalKvGet(WTMGlobalKvGet) returns (AnyValue) {}
   // GlobalKvCreate creates a new global kv pair with the given scope and data.
-  rpc GlobalKvCreate(WTMGlobalKvCreate) returns (ResultResponse) {}
+  rpc GlobalKvCreate(WTMGlobalKvCreate) returns (WTMBool) {}
   // GlobalKvDelete deletes a global kv pair with the given scope and key, if the version matches.
-  rpc GlobalKvDelete(WTMGlobalKvDelete) returns (ResultResponse) {}
+  rpc GlobalKvDelete(WTMGlobalKvDelete) returns (WTMBool) {}
 }
