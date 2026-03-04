@@ -350,8 +350,7 @@ async fn main_impl(args: CmdArgs) {
                 .expect("Could not initialize connection");
 
             let mesophyll_server = mesophyll::server::MesophyllServer::new(
-                CONFIG.addrs.mesophyll_server.clone(),
-                shards,
+                shards.try_into().expect("Shard count exceeds usize limits"),
                 pg_pool.clone()
             )
             .await
