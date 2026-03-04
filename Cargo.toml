@@ -32,7 +32,6 @@ rust-embed = { version = "8.7.0", features = ["debug-embed", "interpolate-folder
 futures = "0.3"
 dashmap = { version = "6", features = ["serde", "inline", "rayon"] }
 tokio-util = { version = "0.7", features = ["time"] }
-console-subscriber = { version = "0.4" }
 tokio-tungstenite = { version = "0.28" }
 rmp-serde = { version = "1.3.1" }
 rustyline = "15"
@@ -56,6 +55,12 @@ serde_repr = "0.1"
 aws-sdk-s3 = { version = "1" }
 aws-smithy-types = { version = "1" }
 
+# Mesophyll
+tonic = "0.14"
+tonic-prost = "0.14"
+prost = "0.14"
+prost-types = "0.14"
+
 [dependencies.tokio]
 version = "1"
 features = ["sync", "macros", "rt-multi-thread", "tracing", "process", "signal"]
@@ -67,3 +72,6 @@ features = ["model", "http", "cache", "rustls_backend", "unstable"]
 
 [features]
 default = []
+
+[build-dependencies]
+tonic-prost-build = "0.14"
