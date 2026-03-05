@@ -190,6 +190,7 @@ impl MesophyllClient {
     /// Fetch a key-value record given a tenant ID, list of scopes, and key
     pub async fn kv_get(&self, id: Id, scopes: Vec<String>, key: String) -> Result<Option<SerdeKvRecord>, crate::Error> {
         let mut cli = self.client.clone();
+        log::info!("MesophyllClient: Fetching KV record for ID {:?}, scopes {:?}, key {:?}", id, scopes, key);
         cli.kv_get(pb::WtmKvGet { 
             worker: Some(self.worker.clone()), 
             id: Some(pb::Id::from_real_id(&id)),
