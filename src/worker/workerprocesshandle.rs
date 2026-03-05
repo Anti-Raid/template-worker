@@ -24,6 +24,9 @@ pub struct WorkerProcessHandle {
     /// The total number of processes in the pool
     total: usize,
 
+    /// Whether to enable print
+    worker_debug: bool,
+
     /// Kill message channel
     kill_msg_tx: UnboundedSender<()>,
 }
@@ -33,12 +36,13 @@ impl WorkerProcessHandle {
     const MAX_CONSECUTIVE_FAILURES_BEFORE_CRASH: usize = 10;
 
     /// Creates a new WorkerProcessHandle given the worker ID and a mesophyll server
-    pub fn new(id: usize, total: usize, mesophyll_server: MesophyllServer) -> Result<Self, crate::Error> {
+    pub fn new(id: usize, total: usize, worker_debug: bool, mesophyll_server: MesophyllServer) -> Result<Self, crate::Error> {
         let (kill_msg_tx, mut kill_msg_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
         let wps = Self {
             mesophyll_server,
             id,
             total,
+            worker_debug,
             kill_msg_tx
         };
 
@@ -91,6 +95,11 @@ impl WorkerProcessHandle {
             command.arg(self.id.to_string());
             command.arg("--process-workers");
             command.arg(self.total.to_string());
+
+            if self.worker_debug {
+                command.arg("--worker-debug");
+            }
+
             command.env("MESOPHYLL_CLIENT_TOKEN", meso_token);
             command.kill_on_drop(true);
 
@@ -178,13 +187,15 @@ impl WorkerLike for WorkerProcessHandle {
 
 pub struct WorkerProcessHandleCreateOpts {
     pub(super) mesophyll_server: MesophyllServer,
+    pub(super) worker_debug: bool,
 }
 
 impl WorkerProcessHandleCreateOpts {
     /// Creates a new WorkerProcessHandleCreateOpts with the given communication layer
-    pub fn new(mesophyll_server: MesophyllServer) -> Self {
+    pub fn new(mesophyll_server: MesophyllServer, worker_debug: bool) -> Self {
         Self {
             mesophyll_server,
+            worker_debug,
         }
     }
 }
@@ -196,7 +207,7 @@ impl Poolable for WorkerProcessHandle {
     fn new(id: usize, total: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
     where Self: Sized 
     {
-        Self::new(id, total, ext_state.mesophyll_server.clone())
+        Self::new(id, total, ext_state.worker_debug, ext_state.mesophyll_server.clone())
     }
 }
 

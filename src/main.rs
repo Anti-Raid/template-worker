@@ -275,7 +275,7 @@ async fn main_impl(args: CmdArgs) {
             let worker_pool = Arc::new(
                 WorkerPool::<WorkerProcessHandle>::new(
                     shards,
-                    &WorkerProcessHandleCreateOpts::new(mesophyll_server),
+                    &WorkerProcessHandleCreateOpts::new(mesophyll_server, args.worker_debug),
                 )
                 .expect("Failed to create worker thread pool"),
             );
