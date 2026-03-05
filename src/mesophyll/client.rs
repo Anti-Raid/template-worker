@@ -38,6 +38,8 @@ impl MesophyllClient {
         let client_stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
         let server_stream = client.worker_init(client_stream).await?.into_inner();
 
+        log::info!("Mesophyll client connected and initialized with worker ID {}", worker_id);
+
         let s = Self {
             worker,
             client,
