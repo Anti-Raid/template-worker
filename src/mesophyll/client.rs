@@ -26,7 +26,8 @@ impl MesophyllClient {
             worker_id: worker_id as u64,
             token: token.clone(),
         };
-        let mut client = pb::mesophyll_master_client::MesophyllMasterClient::connect(crate::CONFIG.addrs.mesophyll_server.as_str()).await?;
+        let uri = tonic::transport::Endpoint::from_shared(format!("http://{}", crate::CONFIG.addrs.mesophyll_server))?;
+        let mut client = pb::mesophyll_master_client::MesophyllMasterClient::connect(uri).await?;
 
         // Start worker_init and identify to the server
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
