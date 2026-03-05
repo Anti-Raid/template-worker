@@ -8,10 +8,7 @@
 ///
 /// In the future, it is a goal for Mesophyll to be a base unit of sandboxing as well
 /// through projects like khronos dapi
-pub mod message;
 pub mod client;
 pub mod server;
 pub mod dbstate;
 pub mod dbtypes;
-
-pub(super) const MESOPHYLL_DEFAULT_HEARTBEAT_MS: u64 = 5000;

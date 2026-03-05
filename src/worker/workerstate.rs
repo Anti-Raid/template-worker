@@ -1,7 +1,7 @@
 use std::{borrow::Cow, cell::RefCell, collections::{HashMap, HashSet}, rc::Rc, sync::{Arc, LazyLock}};
 use serde_json::Value;
 
-use crate::{geese::sandwich::Sandwich, geese::objectstore::ObjectStore, worker::{workerdb::WorkerDB, workervmmanager::Id}};
+use crate::{geese::{objectstore::ObjectStore, sandwich::Sandwich}, mesophyll::client::MesophyllClient, worker::workervmmanager::Id};
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct TenantState {
@@ -27,7 +27,7 @@ pub struct CreateWorkerState {
     pub reqwest_client: reqwest::Client,
     pub object_store: Arc<ObjectStore>,
     pub current_user: Arc<serenity::all::CurrentUser>,
-    pub mesophyll_db: Arc<WorkerDB>,
+    pub mesophyll_client: Arc<MesophyllClient>,
     pub sandwich: Sandwich,
     pub worker_print: bool,
 }
@@ -39,7 +39,7 @@ impl CreateWorkerState {
         reqwest_client: reqwest::Client,
         object_store: Arc<ObjectStore>,
         current_user: Arc<serenity::all::CurrentUser>,
-        mesophyll_db: Arc<WorkerDB>,
+        mesophyll_client: Arc<MesophyllClient>,
         sandwich: Sandwich,
         worker_print: bool
     ) -> Self {
@@ -48,7 +48,7 @@ impl CreateWorkerState {
             reqwest_client,
             object_store,
             current_user,
-            mesophyll_db,
+            mesophyll_client,
             sandwich,
             worker_print
         }
@@ -61,7 +61,7 @@ pub struct WorkerState {
     pub serenity_http: Arc<serenity::http::Http>,
     pub _reqwest_client: reqwest::Client,
     pub object_store: Arc<ObjectStore>,
-    pub mesophyll_db: Arc<WorkerDB>,
+    pub mesophyll_client: Arc<MesophyllClient>,
     pub current_user: Arc<serenity::all::CurrentUser>,
     pub sandwich: Sandwich,
     pub worker_print: bool,
@@ -70,13 +70,13 @@ pub struct WorkerState {
 
 impl WorkerState {
     /// Creates a new WorkerState with the given serenity context, reqwest client, object store, and database pool
-    pub async fn new(cws: CreateWorkerState, worker_id: usize) -> Result<Self, crate::Error> {
+    pub async fn new(cws: CreateWorkerState) -> Result<Self, crate::Error> {
         let tenant_state_cache = Rc::new(RefCell::new(HashMap::new()));
         let s = Self {
             serenity_http: cws.serenity_http,
             _reqwest_client: cws.reqwest_client,
             object_store: cws.object_store,
-            mesophyll_db: cws.mesophyll_db,
+            mesophyll_client: cws.mesophyll_client,
             current_user: cws.current_user,
             sandwich: cws.sandwich,
             worker_print: cws.worker_print,
@@ -86,10 +86,7 @@ impl WorkerState {
         // Initialize the tenant state cache with the current tenant states from the database
         //
         // The tenant state cache acts as a routing table
-        let t_states = match &*s.mesophyll_db {
-            WorkerDB::Direct(ref db) => db.tenant_state_cache_for(worker_id).await,
-            WorkerDB::Mesophyll(ref client) => client.list_tenant_states().await?,
-        };
+        let t_states = s.mesophyll_client.list_tenant_states().await?;
         *s.tenant_state_cache.borrow_mut() = t_states;
 
         Ok(s)
@@ -122,7 +119,7 @@ impl WorkerState {
 
     /// Sets the tenant state for a specific tenant
     pub async fn set_tenant_state_for(&self, id: Id, state: TenantState) -> Result<(), crate::Error> {
-        self.mesophyll_db.set_tenant_state_for(id, &state).await?;
+        self.mesophyll_client.set_tenant_state_for(id, &state).await?;
 
         // Update the cache
         {

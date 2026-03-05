@@ -159,7 +159,7 @@ impl KVProvider for ArKVProvider {
             return Err("Key length too long".into());
         }
 
-        self.state.mesophyll_db.kv_get(
+        self.state.mesophyll_client.kv_get(
             self.id,
             scopes,
             key,
@@ -168,7 +168,7 @@ impl KVProvider for ArKVProvider {
     }
 
     async fn list_scopes(&self) -> Result<Vec<String>, crate::Error> {
-        let scopes = self.state.mesophyll_db.kv_list_scopes(self.id).await?;
+        let scopes = self.state.mesophyll_client.kv_list_scopes(self.id).await?;
         Ok(scopes)
     }
 
@@ -197,7 +197,7 @@ impl KVProvider for ArKVProvider {
             return Err("Value length too long".into());
         }
 
-        self.state.mesophyll_db.kv_set(
+        self.state.mesophyll_client.kv_set(
             self.id,
             scopes,
             key,
@@ -213,7 +213,7 @@ impl KVProvider for ArKVProvider {
             return Err("Key length too long".into());
         }
 
-        self.state.mesophyll_db.kv_delete(
+        self.state.mesophyll_client.kv_delete(
             self.id,
             scopes,
             key,
@@ -228,7 +228,7 @@ impl KVProvider for ArKVProvider {
             return Err("Query length too long".into());
         }
 
-        self.state.mesophyll_db.kv_find(
+        self.state.mesophyll_client.kv_find(
             self.id,
             scopes,
             query,
@@ -641,22 +641,22 @@ impl GlobalKVProvider for ArGlobalKvProvider {
     }
 
     async fn find(&self, scope: String, query: String) -> Result<Vec<PartialGlobalKv>, khronos_runtime::Error> {
-        let globals = self.state.mesophyll_db.global_kv_find(scope, query).await?;
+        let globals = self.state.mesophyll_client.global_kv_find(scope, query).await?;
         Ok(globals.into_iter().map(|x| x.into()).collect())
     }
 
     async fn get(&self, key: String, version: i32, scope: String) -> Result<Option<GlobalKv>, khronos_runtime::Error> {
-        let Some(global) = self.state.mesophyll_db.global_kv_get(key, version, scope, Some(self.id)).await? else {
+        let Some(global) = self.state.mesophyll_client.global_kv_get(key, version, scope, Some(self.id)).await? else {
             return Ok(None);
         };
         Ok(Some(global.into()))
     }
 
     async fn create(&self, entry: CreateGlobalKv) -> Result<(), khronos_runtime::Error> {
-        self.state.mesophyll_db.global_kv_create(self.id, entry.into()).await
+        self.state.mesophyll_client.global_kv_create(self.id, entry.into()).await
     }
 
     async fn delete(&self, key: String, version: i32, scope: String) -> Result<(), khronos_runtime::Error> {
-        self.state.mesophyll_db.global_kv_delete(self.id, key, version, scope).await
+        self.state.mesophyll_client.global_kv_delete(self.id, key, version, scope).await
     }
 }

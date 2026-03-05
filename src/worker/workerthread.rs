@@ -71,7 +71,7 @@ impl WorkerThread {
                         .expect("Failed to create tokio runtime");
 
                     rt.block_on(async move {
-                        let state = WorkerState::new(state, id).await.expect("Failed to create WorkerState");
+                        let state = WorkerState::new(state).await.expect("Failed to create WorkerState");
                         let worker = Worker::new(state);
 
                         // Listen to messages and handle them

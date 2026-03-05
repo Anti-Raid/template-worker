@@ -13,11 +13,9 @@ use crate::config::CONFIG;
 use crate::data::Data;
 use crate::event_handler::EventFramework;
 use crate::fauxpas::layers::shell::ShellData;
-use crate::mesophyll::client::{MesophyllClient, MesophyllDbClient};
-use crate::mesophyll::dbstate::DbState;
+use crate::mesophyll::client::MesophyllClient;
 use crate::migrations::apply_migrations;
 use crate::geese::sandwich::Sandwich;
-use crate::worker::workerdb::WorkerDB;
 use crate::worker::workerlike::WorkerLike;
 use crate::worker::workerpool::WorkerPool;
 use crate::worker::workerprocesshandle::{WorkerProcessHandle, WorkerProcessHandleCreateOpts};
@@ -46,9 +44,6 @@ pub enum WorkerType {
     /// Worker that uses a process pool for executing tasks
     #[clap(name = "processpool", alias = "process-pool")]
     ProcessPool,
-    /// Worker that uses a thread pool for executing tasks
-    #[clap(name = "threadpool", alias = "thread-pool")]
-    ThreadPool,
     /// Single worker within a process pool system
     #[clap(name = "processpoolworker", alias = "process-pool-worker")]
     ProcessPoolWorker,
@@ -102,7 +97,6 @@ fn main() {
         WorkerType::RegisterCommands => 1,
         WorkerType::Migrate => 1,
         WorkerType::Shell => args.tokio_threads_master,
-        WorkerType::ThreadPool => args.tokio_threads_master,
         WorkerType::ProcessPool => args.tokio_threads_master,
         WorkerType::ProcessPoolWorker => args.tokio_threads_worker,
     };
@@ -249,85 +243,6 @@ async fn main_impl(args: CmdArgs) {
                 sandwich,
             });
         }
-        WorkerType::ThreadPool => {
-            // Ask sandwich how many shards we should use
-            let shards = loop {
-                let shard_count = match sandwich.get_shard_count().await {
-                    Ok(count) => count,
-                    Err(e) => {
-                        error!("Failed to get shard count from Sandwich: {:?}, retrying in 5 seconds...", e);
-                        tokio::time::sleep(Duration::from_secs(5)).await;
-                        continue;
-                    }
-                };
-
-                break shard_count;
-            };
-
-            let pg_pool = PgPoolOptions::new()
-                .max_connections(args.max_db_connections)
-                .connect(&CONFIG.meta.postgres_url)
-                .await
-                .expect("Could not initialize connection");
-
-            let db_state = DbState::new(shards, pg_pool.clone())
-            .await
-            .expect("Failed to create DbState");
-
-            let worker_state = CreateWorkerState::new(
-                http.clone(),
-                reqwest.clone(),
-                object_storage.clone(),
-                Arc::new(current_user.clone()),
-                Arc::new(
-                    WorkerDB::new_direct(
-                        db_state.clone()
-                    )
-                ),
-                sandwich.clone(),
-                args.worker_debug
-            );
-
-            let worker_pool = Arc::new(
-                WorkerPool::<WorkerThread>::new(shards, &worker_state)
-                    .expect("Failed to create worker thread pool"),
-            );
-
-            let data = Arc::new(Data {
-                object_store: object_storage,
-                reqwest,
-                current_user,
-                worker: worker_pool,
-                sandwich: sandwich.clone()
-            });
-
-            let data1 = data.clone();
-            let http1 = http.clone();
-            let db_state1 = db_state.clone();
-            tokio::task::spawn(async move {
-                log::info!("Starting RPC server");
-
-                let rpc_server = crate::api::server::create(data1, db_state1, pg_pool.clone(), http1);
-
-                let listener = tokio::net::TcpListener::bind(&CONFIG.addrs.template_worker).await.unwrap();
-
-                axum::serve(listener, rpc_server).await.unwrap();
-            });
-
-            let mut client = client_builder
-                .data(data)
-                .event_handler(EventFramework {})
-                .wait_time_between_shard_start(Duration::from_secs(0)) // Disable wait time between shard start due to Sandwich
-                .await
-                .expect("Error creating client");
-
-            info!("Starting using autosharding");
-
-            if let Err(why) = client.start_autosharded().await {
-                error!("Client error: {:?}", why);
-                std::process::exit(1); // Clean exit with status code of 1
-            }
-        }
         WorkerType::ProcessPool => {
             // Ask sandwich how many shards we should use
             let shards = loop {
@@ -434,16 +349,16 @@ async fn main_impl(args: CmdArgs) {
 
             let ident_token = std::env::var("MESOPHYLL_CLIENT_TOKEN").expect("Failed to find ident token for mesophyll");
 
+            let (meso_client, meso_client_stream) = MesophyllClient::new(ident_token.clone(), worker_id)
+                .await
+                .expect("Failed to create Mesophyll client");
+
             let worker_state = CreateWorkerState::new(
                 http.clone(),
                 reqwest.clone(),
                 object_storage.clone(),
                 Arc::new(current_user.clone()),
-                Arc::new(
-                    WorkerDB::new_mesophyll(
-                        MesophyllDbClient::new(CONFIG.addrs.mesophyll_server.clone(), worker_id, ident_token.clone())
-                    )
-                ),
+                Arc::new(meso_client.clone()),
                 sandwich.clone(),
                 args.worker_debug
             );
@@ -456,7 +371,8 @@ async fn main_impl(args: CmdArgs) {
                 .expect("Failed to create worker thread"),
             );
 
-            let _meso_client = MesophyllClient::new(CONFIG.addrs.mesophyll_server.clone(), ident_token, worker_thread.clone());
+            // Start listening to the mesophyll server stream for events to dispatch to this worker thread
+            meso_client.listen(meso_client_stream, worker_thread.clone());
 
             let data = Arc::new(Data {
                 object_store: object_storage,

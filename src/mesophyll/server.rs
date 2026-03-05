@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tokio::sync::{oneshot, mpsc};
 
 /// Internal transport layer
-mod pb {
+pub(super) mod pb {
     tonic::include_proto!("mesophyll");
 }
 
@@ -30,15 +30,17 @@ fn decode_any<T: for<'de> serde::Deserialize<'de>>(msg: &[u8]) -> Result<T, crat
 
 impl pb::AnyValue {
     pub fn from_real<T: serde::Serialize>(value: &T) -> Result<Self, Status> {
+        Self::from_real_exec(value).map_err(|e| Status::internal(e.to_string()))
+    }
+
+    pub fn from_real_exec<T: serde::Serialize>(value: &T) -> Result<Self, crate::Error> {
         let data = encode_any(value)
-            .map_err(|e| Status::internal(format!("Failed to encode response value: {}", e)))?;
+            .map_err(|e| format!("Failed to encode response value: {}", e))?;
         Ok(Self { value: data })
     }
 
     pub fn to_real<T: for<'de> serde::Deserialize<'de>>(&self) -> Result<T, Status> {
-        let val = decode_any(&self.value)
-            .map_err(|e| Status::internal(format!("Failed to decode request value: {}", e)))?;
-        Ok(val)
+        self.to_real_exec().map_err(|e| Status::internal(e.to_string()))
     }
 
     pub fn to_real_exec<T: for<'de> serde::Deserialize<'de>>(&self) -> Result<T, crate::Error> {
@@ -95,6 +97,30 @@ impl pb::Worker {
     }
 }
 
+impl pb::DispatchEventResponse {
+    pub fn from_real(result: Result<RealKhronosValue, crate::Error>) -> Self {
+        Self {
+            resp: Some(match result {
+                Ok(v) => {
+                    match pb::AnyValue::from_real_exec(&v) {
+                        Ok(v) => pb::dispatch_event_response::Resp::Value(v),
+                        Err(e) => pb::dispatch_event_response::Resp::Error(format!("Failed to convert dispatch result to AnyValue: {:?}", e)),
+                    }
+                },
+                Err(e) => pb::dispatch_event_response::Resp::Error(e.to_string()),
+            })
+        }
+    }
+
+    pub fn to_real(self) -> Result<RealKhronosValue, crate::Error> {
+        match self.resp {
+            Some(pb::dispatch_event_response::Resp::Value(v)) => v.to_real_exec(),
+            Some(pb::dispatch_event_response::Resp::Error(e)) => Err(e.into()),
+            None => Err("DispatchEventResponse missing payload".into()),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct MesophyllServer {
     idents: Arc<HashMap<usize, String>>,
@@ -145,10 +171,10 @@ impl MesophyllServer {
 
     pub fn db_state(&self) -> &DbState { &self.db_state }
 
-    fn verify_worker(&self, worker: Option<pb::Worker>) -> Result<(), Status> {
+    fn verify_worker(&self, worker: Option<pb::Worker>) -> Result<usize, Status> {
         let worker = worker.ok_or_else(|| Status::invalid_argument("Missing worker info in request"))?;
         worker.validate(self)?;
-        Ok(())
+        Ok(worker.worker_id_usize()?)
     }
 }
 
@@ -174,7 +200,12 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         // Create a new connection for this worker
         let (tx, rx) = mpsc::unbounded_channel();
         let conn = MesophyllServerConn::new(wk.worker_id, tx);
-        self.conns.insert(wk.worker_id_usize()?, conn.clone());
+        if let Some(old) = self.conns.insert(wk.worker_id_usize()?, conn.clone()) {
+            old.tx.send(Ok(pb::MtwMessage {
+                payload: Some(pb::mtw_message::Payload::Shutdown("Another worker with the same ID has connected".to_string())),
+                id: None,
+            })).ok();
+        }
 
         tokio::spawn(async move {
             while let Some(item) = stream.next().await {
@@ -248,7 +279,6 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         let key = req.key;
         let Some(value) = req.value else {
             return Err(Status::invalid_argument("Missing value"));
-        
         };
 
         let value = value.to_real()?;
@@ -332,6 +362,25 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
             Err(e) => Err(Status::internal(e.to_string())),
         }
     }
+
+    async fn list_tenant_states(&self, request: tonic::Request<pb::WtmListTenantStates>) -> Result<tonic::Response<pb::AnyValue>, Status> {
+        let req = request.into_inner();
+        let wid = self.verify_worker(req.worker)?;
+        let val = self.db_state.tenant_state_cache_for(wid).await;
+        Ok(tonic::Response::new(pb::AnyValue::from_real(&val)?))
+    }
+
+    async fn set_tenant_state_for(&self, request: tonic::Request<pb::WtmSetTenantStateFor>) -> Result<tonic::Response<pb::WtmBool>, Status> {
+        let req = request.into_inner();
+        self.verify_worker(req.worker)?;
+        let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
+        let state = req.state.ok_or_else(|| Status::invalid_argument("Missing state"))?.to_real()?;
+
+        match self.db_state.set_tenant_state_for(id, state).await {
+            Ok(_) => Ok(tonic::Response::new(pb::WtmBool { value: true })),
+            Err(e) => Err(Status::internal(e.to_string())),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -353,12 +402,7 @@ impl MesophyllServerConn {
     }
 
     pub async fn dispatch_event(&self, id: RealId, event: RealCreateEvent) -> Result<RealKhronosValue, crate::Error> {
-        let (name, author, data) = event.extract();
-        let pb_event = pb::CreateEvent {
-            name,
-            author,
-            value: Some(pb::AnyValue::from_real(&data)?),
-        };
+        let pb_event = pb::AnyValue::from_real(&event)?;
 
         let (resp_tx, resp_rx) = oneshot::channel();
         let resp_id = rand::random::<u64>();
@@ -374,20 +418,11 @@ impl MesophyllServerConn {
         
         self.tx.send(Ok(msg)).map_err(|e| Status::internal(format!("Failed to send dispatch message to worker {}: {}", self.id, e)))?;
         let resp = resp_rx.await?;
-        match resp.resp {
-            Some(pb::dispatch_event_response::Resp::Value(v)) => v.to_real_exec(),
-            Some(pb::dispatch_event_response::Resp::Error(e)) => Err(e.into()),
-            None => Err("Received dispatch response with no payload".into()),
-        }
+        resp.to_real()
     }
     
     pub fn dispatch_event_nowait(&self, id: RealId, event: RealCreateEvent) -> Result<(), crate::Error> {
-        let (name, author, data) = event.extract();
-        let pb_event = pb::CreateEvent {
-            name,
-            author,
-            value: Some(pb::AnyValue::from_real(&data)?),
-        };
+        let pb_event = pb::AnyValue::from_real(&event)?;
 
         let msg = pb::MtwMessage {
             payload: Some(pb::mtw_message::Payload::Dispatch(pb::DispatchEvent {
@@ -402,12 +437,7 @@ impl MesophyllServerConn {
     }
 
     pub async fn run_script(&self, id: RealId, name: String, code: String, event: RealCreateEvent) -> Result<RealKhronosValue, crate::Error> {
-        let (event_name, event_author, event_data) = event.extract();
-        let pb_event = pb::CreateEvent {
-            name: event_name,
-            author: event_author,
-            value: Some(pb::AnyValue::from_real(&event_data)?),
-        };
+        let pb_event = pb::AnyValue::from_real(&event)?;
 
         let (resp_tx, resp_rx) = oneshot::channel();
         let resp_id = rand::random::<u64>();
@@ -425,11 +455,7 @@ impl MesophyllServerConn {
 
         self.tx.send(Ok(msg)).map_err(|e| Status::internal(format!("Failed to send run script message to worker {}: {}", self.id, e)))?;
         let resp = resp_rx.await?;
-        match resp.resp {
-            Some(pb::dispatch_event_response::Resp::Value(v)) => v.to_real_exec(),
-            Some(pb::dispatch_event_response::Resp::Error(e)) => Err(e.into()),
-            None => Err("Received run script response with no payload".into()),
-        }
+        resp.to_real()
     }
 
     pub async fn drop_tenant(&self, id: RealId) -> Result<(), crate::Error> {

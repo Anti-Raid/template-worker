@@ -25,17 +25,11 @@ message Worker {
   string token = 2;
 }
 
-message CreateEvent {
-  string name = 1; 
-  optional string author = 2;
-  AnyValue value = 3; // msgpack khronos value
-}
-
 message DispatchEvent {
   Id id = 1; 
   
-  // Expressed as a raw byte array
-  CreateEvent event_payload = 2;
+  // CreateEvent
+  AnyValue event_payload = 2;
 }
 
 message DispatchEventResponse {
@@ -50,7 +44,7 @@ message RunScript {
   Id id = 1; 
   string name = 2; 
   string code = 3; 
-  CreateEvent event = 4;
+  AnyValue event = 4;
 }
 
 message MTWMessage { // master-to-worker message
@@ -66,6 +60,9 @@ message MTWMessage { // master-to-worker message
 
     // Requests that a tenant be dropped
     Id drop_tenant = 4;
+
+    // Requests the worker shuts down due to another worker with the same ID coming online
+    string shutdown = 5;
   }
 }
 
@@ -147,6 +144,16 @@ message WTMBool {
   bool value = 1;
 }
 
+message WTMListTenantStates {
+  Worker worker = 1;
+}
+
+message WTMSetTenantStateFor {
+  Worker worker = 1;
+  Id id = 2;
+  AnyValue state = 3;
+}
+
 // Mesophyll service (runs on master and called by worker)
 service MesophyllMaster {
   // WorkerInit establishes a bidirectional stream between the master and worker. The master sends MasterToWorkerMessage messages to the worker, and the worker responds with WorkerToMasterMessage messages. 
@@ -180,4 +187,11 @@ service MesophyllMaster {
   rpc GlobalKvCreate(WTMGlobalKvCreate) returns (WTMBool) {}
   // GlobalKvDelete deletes a global kv pair with the given scope and key, if the version matches.
   rpc GlobalKvDelete(WTMGlobalKvDelete) returns (WTMBool) {}
+
+  // ListTenantStates returns a list of all tenant states from the Mesophyll server
+  //
+  // @returns HashMap<Id, TenantState> (msgpack encoded)
+  rpc ListTenantStates(WTMListTenantStates) returns (AnyValue) {}
+  // SetTenantStateFor sets the tenant state for a given tenant
+  rpc SetTenantStateFor(WTMSetTenantStateFor) returns (WTMBool) {}
 }
