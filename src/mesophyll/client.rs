@@ -30,12 +30,12 @@ impl MesophyllClient {
 
         // Start worker_init and identify to the server
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let client_stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
-        let server_stream = client.worker_init(client_stream).await?.into_inner();
         tx.send(pb::WtmMessage {
             payload: Some(pb::wtm_message::Payload::WorkerIdent(worker.clone())),
             resp_id: None,
         })?;
+        let client_stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
+        let server_stream = client.worker_init(client_stream).await?.into_inner();
 
         let s = Self {
             worker,
