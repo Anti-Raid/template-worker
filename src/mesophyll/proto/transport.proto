@@ -144,20 +144,6 @@ message WTMBool {
   bool value = 1;
 }
 
-message TenantState {
-  repeated string events = 1;
-  int32 flags = 2;
-}
-
-message TenantStateMapEntry {
-  Id id = 1;
-  TenantState state = 2;
-}
-
-message TenantStateMap {
-  repeated TenantStateMapEntry entries = 1;
-}
-
 message WTMListTenantStates {
   Worker worker = 1;
 }
@@ -165,7 +151,7 @@ message WTMListTenantStates {
 message WTMSetTenantStateFor {
   Worker worker = 1;
   Id id = 2;
-  TenantState state = 3;
+  AnyValue state = 3;
 }
 
 // Mesophyll service (runs on master and called by worker)
@@ -205,7 +191,7 @@ service MesophyllMaster {
   // ListTenantStates returns a list of all tenant states from the Mesophyll server
   //
   // @returns HashMap<Id, TenantState> (msgpack encoded)
-  rpc ListTenantStates(WTMListTenantStates) returns (TenantStateMap) {}
+  rpc ListTenantStates(WTMListTenantStates) returns (AnyValue) {}
   // SetTenantStateFor sets the tenant state for a given tenant
   rpc SetTenantStateFor(WTMSetTenantStateFor) returns (WTMBool) {}
 }

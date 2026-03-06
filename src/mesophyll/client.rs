@@ -1,8 +1,8 @@
-use std::{collections::{HashMap, HashSet}, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use futures::{StreamExt, stream::FuturesUnordered};
 use khronos_runtime::utils::khronos_value::KhronosValue;
-use crate::{mesophyll::{dbtypes::{CreateGlobalKv, GlobalKv, PartialGlobalKv, TenantState}}, worker::{workerlike::WorkerLike, workerthread::WorkerThread, workervmmanager::Id}};
+use crate::{mesophyll::dbtypes::{CreateGlobalKv, GlobalKv, PartialGlobalKv, TenantState}, worker::{workerlike::WorkerLike, workerthread::WorkerThread, workervmmanager::Id}};
 use crate::geese::kv::SerdeKvRecord;
 use crate::mesophyll::server::pb;
 
@@ -169,28 +169,11 @@ impl MesophyllClient {
     /// Returns a list of all tenant states from the Mesophyll server
     pub async fn list_tenant_states(&self) -> Result<HashMap<Id, TenantState>, crate::Error> {
         let mut cli = self.client.clone();
-        let entry = cli.list_tenant_states(pb::WtmListTenantStates { worker: Some(self.worker.clone()) })
+        cli.list_tenant_states(pb::WtmListTenantStates { worker: Some(self.worker.clone()) })
             .await
             .map_err(|e| e.to_string())?
-            .into_inner();
-
-        let mut states = HashMap::with_capacity(entry.entries.len());
-        for entry in entry.entries {
-            let Some(id) = entry.id.map(|id| id.to_real_id()) else {
-                log::error!("Mesophyll client received tenant state entry with invalid or missing ID");
-                continue;
-            };
-            let Some(state) = entry.state else {
-                log::error!("Mesophyll client received tenant state entry with missing state for ID {:?}", id);
-                continue;
-            };
-            let state = TenantState {
-                events: HashSet::from_iter(state.events),
-                flags: state.flags,
-            };
-            states.insert(id, state);
-        }
-        Ok(states)
+            .into_inner()
+            .to_real_exec()
     }
 
     /// Sets the tenant state for a given tenant ID
@@ -199,10 +182,7 @@ impl MesophyllClient {
         cli.set_tenant_state_for(pb::WtmSetTenantStateFor { 
             worker: Some(self.worker.clone()), 
             id: Some(pb::Id::from_real_id(&id)),
-            state: Some(pb::TenantState {
-                events: state.events.iter().cloned().collect(),
-                flags: state.flags,
-            }),
+            state: Some(pb::AnyValue::from_real_exec(state)?),
         })
         .await
         .map_err(|e| e.to_string())?;
