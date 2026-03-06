@@ -1321,7 +1321,7 @@ dependencies = [
 [[package]]
 name = "dapi"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#e9423ac8d99aaf77cff31b74d8b8b8512efb269b"
+source = "git+https://github.com/anti-raid/khronos#df1866775c1625d3dff5e730e14015798d98f598"
 dependencies = [
  "async-trait",
  "bitflags 2.11.0",
@@ -2431,7 +2431,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.2",
+ "socket2 0.6.3",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -2790,7 +2790,7 @@ dependencies = [
 [[package]]
 name = "khronos_ext"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#e9423ac8d99aaf77cff31b74d8b8b8512efb269b"
+source = "git+https://github.com/anti-raid/khronos#df1866775c1625d3dff5e730e14015798d98f598"
 dependencies = [
  "mlua_scheduler",
  "mluau",
@@ -2802,7 +2802,7 @@ dependencies = [
 [[package]]
 name = "khronos_runtime"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#e9423ac8d99aaf77cff31b74d8b8b8512efb269b"
+source = "git+https://github.com/anti-raid/khronos#df1866775c1625d3dff5e730e14015798d98f598"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -3847,7 +3847,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.1",
  "rustls 0.23.37",
- "socket2 0.6.2",
+ "socket2 0.6.3",
  "thiserror",
  "tokio",
  "tracing",
@@ -3884,7 +3884,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.2",
+ "socket2 0.6.3",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -4857,12 +4857,12 @@ dependencies = [
 
 [[package]]
 name = "socket2"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86f4aa3ad99f2088c990dfa82d367e19cb29268ed67c574d10d0a4bfe71f07e0"
+checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5386,7 +5386,7 @@ dependencies = [
  "mio",
  "pin-project-lite",
  "signal-hook-registry",
- "socket2 0.6.2",
+ "socket2 0.6.3",
  "tokio-macros",
  "tracing",
  "windows-sys 0.61.2",
@@ -5506,7 +5506,7 @@ dependencies = [
  "hyper-util",
  "percent-encoding",
  "pin-project",
- "socket2 0.6.2",
+ "socket2 0.6.3",
  "sync_wrapper",
  "tokio",
  "tokio-stream",

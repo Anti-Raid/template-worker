@@ -1,9 +1,14 @@
 use std::{collections::HashSet, sync::LazyLock};
+use crate::api::types::KhronosValueApi;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use khronos_runtime::traits::ir::globalkv as gkv_ir;
+use khronos_runtime::{traits::ir::globalkv as gkv_ir, utils::khronos_value::KhronosValue};
 use ts_rs::TS;
+
+#[allow(dead_code)]
+/// Marker trait for types that can describe themselves fully and can hence be used w/ bincode/rkyv etc.
+pub trait SelfDescribing {}
 
 #[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema, sqlx::FromRow)]
 #[ts(export)]
@@ -14,7 +19,10 @@ pub struct PartialGlobalKv {
     pub owner_type: String,
     pub price: Option<i64>, // will only be set for shop items, otherwise None
     pub short: String, // short description for the key-value.
-    pub public_metadata: serde_json::Value, // public metadata about the key-value
+    #[ts(as = "KhronosValueApi")]
+    #[schema(value_type = KhronosValueApi)]
+    #[sqlx(json)]
+    pub public_metadata: KhronosValue, // public metadata about the key-value
     pub scope: String,
     pub created_at: DateTime<Utc>,
     pub last_updated_at: DateTime<Utc>,
@@ -24,6 +32,8 @@ pub struct PartialGlobalKv {
     #[sqlx(default)]
     pub long: Option<String>, // long description for the key-value.
 }
+
+impl SelfDescribing for PartialGlobalKv {}
 
 impl Into<gkv_ir::PartialGlobalKv> for PartialGlobalKv {
     fn into(self) -> gkv_ir::PartialGlobalKv {
@@ -52,10 +62,13 @@ pub struct GlobalKv {
     #[serde(skip)]
     #[sqlx(rename = "data")]
     #[ts(skip)]
-    pub(super) raw_data: serde_json::Value, // the actual value of the key-value, may be private
+    #[sqlx(json)]
+    pub(super) raw_data: KhronosValue, // the actual value of the key-value, may be private
     #[sqlx(skip)]
     pub data: GlobalKvData,
 }
+
+impl SelfDescribing for GlobalKv {} 
 
 impl GlobalKv {
     /// Drop sensitive data from the GlobalKv, replacing it with null if it's opaque
@@ -63,7 +76,7 @@ impl GlobalKv {
         match self.data {
             GlobalKvData::Value { data: _, opaque: true } => {
                 self.data = GlobalKvData::Value {
-                    data: serde_json::Value::Null,
+                    data: KhronosValue::Null,
                     opaque: true,
                 };
             }
@@ -87,7 +100,9 @@ impl Into<gkv_ir::GlobalKv> for GlobalKv {
 #[serde(tag = "type")]
 pub enum GlobalKvData {
     Value {
-        data: serde_json::Value,
+        #[ts(as = "KhronosValueApi")]
+        #[schema(value_type = KhronosValueApi)]
+        data: KhronosValue,
         opaque: bool,
     },
     PurchaseRequired {
@@ -98,7 +113,7 @@ pub enum GlobalKvData {
 impl Default for GlobalKvData {
     fn default() -> Self {
         GlobalKvData::Value {
-            data: serde_json::Value::Null,
+            data: KhronosValue::Null,
             opaque: true,
         }
     }
@@ -123,11 +138,15 @@ pub struct CreateGlobalKv {
     pub key: String,
     pub version: i32,
     pub short: String, // short description for the key-value.
-    pub public_metadata: serde_json::Value, // public metadata about the key-value
+    #[ts(as = "KhronosValueApi")]
+    #[schema(value_type = KhronosValueApi)]
+    pub public_metadata: KhronosValue, // public metadata about the key-value
     pub scope: String,
     pub public_data: bool,
     pub long: Option<String>, // long description for the key-value.
-    pub data: serde_json::Value, // the actual value of the key-value, may be private
+    #[ts(as = "KhronosValueApi")]
+    #[schema(value_type = KhronosValueApi)]
+    pub data: KhronosValue, // the actual value of the key-value, may be private
 }
 
 impl From<gkv_ir::CreateGlobalKv> for CreateGlobalKv {
@@ -145,11 +164,15 @@ impl From<gkv_ir::CreateGlobalKv> for CreateGlobalKv {
     }
 }
 
+impl SelfDescribing for CreateGlobalKv {}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct TenantState {
     pub events: HashSet<String>,
     pub flags: i32,
 }
+
+impl SelfDescribing for TenantState {} // Fully self-describing since it only contains primitive types and a HashSet which is also self-describing
 
 pub static DEFAULT_TENANT_STATE: LazyLock<TenantState> = LazyLock::new(|| TenantState {
     events: {

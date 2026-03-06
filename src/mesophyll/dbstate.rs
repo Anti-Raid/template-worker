@@ -1,4 +1,5 @@
 use std::{collections::{HashMap, HashSet}, sync::Arc};
+use khronos_runtime::utils::khronos_value::KhronosValue;
 use tokio::sync::RwLock;
 use crate::{mesophyll::dbtypes::{CreateGlobalKv, GlobalKv, GlobalKvData, PartialGlobalKv, TenantState}, worker::{workervmmanager::Id}};
 use crate::geese::kv::KeyValueDb;
@@ -149,7 +150,7 @@ impl DbState {
         };
 
         // Drop data immediately here to ensure it is not leaked
-        let data = std::mem::replace(&mut gkv.raw_data, serde_json::Value::Null);
+        let data = std::mem::replace(&mut gkv.raw_data, KhronosValue::Null);
 
         if gkv.partial.price.is_some() {
             match id {
@@ -205,10 +206,10 @@ impl DbState {
         .bind(id.tenant_type())
         .bind(&gkv.short)
         .bind(&gkv.long)
-        .bind(&gkv.public_metadata)
+        .bind(serde_json::to_value(gkv.public_metadata)?)
         .bind(gkv.public_data)
         .bind(&gkv.scope)
-        .bind(&gkv.data)
+        .bind(serde_json::to_value(gkv.data)?)
         .execute(&self.pool)
         .await?;
 
