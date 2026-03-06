@@ -1,24 +1,6 @@
-use std::{borrow::Cow, cell::RefCell, collections::{HashMap, HashSet}, rc::Rc, sync::{Arc, LazyLock}};
-use serde_json::Value;
+use std::{borrow::Cow, cell::RefCell, collections::{HashMap, HashSet}, rc::Rc, sync::Arc};
 
-use crate::{geese::{objectstore::ObjectStore, sandwich::Sandwich}, mesophyll::client::MesophyllClient, worker::workervmmanager::Id};
-
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-pub struct TenantState {
-    pub events: HashSet<String>,
-    pub data: Value
-}
-
-static DEFAULT_TENANT_STATE: LazyLock<TenantState> = LazyLock::new(|| TenantState {
-    events: {
-        let mut set = HashSet::new();
-        set.insert("INTERACTION_CREATE".to_string());
-        set.insert("WebGetSettings".to_string());
-        set.insert("WebExecuteSetting".to_string());
-        set
-    },
-    data: Value::Object(serde_json::Map::new()),
-});
+use crate::{geese::{objectstore::ObjectStore, sandwich::Sandwich}, mesophyll::{client::MesophyllClient, dbtypes::{DEFAULT_TENANT_STATE, TenantState}}, worker::workervmmanager::Id};
 
 #[derive(Clone)]
 /// Represents the state of the worker, which includes the serenity context, reqwest client, object store, and database pool

@@ -2,7 +2,7 @@ use super::workerstate::WorkerState;
 use super::workervmmanager::Id;
 use crate::geese::objectstore::{Bucket, BucketWithKey, BucketWithPrefix};
 use crate::worker::builtins::EXPOSED_VFS;
-use crate::worker::workerstate::TenantState;
+use crate::mesophyll::dbtypes::TenantState;
 use crate::worker::workervmmanager::VmData;
 use khronos_runtime::core::typesext::Vfs;
 use khronos_runtime::traits::context::{
@@ -68,7 +68,7 @@ impl KhronosContext for TemplateContextProvider {
 
     fn limitations(&self) -> Limitations {
         // We start with full limitations with builtins applying extra limits prior to event dispatch where desired
-        Limitations::new(vec!["*".to_string()])
+        Limitations::new(HashSet::from_iter(["*".to_string()]), HashSet::new())
     }
 
     fn kv_provider(&self) -> Option<Self::KVProvider> {
@@ -610,7 +610,7 @@ impl RuntimeProvider for ArRuntimeProvider {
         Ok(runtime_ir::TenantState {
             events: ts.events.into_iter().collect(),
             banned: false,
-            data: ts.data,
+            flags: ts.flags,
         })
     }
 
@@ -620,7 +620,7 @@ impl RuntimeProvider for ArRuntimeProvider {
                 self.id,
                 TenantState {
                     events: HashSet::from_iter(state.events),
-                    data: state.data,
+                    flags: state.flags,
                 },
             )
             .await?;

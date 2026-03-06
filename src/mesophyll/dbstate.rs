@@ -1,6 +1,6 @@
 use std::{collections::{HashMap, HashSet}, sync::Arc};
 use tokio::sync::RwLock;
-use crate::{mesophyll::dbtypes::{CreateGlobalKv, GlobalKv, GlobalKvData, PartialGlobalKv}, worker::{workerstate::TenantState, workervmmanager::Id}};
+use crate::{mesophyll::dbtypes::{CreateGlobalKv, GlobalKv, GlobalKvData, PartialGlobalKv, TenantState}, worker::{workervmmanager::Id}};
 use crate::geese::kv::KeyValueDb;
 
 #[derive(Clone)]
@@ -56,13 +56,13 @@ impl DbState {
         #[derive(sqlx::FromRow)]
         struct TenantStatePartial {
             events: Vec<String>,
-            data: serde_json::Value,
+            flags: i32,
             owner_id: String,
             owner_type: String,
         }
 
         let partials: Vec<TenantStatePartial> =
-            sqlx::query_as("SELECT owner_id, owner_type, events, data FROM tenant_state")
+            sqlx::query_as("SELECT owner_id, owner_type, events, flags FROM tenant_state")
             .fetch_all(&self.pool)
             .await?;
 
@@ -73,7 +73,7 @@ impl DbState {
             };
             let state = TenantState {
                 events: HashSet::from_iter(partial.events),
-                data: partial.data,
+                flags: partial.flags,
             };
 
             states.insert(id, state);
@@ -86,12 +86,12 @@ impl DbState {
     pub async fn set_tenant_state_for(&self, id: Id, state: TenantState) -> Result<(), crate::Error> {
         let events = state.events.iter().collect::<Vec<_>>();
         sqlx::query(
-            "INSERT INTO tenant_state (owner_id, owner_type, events, data) VALUES ($1, $2, $3, $4) ON CONFLICT (owner_id, owner_type) DO UPDATE SET events = EXCLUDED.events, data = EXCLUDED.data",
+            "INSERT INTO tenant_state (owner_id, owner_type, events, flags) VALUES ($1, $2, $3, $4) ON CONFLICT (owner_id, owner_type) DO UPDATE SET events = EXCLUDED.events, flags = EXCLUDED.flags",
         )
         .bind(id.tenant_id())
         .bind(id.tenant_type())
         .bind(&events)
-        .bind(&state.data)
+        .bind(&state.flags)
         .execute(&self.pool)
         .await?;
 
