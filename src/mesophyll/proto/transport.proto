@@ -39,7 +39,9 @@ message DispatchEventResponse {
   }
 }
 
-// RunScript is a message sent from the master to a worker to instruct it to run a script. The worker will execute the script and respond with a DispatchEventResponse containing the result of the script execution or an error message if the execution failed.
+// RunScript is a message sent from the master to a worker to instruct it to run a script. 
+// The worker will execute the script and respond with a DispatchEventResponse containing 
+// the result of the script execution or an error message if the execution failed.
 message RunScript {
   Id id = 1; 
   string name = 2; 
@@ -154,9 +156,77 @@ message WTMSetTenantStateFor {
   AnyValue state = 3;
 }
 
+/*
+  #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum KhronosValue {
+    Text(String),
+    Integer(i64),
+    UnsignedInteger(u64),
+    Float(f64),
+    Boolean(bool),
+    Buffer(Vec<u8>),   // Binary data
+    Vector((f32, f32, f32)), // Luau vector
+    Map(Vec<(KhronosValue, KhronosValue)>),
+    List(Vec<KhronosValue>),
+    Timestamptz(chrono::DateTime<chrono::Utc>),
+    Interval(chrono::Duration),
+    TimeZone(chrono_tz::Tz),
+    MemoryVfs(HashMap<String, String>),
+    Null,
+}
+*/
+
+message KhronosValue {
+  oneof value {
+    string text = 1;
+    int64 integer = 2;
+    uint64 unsigned_integer = 3;
+    double float = 4;
+    bool boolean = 5;
+    bytes buffer = 6; // Binary data
+    KhronosVector vector = 7; // Luau vector
+    KhronosMap map = 8;
+    KhronosList list = 9;
+    string timestamptz = 10; // ISO8601 format
+    KhronosInterval interval = 11; // milliseconds
+    string time_zone = 12; // IANA time zone name
+    KhronosMemoryVfs memory_vfs = 13;
+    bool null_value = 14; // true if the value is null, false otherwise
+  }
+}
+
+message KhronosInterval {
+  int64 secs = 1;
+  int32 nanos = 2;
+}
+
+message KhronosVector {
+  float x = 1;
+  float y = 2;
+  float z = 3;
+}
+
+message KhronosMapEntry {
+  KhronosValue key = 1;
+  KhronosValue value = 2;
+}
+
+message KhronosMap {
+  repeated KhronosMapEntry entries = 1;
+}
+
+message KhronosList {
+  repeated KhronosValue values = 1;
+}
+
+message KhronosMemoryVfs {
+  map<string, string> entries = 1;
+}
+
 // Mesophyll service (runs on master and called by worker)
 service MesophyllMaster {
-  // WorkerInit establishes a bidirectional stream between the master and worker. The master sends MasterToWorkerMessage messages to the worker, and the worker responds with WorkerToMasterMessage messages. 
+  // WorkerInit establishes a bidirectional stream between the master and worker. The master sends MasterToWorkerMessage messages to the worker, 
+  // and the worker responds with WorkerToMasterMessage messages. 
   //
   // This stream remains open for the duration of the worker's lifecycle, allowing for continuous communication between the master and worker.
   rpc WorkerInit(stream WTMMessage) returns (stream MTWMessage) {}

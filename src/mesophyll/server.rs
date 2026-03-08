@@ -1,4 +1,6 @@
+use chrono::TimeDelta;
 use futures::{Stream, StreamExt};
+use khronos_runtime::chrono_tz;
 use serenity::all::{UserId, GuildId};
 use tonic::Status;
 use crate::{mesophyll::dbstate::DbState, worker::workervmmanager::Id as RealId};
@@ -96,6 +98,101 @@ impl pb::Worker {
         Ok(())
     }
 }
+
+impl pb::KhronosValue {
+    // No &self to give master ownership
+    pub fn into_real(self) -> Result<RealKhronosValue, crate::Error> {
+        use pb::khronos_value::Value;
+
+        match self.value {
+            None => Err("KhronosValue missing value".into()),
+            Some(v) => match v {
+                Value::Text(s) => Ok(RealKhronosValue::Text(s)),
+                Value::Integer(i) => Ok(RealKhronosValue::Integer(i)),
+                Value::UnsignedInteger(u) => Ok(RealKhronosValue::UnsignedInteger(u)),
+                Value::Float(f) => Ok(RealKhronosValue::Float(f)),
+                Value::Boolean(b) => Ok(RealKhronosValue::Boolean(b)),
+                Value::Buffer(b) => Ok(RealKhronosValue::Buffer(b)),
+                Value::Vector(v) => Ok(RealKhronosValue::Vector((v.x, v.y, v.z))),
+                Value::Map(m) => {
+                    let entries = m.entries.into_iter().map(|e| {
+                        let k = e.key.ok_or("Map entry missing key")?.into_real()?;
+                        let v = e.value.ok_or("Map entry missing value")?.into_real()?;
+                        Ok((k, v))
+                    }).collect::<Result<Vec<_>, crate::Error>>()?;
+                    Ok(RealKhronosValue::Map(entries))
+                },
+                Value::List(l) => {
+                    let items = l.values.into_iter().map(|v| v.into_real()).collect::<Result<Vec<_>, _>>()?;
+                    Ok(RealKhronosValue::List(items))
+                },
+                Value::Timestamptz(s) => {
+                    let dt = chrono::DateTime::parse_from_rfc3339(&s)
+                        .map_err(|e| format!("Invalid timestamptz: {}", e))?
+                        .with_timezone(&chrono::Utc);
+                    Ok(RealKhronosValue::Timestamptz(dt))
+                },
+                Value::Interval(ms) => {
+                    let new_time = TimeDelta::new(ms.secs, ms.nanos as u32).ok_or(format!("duration is out of bounds"))?;
+
+                    Ok(RealKhronosValue::Interval(new_time))
+                },
+                Value::TimeZone(tz) => {
+                    let tz: chrono_tz::Tz = tz.parse()
+                        .map_err(|e| format!("Invalid timezone: {}", e))?;
+                    Ok(RealKhronosValue::TimeZone(tz))
+                },
+                Value::MemoryVfs(vfs) => {
+                    Ok(RealKhronosValue::MemoryVfs(vfs.entries))
+                },
+                Value::NullValue(_) => Ok(RealKhronosValue::Null),
+            },
+        }
+    }
+
+    pub fn from_real(value: RealKhronosValue) -> Self {
+        use pb::khronos_value::Value;
+
+        let v = match value {
+            RealKhronosValue::Text(s) => Value::Text(s),
+            RealKhronosValue::Integer(i) => Value::Integer(i),
+            RealKhronosValue::UnsignedInteger(u) => Value::UnsignedInteger(u),
+            RealKhronosValue::Float(f) => Value::Float(f),
+            RealKhronosValue::Boolean(b) => Value::Boolean(b),
+            RealKhronosValue::Buffer(b) => Value::Buffer(b),
+            RealKhronosValue::Vector((x, y, z)) => Value::Vector(pb::KhronosVector { x, y, z }),
+            RealKhronosValue::Map(m) => {
+                let entries = m.into_iter().map(|(k, v)| {
+                    let key = Some(Self::from_real(k));
+                    let value = Some(Self::from_real(v));
+                    pb::KhronosMapEntry { key, value }
+                }).collect::<Vec<_>>();
+                Value::Map(pb::KhronosMap { entries })
+            },
+            RealKhronosValue::List(l) => {
+                let values = l.into_iter().map(Self::from_real).collect::<Vec<_>>();
+                Value::List(pb::KhronosList { values })
+            },
+            RealKhronosValue::Timestamptz(dt) => {
+                Value::Timestamptz(dt.to_rfc3339())
+            },
+            RealKhronosValue::Interval(dur) => {
+                Value::Interval(pb::KhronosInterval { secs: dur.num_seconds(), nanos: dur.subsec_nanos() })
+            },
+            RealKhronosValue::TimeZone(tz) => {
+                Value::TimeZone(tz.name().to_string())
+            },
+            RealKhronosValue::MemoryVfs(entries) => {
+                Value::MemoryVfs(pb::KhronosMemoryVfs { entries })
+            },
+            RealKhronosValue::Null => Value::NullValue(true),
+        };
+
+        Self { value: Some(v) }
+    }
+}
+
+
 
 impl pb::DispatchEventResponse {
     pub fn from_real(result: Result<RealKhronosValue, crate::Error>) -> Self {
@@ -222,7 +319,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
                             },
                             pb::wtm_message::Payload::WorkerIdent(_) => {
                                 log::error!("Received unexpected WorkerIdent message from worker {}, ignoring", wk.worker_id);
-                                break;
+                                continue;
                             },
                             pb::wtm_message::Payload::DropTenantAck(_) => {
                                 let Some((_, handler)) = conn.drop_tenant_ack_handlers.remove(&resp_id) else {
