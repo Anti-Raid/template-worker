@@ -6,9 +6,11 @@ function pullCommand {
     git pull origin HEAD:master
 }
 
+cd $(git rev-parse --show-toplevel)
+cd luau
 git submodule init && git submodule update --init --recursive
 
-cd ../luau/builtins
+cd builtins
 pullCommand
 
 cd templating-types
