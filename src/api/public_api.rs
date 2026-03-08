@@ -15,7 +15,7 @@ use crate::api::types::AuthorizeRequest;
 use crate::api::types::GetStatusResponse;
 use crate::api::types::GuildChannelWithPermissions;
 use crate::api::types::KhronosValueApi;
-use crate::mesophyll::dbtypes::GlobalKv;
+use crate::geese::gkv::GlobalKv;
 use crate::api::types::PartialGlobalKvList;
 use crate::api::types::PublicLuauExecute;
 use crate::api::types::ShardConn;
@@ -913,7 +913,7 @@ pub(super) async fn list_global_kv(
     State(AppData { mesophyll_db_state, .. }): State<AppData>,
     Query(params): Query<ListGlobalKvParams>,
 ) -> ApiResponse<PartialGlobalKvList> {
-    let items = mesophyll_db_state.global_kv_find(params.scope, params.query.unwrap_or_else(|| "%".to_string()))
+    let items = mesophyll_db_state.global_key_value_db().global_kv_find(params.scope, params.query.unwrap_or_else(|| "%".to_string()))
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to list global kvs: {e:?}").into())))?;
 
@@ -940,7 +940,7 @@ pub(super) async fn get_global_kv(
     State(AppData { mesophyll_db_state, .. }): State<AppData>,
     Path((scope, key, version)): Path<(String, String, i32)>,
 ) -> ApiResponse<GlobalKv> {
-    let item = mesophyll_db_state.global_kv_get(key, version, scope, None)
+    let item = mesophyll_db_state.global_key_value_db().global_kv_get(key, version, scope, None)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get global kv: {e:?}").into())))?;
 

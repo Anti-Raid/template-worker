@@ -318,7 +318,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         let scope = req.scope;
         let query = req.query;
 
-        match self.db_state.global_kv_find(scope, query).await {
+        match self.db_state.global_key_value_db().global_kv_find(scope, query).await {
             Ok(records) => Ok(tonic::Response::new(pb::AnyValue::from_real(&records)?)),
             Err(e) => Err(Status::internal(e.to_string())),
         }
@@ -331,7 +331,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         let scope = req.scope;
         let id = req.id.map(|id| id.to_real_id());
 
-        match self.db_state.global_kv_get(key, version, scope, id).await {
+        match self.db_state.global_key_value_db().global_kv_get(key, version, scope, id).await {
             Ok(record) => Ok(tonic::Response::new(pb::AnyValue::from_real(&record)?)),
             Err(e) => Err(Status::internal(e.to_string())),
         }
@@ -343,7 +343,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
         let value = req.data.ok_or_else(|| Status::invalid_argument("Missing data"))?.to_real()?;
 
-        match self.db_state.global_kv_create(id, value).await {
+        match self.db_state.global_key_value_db().global_kv_create(id, value).await {
             Ok(_) => Ok(tonic::Response::new(pb::WtmBool { value: true })),
             Err(e) => Err(Status::internal(e.to_string())),
         }
@@ -357,7 +357,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         let version = req.version;
         let scope = req.scope;
 
-        match self.db_state.global_kv_delete(id, key, version, scope).await {
+        match self.db_state.global_key_value_db().global_kv_delete(id, key, version, scope).await {
             Ok(_) => Ok(tonic::Response::new(pb::WtmBool { value: true })),
             Err(e) => Err(Status::internal(e.to_string())),
         }

@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use futures::{StreamExt, stream::FuturesUnordered};
 use khronos_runtime::utils::khronos_value::KhronosValue;
-use crate::{mesophyll::dbtypes::{CreateGlobalKv, GlobalKv, PartialGlobalKv, TenantState}, worker::{workerlike::WorkerLike, workerthread::WorkerThread, workervmmanager::Id}};
+use crate::{geese::gkv::{CreateGlobalKv, GlobalKv, PartialGlobalKv}, mesophyll::dbtypes::TenantState, worker::{workerlike::WorkerLike, workerthread::WorkerThread, workervmmanager::Id}};
 use crate::geese::kv::SerdeKvRecord;
 use crate::mesophyll::server::pb;
 

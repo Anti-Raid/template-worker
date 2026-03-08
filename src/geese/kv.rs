@@ -2,7 +2,7 @@ use khronos_runtime::utils::khronos_value::KhronosValue;
 use rand::distr::{Alphanumeric, SampleString};
 use crate::worker::workervmmanager::Id;
 use sqlx::Row;
-use khronos_runtime::traits::ir::KvRecord;
+use khronos_runtime::traits::ir::kv as kv_ir;
 
 #[derive(Clone)]
 /// A simple wrapper around the database pool that provides just the key-value storage functionality for tenants
@@ -208,9 +208,9 @@ pub struct SerdeKvRecord {
     pub last_updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-impl Into<KvRecord> for SerdeKvRecord {
-    fn into(self) -> KvRecord {
-        KvRecord {
+impl Into<kv_ir::KvRecord> for SerdeKvRecord {
+    fn into(self) -> kv_ir::KvRecord {
+        kv_ir::KvRecord {
             id: self.id,
             key: self.key,
             value: self.value,
