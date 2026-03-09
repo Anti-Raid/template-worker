@@ -74,6 +74,7 @@ s3_secret_key = secrets.token_urlsafe(64)
 vapid_public_key = secrets.token_urlsafe(32)
 vapid_private_key = secrets.token_urlsafe(64)
 dp_secret = secrets.token_urlsafe(128)
+mesophyll_token = secrets.token_urlsafe()
 default_error_channel = get_var("Default Error Channel ID", "DEFAULT_ERROR_CHANNEL")
 
 # Determine URLs based on docker or not
@@ -134,6 +135,7 @@ meta:
   support_server_invite: https://discord.gg/9BJWSrEBBJ
   sandwich_http_api: {sandwich_url}
   default_error_channel: "{default_error_channel}" # Change this
+  mesophyll_token: "{mesophyll_token}" # Mesophyll Token
 
 {SEAWEED_DATA}
 

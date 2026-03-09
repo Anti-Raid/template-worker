@@ -154,6 +154,11 @@ message WTMSetTenantStateFor {
   AnyValue state = 3;
 }
 
+// Sent by the master to the worker to send over key data like number of workers in the pool etc.
+message MTWBaseWorkerInfo {
+  uint32 num_workers = 1;
+}
+
 // Mesophyll service (runs on master and called by worker)
 service MesophyllMaster {
   // WorkerInit establishes a bidirectional stream between the master and worker. The master sends MasterToWorkerMessage messages to the worker, and the worker responds with WorkerToMasterMessage messages. 
@@ -194,4 +199,8 @@ service MesophyllMaster {
   rpc ListTenantStates(WTMListTenantStates) returns (AnyValue) {}
   // SetTenantStateFor sets the tenant state for a given tenant
   rpc SetTenantStateFor(WTMSetTenantStateFor) returns (WTMBool) {}
+
+
+  // BaseWorkerInfo enables the worker to get common info from the master
+  rpc BaseWorkerInfo(Worker) returns (MTWBaseWorkerInfo) {}
 }

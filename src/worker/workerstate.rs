@@ -6,7 +6,6 @@ use crate::{geese::{objectstore::ObjectStore, sandwich::Sandwich}, mesophyll::{c
 /// Represents the state of the worker, which includes the serenity context, reqwest client, object store, and database pool
 pub struct CreateWorkerState {
     pub serenity_http: Arc<serenity::http::Http>,
-    pub reqwest_client: reqwest::Client,
     pub object_store: Arc<ObjectStore>,
     pub current_user: Arc<serenity::all::CurrentUser>,
     pub mesophyll_client: Arc<MesophyllClient>,
@@ -18,7 +17,6 @@ impl CreateWorkerState {
     /// Creates a new CreateWorkerState with the given serenity context, reqwest client, object store, and database pool
     pub fn new(
         serenity_http: Arc<serenity::http::Http>,
-        reqwest_client: reqwest::Client,
         object_store: Arc<ObjectStore>,
         current_user: Arc<serenity::all::CurrentUser>,
         mesophyll_client: Arc<MesophyllClient>,
@@ -27,7 +25,6 @@ impl CreateWorkerState {
     ) -> Self {
         Self {
             serenity_http,
-            reqwest_client,
             object_store,
             current_user,
             mesophyll_client,
@@ -41,7 +38,6 @@ impl CreateWorkerState {
 /// Represents the state of the worker, which includes the serenity context, reqwest client, object store, and database pool
 pub struct WorkerState {
     pub serenity_http: Arc<serenity::http::Http>,
-    pub _reqwest_client: reqwest::Client,
     pub object_store: Arc<ObjectStore>,
     pub mesophyll_client: Arc<MesophyllClient>,
     pub current_user: Arc<serenity::all::CurrentUser>,
@@ -56,7 +52,6 @@ impl WorkerState {
         let tenant_state_cache = Rc::new(RefCell::new(HashMap::new()));
         let s = Self {
             serenity_http: cws.serenity_http,
-            _reqwest_client: cws.reqwest_client,
             object_store: cws.object_store,
             mesophyll_client: cws.mesophyll_client,
             current_user: cws.current_user,

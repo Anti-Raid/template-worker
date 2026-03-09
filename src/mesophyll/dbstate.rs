@@ -27,6 +27,11 @@ impl DbState {
         Ok(s)
     }
 
+    /// Returns the number of workers in the pool
+    pub fn num_workers(&self) -> usize {
+        self.num_workers
+    }
+
     /// Returns the underlying SQLx Postgres pool
     pub fn get_pool(&self) -> &sqlx::PgPool {
         &self.pool

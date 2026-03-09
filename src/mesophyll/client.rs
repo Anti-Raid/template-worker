@@ -21,10 +21,10 @@ pub struct MesophyllClientStream {
 #[allow(dead_code)]
 impl MesophyllClient {
     /// Creates a new Mesophyll client
-    pub async fn new(token: String, worker_id: usize) -> Result<(Self, MesophyllClientStream), crate::Error> {
+    pub async fn new(worker_id: usize) -> Result<(Self, MesophyllClientStream), crate::Error> {
         let worker = pb::Worker {
             worker_id: worker_id as u64,
-            token: token.clone(),
+            token: crate::CONFIG.meta.mesophyll_token.clone(),
         };
         let uri = tonic::transport::Endpoint::from_shared(format!("http://{}", crate::CONFIG.addrs.mesophyll_server))?;
         let mut client = pb::mesophyll_master_client::MesophyllMasterClient::connect(uri).await?;
@@ -316,5 +316,14 @@ impl MesophyllClient {
         .await
         .map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    /// Fetch common information for the worker from the Mesophyll server, such as number of workers in the pool
+    pub async fn fetch_base_worker_info(&self) -> Result<pb::MtwBaseWorkerInfo, crate::Error> {
+        let mut cli = self.client.clone();
+        Ok(cli.base_worker_info(tonic::Request::new(self.worker.clone()))
+            .await
+            .map_err(|e| e.to_string())?
+            .into_inner())
     }
 }

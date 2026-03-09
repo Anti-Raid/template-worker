@@ -22,11 +22,12 @@ use crate::worker::workerprocesshandle::{WorkerProcessHandle, WorkerProcessHandl
 use crate::worker::workerstate::CreateWorkerState;
 use crate::worker::workerthread::WorkerThread;
 use clap::{Parser, ValueEnum};
-use log::{error, info};
+use log::{debug, error, info};
 use serenity::all::{ApplicationId, HttpBuilder, UserId};
 use sqlx::postgres::PgPoolOptions;
 use std::io::Write;
 use std::{sync::Arc, time::Duration};
+use tokio::signal::unix::{signal, SignalKind};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>; // This is constant and should be copy pasted
 
@@ -56,19 +57,9 @@ struct CmdArgs {
     #[clap(long, default_value = "7")]
     pub max_db_connections: u32,
 
-    #[clap(long, default_value_t = false)]
-    /// Whether to use tokio console for debugging
-    /// 
-    /// May increase resource usage, so only enable when needed
-    pub use_tokio_console: bool,
-
     /// Enables debug logging for luau in workers
     #[clap(long, default_value_t = false)]
     pub worker_debug: bool,
-
-    /// Number of process workers to use for the process pool
-    #[clap(long, default_value = None)]
-    pub process_workers: Option<usize>,
 
     /// Type of worker to use
     #[clap(long, default_value = "processpool", value_enum)]
@@ -150,22 +141,18 @@ async fn main_impl(args: CmdArgs) {
 
     env_builder.init();
 
-    if args.use_tokio_console {
-        //console_subscriber::init();
-    }
-
     let proxy_url = CONFIG.meta.proxy.clone();
 
-    info!("Proxy URL: {}", proxy_url);
+    debug!("Proxy URL: {}", proxy_url);
 
     let token = serenity::all::SecretString::new(CONFIG.discord_auth.token.clone().into());
     let http = Arc::new(HttpBuilder::new(token.clone()).proxy(proxy_url).build());
 
-    info!("HttpBuilder done");
+    debug!("HttpBuilder done");
 
     let client_builder = serenity::all::ClientBuilder::new_with_http(token, http.clone());
 
-    info!("Connecting to database");
+    debug!("Connecting to database");
 
     let reqwest = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(30))
@@ -193,7 +180,7 @@ async fn main_impl(args: CmdArgs) {
             continue;
         }
 
-        info!("Current user: {} ({})", current_user.name, current_user.id);
+        debug!("Current user: {} ({})", current_user.name, current_user.id);
 
         http.set_application_id(ApplicationId::new(current_user.id.get()));
         break current_user;
@@ -301,41 +288,22 @@ async fn main_impl(args: CmdArgs) {
                 axum::serve(listener, rpc_server).await.unwrap();
             });
 
-            // Loop indefinitely until Ctrl+C is pressed
-            #[allow(clippy::never_loop)] // loop here is for documenting semantics
-            // On Unix, listen for *both* SIGINT and SIGTERM
-            #[cfg(unix)]
-            {
-                use tokio::signal::unix::{signal, SignalKind};
+            // Wait indefinitely until Ctrl+C is pressed
+            let mut sigint =
+                signal(SignalKind::interrupt()).expect("Failed to set up SIGINT handler");
+            let mut sigterm =
+                signal(SignalKind::terminate()).expect("Failed to set up SIGTERM handler");
 
-                let mut sigint =
-                    signal(SignalKind::interrupt()).expect("Failed to set up SIGINT handler");
-                let mut sigterm =
-                    signal(SignalKind::terminate()).expect("Failed to set up SIGTERM handler");
-
-                tokio::select! {
-                    _ = sigint.recv() => {
-                        // Kill the worker pool
-                        info!("Received SIGINT, shutting down worker pool");
-                        worker_pool.kill().await.expect("Failed to kill worker pool");
-                    }
-                    _ = sigterm.recv() => {
-                        // Kill the worker pool
-                        info!("Received SIGTERM, shutting down worker pool");
-                        worker_pool.kill().await.expect("Failed to kill worker pool");
-                    }
+            tokio::select! {
+                _ = sigint.recv() => {
+                    // Kill the worker pool
+                    info!("Received SIGINT, shutting down worker pool");
+                    worker_pool.kill().await.expect("Failed to kill worker pool");
                 }
-            }
-
-            // Fallback for non-unix systems
-            #[cfg(not(unix))]
-            {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {
-                        // Kill the worker pool
-                        info!("Received Ctrl+C, shutting down worker pool");
-                        worker_pool.kill().await.expect("Failed to kill worker pool");
-                    }
+                _ = sigterm.recv() => {
+                    // Kill the worker pool
+                    info!("Received SIGTERM, shutting down worker pool");
+                    worker_pool.kill().await.expect("Failed to kill worker pool");
                 }
             }
         }
@@ -343,19 +311,15 @@ async fn main_impl(args: CmdArgs) {
             let Some(worker_id) = args.worker_id else {
                 panic!("Worker ID must be set when worker type is processpoolworker");
             };
-            let Some(process_workers) = args.process_workers else {
-                panic!("Process workers must be set when worker type is processpoolworker");
-            };
 
-            let ident_token = std::env::var("MESOPHYLL_CLIENT_TOKEN").expect("Failed to find ident token for mesophyll");
-
-            let (meso_client, meso_client_stream) = MesophyllClient::new(ident_token.clone(), worker_id)
+            let (meso_client, meso_client_stream) = MesophyllClient::new(worker_id)
                 .await
                 .expect("Failed to create Mesophyll client");
 
+            let base_worker_info = meso_client.fetch_base_worker_info().await.expect("Failed to fetch base worker info from Mesophyll server");
+
             let worker_state = CreateWorkerState::new(
                 http.clone(),
-                reqwest.clone(),
                 object_storage.clone(),
                 Arc::new(current_user.clone()),
                 Arc::new(meso_client.clone()),
@@ -395,7 +359,7 @@ async fn main_impl(args: CmdArgs) {
             if let Err(why) = client
                 .start_shard(
                     worker_id.try_into().unwrap(),
-                    process_workers.try_into().unwrap(),
+                    base_worker_info.num_workers.try_into().unwrap(),
                 )
                 .await
             {

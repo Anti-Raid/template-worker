@@ -21,9 +21,6 @@ pub struct WorkerProcessHandle {
     /// The id of the worker process, used for routing
     id: usize,
     
-    /// The total number of processes in the pool
-    total: usize,
-
     /// Whether to enable print
     worker_debug: bool,
 
@@ -36,12 +33,11 @@ impl WorkerProcessHandle {
     const MAX_CONSECUTIVE_FAILURES_BEFORE_CRASH: usize = 10;
 
     /// Creates a new WorkerProcessHandle given the worker ID and a mesophyll server
-    pub fn new(id: usize, total: usize, worker_debug: bool, mesophyll_server: MesophyllServer) -> Result<Self, crate::Error> {
+    pub fn new(id: usize, worker_debug: bool, mesophyll_server: MesophyllServer) -> Result<Self, crate::Error> {
         let (kill_msg_tx, mut kill_msg_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
         let wps = Self {
             mesophyll_server,
             id,
-            total,
             worker_debug,
             kill_msg_tx
         };
@@ -59,11 +55,6 @@ impl WorkerProcessHandle {
         let mut consecutive_failures = 0;
 
         loop {
-            let Some(meso_token) = self.mesophyll_server.get_token_for_worker(self.id) else {
-                log::error!("No ident found for worker process with ID: {}", self.id);
-                return;
-            };
-
             if consecutive_failures >= Self::MAX_CONSECUTIVE_FAILURES_BEFORE_CRASH {
                 log::error!("Worker process with ID: {} has failed {} times in a row, crashing", self.id, consecutive_failures);
 
@@ -93,14 +84,11 @@ impl WorkerProcessHandle {
             command.arg("processpoolworker");
             command.arg("--worker-id");
             command.arg(self.id.to_string());
-            command.arg("--process-workers");
-            command.arg(self.total.to_string());
 
             if self.worker_debug {
                 command.arg("--worker-debug");
             }
 
-            command.env("MESOPHYLL_CLIENT_TOKEN", meso_token);
             command.kill_on_drop(true);
 
             let mut child = match command.spawn() {
@@ -204,10 +192,10 @@ impl WorkerProcessHandleCreateOpts {
 impl Poolable for WorkerProcessHandle {
     type ExtState = WorkerProcessHandleCreateOpts;
 
-    fn new(id: usize, total: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
+    fn new(id: usize, _total: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
     where Self: Sized 
     {
-        Self::new(id, total, ext_state.worker_debug, ext_state.mesophyll_server.clone())
+        Self::new(id, ext_state.worker_debug, ext_state.mesophyll_server.clone())
     }
 }
 

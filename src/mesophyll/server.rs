@@ -5,8 +5,7 @@ use crate::{mesophyll::dbstate::DbState, worker::workervmmanager::Id as RealId};
 use khronos_runtime::utils::khronos_value::KhronosValue as RealKhronosValue;
 use khronos_runtime::primitives::event::CreateEvent as RealCreateEvent;
 use dashmap::DashMap;
-use rand::distr::{SampleString, Alphanumeric};
-use std::{collections::HashMap, net::ToSocketAddrs};
+use std::net::ToSocketAddrs;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::{oneshot, mpsc};
@@ -84,12 +83,13 @@ impl pb::Worker {
     }
 
     /// Validates the workers session against the Mesophyll server state
-    fn validate(&self, state: &MesophyllServer) -> Result<(), Status> {
+    fn validate(&self, server: &MesophyllServer) -> Result<(), Status> {
         let wid = self.worker_id_usize()?;
-        let Some(expected_key) = state.get_token_for_worker(wid) else {
-            return Err(Status::unauthenticated(format!("Invalid worker ID: {}", wid)));
-        };
-        if self.token != *expected_key {
+        if wid > server.db_state().num_workers() {
+            return Err(Status::permission_denied(format!("Invalid worker ID: {}, exceeds number of workers in pool", wid)));
+        }
+
+        if self.token != crate::CONFIG.meta.mesophyll_token {
             return Err(Status::permission_denied("Invalid token"));
         }
 
@@ -123,27 +123,14 @@ impl pb::DispatchEventResponse {
 
 #[derive(Clone)]
 pub struct MesophyllServer {
-    idents: Arc<HashMap<usize, String>>,
     conns: Arc<DashMap<usize, MesophyllServerConn>>,
     db_state: DbState,
 }
 
 impl MesophyllServer {
-    const TOKEN_LENGTH: usize = 64;
-
-    pub async fn new(num_idents: usize, pool: sqlx::PgPool) -> Result<Self, crate::Error> {
-        let mut idents = HashMap::new();
-        for i in 0..num_idents {
-            let ident = Alphanumeric.sample_string(&mut rand::rng(), Self::TOKEN_LENGTH);
-            idents.insert(i, ident);
-        }
-        Self::new_with(idents, pool).await
-    }
-
-    async fn new_with(idents: HashMap<usize, String>, pool: sqlx::PgPool) -> Result<Self, crate::Error> {
+    pub async fn new(num_workers: usize, pool: sqlx::PgPool) -> Result<Self, crate::Error> {
         let s = Self {
-            db_state: DbState::new(idents.len(), pool).await?,
-            idents: Arc::new(idents),
+            db_state: DbState::new(num_workers, pool).await?,
             conns: Arc::new(DashMap::new()),
         };
 
@@ -159,10 +146,6 @@ impl MesophyllServer {
         });
 
         Ok(s)
-    }
-
-    pub fn get_token_for_worker(&self, worker_id: usize) -> Option<&String> {
-        self.idents.get(&worker_id)
     }
 
     pub fn get_connection(&self, worker_id: usize) -> Option<MesophyllServerConn> {
@@ -200,12 +183,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         // Create a new connection for this worker
         let (tx, rx) = mpsc::unbounded_channel();
         let conn = MesophyllServerConn::new(wk.worker_id, tx);
-        if let Some(old) = self.conns.insert(wk.worker_id_usize()?, conn.clone()) {
-            old.tx.send(Ok(pb::MtwMessage {
-                payload: Some(pb::mtw_message::Payload::Shutdown("Another worker with the same ID has connected".to_string())),
-                id: None,
-            })).ok();
-        }
+        self.conns.insert(wk.worker_id_usize()?, conn.clone());
 
         tokio::spawn(async move {
             while let Some(item) = stream.next().await {
@@ -381,6 +359,15 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
             Err(e) => Err(Status::internal(e.to_string())),
         }
     }
+
+    async fn base_worker_info(&self, request: tonic::Request<pb::Worker>) -> Result<tonic::Response<pb::MtwBaseWorkerInfo>, Status> {
+        let req = request.into_inner();
+        req.validate(self)?;
+
+        Ok(tonic::Response::new(pb::MtwBaseWorkerInfo {
+            num_workers: self.db_state().num_workers().try_into().map_err(|_e| Status::internal("num_workers exceeds u32 max"))?,
+        }))
+    }
 }
 
 #[derive(Clone)]
@@ -389,6 +376,22 @@ pub struct MesophyllServerConn {
     tx: mpsc::UnboundedSender<Result<pb::MtwMessage, Status>>,
     pub(super) dispatch_response_handlers: Arc<DashMap<u64, oneshot::Sender<pb::DispatchEventResponse>>>,
     pub(super) drop_tenant_ack_handlers: Arc<DashMap<u64, oneshot::Sender<()>>>,
+}
+
+// On drop, shutdown
+impl Drop for MesophyllServerConn {
+    fn drop(&mut self) {
+        log::info!("Worker with ID: {} disconnected, cleaning up connection", self.id);
+        // Send a shutdown message to the worker to clean up any resources on the worker side
+        if let Err(e) = self.tx.send(Ok(pb::MtwMessage {
+            payload: Some(pb::mtw_message::Payload::Shutdown("Worker disconnected".to_string())),
+            id: None,
+        })) {
+            log::error!("Failed to send shutdown message to worker with ID: {}: {}", self.id, e);
+        } else {
+            log::info!("Sent shutdown message to worker with ID: {}", self.id);
+        }
+    }
 }
 
 impl MesophyllServerConn {

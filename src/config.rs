@@ -90,6 +90,7 @@ pub struct Meta {
     pub support_server_invite: String,
     pub sandwich_http_api: String,
     pub default_error_channel: serenity::all::ChannelId,
+    pub mesophyll_token: String,
 }
 
 #[derive(Serialize, Deserialize)]
