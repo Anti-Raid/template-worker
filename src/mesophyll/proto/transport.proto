@@ -156,26 +156,6 @@ message WTMSetTenantStateFor {
   AnyValue state = 3;
 }
 
-/*
-  #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum KhronosValue {
-    Text(String),
-    Integer(i64),
-    UnsignedInteger(u64),
-    Float(f64),
-    Boolean(bool),
-    Buffer(Vec<u8>),   // Binary data
-    Vector((f32, f32, f32)), // Luau vector
-    Map(Vec<(KhronosValue, KhronosValue)>),
-    List(Vec<KhronosValue>),
-    Timestamptz(chrono::DateTime<chrono::Utc>),
-    Interval(chrono::Duration),
-    TimeZone(chrono_tz::Tz),
-    MemoryVfs(HashMap<String, String>),
-    Null,
-}
-*/
-
 message KhronosValue {
   oneof value {
     string text = 1;
@@ -222,6 +202,12 @@ message KhronosList {
 message KhronosMemoryVfs {
   map<string, string> entries = 1;
 }
+
+message TenantState {
+  repeated string events = 1;
+  int32 flags = 2;
+}
+
 
 // Mesophyll service (runs on master and called by worker)
 service MesophyllMaster {

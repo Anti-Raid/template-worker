@@ -192,7 +192,26 @@ impl pb::KhronosValue {
     }
 }
 
+impl pb::TenantState {
+    pub fn into_real(self) -> crate::mesophyll::dbtypes::TenantState {
+        let events = self.events.into_iter().collect::<std::collections::HashSet<_>>();
 
+        crate::mesophyll::dbtypes::TenantState {
+            events: events,
+            flags: self.flags,
+        }
+    }
+
+    
+    pub fn from_real(value: crate::mesophyll::dbtypes::TenantState) -> Self {
+        let events = value.events.into_iter().collect::<Vec<_>>();
+
+        Self {
+            events,
+            flags: value.flags,
+        }
+    }
+}
 
 impl pb::DispatchEventResponse {
     pub fn from_real(result: Result<RealKhronosValue, crate::Error>) -> Self {
