@@ -101,7 +101,7 @@ impl WorkerState {
 
     /// Sets the tenant state for a specific tenant
     pub async fn set_tenant_state_for(&self, id: Id, state: TenantState) -> Result<(), crate::Error> {
-        self.mesophyll_client.set_tenant_state_for(id, &state).await?;
+        self.mesophyll_client.set_tenant_state_for(id, state.clone()).await?;
 
         // Update the cache
         {

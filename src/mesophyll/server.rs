@@ -213,6 +213,30 @@ impl pb::TenantState {
     }
 }
 
+impl pb::ListTenantState {
+    pub fn from_real(value: HashMap<RealId, crate::mesophyll::dbtypes::TenantState>) -> Self {
+        let states = value.into_iter().map(|(id, state)| {
+            let pb_id = pb::Id::from_real_id(&id);
+            let pb_state = pb::TenantState::from_real(state);
+            
+            pb::TenantStateAndId {
+                id: Some(pb_id),
+                state: Some(pb_state),
+            }
+        }).collect();
+
+        Self { states }
+    }
+
+    pub fn into_real(self) -> HashMap<RealId, crate::mesophyll::dbtypes::TenantState> {
+        self.states.into_iter().filter_map(|state_and_id| {
+            let id = state_and_id.id?.to_real_id();
+            let state = state_and_id.state?.into_real();
+            Some((id, state))
+        }).collect()
+    }
+}
+
 impl pb::DispatchEventResponse {
     pub fn from_real(result: Result<RealKhronosValue, crate::Error>) -> Self {
         Self {
@@ -479,18 +503,18 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         }
     }
 
-    async fn list_tenant_states(&self, request: tonic::Request<pb::WtmListTenantStates>) -> Result<tonic::Response<pb::AnyValue>, Status> {
+    async fn list_tenant_states(&self, request: tonic::Request<pb::WtmListTenantStates>) -> Result<tonic::Response<pb::ListTenantState>, Status> {
         let req = request.into_inner();
         let wid = self.verify_worker(req.worker)?;
         let val = self.db_state.tenant_state_cache_for(wid).await;
-        Ok(tonic::Response::new(pb::AnyValue::from_real(&val)?))
+        Ok(tonic::Response::new(pb::ListTenantState::from_real(val)))
     }
 
     async fn set_tenant_state_for(&self, request: tonic::Request<pb::WtmSetTenantStateFor>) -> Result<tonic::Response<pb::WtmBool>, Status> {
         let req = request.into_inner();
         self.verify_worker(req.worker)?;
         let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
-        let state = req.state.ok_or_else(|| Status::invalid_argument("Missing state"))?.to_real()?;
+        let state = req.state.ok_or_else(|| Status::invalid_argument("Missing state"))?.into_real();
 
         match self.db_state.set_tenant_state_for(id, state).await {
             Ok(_) => Ok(tonic::Response::new(pb::WtmBool { value: true })),

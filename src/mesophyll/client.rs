@@ -169,20 +169,21 @@ impl MesophyllClient {
     /// Returns a list of all tenant states from the Mesophyll server
     pub async fn list_tenant_states(&self) -> Result<HashMap<Id, TenantState>, crate::Error> {
         let mut cli = self.client.clone();
-        cli.list_tenant_states(pb::WtmListTenantStates { worker: Some(self.worker.clone()) })
+        Ok(cli.list_tenant_states(pb::WtmListTenantStates { worker: Some(self.worker.clone()) })
             .await
             .map_err(|e| e.to_string())?
             .into_inner()
-            .to_real_exec()
+            .into_real()
+        )
     }
 
     /// Sets the tenant state for a given tenant ID
-    pub async fn set_tenant_state_for(&self, id: Id, state: &TenantState) -> Result<(), crate::Error> {
+    pub async fn set_tenant_state_for(&self, id: Id, state: TenantState) -> Result<(), crate::Error> {
         let mut cli = self.client.clone();
         cli.set_tenant_state_for(pb::WtmSetTenantStateFor { 
             worker: Some(self.worker.clone()), 
             id: Some(pb::Id::from_real_id(&id)),
-            state: Some(pb::AnyValue::from_real_exec(state)?),
+            state: Some(pb::TenantState::from_real(state)),
         })
         .await
         .map_err(|e| e.to_string())?;
