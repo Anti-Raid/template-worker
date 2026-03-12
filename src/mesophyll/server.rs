@@ -383,14 +383,10 @@ impl Drop for MesophyllServerConn {
     fn drop(&mut self) {
         log::info!("Worker with ID: {} disconnected, cleaning up connection", self.id);
         // Send a shutdown message to the worker to clean up any resources on the worker side
-        if let Err(e) = self.tx.send(Ok(pb::MtwMessage {
+        let _ = self.tx.send(Ok(pb::MtwMessage {
             payload: Some(pb::mtw_message::Payload::Shutdown("Worker disconnected".to_string())),
             id: None,
-        })) {
-            log::error!("Failed to send shutdown message to worker with ID: {}: {}", self.id, e);
-        } else {
-            log::info!("Sent shutdown message to worker with ID: {}", self.id);
-        }
+        }));
     }
 }
 

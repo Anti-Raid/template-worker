@@ -70,6 +70,7 @@ impl Stratum {
         bot_id: UserId,
         evt: pb::DiscordEvent,
     ) -> Result<(), crate::Error> {
+        log::info!("Event: {}, gid: {}, payload: {}", evt.event_name, evt.guild_id, evt.payload);
         if evt.guild_id == 0 || evt.guild_id == u64::MAX {
             return Ok(()); // No guild ID, nothing to do
         }
