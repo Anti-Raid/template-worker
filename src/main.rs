@@ -1,7 +1,6 @@
 mod api;
 mod config;
 mod data;
-mod event_handler;
 mod mesophyll;
 mod fauxpas;
 mod register;
@@ -11,11 +10,10 @@ mod geese;
 
 use crate::config::CONFIG;
 use crate::data::Data;
-use crate::event_handler::EventFramework;
 use crate::fauxpas::layers::shell::ShellData;
 use crate::mesophyll::client::MesophyllClient;
 use crate::migrations::apply_migrations;
-use crate::geese::sandwich::Sandwich;
+use crate::geese::stratum::Stratum;
 use crate::worker::workerlike::WorkerLike;
 use crate::worker::workerpool::WorkerPool;
 use crate::worker::workerprocesshandle::{WorkerProcessHandle, WorkerProcessHandleCreateOpts};
@@ -23,8 +21,9 @@ use crate::worker::workerstate::CreateWorkerState;
 use crate::worker::workerthread::WorkerThread;
 use clap::{Parser, ValueEnum};
 use log::{debug, error, info};
-use serenity::all::{ApplicationId, HttpBuilder, UserId};
+use serenity::all::{ApplicationId, HttpBuilder};
 use sqlx::postgres::PgPoolOptions;
+use tokio::sync::watch;
 use std::io::Write;
 use std::{sync::Arc, time::Duration};
 use tokio::signal::unix::{signal, SignalKind};
@@ -148,10 +147,6 @@ async fn main_impl(args: CmdArgs) {
     let token = serenity::all::SecretString::new(CONFIG.discord_auth.token.clone().into());
     let http = Arc::new(HttpBuilder::new(token.clone()).proxy(proxy_url).build());
 
-    debug!("HttpBuilder done");
-
-    let client_builder = serenity::all::ClientBuilder::new_with_http(token, http.clone());
-
     debug!("Connecting to database");
 
     let reqwest = reqwest::Client::builder()
@@ -160,31 +155,27 @@ async fn main_impl(args: CmdArgs) {
         .build()
         .expect("Could not initialize reqwest client");
 
-    let sandwich = Sandwich::new(reqwest.clone(), http.clone());
+    let stratum = Stratum::new(http.clone()).await.expect("Failed to connect to stratum");
 
     let current_user = loop {
-        let current_user = match sandwich.current_user()
-        .await {
-            Ok(user) => user,
+        match stratum.current_user().await {
+            Ok(Some(user)) => break user,
+            Ok(None) => {
+                error!("Current user is not available yet, retrying in 5 seconds...");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
             Err(e) => {
                 error!("Failed to get current user from Sandwich: {:?}, retrying in 5 seconds...", e);
                 tokio::time::sleep(Duration::from_secs(5)).await;
                 continue;
             }
-        };
-
-        if current_user.id == UserId::new(0) {
-            // TODO: Figure out why this happens sometimes
-            log::error!("current_user.id == 0, this is a known bug with Sandwich, retrying in 5 seconds...");
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            continue;
         }
-
-        debug!("Current user: {} ({})", current_user.name, current_user.id);
-
-        http.set_application_id(ApplicationId::new(current_user.id.get()));
-        break current_user;
     };
+
+    debug!("Current user: {} ({})", current_user.name, current_user.id);
+    http.set_application_id(ApplicationId::new(current_user.id.get()));
+
 
     let object_storage = Arc::new(
         CONFIG
@@ -227,23 +218,16 @@ async fn main_impl(args: CmdArgs) {
                 pg_pool,
                 http,
                 reqwest,
-                sandwich,
             });
         }
         WorkerType::ProcessPool => {
-            // Ask sandwich how many shards we should use
-            let shards = loop {
-                let shard_count = match sandwich.get_shard_count().await {
-                    Ok(count) => count,
-                    Err(e) => {
-                        error!("Failed to get shard count from Sandwich: {:?}, retrying in 5 seconds...", e);
-                        tokio::time::sleep(Duration::from_secs(5)).await;
-                        continue;
-                    }
-                };
-
-                break shard_count;
-            };
+            // Ask stratum for its worker count
+            let worker_count: usize = stratum.get_config()
+            .await
+            .expect("Failed to get worker count")
+            .num_workers
+            .try_into()
+            .expect("worker_count exceeds usize limits");
 
             let pg_pool = PgPoolOptions::new()
                 .max_connections(args.max_db_connections)
@@ -252,7 +236,7 @@ async fn main_impl(args: CmdArgs) {
                 .expect("Could not initialize connection");
 
             let mesophyll_server = mesophyll::server::MesophyllServer::new(
-                shards.try_into().expect("Shard count exceeds usize limits"),
+                worker_count,
                 pg_pool.clone()
             )
             .await
@@ -261,10 +245,10 @@ async fn main_impl(args: CmdArgs) {
 
             let worker_pool = Arc::new(
                 WorkerPool::<WorkerProcessHandle>::new(
-                    shards,
+                    worker_count,
                     &WorkerProcessHandleCreateOpts::new(mesophyll_server, args.worker_debug),
                 )
-                .expect("Failed to create worker thread pool"),
+                .expect("Failed to create worker process pool"),
             );
 
             let data = Arc::new(Data {
@@ -272,7 +256,7 @@ async fn main_impl(args: CmdArgs) {
                 reqwest,
                 current_user,
                 worker: worker_pool.clone(),
-                sandwich: sandwich.clone()
+                stratum: stratum.clone()
             });
 
             let data1 = data.clone();
@@ -316,14 +300,12 @@ async fn main_impl(args: CmdArgs) {
                 .await
                 .expect("Failed to create Mesophyll client");
 
-            let base_worker_info = meso_client.fetch_base_worker_info().await.expect("Failed to fetch base worker info from Mesophyll server");
-
             let worker_state = CreateWorkerState::new(
                 http.clone(),
                 object_storage.clone(),
                 Arc::new(current_user.clone()),
                 Arc::new(meso_client.clone()),
-                sandwich.clone(),
+                stratum.clone(),
                 args.worker_debug
             );
 
@@ -338,34 +320,9 @@ async fn main_impl(args: CmdArgs) {
             // Start listening to the mesophyll server stream for events to dispatch to this worker thread
             meso_client.listen(meso_client_stream, worker_thread.clone());
 
-            let data = Arc::new(Data {
-                object_store: object_storage,
-                reqwest,
-                current_user,
-                worker: worker_thread,
-                sandwich: sandwich.clone()
-            });
-
-            let mut client = client_builder
-                .data(data)
-                .event_handler(EventFramework {})
-                .wait_time_between_shard_start(Duration::from_secs(0)) // Disable wait time between shard start due to Sandwich
-                .await
-                .expect("Error creating client");
-
-            info!("Starting worker...");
-
-            // Start the worker shard
-            if let Err(why) = client
-                .start_shard(
-                    worker_id.try_into().unwrap(),
-                    base_worker_info.num_workers.try_into().unwrap(),
-                )
-                .await
-            {
-                error!("Client error: {:?}", why);
-                std::process::exit(1); // Clean exit with status code of 1
-            }
+            // Start listening to stratum stream
+            let (_shutdown_tx, shutdown_rx) = watch::channel(false);
+            stratum.listen_discord_events(worker_thread, shutdown_rx).await;
         }
     }
 }

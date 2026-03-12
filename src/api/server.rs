@@ -1,6 +1,5 @@
 use crate::mesophyll::dbstate::DbState;
 
-use super::internal_api;
 use super::public_api;
 use axum::{
     http::StatusCode,
@@ -89,16 +88,6 @@ pub fn create(
 ) -> axum::routing::IntoMakeService<Router> {
     let mut router = Router::new();
 
-    // Internal routes
-    let internal_routes = [
-        routes!(internal_api::dispatch_event),
-        routes!(internal_api::get_threads_count),
-        //routes!(internal_api::get_vm_metrics_by_tid),
-        //routes!(internal_api::get_vm_metrics_for_all),
-        routes!(internal_api::guilds_exist),
-        routes!(internal_api::kill_worker),
-    ];
-
     // Public routes
     let public_routes = [
         routes!(public_api::dispatch_event),
@@ -115,41 +104,6 @@ pub fn create(
         routes!(public_api::list_global_kv),
         routes!(public_api::get_global_kv),
     ];
-
-    let mut oapi_router = OpenApiRouter::new();
-    for route in internal_routes {
-        oapi_router = oapi_router.routes(route.clone());
-
-        let mut paths = route.1.paths;
-        let path = {
-            assert!(paths.len() == 1, "Internal API routes should have one path");
-            let first_entry = paths.first_entry();
-            let path = first_entry.map(|path| path.key().clone()).unwrap();
-            if path.is_empty() {
-                "/".to_string()
-            } else {
-                path
-            }
-        };
-
-        router = router.route(&path, route.2);
-    }
-
-    let mut internal_openapi = oapi_router.into_openapi();
-
-    // Set OpenAPI servers so Swagger UI knows the API base URL
-    internal_openapi.servers = Some(vec![Server::new("https://splashtail-staging.antiraid.xyz")]);
-
-    // Add InternalAuth
-    if let Some(comps) = internal_openapi.components.as_mut() {
-        comps.security_schemes.insert(
-            "InternalAuth".to_string(),
-            SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::with_description(
-                "Authorization",
-                "API token. Note that user must have root access to use this API",
-            ))),
-        );
-    }
 
     let mut oapi_router = OpenApiRouter::new();
     for route in public_routes {
@@ -189,7 +143,6 @@ pub fn create(
     router = router
         .route("/healthcheck", post(|| async { Json(()) }))
         .merge(SwaggerUi::new("/docs").url("/openapi", public_openapi))
-        .merge(SwaggerUi::new("/i/docs").url("/i/openapi", internal_openapi))
         .fallback(get(|| async {
             (
                 StatusCode::NOT_FOUND,

@@ -276,9 +276,9 @@ impl DiscordProvider for ArDiscordProvider {
         &self,
     ) -> serenity::Result<Value, crate::Error> {
         let guild_id = self.guild_id()?;
-        Ok(self.state.sandwich.guild(guild_id)
-        .await
-        .map_err(|e| format!("Failed to fetch guild information from sandwich: {}", e))?)
+        let obj = self.state.stratum.guild(guild_id).await?;
+        let Some(obj) = obj else { return Ok(serde_json::Value::Null) };
+        Ok(obj)
     }
 
     fn current_user(&self) -> Option<serenity::all::CurrentUser> {
@@ -294,31 +294,18 @@ impl DiscordProvider for ArDiscordProvider {
         user_id: serenity::all::UserId,
     ) -> serenity::Result<Value, crate::Error> {
         let guild_id = self.guild_id()?;
-        let member = self.state.sandwich.member_in_guild(
-            guild_id,
-            user_id,
-        )
-        .await
-        .map_err(|e| format!("Failed to fetch member information from sandwich: {}", e))?;
-
-        let Some(member) = member else {
-            return Ok(Value::Null);
-        };
-
-        return Ok(member)
+        let obj = self.state.stratum.guild_member(guild_id, user_id).await?;
+        let Some(obj) = obj else { return Ok(serde_json::Value::Null) };
+        Ok(obj)
     }
 
     async fn get_guild_channels(
         &self,
     ) -> serenity::Result<Value, crate::Error> {
         let guild_id = self.guild_id()?;
-        let channels = self.state.sandwich.guild_channels(
-            guild_id,
-        )
-        .await
-        .map_err(|e| format!("Failed to fetch channel information from sandwich: {}", e))?;
-
-        Ok(channels)
+        let obj = self.state.stratum.guild_channels(guild_id).await?;
+        let Some(obj) = obj else { return Ok(serde_json::Value::Null) };
+        Ok(obj)
     }
 
     async fn get_guild_roles(
@@ -326,11 +313,9 @@ impl DiscordProvider for ArDiscordProvider {
     ) -> serenity::Result<Value, crate::Error>
     {
         let guild_id = self.guild_id()?;
-        let roles = self.state.sandwich.guild_roles(guild_id)
-        .await
-        .map_err(|e| format!("Failed to fetch role information from sandwich: {}", e))?;
-
-        Ok(roles)
+        let obj = self.state.stratum.guild_roles(guild_id).await?;
+        let Some(obj) = obj else { return Ok(serde_json::Value::Null) };
+        Ok(obj)
     }
 
     async fn get_channel(
@@ -338,22 +323,17 @@ impl DiscordProvider for ArDiscordProvider {
         channel_id: serenity::all::GenericChannelId,
     ) -> serenity::Result<Value, crate::Error> {
         let guild_id = self.guild_id()?;
-        let channel = self.state.sandwich.channel(
-            Some(guild_id),
-            channel_id,
-        )
-        .await
-        .map_err(|e| format!("Failed to fetch channel information from sandwich: {}", e))?;
+        let channel = self.state.stratum.channel(channel_id).await?;
 
         let Some(channel) = channel else {
-            return Err("Channel not found".into());
+            return Ok(serde_json::Value::Null);
         };
 
-        let Some(Value::String(guild_id)) = channel.get("guild_id") else {
+        let Some(Value::String(channel_guild_id)) = channel.get("guild_id") else {
             return Err(format!("Channel {channel_id} does not belong to a guild").into());
         };
 
-        if guild_id != &guild_id.to_string() {
+        if channel_guild_id != &guild_id.to_string() {
             return Err(format!("Channel {channel_id} does not belong to the guild").into());
         }
 
@@ -557,21 +537,12 @@ impl RuntimeProvider for ArRuntimeProvider {
 
     async fn stats(&self) -> Result<runtime_ir::RuntimeStats, khronos_runtime::Error> {
         log::info!("Fetching runtime stats for tenant {:?}", self.id);
-        let sandwich_resp = self.state.sandwich.get_status().await?;
-
-        let total_guilds = {
-            let mut guild_count: i64 = 0;
-            sandwich_resp.shard_conns.iter().for_each(|(_, sc)| {
-                guild_count += sc.guilds;
-            });
-
-            guild_count
-        };
+        let resp = self.state.stratum.get_status().await?;
 
         Ok(runtime_ir::RuntimeStats {
-            total_cached_guilds: total_guilds.try_into()?, // This field is deprecated, use total_guilds instead
-            total_guilds: total_guilds.try_into()?,
-            total_users: sandwich_resp.user_count.try_into()?,
+            total_cached_guilds: resp.guild_count, // This field is deprecated, use total_guilds instead
+            total_guilds: resp.guild_count,
+            total_users: resp.user_count,
             //total_members: sandwich_resp.total_members.try_into()?,
             last_started_at: crate::CONFIG.start_time,
         })

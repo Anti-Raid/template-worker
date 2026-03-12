@@ -1,6 +1,5 @@
 use std::{borrow::Cow, cell::RefCell, collections::{HashMap, HashSet}, rc::Rc, sync::Arc};
-
-use crate::{geese::{objectstore::ObjectStore, sandwich::Sandwich}, mesophyll::{client::MesophyllClient, dbtypes::{DEFAULT_TENANT_STATE, TenantState}}, worker::workervmmanager::Id};
+use crate::{geese::{objectstore::ObjectStore, stratum::Stratum}, mesophyll::{client::MesophyllClient, dbtypes::{DEFAULT_TENANT_STATE, TenantState}}, worker::workervmmanager::Id};
 
 #[derive(Clone)]
 /// Represents the state of the worker, which includes the serenity context, reqwest client, object store, and database pool
@@ -9,7 +8,7 @@ pub struct CreateWorkerState {
     pub object_store: Arc<ObjectStore>,
     pub current_user: Arc<serenity::all::CurrentUser>,
     pub mesophyll_client: Arc<MesophyllClient>,
-    pub sandwich: Sandwich,
+    pub stratum: Stratum,
     pub worker_print: bool,
 }
 
@@ -20,7 +19,7 @@ impl CreateWorkerState {
         object_store: Arc<ObjectStore>,
         current_user: Arc<serenity::all::CurrentUser>,
         mesophyll_client: Arc<MesophyllClient>,
-        sandwich: Sandwich,
+        stratum: Stratum,
         worker_print: bool
     ) -> Self {
         Self {
@@ -28,7 +27,7 @@ impl CreateWorkerState {
             object_store,
             current_user,
             mesophyll_client,
-            sandwich,
+            stratum,
             worker_print
         }
     }
@@ -41,7 +40,7 @@ pub struct WorkerState {
     pub object_store: Arc<ObjectStore>,
     pub mesophyll_client: Arc<MesophyllClient>,
     pub current_user: Arc<serenity::all::CurrentUser>,
-    pub sandwich: Sandwich,
+    pub stratum: Stratum,
     pub worker_print: bool,
     tenant_state_cache: Rc<RefCell<HashMap<Id, TenantState>>>, // Maps tenant IDs to their states
 }
@@ -55,7 +54,7 @@ impl WorkerState {
             object_store: cws.object_store,
             mesophyll_client: cws.mesophyll_client,
             current_user: cws.current_user,
-            sandwich: cws.sandwich,
+            stratum: cws.stratum,
             worker_print: cws.worker_print,
             tenant_state_cache,
         };

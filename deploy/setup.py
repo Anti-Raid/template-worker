@@ -75,11 +75,13 @@ vapid_public_key = secrets.token_urlsafe(32)
 vapid_private_key = secrets.token_urlsafe(64)
 dp_secret = secrets.token_urlsafe(128)
 mesophyll_token = secrets.token_urlsafe()
+stratum_grpc_access_key = secrets.token_urlsafe()
 default_error_channel = get_var("Default Error Channel ID", "DEFAULT_ERROR_CHANNEL")
 
 # Determine URLs based on docker or not
 sandwich_url = "http://sandwich:29334" if args.docker else "http://localhost:29334"
 proxy_url = "http://nirn_proxy:3221" if args.docker else "http://localhost:3221"
+stratum_server = "http://stratum:29332" if args.docker else "http://localhost:29332"
 pg_url = "postgres://antiraid:AnTiRaId123!@postgres:5432/antiraid" if args.docker else "postgres:///antiraid"
 seaweed_endpoint = "seaweed:8333" if args.docker else "localhost:8333"
 seaweed_cdn_endpoint = "$DOCKER:localhost:5601" if args.docker else "localhost:8333"
@@ -136,6 +138,8 @@ meta:
   sandwich_http_api: {sandwich_url}
   default_error_channel: "{default_error_channel}" # Change this
   mesophyll_token: "{mesophyll_token}" # Mesophyll Token
+  stratum_server: {stratum_server}
+  stratum_grpc_access_key: {stratum_grpc_access_key}
 
 {SEAWEED_DATA}
 

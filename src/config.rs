@@ -91,6 +91,8 @@ pub struct Meta {
     pub sandwich_http_api: String,
     pub default_error_channel: serenity::all::ChannelId,
     pub mesophyll_token: String,
+    pub stratum_server: String,
+    pub stratum_grpc_access_key: String
 }
 
 #[derive(Serialize, Deserialize)]

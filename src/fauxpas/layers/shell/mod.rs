@@ -3,9 +3,9 @@ use dapi::types::CreateCommand;
 use khronos_ext::mlua_scheduler_ext::LuaSchedulerAsyncUserData;
 use khronos_runtime::rt::{KhronosRuntime, mluau::prelude::*};
 use tokio::sync::{oneshot::Sender as OneshotSender, mpsc::{unbounded_channel, UnboundedSender}};
-use crate::worker::{builtins::TemplatingTypes};
+use crate::worker::builtins::TemplatingTypes;
 use crate::fauxpas::geese::LuaKvGod;
-use crate::geese::{sandwich::Sandwich, kv::KeyValueDb};
+use crate::geese::kv::KeyValueDb;
 use rust_embed::Embed;
 use crate::fauxpas::mainthread::{run_in_thread, RunInThreadFn};
 
@@ -25,7 +25,6 @@ pub struct ShellData {
     pub pg_pool: sqlx::PgPool,
     pub http: Arc<serenity::http::Http>,
     pub reqwest: reqwest::Client,
-    pub sandwich: Sandwich,
 }
 
 type ShellInputValue = Result<Option<String>, String>;

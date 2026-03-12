@@ -61,6 +61,10 @@ prost = "0.14"
 prost-types = "0.14"
 tokio-stream = "0.1"
 
+# discord event gateway
+stratum_client = { git = "https://github.com/anti-raid/stratum" }
+stratum_common = { git = "https://github.com/anti-raid/stratum" }
+
 [dependencies.tokio]
 version = "1"
 features = ["sync", "macros", "rt-multi-thread", "tracing", "process", "signal"]

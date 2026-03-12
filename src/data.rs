@@ -1,5 +1,5 @@
 use crate::geese::objectstore::ObjectStore;
-use crate::geese::sandwich::Sandwich;
+use crate::geese::stratum::Stratum;
 use crate::worker::workerlike::WorkerLike;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -12,7 +12,7 @@ pub struct Data {
     #[allow(dead_code)]
     pub object_store: Arc<ObjectStore>,
     pub worker: Arc<dyn WorkerLike + Send + Sync>,
-    pub sandwich: Sandwich,
+    pub stratum: Stratum
 }
 
 impl Debug for Data {

@@ -229,18 +229,9 @@ pub struct UserSessionList {
 pub struct ShardConn {
     /// The status of the shard connection
     pub status: String,
-    /// The real latency of the shard connection
+    /// The real latency of the shard connection in milliseconds
     #[ts(type = "number")]
-    pub real_latency: i64,
-    /// The number of guilds the shard is connected to
-    #[ts(type = "number")]
-    pub guilds: i64,
-    /// The uptime of the shard connection in seconds
-    #[ts(type = "number")]
-    pub uptime: i64,
-    /// The total uptime of the shard connection in seconds
-    #[ts(type = "number")]
-    pub total_uptime: i64,
+    pub latency: f64,
 }
 
 /// A response containing the status of all shards
@@ -248,14 +239,14 @@ pub struct ShardConn {
 #[ts(export)]
 pub struct GetStatusResponse {
     /// A map of shard group ID to shard connection information
-    #[ts(as = "HashMap<i32, ShardConn>")]
-    pub shard_conns: HashMap<i64, ShardConn>,
+    #[ts(as = "HashMap<u32, ShardConn>")]
+    pub shard_conns: HashMap<u32, ShardConn>,
     /// The total number of guilds the bot is connected to
     #[ts(type = "number")]
-    pub total_guilds: i64,
+    pub total_guilds: u64,
     /// The total number of users
     #[ts(type = "number")]
-    pub total_users: i64,
+    pub total_users: u64,
 }
 
 /// Publicly accessible representation of a Discord command

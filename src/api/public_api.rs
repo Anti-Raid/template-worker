@@ -60,11 +60,11 @@ async fn check_guild_has_bot(
     guild_id: serenity::all::GuildId,
 ) -> Result<(), ApiResponseError> {
     if !BOT_HAS_GUILD_CACHE.contains_key(&guild_id) {
-        let guild_exists = data.sandwich.has_guilds(&[guild_id])
+        let guild_exists = data.stratum.has_guilds(&[guild_id])
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
-        if guild_exists.is_empty() || guild_exists[0] == 0 {
+        if guild_exists.is_empty() || !guild_exists[0] {
             return Err((StatusCode::NOT_FOUND, Json("Guild to get settings for does not have the bot?".into())));
         }
 
@@ -263,7 +263,7 @@ pub(super) async fn get_user_guilds(
             .map_err(|e: serenity::all::ParseIdError| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?);
     }
 
-    let guilds_exist = data.sandwich.has_guilds(&guild_ids)
+    let guilds_exist = data.stratum.has_guilds(&guild_ids)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
@@ -276,7 +276,7 @@ pub(super) async fn get_user_guilds(
 
     let mut bot_in_guilds = Vec::with_capacity(guilds.len());
     for (i, exists) in guilds_exist.into_iter().enumerate() {
-        if exists == 1 {
+        if exists {
             bot_in_guilds.push(guild_ids[i].to_string());
         }
     }
@@ -317,20 +317,25 @@ pub(super) async fn base_guild_user_info(
         .map_err(|e: serenity::all::ParseIdError| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
     let bot_user_id = data.current_user.id;
-    let guild_json = data.sandwich.guild(guild_id)
+    let Some(guild_json) = data.stratum.guild(guild_id)
     .await
     .map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(format!("Failed to get guild: {:#?}", e).into()),
         )
-    })?;
+    })? else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json("Failed to find guild".into()),
+        ));
+    };
 
     let guild = serde_json::from_value::<serenity::all::PartialGuild>(guild_json)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
     // Next fetch the member and bot_user
-    let member_json = match data.sandwich.member_in_guild(
+    let member_json = match data.stratum.guild_member(
         guild_id,
         user_id,
     )
@@ -351,7 +356,7 @@ pub(super) async fn base_guild_user_info(
     let member = serde_json::from_value::<serenity::all::Member>(member_json)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
-    let bot_user_json = match data.sandwich.member_in_guild(
+    let bot_user_json = match data.stratum.guild_member(
         guild_id,
         bot_user_id,
     )
@@ -373,14 +378,19 @@ pub(super) async fn base_guild_user_info(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
     // Fetch the channels
-    let channels_json = data.sandwich.guild_channels(guild_id)
+    let Some(channels_json) = data.stratum.guild_channels(guild_id)
     .await
     .map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(format!("Failed to get channels: {:#?}", e).into()),
         )
-    })?;
+    })? else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json("Failed to find guild channels".into()),
+        ));
+    };
 
     let channels = serde_json::from_value::<Vec<serenity::all::GuildChannel>>(channels_json)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
@@ -859,27 +869,19 @@ pub(super) async fn get_bot_stats(
         return Ok(Json(stats));
     }
 
-    let sandwich_raw_stats = data.sandwich.get_status()
+    let raw_stats = data.stratum.get_status()
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get bot stats: {e:?}").into())))?;
 
-    let mut total_guilds = 0;
-    for shard in sandwich_raw_stats.shard_conns.values() {
-        total_guilds += shard.guilds;
-    }
-
     let stats = GetStatusResponse {
-        shard_conns: sandwich_raw_stats.shard_conns.into_iter().map(|(id, shard)| {
-            (id, ShardConn {
-                status: shard.status,
-                real_latency: shard.real_latency,
-                guilds: shard.guilds,   
-                uptime: shard.uptime,
-                total_uptime: shard.total_uptime,
+        shard_conns: raw_stats.shards.into_iter().map(|shard| {
+            (shard.shard_id, ShardConn {
+                status: shard.state().as_str_name().to_string(),
+                latency: shard.latency,
             })
         }).collect(),
-        total_guilds,
-        total_users: sandwich_raw_stats.user_count,
+        total_guilds: raw_stats.guild_count,
+        total_users: raw_stats.user_count,
     };
 
     STATS_CACHE.insert((), stats.clone()).await;
