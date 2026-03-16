@@ -12,7 +12,6 @@ use khronos_runtime::traits::ir::globalkv::{PartialGlobalKv, CreateGlobalKv, Glo
 use khronos_runtime::traits::ir::runtime as runtime_ir;
 use dapi::controller::{DiscordProvider, DiscordProviderContext};
 use khronos_runtime::traits::httpclientprovider::HTTPClientProvider;
-use khronos_runtime::traits::httpserverprovider::HTTPServerProvider;
 use khronos_runtime::traits::ir::kv::KvRecord;
 use khronos_runtime::traits::ir::ObjectMetadata;
 use khronos_runtime::traits::kvprovider::KVProvider;
@@ -62,7 +61,6 @@ impl KhronosContext for TemplateContextProvider {
     type DiscordProvider = ArDiscordProvider;
     type ObjectStorageProvider = ArObjectStorageProvider;
     type HTTPClientProvider = ArHTTPClientProvider;
-    type HTTPServerProvider = ArHTTPServerProvider;
     type RuntimeProvider = ArRuntimeProvider;
 
     fn limitations(&self) -> Limitations {
@@ -118,10 +116,6 @@ impl KhronosContext for TemplateContextProvider {
             state: self.state.clone(),
             ratelimits: self.ratelimits.clone(),
         })
-    }
-
-    fn httpserver_provider(&self) -> Option<Self::HTTPServerProvider> {
-        None // Don't expose HTTP sercer provider in templates
     }
 }
 
@@ -505,16 +499,6 @@ pub struct ArHTTPClientProvider {
 impl HTTPClientProvider for ArHTTPClientProvider {
     fn attempt_action(&self, bucket: &str, _url: &str) -> Result<(), khronos_runtime::Error> {
         self.ratelimits.http.check(bucket)
-    }
-}
-
-#[derive(Clone)]
-pub struct ArHTTPServerProvider {
-}
-
-impl HTTPServerProvider for ArHTTPServerProvider {
-    fn attempt_action(&self, _bucket: &str, _path: String) -> Result<(), khronos_runtime::Error> {
-        Err("Internal Error: unreachable code: HTTP server provider not implemented for templates".into())
     }
 }
 
