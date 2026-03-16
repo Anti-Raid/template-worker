@@ -64,6 +64,7 @@ tokio-stream = "0.1"
 # discord event gateway
 stratum_client = { git = "https://github.com/anti-raid/stratum" }
 stratum_common = { git = "https://github.com/anti-raid/stratum" }
+bitflags = "2.11.0"
 
 [dependencies.tokio]
 version = "1"

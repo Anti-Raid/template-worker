@@ -1,5 +1,17 @@
-use std::{borrow::Cow, cell::RefCell, collections::{HashMap, HashSet}, rc::Rc, sync::Arc};
-use crate::{geese::{objectstore::ObjectStore, stratum::Stratum}, mesophyll::{client::MesophyllClient, dbtypes::{DEFAULT_TENANT_STATE, TenantState}}, worker::workervmmanager::Id};
+use std::{borrow::Cow, cell::RefCell, collections::{HashMap, HashSet, hash_map::Entry}, rc::Rc, sync::{Arc, LazyLock}};
+use crate::{geese::{objectstore::ObjectStore, stratum::Stratum, tenantstate::{ModFlags, TenantState}}, mesophyll::client::MesophyllClient, worker::workervmmanager::Id};
+
+pub static DEFAULT_TENANT_STATE: LazyLock<TenantState> = LazyLock::new(|| TenantState {
+    events: {
+        let mut set = HashSet::new();
+        set.insert("INTERACTION_CREATE".to_string());
+        set.insert("WebGetSettings".to_string());
+        set.insert("WebExecuteSetting".to_string());
+        set
+    },
+    flags: 0,
+    modflags: ModFlags::empty()
+});
 
 #[derive(Clone)]
 /// Represents the state of the worker, which includes the serenity context, reqwest client, object store, and database pool
@@ -74,7 +86,7 @@ impl WorkerState {
         let ts = self.tenant_state_cache.borrow();
         for (id, ts) in ts.iter() {
             // Track startup events
-            if ts.events.contains(&"OnStartup".to_string()) {
+            if ts.events.contains("OnStartup") {
                 startup_events.insert(*id);
             }
         }
@@ -94,13 +106,30 @@ impl WorkerState {
     }
 
     /// Sets the tenant state for a specific tenant
-    pub async fn set_tenant_state_for(&self, id: Id, state: TenantState) -> Result<(), crate::Error> {
-        self.mesophyll_client.set_tenant_state_for(id, &state).await?;
+    pub async fn set_tenant_state_for(&self, id: Id, events: Vec<String>, flags: i32) -> Result<(), crate::Error> {
+        self.mesophyll_client.set_tenant_state_for(id, events.clone(), flags).await?;
+        let events_set = HashSet::from_iter(events);
 
         // Update the cache
         {
             let mut cache = self.tenant_state_cache.borrow_mut();
-            cache.insert(id, state);
+            match cache.entry(id) {
+                Entry::Occupied(mut e) => {
+                    let old_modflags = e.get().modflags;
+                    e.insert(TenantState {
+                        events: events_set,
+                        flags,
+                        modflags: old_modflags,
+                    }); 
+                }
+                Entry::Vacant(vc) => {
+                    vc.insert(TenantState { 
+                        events: events_set, 
+                        flags, 
+                        modflags: ModFlags::empty()
+                    });
+                }
+            };
         }
 
         Ok(())

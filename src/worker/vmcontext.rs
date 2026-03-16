@@ -2,7 +2,6 @@ use super::workerstate::WorkerState;
 use super::workervmmanager::Id;
 use crate::geese::objectstore::{Bucket, BucketWithKey, BucketWithPrefix};
 use crate::worker::builtins::EXPOSED_VFS;
-use crate::mesophyll::dbtypes::TenantState;
 use crate::worker::workervmmanager::VmData;
 use khronos_runtime::core::typesext::Vfs;
 use khronos_runtime::traits::context::{
@@ -589,10 +588,8 @@ impl RuntimeProvider for ArRuntimeProvider {
         self.state
             .set_tenant_state_for(
                 self.id,
-                TenantState {
-                    events: HashSet::from_iter(state.events),
-                    flags: state.flags,
-                },
+                state.events,
+                state.flags,
             )
             .await?;
         Ok(())

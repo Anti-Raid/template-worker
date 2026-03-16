@@ -151,7 +151,8 @@ message WTMListTenantStates {
 message WTMSetTenantStateFor {
   Worker worker = 1;
   Id id = 2;
-  AnyValue state = 3;
+  int32 flags = 3;
+  repeated string events = 4;
 }
 
 // Sent by the master to the worker to send over key data like number of workers in the pool etc.

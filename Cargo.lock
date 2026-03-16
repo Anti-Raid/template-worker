@@ -5264,6 +5264,7 @@ dependencies = [
  "aws-sdk-s3",
  "aws-smithy-types",
  "axum",
+ "bitflags 2.11.0",
  "chrono",
  "clap",
  "dapi",

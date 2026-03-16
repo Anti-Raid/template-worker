@@ -5,7 +5,7 @@ use serenity::all::{GuildId, UserId};
 use std::cell::RefCell;
 use std::{collections::HashMap, rc::Rc};
 use khronos_runtime::rt::mlua::prelude::*;
-use crate::worker::builtins::{Builtins, BuiltinsPatches, TemplatingTypes};
+use crate::worker::builtins::{Builtins, TemplatingTypes};
 use crate::worker::limits::TEMPLATE_GIVE_TIME;
 
 use super::limits::{LuaKVConstraints, Ratelimits};
@@ -187,7 +187,6 @@ impl WorkerVmManager {
             // We start with builtins *always* as the root template, the builtins root template then spawns in all other templates to dispatch
             // automatically from within luau (which is a lot easier + maintainable and allows for custom events etc.)
             vfs::OverlayFS::new(&vec![
-                vfs::EmbeddedFS::<BuiltinsPatches>::new().into(),
                 vfs::EmbeddedFS::<Builtins>::new().into(),
                 vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
             ])

@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use futures::{StreamExt, stream::FuturesUnordered};
 use khronos_runtime::utils::khronos_value::KhronosValue;
-use crate::{geese::gkv::{CreateGlobalKv, GlobalKv, PartialGlobalKv}, mesophyll::dbtypes::TenantState, worker::{workerlike::WorkerLike, workerthread::WorkerThread, workervmmanager::Id}};
+use crate::{geese::gkv::{CreateGlobalKv, GlobalKv, PartialGlobalKv}, geese::tenantstate::TenantState, worker::{workerlike::WorkerLike, workerthread::WorkerThread, workervmmanager::Id}};
 use crate::geese::kv::SerdeKvRecord;
 use crate::mesophyll::server::pb;
 
@@ -177,12 +177,13 @@ impl MesophyllClient {
     }
 
     /// Sets the tenant state for a given tenant ID
-    pub async fn set_tenant_state_for(&self, id: Id, state: &TenantState) -> Result<(), crate::Error> {
+    pub async fn set_tenant_state_for(&self, id: Id, events: Vec<String>, flags: i32) -> Result<(), crate::Error> {
         let mut cli = self.client.clone();
         cli.set_tenant_state_for(pb::WtmSetTenantStateFor { 
             worker: Some(self.worker.clone()), 
             id: Some(pb::Id::from_real_id(&id)),
-            state: Some(pb::AnyValue::from_real_exec(state)?),
+            events,
+            flags
         })
         .await
         .map_err(|e| e.to_string())?;

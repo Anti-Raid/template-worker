@@ -344,17 +344,18 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
     async fn list_tenant_states(&self, request: tonic::Request<pb::WtmListTenantStates>) -> Result<tonic::Response<pb::AnyValue>, Status> {
         let req = request.into_inner();
         let wid = self.verify_worker(req.worker)?;
-        let val = self.db_state.tenant_state_cache_for(wid).await;
-        Ok(tonic::Response::new(pb::AnyValue::from_real(&val)?))
+        match self.db_state.tenant_state_db().get_tenant_state(Some((wid as i64, self.db_state.num_workers() as i64))).await {
+            Ok(ts) => Ok(tonic::Response::new(pb::AnyValue::from_real(&ts)?)),
+            Err(e) => Err(Status::internal(e.to_string())),
+        }
     }
 
     async fn set_tenant_state_for(&self, request: tonic::Request<pb::WtmSetTenantStateFor>) -> Result<tonic::Response<pb::WtmBool>, Status> {
         let req = request.into_inner();
         self.verify_worker(req.worker)?;
         let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
-        let state = req.state.ok_or_else(|| Status::invalid_argument("Missing state"))?.to_real()?;
 
-        match self.db_state.set_tenant_state_for(id, state).await {
+        match self.db_state.tenant_state_db().set_tenant_state_for(id, &req.events, req.flags).await {
             Ok(_) => Ok(tonic::Response::new(pb::WtmBool { value: true })),
             Err(e) => Err(Status::internal(e.to_string())),
         }

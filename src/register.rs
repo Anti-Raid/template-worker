@@ -1,5 +1,5 @@
 use crate::fauxpas::mainthread::{run_in_thread, RunInThreadFn};
-use crate::worker::builtins::{Builtins, BuiltinsPatches, TemplatingTypes};
+use crate::worker::builtins::{Builtins, TemplatingTypes};
 use dapi::types::CreateCommand;
 use khronos_runtime::rt::mlua::prelude::*;
 use khronos_runtime::rt::KhronosRuntime;
@@ -34,7 +34,6 @@ fn register() -> Result<RegisterResult, crate::Error> {
 
     Ok(run_in_thread::<RunInThreadRegister, _, _, _>(
     vfs::OverlayFS::new(&vec![
-            vfs::EmbeddedFS::<BuiltinsPatches>::new().into(),
             vfs::EmbeddedFS::<Builtins>::new().into(),
             vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
         ]),

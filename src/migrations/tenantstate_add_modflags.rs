@@ -1,15 +1,14 @@
 use crate::migrations::Migration;
 
 pub static MIGRATION: Migration = Migration {
-    id: "tenantstate_data_to_flags",
-    description: "Update data field to just flags",
+    id: "tenantstate_add_modflags",
+    description: "Add modflags integer field",
     up: |pool| {
         Box::pin(async move {
             let mut tx = pool.begin().await?;
 
             let stmts = [
-                "ALTER TABLE tenant_state DROP COLUMN IF EXISTS data;", // Drop the old data column
-                "ALTER TABLE tenant_state ADD COLUMN flags INTEGER NOT NULL DEFAULT 0;", // Add the new flags column
+                "ALTER TABLE tenant_state ADD COLUMN modflags INTEGER NOT NULL DEFAULT 0;", // Add the new flags column
             ];
 
             for stmt in stmts.iter() {
