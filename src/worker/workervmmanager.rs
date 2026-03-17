@@ -109,11 +109,6 @@ impl WorkerVmManager {
         }
     }
 
-    /// Returns the underlying worker state
-    pub fn worker_state(&self) -> &WorkerState {
-        &self.worker_state
-    }
-
     /// Returns the VM for the given tenant ID creating it if needed
     pub fn get_vm_for(&self, id: Id) -> LuaResult<VmData> {
         let mut vms = self.vms.borrow_mut();

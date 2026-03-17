@@ -1,5 +1,7 @@
 use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
 use serde_json::json;
+use crate::worker::workertenantstate::WorkerTenantState;
+
 use super::workervmmanager::{Id, WorkerVmManager, VmData};
 use super::vmcontext::TemplateContextProvider;
 use khronos_runtime::rt::mlua;
@@ -10,12 +12,13 @@ use khronos_runtime::rt::mlua;
 pub struct WorkerDispatch {
     /// VM Manager for the worker
     vm_manager: WorkerVmManager,
+    tenant_state: WorkerTenantState
 }
 
 impl WorkerDispatch {
     /// Creates a new WorkerDispatch with the given WorkerVmManager
-    pub fn new(vm_manager: WorkerVmManager) -> Self {
-        let dispatch = Self { vm_manager };
+    pub fn new(vm_manager: WorkerVmManager, tenant_state: WorkerTenantState) -> Self {
+        let dispatch = Self { vm_manager, tenant_state };
 
         // Dispatch startup events for all tenants in the background upon creation of the WorkerDispatch
         dispatch.dispatch_startup_events();
@@ -25,7 +28,7 @@ impl WorkerDispatch {
 
     /// Dispatches startup events for all tenants
     pub fn dispatch_startup_events(&self) {
-        let ids = self.vm_manager.worker_state().get_startup_event_tenants();
+        let ids = self.tenant_state.get_startup_event_tenants();
         for id in ids.iter() {
             let id = *id;
             log::info!(
@@ -60,6 +63,7 @@ impl WorkerDispatch {
         let provider = TemplateContextProvider::new(
             id,
             vm_data.clone(),
+            self.tenant_state.clone()
         );
         let context = vm_data.runtime.create_context(provider, event)?;
         match vm_data.runtime.call_in_scheduler::<_, KhronosValue>(func, context).await {
@@ -72,7 +76,7 @@ impl WorkerDispatch {
     pub async fn dispatch_event(&self, id: Id, event: CreateEvent) -> mlua::Result<KhronosValue> {
         use khronos_runtime::rt::mlua;
 
-        let tenant_state = self.vm_manager.worker_state().get_cached_tenant_state_for(id)
+        let tenant_state = self.tenant_state.get_cached_tenant_state_for(id)
             .map_err(|e| mlua::Error::external(format!("Failed to get tenant state for ID {id:?}: {e}")))?;
 
         if !tenant_state.events.contains(event.name()) {
@@ -94,6 +98,7 @@ impl WorkerDispatch {
         let provider = TemplateContextProvider::new(
             id,
             vm_data.clone(),
+            self.tenant_state.clone()
         );
         let context = vm_data.runtime.create_context(provider, event)?;
         match vm_data.runtime.call_in_scheduler::<_, KhronosValue>(func, context).await {

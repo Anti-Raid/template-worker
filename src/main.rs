@@ -17,7 +17,7 @@ use crate::geese::stratum::Stratum;
 use crate::worker::workerlike::WorkerLike;
 use crate::worker::workerpool::WorkerPool;
 use crate::worker::workerprocesshandle::{WorkerProcessHandle, WorkerProcessHandleCreateOpts};
-use crate::worker::workerstate::CreateWorkerState;
+use crate::worker::workerstate::WorkerState;
 use crate::worker::workerthread::WorkerThread;
 use clap::{Parser, ValueEnum};
 use log::{debug, error, info};
@@ -300,7 +300,7 @@ async fn main_impl(args: CmdArgs) {
                 .await
                 .expect("Failed to create Mesophyll client");
 
-            let worker_state = CreateWorkerState::new(
+            let worker_state = WorkerState::new(
                 http.clone(),
                 object_storage.clone(),
                 Arc::new(current_user.clone()),

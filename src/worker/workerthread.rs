@@ -9,8 +9,8 @@ use std::panic::AssertUnwindSafe;
 use crate::worker::limits::MAX_VM_THREAD_STACK_SIZE;
 use crate::worker::workerlike::WorkerLike;
 use crate::worker::workerpool::Poolable;
-use crate::worker::workerstate::CreateWorkerState;
-use super::{workerstate::WorkerState, worker::Worker, workervmmanager::Id};
+use crate::worker::workerstate::WorkerState;
+use super::{worker::Worker, workervmmanager::Id};
 
 /// WorkerThreadMessage is the message type that is sent to the worker thread
 enum WorkerThreadMessage {
@@ -47,7 +47,7 @@ pub struct WorkerThread {
 
 impl WorkerThread {
     /// Creates a new WorkerThread with the given cache data and worker state
-    pub fn new(state: CreateWorkerState, id: usize) -> Result<Self, crate::Error> {
+    pub fn new(state: WorkerState, id: usize) -> Result<Self, crate::Error> {
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         
@@ -59,7 +59,7 @@ impl WorkerThread {
     }
 
     /// `id` is the worker thread ID, used for routing. `state` is the state to create the worker with. `rx` is the channel receiver for receiving messages from the worker thread.
-    fn create_thread(id: usize, state: CreateWorkerState, mut rx: UnboundedReceiver<WorkerThreadMessage>) -> Result<(), crate::Error> {
+    fn create_thread(id: usize, state: WorkerState, mut rx: UnboundedReceiver<WorkerThreadMessage>) -> Result<(), crate::Error> {
         std::thread::Builder::new()
             .name(format!("lua-vm-threadpool-{id}"))
             .stack_size(MAX_VM_THREAD_STACK_SIZE)
@@ -71,8 +71,7 @@ impl WorkerThread {
                         .expect("Failed to create tokio runtime");
 
                     rt.block_on(async move {
-                        let state = WorkerState::new(state).await.expect("Failed to create WorkerState");
-                        let worker = Worker::new(state);
+                        let worker = Worker::new(state).await.expect("Failed to setup worker");
 
                         // Listen to messages and handle them
                         while let Some(msg) = rx.recv().await {
@@ -159,7 +158,7 @@ impl WorkerLike for WorkerThread {
 
 // WorkerThread's can be pooled via WorkerPool!
 impl Poolable for WorkerThread {
-    type ExtState = CreateWorkerState;
+    type ExtState = WorkerState;
     fn new(id: usize, _total: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
         where
             Self: Sized {

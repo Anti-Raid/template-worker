@@ -28,3 +28,4 @@ pub mod workerthread;
 pub mod workerlike;
 pub mod workerprocesshandle; // TODO: Replace with mesophyll
 pub mod workerpool;
+pub mod workertenantstate;

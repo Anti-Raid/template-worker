@@ -2,6 +2,7 @@ use super::workerstate::WorkerState;
 use super::workervmmanager::Id;
 use crate::geese::objectstore::{Bucket, BucketWithKey, BucketWithPrefix};
 use crate::worker::builtins::EXPOSED_VFS;
+use crate::worker::workertenantstate::WorkerTenantState;
 use crate::worker::workervmmanager::VmData;
 use khronos_runtime::core::typesext::Vfs;
 use khronos_runtime::traits::context::{
@@ -27,6 +28,9 @@ use super::limits::{LuaKVConstraints, Ratelimits};
 pub struct TemplateContextProvider {
     state: WorkerState,
 
+    /// Worker tenant state
+    wts: WorkerTenantState,
+
     id: Id,
 
     /// The KV constraints for this template
@@ -41,9 +45,11 @@ impl TemplateContextProvider {
     pub fn new(
         id: Id,
         vm_data: VmData,
+        wts: WorkerTenantState
     ) -> Self {
         Self {
             id,
+            wts,
             state: vm_data.state,
             kv_constraints: vm_data.kv_constraints,
             ratelimits: vm_data.ratelimits,
@@ -97,6 +103,7 @@ impl KhronosContext for TemplateContextProvider {
         Some(ArRuntimeProvider {
             id: self.id(),
             state: self.state.clone(),
+            wts: self.wts.clone(),
             ratelimits: self.ratelimits.clone(),
         })
     }
@@ -506,6 +513,7 @@ impl HTTPClientProvider for ArHTTPClientProvider {
 pub struct ArRuntimeProvider {
     id: Id,
     state: WorkerState,
+    wts: WorkerTenantState,
     ratelimits: Rc<Ratelimits>,
 }
 
@@ -560,7 +568,7 @@ impl RuntimeProvider for ArRuntimeProvider {
     }
 
     async fn get_tenant_state(&self) -> Result<runtime_ir::TenantState, khronos_runtime::Error> {
-        let ts = self.state.get_cached_tenant_state_for(self.id)?.into_owned();
+        let ts = self.wts.get_cached_tenant_state_for(self.id)?;
         Ok(runtime_ir::TenantState {
             events: ts.events.into_iter().collect(),
             banned: false,
@@ -569,7 +577,7 @@ impl RuntimeProvider for ArRuntimeProvider {
     }
 
     async fn set_tenant_state(&self, state: runtime_ir::TenantState) -> Result<(), khronos_runtime::Error> {
-        self.state
+        self.wts
             .set_tenant_state_for(
                 self.id,
                 state.events,
