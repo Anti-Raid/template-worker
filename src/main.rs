@@ -1,6 +1,5 @@
 mod api;
 mod config;
-mod data;
 mod mesophyll;
 mod fauxpas;
 mod register;
@@ -9,7 +8,7 @@ mod migrations;
 mod geese;
 
 use crate::config::CONFIG;
-use crate::data::Data;
+use crate::api::data::ApiData;
 use crate::fauxpas::layers::shell::ShellData;
 use crate::mesophyll::client::MesophyllClient;
 use crate::migrations::apply_migrations;
@@ -251,8 +250,7 @@ async fn main_impl(args: CmdArgs) {
                 .expect("Failed to create worker process pool"),
             );
 
-            let data = Arc::new(Data {
-                object_store: object_storage,
+            let data = Arc::new(ApiData {
                 reqwest,
                 current_user,
                 worker: worker_pool.clone(),

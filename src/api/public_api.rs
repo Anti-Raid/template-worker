@@ -56,7 +56,7 @@ const APP_OAUTH2_REDIRECT_URI: &str = "antiraid://oauth-callback";
 
 /// Helper function to check if the bot is in a guild
 async fn check_guild_has_bot(
-    data: &crate::data::Data,
+    data: &super::data::ApiData,
     guild_id: serenity::all::GuildId,
 ) -> Result<(), ApiResponseError> {
     if !BOT_HAS_GUILD_CACHE.contains_key(&guild_id) {

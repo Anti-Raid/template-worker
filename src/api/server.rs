@@ -51,14 +51,14 @@ impl<'a> From<&'a str> for ApiError {
 
 #[derive(Clone)]
 pub struct AppData {
-    pub data: Arc<crate::data::Data>,
+    pub data: Arc<super::data::ApiData>,
     pub mesophyll_db_state: DbState,
     pub pool: sqlx::PgPool,
     pub _http: Arc<serenity::http::Http>,
 }
 
 impl AppData {
-    pub fn new(data: Arc<crate::data::Data>, http: Arc<serenity::http::Http>, pool: sqlx::PgPool, mesophyll_db_state: DbState) -> Self {
+    pub fn new(data: Arc<super::data::ApiData>, http: Arc<serenity::http::Http>, pool: sqlx::PgPool, mesophyll_db_state: DbState) -> Self {
         Self { data, _http: http, pool, mesophyll_db_state }
     }
 }
@@ -81,7 +81,7 @@ async fn logger(
 }
 
 pub fn create(
-    data: Arc<crate::data::Data>,
+    data: Arc<super::data::ApiData>,
     mesophyll_db_state: DbState,
     pool: sqlx::PgPool,
     http: Arc<serenity::http::Http>,
