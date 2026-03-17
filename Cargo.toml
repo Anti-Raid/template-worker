@@ -42,7 +42,6 @@ tower-http = { version = "0.5.2", features = ["trace", "cors"] }
 # openapi
 utoipa = { version = "5", features = ["chrono", "uuid", "indexmap", "axum_extras"] }
 utoipa-axum = "0.2"
-utoipa-swagger-ui = { version = "9", features = ["axum", "vendored", "reqwest"] }
 
 # ts
 ts-rs = { version = "11", features = ["serde-json-impl", "chrono-impl", "uuid-impl", "indexmap-impl"] }
@@ -51,7 +50,7 @@ ts-rs = { version = "11", features = ["serde-json-impl", "chrono-impl", "uuid-im
 serde_repr = "0.1"
 
 # AWS
-aws-sdk-s3 = { version = "1" }
+aws-sdk-s3 = { version = "1", default-features = false, features = ["rt-tokio", "rustls"] }
 aws-smithy-types = { version = "1" }
 
 # Mesophyll

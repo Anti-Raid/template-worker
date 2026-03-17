@@ -10,7 +10,6 @@ use std::sync::Arc;
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 use utoipa::openapi::server::Server;
 use utoipa_axum::{router::OpenApiRouter, routes};
-use utoipa_swagger_ui::SwaggerUi;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 pub enum ApiErrorCode {
@@ -142,7 +141,9 @@ pub fn create(
 
     router = router
         .route("/healthcheck", post(|| async { Json(()) }))
-        .merge(SwaggerUi::new("/docs").url("/openapi", public_openapi))
+        .route("/openapi", get(|| async { 
+            Json(public_openapi) 
+        }))
         .fallback(get(|| async {
             (
                 StatusCode::NOT_FOUND,
