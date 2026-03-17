@@ -76,7 +76,7 @@ async fn check_guild_has_bot(
 
 /// Dispatch an event to a guild and wait for a response
 #[utoipa::path(
-    get, 
+    post, 
     tag = "Public API",
     path = "/guilds/{guild_id}/events",
     security(
