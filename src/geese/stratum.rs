@@ -82,11 +82,7 @@ impl Stratum {
         wt.dispatch_event_nowait(
             Id::Guild(GuildId::new(evt.guild_id)), // TODO: make this tenant-agnostic in the future
             CreateEvent::new_raw_value(
-                if evt.event_name.as_str() == "MESSAGE_CREATE" {
-                    "MESSAGE".to_string() // Message events are called MESSAGE and not MESSAGE_CREATE in AntiRaid for backwards compatibility
-                } else {
-                    evt.event_name
-                },
+                evt.event_name,
                 None,
                 RawValue::from_string(evt.payload)?,
             ),

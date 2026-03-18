@@ -44,10 +44,7 @@ num_events = 0
 for event in events:
     if event["name"] in ["Hello", "Ready", "Resumed", "Reconnect", "Invalid Session", "Guild Create", "Guild Delete"]:
         continue
-    
-    if event["name"] == "Message Create":
-        event["name"] = "Message"
-    
+        
     name = event["name"].replace(" ", "_").upper()
 
     rust_def_str += f"  \"{name}\", // {event['description']}\n"
