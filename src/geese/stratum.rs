@@ -70,17 +70,22 @@ impl Stratum {
         bot_id: UserId,
         evt: pb::DiscordEvent,
     ) -> Result<(), crate::Error> {
-        log::info!("Event: {}, gid: {}, payload: {}", evt.event_name, evt.guild_id, evt.payload);
-        if evt.guild_id == 0 || evt.guild_id == u64::MAX {
-            return Ok(()); // No guild ID, nothing to do
-        }
+        log::info!("Event: {}, gid: {}, target_user: {}, payload: {}", evt.event_name, evt.guild_id, evt.target_user, evt.payload);
+        
+        let id = if evt.guild_id != 0 && evt.guild_id != u64::MAX {
+            Id::Guild(GuildId::new(evt.guild_id))
+        } else if evt.target_user != 0 {
+            Id::User(UserId::new(evt.target_user)) // User installed app
+        } else {
+            return Ok(()); // No routing info
+        };
 
         if evt.msg_author != 0 && evt.msg_author == bot_id.get() {
             return Ok(()); // avoid self-bot related footguns
         }  
 
         wt.dispatch_event_nowait(
-            Id::Guild(GuildId::new(evt.guild_id)), // TODO: make this tenant-agnostic in the future
+            id,
             CreateEvent::new_raw_value(
                 evt.event_name,
                 None,

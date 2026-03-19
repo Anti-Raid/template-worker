@@ -4212,7 +4212,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 [[package]]
 name = "stratum_client"
 version = "0.1.0"
-source = "git+https://github.com/anti-raid/stratum#2bbb55ecc91e2b84b42e618bd614fdd4c13ef005"
+source = "git+https://github.com/anti-raid/stratum#9ba97d61fc5183d585bb35b297bb1149e960a1c9"
 dependencies = [
  "futures-util",
  "serde",
@@ -4225,7 +4225,7 @@ dependencies = [
 [[package]]
 name = "stratum_common"
 version = "0.1.0"
-source = "git+https://github.com/anti-raid/stratum#2bbb55ecc91e2b84b42e618bd614fdd4c13ef005"
+source = "git+https://github.com/anti-raid/stratum#9ba97d61fc5183d585bb35b297bb1149e960a1c9"
 dependencies = [
  "bitflags 2.11.0",
  "prost",
@@ -5696,18 +5696,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.42"
+version = "0.8.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2578b716f8a7a858b7f02d5bd870c14bf4ddbbcf3a4c05414ba6503640505e3"
+checksum = "5c5030500cb2d66bdfbb4ebc9563be6ce7005a4b5d0f26be0c523870fe372ca6"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.42"
+version = "0.8.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e6cc098ea4d3bd6246687de65af3f920c430e236bee1e3bf2e441463f08a02f"
+checksum = "a5f86989a046a79640b9d8867c823349a139367bda96549794fcc3313ce91f4e"
 dependencies = [
  "proc-macro2",
  "quote",
