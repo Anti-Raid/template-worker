@@ -571,7 +571,6 @@ impl RuntimeProvider for ArRuntimeProvider {
         let ts = self.wts.get_cached_tenant_state_for(self.id)?;
         Ok(runtime_ir::TenantState {
             events: ts.events.into_iter().collect(),
-            banned: false,
             flags: ts.flags,
         })
     }
