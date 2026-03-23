@@ -65,8 +65,8 @@ impl WorkerDispatch {
             vm_data.clone(),
             self.tenant_state.clone()
         );
-        let context = vm_data.runtime.create_context(provider, event)?;
-        match vm_data.runtime.call_in_scheduler::<_, KhronosValue>(func, context).await {
+        let context = vm_data.runtime.create_context(provider)?;
+        match vm_data.runtime.call_in_scheduler::<_, KhronosValue>(func, (context, event)).await {
             Ok(result) => Ok(result),
             Err(e) => Err(e.into()),
         }
@@ -100,8 +100,8 @@ impl WorkerDispatch {
             vm_data.clone(),
             self.tenant_state.clone()
         );
-        let context = vm_data.runtime.create_context(provider, event)?;
-        match vm_data.runtime.call_in_scheduler::<_, KhronosValue>(func, context).await {
+        let context = vm_data.runtime.create_context(provider)?;
+        match vm_data.runtime.call_in_scheduler::<_, KhronosValue>(func, (context, event)).await {
             Ok(result) => Ok(result),
             Err(e) => {
                 let err_str = e.to_string();

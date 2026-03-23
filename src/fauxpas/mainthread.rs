@@ -129,6 +129,7 @@ where R: RunInThreadFn<RD, RR> + 'static,
                     },
                     None::<(fn(&Lua, LuaThread) -> Result<(), LuaError>, fn(LuaLightUserData) -> ())>,
                     vfs,
+                    "antiraid"
                 )
                 .expect("Failed to create KhronosRuntime");
 

@@ -5,9 +5,7 @@ use crate::worker::builtins::EXPOSED_VFS;
 use crate::worker::workertenantstate::WorkerTenantState;
 use crate::worker::workervmmanager::VmData;
 use khronos_runtime::core::typesext::Vfs;
-use khronos_runtime::traits::context::{
-    KhronosContext, Limitations,
-};
+use khronos_runtime::traits::context::KhronosContext;
 use khronos_runtime::traits::globalkvprovider::GlobalKVProvider;
 use khronos_runtime::traits::ir::globalkv::{PartialGlobalKv, CreateGlobalKv, GlobalKv};
 use khronos_runtime::traits::ir::runtime as runtime_ir;
@@ -20,7 +18,6 @@ use khronos_runtime::traits::objectstorageprovider::ObjectStorageProvider;
 use khronos_runtime::traits::runtimeprovider::RuntimeProvider;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use serde_json::Value;
-use std::collections::HashSet;
 use std::rc::Rc;
 use super::limits::{LuaKVConstraints, Ratelimits};
 
@@ -68,11 +65,6 @@ impl KhronosContext for TemplateContextProvider {
     type ObjectStorageProvider = ArObjectStorageProvider;
     type HTTPClientProvider = ArHTTPClientProvider;
     type RuntimeProvider = ArRuntimeProvider;
-
-    fn limitations(&self) -> Limitations {
-        // We start with full limitations with builtins applying extra limits prior to event dispatch where desired
-        Limitations::new(HashSet::from_iter(["*".to_string()]), HashSet::new())
-    }
 
     fn kv_provider(&self) -> Option<Self::KVProvider> {
         Some(ArKVProvider {

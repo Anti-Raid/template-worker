@@ -184,7 +184,8 @@ impl WorkerVmManager {
             vfs::OverlayFS::new(&vec![
                 vfs::EmbeddedFS::<Builtins>::new().into(),
                 vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
-            ])
+            ]),
+            "antiraid"
         )?;
 
         rt.set_memory_limit(MAX_TEMPLATE_MEMORY_USAGE)?;
