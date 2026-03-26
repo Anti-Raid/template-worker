@@ -115,7 +115,7 @@ pub enum KhronosValueV2 {
     Timestamptz(chrono::DateTime<chrono::Utc>),
     Interval(chrono::Duration),
     TimeZone(khronos_runtime::chrono_tz::Tz),
-    LazyStringMap(HashMap<String, String>), // For lazy string maps
+    MemoryVfs(HashMap<String, String>), // For lazy string maps
     Null,
 }
 

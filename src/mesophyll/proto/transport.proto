@@ -78,7 +78,7 @@ message WTMMessage { // worker-to-master message
 message WTMKvGet {
   Worker worker = 1;
   Id id = 2;
-  repeated string scopes = 3;
+  string scope = 3;
   string key = 4;
 }
 
@@ -94,7 +94,7 @@ message KvListScopesResponse {
 message WTMKvSet {
   Worker worker = 1;
   Id id = 2;
-  repeated string scopes = 3;
+  string scope = 3;
   string key = 4;
   AnyValue value = 5;
 }
@@ -102,14 +102,14 @@ message WTMKvSet {
 message WTMKvDelete {
   Worker worker = 1;
   Id id = 2;
-  repeated string scopes = 3;
+  string scope = 3;
   string key = 4;
 }
 
 message WTMKvFind {
   Worker worker = 1;
   Id id = 2;
-  repeated string scopes = 3;
+  string scope = 3;
   string prefix = 4;
 }
 

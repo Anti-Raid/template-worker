@@ -126,26 +126,12 @@ pub struct ArKVProvider {
     ratelimits: Rc<Ratelimits>,
 }
 
-const MAX_SCOPES: usize = 10;
-impl ArKVProvider {
-    fn parse_scopes(scopes: &[String]) -> Result<Vec<String>, crate::Error> {        
-        if scopes.len() > MAX_SCOPES {
-            return Err(format!("Scopes length may be at most {MAX_SCOPES} long").into())
-        }
-        let mut scopes = scopes.to_vec();
-        scopes.sort();
-        Ok(scopes)
-    }
-}
-
 impl KVProvider for ArKVProvider {
-    fn attempt_action(&self, _scope: &[String], bucket: &str) -> Result<(), crate::Error> {
+    fn attempt_action(&self, bucket: &str) -> Result<(), crate::Error> {
         self.ratelimits.kv.check(bucket)
     }
 
-    async fn get(&self, scopes: &[String], key: String) -> Result<Option<KvRecord>, crate::Error> {
-        let scopes = Self::parse_scopes(scopes)?;
-
+    async fn get(&self, scope: String, key: String) -> Result<Option<KvRecord>, crate::Error> {
         // Check key length
         if key.len() > self.kv_constraints.max_key_length {
             return Err("Key length too long".into());
@@ -153,7 +139,7 @@ impl KVProvider for ArKVProvider {
 
         self.state.mesophyll_client.kv_get(
             self.id,
-            scopes,
+            scope,
             key,
         ).await
         .map(|x| x.map(|y| y.into()))
@@ -166,17 +152,10 @@ impl KVProvider for ArKVProvider {
 
     async fn set(
         &self,
-        scopes: &[String],
+        scope: String,
         key: String,
         data: KhronosValue,
     ) -> Result<(), crate::Error> {
-        let scopes = Self::parse_scopes(scopes)?;
-
-        // Shouldn't happen but scopes must be non-empty
-        if scopes.is_empty() {
-            return Err("Scopes cannot be empty".into());
-        }
-
         // Check key length
         if key.len() > self.kv_constraints.max_key_length {
             return Err("Key length too long".into());
@@ -191,15 +170,13 @@ impl KVProvider for ArKVProvider {
 
         self.state.mesophyll_client.kv_set(
             self.id,
-            scopes,
+            scope,
             key,
             data,
         ).await
     }
 
-    async fn delete(&self, scopes: &[String], key: String) -> Result<(), crate::Error> {
-        let scopes = Self::parse_scopes(scopes)?;
-
+    async fn delete(&self, scope: String, key: String) -> Result<(), crate::Error> {
         // Check key length
         if key.len() > self.kv_constraints.max_key_length {
             return Err("Key length too long".into());
@@ -207,14 +184,12 @@ impl KVProvider for ArKVProvider {
 
         self.state.mesophyll_client.kv_delete(
             self.id,
-            scopes,
+            scope,
             key,
         ).await
     }
 
-    async fn find(&self, scopes: &[String], query: String) -> Result<Vec<KvRecord>, crate::Error> {
-        let scopes = Self::parse_scopes(scopes)?;
-
+    async fn find(&self, scope: String, query: String) -> Result<Vec<KvRecord>, crate::Error> {
         // Check key length
         if query.len() > self.kv_constraints.max_key_length {
             return Err("Query length too long".into());
@@ -222,7 +197,7 @@ impl KVProvider for ArKVProvider {
 
         self.state.mesophyll_client.kv_find(
             self.id,
-            scopes,
+            scope,
             query,
         ).await
         .map(|x| x.into_iter().map(|y| y.into()).collect())

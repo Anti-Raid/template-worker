@@ -3,8 +3,8 @@ use khronos_runtime::utils::ratelimits::LuaRatelimits;
 use std::num::NonZeroU32;
 use std::time::Duration;
 
-pub const MAX_TEMPLATE_MEMORY_USAGE: usize = 1024 * 1024 * 20; // 20MB maximum memory
-pub const MAX_VM_THREAD_STACK_SIZE: usize = 1024 * 1024 * 20; // 20MB maximum memory
+pub const MAX_TEMPLATE_MEMORY_USAGE: usize = 1024 * 1024 * 25; // 25MB maximum memory
+pub const MAX_VM_THREAD_STACK_SIZE: usize = 1024 * 1024 * 25; // 25MB maximum memory
 pub const MAX_TEMPLATES_EXECUTION_TIME: Duration = Duration::from_secs(10); // 10 seconds maximum execution time before sched yield must happen
 pub const TEMPLATE_GIVE_TIME: Duration = Duration::from_secs(1); // 1 second maximum time to give to a template to finish execution following a yield
 

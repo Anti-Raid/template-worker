@@ -229,7 +229,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         let req = request.into_inner();
         self.verify_worker(req.worker)?;
         let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
-        let scopes = req.scopes;
+        let scopes = req.scope;
         let key = req.key;
 
         match self.db_state.key_value_db().kv_get(id, scopes, key).await {
@@ -253,7 +253,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         let req = request.into_inner();
         self.verify_worker(req.worker)?;
         let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
-        let scopes = req.scopes;
+        let scopes = req.scope;
         let key = req.key;
         let Some(value) = req.value else {
             return Err(Status::invalid_argument("Missing value"));
@@ -270,7 +270,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         let req = request.into_inner();
         self.verify_worker(req.worker)?;
         let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
-        let scopes = req.scopes;
+        let scopes = req.scope;
         let key = req.key;
 
         match self.db_state.key_value_db().kv_delete(id, scopes, key).await {
@@ -283,7 +283,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         let req = request.into_inner();
         self.verify_worker(req.worker)?;
         let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
-        let scopes = req.scopes;
+        let scopes = req.scope;
         let prefix = req.prefix;
         match self.db_state.key_value_db().kv_find(id, scopes, prefix).await {
             Ok(records) => Ok(tonic::Response::new(pb::AnyValue::from_real(&records)?)),

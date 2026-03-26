@@ -191,13 +191,13 @@ impl MesophyllClient {
     }
 
     /// Fetch a key-value record given a tenant ID, list of scopes, and key
-    pub async fn kv_get(&self, id: Id, scopes: Vec<String>, key: String) -> Result<Option<SerdeKvRecord>, crate::Error> {
+    pub async fn kv_get(&self, id: Id, scope: String, key: String) -> Result<Option<SerdeKvRecord>, crate::Error> {
         let mut cli = self.client.clone();
-        log::info!("MesophyllClient: Fetching KV record for ID {:?}, scopes {:?}, key {:?}", id, scopes, key);
+        log::info!("MesophyllClient: Fetching KV record for ID {:?}, scopes {:?}, key {:?}", id, scope, key);
         cli.kv_get(pb::WtmKvGet { 
             worker: Some(self.worker.clone()), 
             id: Some(pb::Id::from_real_id(&id)),
-            scopes,
+            scope,
             key,
         })
         .await
@@ -220,12 +220,12 @@ impl MesophyllClient {
     }
 
     /// Set a key-value record for a given tenant ID, list of scopes, and key
-    pub async fn kv_set(&self, id: Id, scopes: Vec<String>, key: String, value: KhronosValue) -> Result<(), crate::Error> {
+    pub async fn kv_set(&self, id: Id, scope: String, key: String, value: KhronosValue) -> Result<(), crate::Error> {
         let mut cli = self.client.clone();
         cli.kv_set(pb::WtmKvSet {
             worker: Some(self.worker.clone()),
             id: Some(pb::Id::from_real_id(&id)),
-            scopes,
+            scope,
             key,
             value: Some(pb::AnyValue::from_real_exec(&value)?),
         })
@@ -235,12 +235,12 @@ impl MesophyllClient {
     }
 
     /// Delete a key-value record for a given tenant ID, list of scopes, and key
-    pub async fn kv_delete(&self, id: Id, scopes: Vec<String>, key: String) -> Result<(), crate::Error> {
+    pub async fn kv_delete(&self, id: Id, scope: String, key: String) -> Result<(), crate::Error> {
         let mut cli = self.client.clone();
         cli.kv_delete(pb::WtmKvDelete {
             worker: Some(self.worker.clone()),
             id: Some(pb::Id::from_real_id(&id)),
-            scopes,
+            scope,
             key,
         })
         .await
@@ -249,12 +249,12 @@ impl MesophyllClient {
     }
 
     /// Find key-value records with keys that start with a given prefix for a given tenant ID and list of scopes
-    pub async fn kv_find(&self, id: Id, scopes: Vec<String>, prefix: String) -> Result<Vec<SerdeKvRecord>, crate::Error> {
+    pub async fn kv_find(&self, id: Id, scope: String, prefix: String) -> Result<Vec<SerdeKvRecord>, crate::Error> {
         let mut cli = self.client.clone();
         Ok(cli.kv_find(pb::WtmKvFind {
             worker: Some(self.worker.clone()),
             id: Some(pb::Id::from_real_id(&id)),
-            scopes,
+            scope,
             prefix,
         })
         .await

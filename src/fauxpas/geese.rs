@@ -19,7 +19,7 @@ impl LuaKvGod {
             id: record.id,
             key: record.key,
             value: record.value,
-            scopes: record.scopes,
+            scope: record.scope,
             exists: true,
             created_at: record.created_at,
             last_updated_at: record.last_updated_at,
@@ -30,7 +30,7 @@ impl LuaKvGod {
 impl LuaUserData for LuaKvGod {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         // Get a value from the KV store
-        methods.add_scheduler_async_method("Get", async move |_lua, this, (id, scopes, key): (LuaId, Vec<String>, String)| {
+        methods.add_scheduler_async_method("Get", async move |_lua, this, (id, scopes, key): (LuaId, String, String)| {
             let res = this.kv_db.kv_get(id.0, scopes, key).await
                 .map_err(|e| LuaError::external(format!("Failed to get KV value: {e:?}")))?;
             Ok(res.map(Self::cast_record))
@@ -44,21 +44,21 @@ impl LuaUserData for LuaKvGod {
         });
 
         // Set a value in the KV store
-        methods.add_scheduler_async_method("Set", async move |_lua, this, (id, scopes, key, value): (LuaId, Vec<String>, String, KhronosValue)| {
+        methods.add_scheduler_async_method("Set", async move |_lua, this, (id, scopes, key, value): (LuaId, String, String, KhronosValue)| {
             let res = this.kv_db.kv_set(id.0, scopes, key, value).await
                 .map_err(|e| LuaError::external(format!("Failed to set KV value: {e:?}")))?;
             Ok(res)
         });
 
         // Delete a value from the KV store
-        methods.add_scheduler_async_method("Delete", async move |_lua, this, (id, scopes, key): (LuaId, Vec<String>, String)| {
+        methods.add_scheduler_async_method("Delete", async move |_lua, this, (id, scopes, key): (LuaId, String, String)| {
             let res = this.kv_db.kv_delete(id.0, scopes, key).await
                 .map_err(|e| LuaError::external(format!("Failed to delete KV value: {e:?}")))?;
             Ok(res)
         });
 
         // Find values in the KV store
-        methods.add_scheduler_async_method("Find", async move |_lua, this, (id, scopes, prefix): (LuaId, Vec<String>, String)| {
+        methods.add_scheduler_async_method("Find", async move |_lua, this, (id, scopes, prefix): (LuaId, String, String)| {
             let res = this.kv_db.kv_find(id.0, scopes, prefix).await
                 .map_err(|e| LuaError::external(format!("Failed to find KV values: {e:?}")))?;
             Ok(res.into_iter().map(Self::cast_record).collect::<Vec<_>>())
