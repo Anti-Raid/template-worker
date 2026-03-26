@@ -8,7 +8,7 @@ pub static MIGRATION: Migration = Migration {
             let mut tx = pool.begin().await?;
 
             let stmts = [
-                "ALTER TABLE tenant_kv ADD COLUMN scopes_2;",
+                "ALTER TABLE tenant_kv ADD COLUMN scopes_2 TEXT;",
                 "ALTER TABLE tenant_kv DROP CONSTRAINT kv_unique_entry;"
             ];
 
@@ -26,7 +26,7 @@ pub static MIGRATION: Migration = Migration {
                 scopes: Vec<String>
             }
 
-            let rows = sqlx::query_as::<_, TenantKv>("SELECT owner_id, owner_id_type, key, scopes FROM tenant_kv")
+            let rows = sqlx::query_as::<_, TenantKv>("SELECT owner_id, owner_type, key, scopes FROM tenant_kv")
             .fetch_all(&mut *tx)
             .await?;
 
@@ -64,7 +64,7 @@ pub static MIGRATION: Migration = Migration {
                     .await?;
             }
 
-            //tx.commit().await?;
+            tx.commit().await?;
 
             Ok(())
         })

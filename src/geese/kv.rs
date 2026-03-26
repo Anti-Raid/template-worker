@@ -18,7 +18,7 @@ impl KeyValueDb {
     /// Gets a key-value record for a given tenant ID, scope, and key
     pub async fn kv_get(&self, tid: Id, scope: String, key: String) -> Result<Option<SerdeKvRecord>, crate::Error> {
         let rec = sqlx::query(
-            "SELECT id, scope, value, created_at, last_updated_at FROM tenant_kv WHERE owner_id = $1 AND owner_type = $2 AND key = $3 AND scope = $4",
+            "SELECT scope, value, created_at, last_updated_at FROM tenant_kv WHERE owner_id = $1 AND owner_type = $2 AND key = $3 AND scope = $4",
             )
             .bind(tid.tenant_id())
             .bind(tid.tenant_type())
@@ -32,7 +32,6 @@ impl KeyValueDb {
         };
 
         Ok(Some(SerdeKvRecord {
-            id: rec.try_get::<String, _>("id")?,
             key,
             scope: rec.try_get::<String, _>("scope")?,
             value: {
@@ -123,7 +122,7 @@ ORDER BY scope",
             if query == "%%" {
                 // Fast path, omit ILIKE if '%%' is used
                 sqlx::query(
-                "SELECT id, key, value, created_at, last_updated_at, scope FROM tenant_kv WHERE owner_id = $1 AND owner_type = $2 AND scope = $3",
+                "SELECT key, value, created_at, last_updated_at, scope FROM tenant_kv WHERE owner_id = $1 AND owner_type = $2 AND scope = $3",
                 )
                 .bind(tid.tenant_id())
                 .bind(tid.tenant_type())
@@ -133,7 +132,7 @@ ORDER BY scope",
             } else {
                 // with query
                 sqlx::query(
-                "SELECT id, key, value, created_at, last_updated_at, scopes FROM tenant_kv WHERE owner_id = $1 AND owner_type = $2 AND scope = $3 AND key LIKE $4",
+                "SELECT key, value, created_at, last_updated_at, scopes FROM tenant_kv WHERE owner_id = $1 AND owner_type = $2 AND scope = $3 AND key LIKE $4",
                 )
                 .bind(tid.tenant_id())
                 .bind(tid.tenant_type())
@@ -148,7 +147,6 @@ ORDER BY scope",
 
         for rec in rec {
             let record = SerdeKvRecord {
-                id: rec.try_get::<String, _>("id")?,
                 scope: rec.try_get::<String, _>("scope")?,
                 key: rec.try_get("key")?,
                 value: {
@@ -172,7 +170,6 @@ ORDER BY scope",
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct SerdeKvRecord {
-    pub id: String,
     pub key: String,
     pub value: KhronosValue,
     pub scope: String,
@@ -183,7 +180,6 @@ pub struct SerdeKvRecord {
 impl Into<kv_ir::KvRecord> for SerdeKvRecord {
     fn into(self) -> kv_ir::KvRecord {
         kv_ir::KvRecord {
-            id: self.id,
             key: self.key,
             value: self.value,
             scope: self.scope,

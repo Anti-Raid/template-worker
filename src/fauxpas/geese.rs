@@ -16,7 +16,6 @@ impl LuaKvGod {
 
     pub fn cast_record(record: SerdeKvRecord) -> KvRecord {
         KvRecord {
-            id: record.id,
             key: record.key,
             value: record.value,
             scope: record.scope,

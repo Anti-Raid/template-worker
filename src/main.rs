@@ -20,7 +20,7 @@ use crate::worker::workerstate::WorkerState;
 use crate::worker::workerthread::WorkerThread;
 use clap::{Parser, ValueEnum};
 use log::{debug, error, info};
-use serenity::all::{ApplicationId, HttpBuilder};
+use serenity::all::{ApplicationId, CurrentUser, Http, HttpBuilder};
 use sqlx::postgres::PgPoolOptions;
 use tokio::sync::watch;
 use std::io::Write;
@@ -139,13 +139,6 @@ async fn main_impl(args: CmdArgs) {
 
     env_builder.init();
 
-    let proxy_url = CONFIG.meta.proxy.clone();
-
-    debug!("Proxy URL: {}", proxy_url);
-
-    let token = serenity::all::SecretString::new(CONFIG.discord_auth.token.clone().into());
-    let http = Arc::new(HttpBuilder::new(token.clone()).proxy(proxy_url).build());
-
     debug!("Connecting to database");
 
     let reqwest = reqwest::Client::builder()
@@ -153,28 +146,6 @@ async fn main_impl(args: CmdArgs) {
         .timeout(std::time::Duration::from_secs(90))
         .build()
         .expect("Could not initialize reqwest client");
-
-    let stratum = Stratum::new(http.clone()).await.expect("Failed to connect to stratum");
-
-    let current_user = loop {
-        match stratum.current_user().await {
-            Ok(Some(user)) => break user,
-            Ok(None) => {
-                error!("Current user is not available yet, retrying in 5 seconds...");
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                continue;
-            }
-            Err(e) => {
-                error!("Failed to get current user from Sandwich: {:?}, retrying in 5 seconds...", e);
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                continue;
-            }
-        }
-    };
-
-    debug!("Current user: {} ({})", current_user.name, current_user.id);
-    http.set_application_id(ApplicationId::new(current_user.id.get()));
-
 
     let object_storage = Arc::new(
         CONFIG
@@ -185,6 +156,8 @@ async fn main_impl(args: CmdArgs) {
 
     match args.worker_type {
         WorkerType::RegisterCommands => {
+            let (http, _, _) = setup_discord().await;
+
             info!("Getting registration data from builtins");
 
             let data = &*register::REGISTER;
@@ -205,6 +178,8 @@ async fn main_impl(args: CmdArgs) {
             apply_migrations(pg_pool).await.expect("Failed to apply migrations");
         }
         WorkerType::Shell => {
+            let (http, _, _) = setup_discord().await;
+
             let pg_pool = PgPoolOptions::new()
                 .max_connections(args.max_db_connections)
                 .connect(&CONFIG.meta.postgres_url)
@@ -220,6 +195,8 @@ async fn main_impl(args: CmdArgs) {
             });
         }
         WorkerType::ProcessPool => {
+            let (http, stratum, current_user) = setup_discord().await;
+
             // Ask stratum for its worker count
             let worker_count: usize = stratum.get_config()
             .await
@@ -290,6 +267,8 @@ async fn main_impl(args: CmdArgs) {
             }
         }
         WorkerType::ProcessPoolWorker => {
+            let (http, stratum, current_user) = setup_discord().await;
+
             let Some(worker_id) = args.worker_id else {
                 panic!("Worker ID must be set when worker type is processpoolworker");
             };
@@ -323,4 +302,36 @@ async fn main_impl(args: CmdArgs) {
             stratum.listen_discord_events(worker_thread, shutdown_rx).await;
         }
     }
+}
+
+async fn setup_discord() -> (Arc<Http>, Stratum, CurrentUser) {
+    let proxy_url = CONFIG.meta.proxy.clone();
+
+    debug!("Proxy URL: {}", proxy_url);
+
+    let token = serenity::all::SecretString::new(CONFIG.discord_auth.token.clone().into());
+    let http = Arc::new(HttpBuilder::new(token.clone()).proxy(proxy_url).build());
+
+    let stratum = Stratum::new(http.clone()).await.expect("Failed to connect to stratum");
+
+    let current_user = loop {
+        match stratum.current_user().await {
+            Ok(Some(user)) => break user,
+            Ok(None) => {
+                error!("Current user is not available yet, retrying in 5 seconds...");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+            Err(e) => {
+                error!("Failed to get current user from Sandwich: {:?}, retrying in 5 seconds...", e);
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        }
+    };
+
+    debug!("Current user: {} ({})", current_user.name, current_user.id);
+    http.set_application_id(ApplicationId::new(current_user.id.get()));
+
+    (http, stratum, current_user)
 }
