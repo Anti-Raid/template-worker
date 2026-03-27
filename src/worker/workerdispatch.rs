@@ -3,7 +3,6 @@ use serde_json::json;
 use crate::worker::workertenantstate::WorkerTenantState;
 
 use super::workervmmanager::{Id, WorkerVmManager, VmData};
-use super::vmcontext::TemplateContextProvider;
 use khronos_runtime::rt::mlua;
 
 /// A WorkerDispatch manages the dispatching of events to a Luau VM
@@ -50,23 +49,18 @@ impl WorkerDispatch {
 
     /// Runs a script directly on the VM for the given tenant ID with the provided event
     pub async fn run_script(&self, id: Id, name: String, code: String, event: CreateEvent) -> mlua::Result<KhronosValue> {
-        let vm_data = self.vm_manager.get_vm_for(id)?;
+        let vm_data = self.vm_manager.get_vm_for(id, &self.tenant_state)?;
 
-        if vm_data.runtime.is_broken() {
+        if vm_data.data.runtime.is_broken() {
             return Err(mlua::Error::external("Lua VM to dispatch to is broken"));
         }
 
         let func = vm_data
+            .data
             .runtime
             .eval_chunk(&code, Some(&name), None)?;
 
-        let provider = TemplateContextProvider::new(
-            id,
-            vm_data.clone(),
-            self.tenant_state.clone()
-        );
-        let context = vm_data.runtime.create_context(provider)?;
-        match vm_data.runtime.call_in_scheduler::<_, KhronosValue>(func, (context, event)).await {
+        match vm_data.data.runtime.call_in_scheduler::<_, KhronosValue>(func, event).await {
             Ok(result) => Ok(result),
             Err(e) => Err(e.into()),
         }
@@ -84,29 +78,19 @@ impl WorkerDispatch {
             return Ok(KhronosValue::Null);
         }
 
-        let vm_data = self.vm_manager.get_vm_for(id)
+        let vm_data = self.vm_manager.get_vm_for(id, &self.tenant_state)
             .map_err(|e| mlua::Error::external(format!("Failed to get VM for ID {id:?}: {e}")))?;
 
-        if vm_data.runtime.is_broken() {
+        if vm_data.data.runtime.is_broken() {
             return Err(mlua::Error::external("Lua VM to dispatch to is broken"));
         }
 
-        let func: khronos_runtime::rt::mlua::Function = vm_data
-        .runtime
-        .eval_script("./builtins.templateloop")?;
-
-        let provider = TemplateContextProvider::new(
-            id,
-            vm_data.clone(),
-            self.tenant_state.clone()
-        );
-        let context = vm_data.runtime.create_context(provider)?;
-        match vm_data.runtime.call_in_scheduler::<_, KhronosValue>(func, (context, event)).await {
+        match vm_data.data.runtime.call_in_scheduler::<_, KhronosValue>(vm_data.dispatch_func, event).await {
             Ok(result) => Ok(result),
             Err(e) => {
                 let err_str = e.to_string();
                 tokio::task::spawn_local(async move {
-                    if let Err(e) = Self::log_error_to_main_server(&vm_data, err_str.clone()).await {
+                    if let Err(e) = Self::log_error_to_main_server(&vm_data.data, err_str.clone()).await {
                         log::error!("Failed to log error for ID {id:?}: {}", e);
                     }
                 });

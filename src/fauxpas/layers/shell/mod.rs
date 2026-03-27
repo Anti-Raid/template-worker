@@ -4,8 +4,6 @@ use khronos_ext::mlua_scheduler_ext::LuaSchedulerAsyncUserData;
 use khronos_runtime::rt::{KhronosRuntime, mluau::prelude::*};
 use tokio::sync::{oneshot::Sender as OneshotSender, mpsc::{unbounded_channel, UnboundedSender}};
 use crate::worker::builtins::TemplatingTypes;
-use crate::fauxpas::geese::LuaKvGod;
-use crate::geese::kv::KeyValueDb;
 use rust_embed::Embed;
 use crate::fauxpas::mainthread::{run_in_thread, RunInThreadFn};
 
@@ -87,13 +85,6 @@ impl std::ops::Deref for ShellContext {
 
 impl LuaUserData for ShellContext {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        // Creates a new KvGod for interacting with the key-value store
-        methods.add_method("CreateKvGod", |_lua, this, (): ()| {
-            let kv_db = KeyValueDb::new(this.pg_pool.clone());
-            let kv_god = LuaKvGod::new(kv_db);
-            Ok(kv_god)
-        });
-
         methods.add_scheduler_async_method("RegisterGlobalCommands", async move |lua, this, value: LuaValue| {
             let res: Vec<CreateCommand> = lua.from_value(value)
                 .map_err(|e| LuaError::external(format!("Failed to parse command definitions: {e:?}")))?;

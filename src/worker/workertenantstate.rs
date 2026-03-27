@@ -20,7 +20,6 @@ static DEFAULT_TENANT_STATE: LazyLock<TenantState> = LazyLock::new(|| {
 
 #[derive(Clone)]
 pub struct WorkerTenantState {
-    mesophyll_client: Arc<MesophyllClient>,
     vm_manager: WorkerVmManager,
     tenant_state_cache: Rc<RefCell<HashMap<Id, TenantState>>>, // Maps tenant IDs to their states
 }
@@ -32,7 +31,6 @@ impl WorkerTenantState {
         // The tenant state cache acts as a routing table
         let t_states = mesophyll_client.list_tenant_states().await?;
         Ok(Self {
-            mesophyll_client,
             vm_manager,
             tenant_state_cache: Rc::new(RefCell::new(t_states))
         })
@@ -84,14 +82,6 @@ impl WorkerTenantState {
             }
         }
     }
-
-    /// Sets the tenant state for a specific tenant
-    pub async fn set_tenant_state_for(&self, id: Id, events: Vec<String>, flags: i32) -> Result<(), crate::Error> {
-        self.mesophyll_client.set_tenant_state_for(id, events.clone(), flags).await?;
-        self.reload_for_tenant(id, events, flags, None)?;
-        Ok(())
-    }
-
     /// Returns the set of tenant IDs that have startup events enabled
     pub fn get_startup_event_tenants(&self) -> HashSet<Id> {
         let mut startup_events = HashSet::new();  

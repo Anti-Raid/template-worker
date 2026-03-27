@@ -1,5 +1,4 @@
 use khronos_runtime::rt::{mlua::prelude::*, mlua_scheduler::LuaSchedulerAsyncUserData};
-use super::geese::LuaKvGod;
 use crate::{fauxpas::base::LuaId, mesophyll::{dbstate::DbState}, worker::workerlike::WorkerLike};
 
 /// LuaGod is a special God-level entity that provides access to everything else in the staff lua api
@@ -67,13 +66,6 @@ impl<T: WorkerLike> LuaUserData for LuaGod<T> {
 
             let db_client = super::db::Db::new(pool);
             Ok(db_client)
-        });
-
-        // Create a KV god
-        methods.add_method("CreateKvGod", |_lua, this, (): ()| {
-            this.ensure_secure()?;
-            let kv_god = LuaKvGod::new(this.mesophyll_db_state.key_value_db().clone());
-            Ok(kv_god)
         });
     }
 

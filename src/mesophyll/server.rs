@@ -225,118 +225,14 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         Ok(tonic::Response::new(Box::pin(resp_stream) as Self::WorkerInitStream))
     }
 
-    async fn kv_get(&self, request: tonic::Request<pb::WtmKvGet>) -> Result<tonic::Response<pb::AnyValue>, Status> {
+    async fn exec_state_op(&self, request: tonic::Request<pb::WtmExecStateOp>) -> Result<tonic::Response<pb::AnyValue>, Status> {
         let req = request.into_inner();
         self.verify_worker(req.worker)?;
         let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
-        let scopes = req.scope;
-        let key = req.key;
+        let state_op = req.state_op.ok_or_else(|| Status::invalid_argument("Missing state_op"))?.to_real()?;
 
-        match self.db_state.key_value_db().kv_get(id, scopes, key).await {
-            Ok(record) => Ok(tonic::Response::new(pb::AnyValue::from_real(&record)?)),
-            Err(e) => Err(Status::internal(e.to_string())),
-        }
-    }
-
-    async fn kv_list_scopes(&self, request: tonic::Request<pb::WtmKvListScopes>) -> Result<tonic::Response<pb::KvListScopesResponse>, Status> {
-        let req = request.into_inner();
-        self.verify_worker(req.worker)?;
-        let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
-
-        match self.db_state.key_value_db().kv_list_scopes(id).await {
-            Ok(scopes) => Ok(tonic::Response::new(pb::KvListScopesResponse { scopes })),
-            Err(e) => Err(Status::internal(e.to_string())),
-        }
-    }
-
-    async fn kv_set(&self, request: tonic::Request<pb::WtmKvSet>) -> Result<tonic::Response<pb::WtmBool>, Status> {
-        let req = request.into_inner();
-        self.verify_worker(req.worker)?;
-        let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
-        let scopes = req.scope;
-        let key = req.key;
-        let Some(value) = req.value else {
-            return Err(Status::invalid_argument("Missing value"));
-        };
-
-        let value = value.to_real()?;
-        match self.db_state.key_value_db().kv_set(id, scopes, key, value).await {
-            Ok(_) => Ok(tonic::Response::new(pb::WtmBool { value: true })),
-            Err(e) => Err(Status::internal(e.to_string())),
-        }
-    }
-
-    async fn kv_delete(&self, request: tonic::Request<pb::WtmKvDelete>) -> Result<tonic::Response<pb::WtmBool>, Status> {
-        let req = request.into_inner();
-        self.verify_worker(req.worker)?;
-        let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
-        let scopes = req.scope;
-        let key = req.key;
-
-        match self.db_state.key_value_db().kv_delete(id, scopes, key).await {
-            Ok(_) => Ok(tonic::Response::new(pb::WtmBool { value: true })),
-            Err(e) => Err(Status::internal(e.to_string())),
-        }
-    }
-
-    async fn kv_find(&self, request: tonic::Request<pb::WtmKvFind>) -> Result<tonic::Response<pb::AnyValue>, Status> {
-        let req = request.into_inner();
-        self.verify_worker(req.worker)?;
-        let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
-        let scopes = req.scope;
-        let prefix = req.prefix;
-        match self.db_state.key_value_db().kv_find(id, scopes, prefix).await {
-            Ok(records) => Ok(tonic::Response::new(pb::AnyValue::from_real(&records)?)),
-            Err(e) => Err(Status::internal(e.to_string())),
-        }
-    }
-
-    async fn global_kv_find(&self, request: tonic::Request<pb::WtmGlobalKvFind>) -> Result<tonic::Response<pb::AnyValue>, Status> {
-        let req = request.into_inner();
-        let scope = req.scope;
-        let query = req.query;
-
-        match self.db_state.global_key_value_db().global_kv_find(scope, query).await {
-            Ok(records) => Ok(tonic::Response::new(pb::AnyValue::from_real(&records)?)),
-            Err(e) => Err(Status::internal(e.to_string())),
-        }
-    }
-
-    async fn global_kv_get(&self, request: tonic::Request<pb::WtmGlobalKvGet>) -> Result<tonic::Response<pb::AnyValue>, Status> {
-        let req = request.into_inner();
-        let key = req.key;
-        let version = req.version;
-        let scope = req.scope;
-        let id = req.id.map(|id| id.to_real_id());
-
-        match self.db_state.global_key_value_db().global_kv_get(key, version, scope, id).await {
-            Ok(record) => Ok(tonic::Response::new(pb::AnyValue::from_real(&record)?)),
-            Err(e) => Err(Status::internal(e.to_string())),
-        }
-    }
-
-    async fn global_kv_create(&self, request: tonic::Request<pb::WtmGlobalKvCreate>) -> Result<tonic::Response<pb::WtmBool>, Status> {
-        let req = request.into_inner();
-        self.verify_worker(req.worker)?;
-        let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
-        let value = req.data.ok_or_else(|| Status::invalid_argument("Missing data"))?.to_real()?;
-
-        match self.db_state.global_key_value_db().global_kv_create(id, value).await {
-            Ok(_) => Ok(tonic::Response::new(pb::WtmBool { value: true })),
-            Err(e) => Err(Status::internal(e.to_string())),
-        }
-    }
-
-    async fn global_kv_delete(&self, request: tonic::Request<pb::WtmGlobalKvDelete>) -> Result<tonic::Response<pb::WtmBool>, Status> {
-        let req = request.into_inner();
-        self.verify_worker(req.worker)?;
-        let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
-        let key = req.key;
-        let version = req.version;
-        let scope = req.scope;
-
-        match self.db_state.global_key_value_db().global_kv_delete(id, key, version, scope).await {
-            Ok(_) => Ok(tonic::Response::new(pb::WtmBool { value: true })),
+        match self.db_state.state_db().do_op(id, state_op).await {
+            Ok(result) => Ok(tonic::Response::new(pb::AnyValue::from_real(&result)?)),
             Err(e) => Err(Status::internal(e.to_string())),
         }
     }
@@ -346,17 +242,6 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         let wid = self.verify_worker(req.worker)?;
         match self.db_state.tenant_state_db().get_tenant_state(Some((wid as i64, self.db_state.num_workers() as i64))).await {
             Ok(ts) => Ok(tonic::Response::new(pb::AnyValue::from_real(&ts)?)),
-            Err(e) => Err(Status::internal(e.to_string())),
-        }
-    }
-
-    async fn set_tenant_state_for(&self, request: tonic::Request<pb::WtmSetTenantStateFor>) -> Result<tonic::Response<pb::WtmBool>, Status> {
-        let req = request.into_inner();
-        self.verify_worker(req.worker)?;
-        let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
-
-        match self.db_state.tenant_state_db().set_tenant_state_for(id, &req.events, req.flags).await {
-            Ok(_) => Ok(tonic::Response::new(pb::WtmBool { value: true })),
             Err(e) => Err(Status::internal(e.to_string())),
         }
     }

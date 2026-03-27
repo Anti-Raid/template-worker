@@ -75,89 +75,19 @@ message WTMMessage { // worker-to-master message
   }
 }
 
-message WTMKvGet {
-  Worker worker = 1;
-  Id id = 2;
-  string scope = 3;
-  string key = 4;
-}
-
-message WTMKvListScopes {
-  Worker worker = 1;
-  Id id = 2;
-}
-
-message KvListScopesResponse {
-  repeated string scopes = 1;
-}
-
-message WTMKvSet {
-  Worker worker = 1;
-  Id id = 2;
-  string scope = 3;
-  string key = 4;
-  AnyValue value = 5;
-}
-
-message WTMKvDelete {
-  Worker worker = 1;
-  Id id = 2;
-  string scope = 3;
-  string key = 4;
-}
-
-message WTMKvFind {
-  Worker worker = 1;
-  Id id = 2;
-  string scope = 3;
-  string prefix = 4;
-}
-
-message WTMGlobalKvFind {
-  string query = 1;
-  string scope = 2;
-}
-
-message WTMGlobalKvGet {
-  string key = 1;
-  int32 version = 2;
-  string scope = 3;
-  optional Id id = 4;
-}
-
-message WTMGlobalKvCreate {
-  Worker worker = 1;
-  Id id = 2;
-  // Must be a CreateGlobalKv
-  AnyValue data = 3;
-}
-
-message WTMGlobalKvDelete {
-  Worker worker = 1;
-  Id id = 2;
-  string key = 3;
-  int32 version = 4;
-  string scope = 5;
-}
-
-message WTMBool {
-  bool value = 1;
-}
-
 message WTMListTenantStates {
   Worker worker = 1;
-}
-
-message WTMSetTenantStateFor {
-  Worker worker = 1;
-  Id id = 2;
-  int32 flags = 3;
-  repeated string events = 4;
 }
 
 // Sent by the master to the worker to send over key data like number of workers in the pool etc.
 message MTWBaseWorkerInfo {
   uint32 num_workers = 1;
+}
+
+message WTMExecStateOp {
+  Worker worker = 1;
+  Id id = 2;
+  AnyValue state_op = 3;
 }
 
 // Mesophyll service (runs on master and called by worker)
@@ -167,40 +97,15 @@ service MesophyllMaster {
   // This stream remains open for the duration of the worker's lifecycle, allowing for continuous communication between the master and worker.
   rpc WorkerInit(stream WTMMessage) returns (stream MTWMessage) {}
 
-  // KvGet is called by the worker to retrieve a value from the key-value store.
+  // ExecStateOp is called by the worker to perform a state op
   //
-  // @returns KvRecord? (msgpack encoded)
-  rpc KvGet(WTMKvGet) returns (AnyValue) {}
-  // KvListScopes is called by the worker to retrieve a list of scopes that have been used for a given tenant.
-  rpc KvListScopes(WTMKvListScopes) returns (KvListScopesResponse) {}
-  // KvSet is called by the worker to set a value in the key-value store.
-  rpc KvSet(WTMKvSet) returns (WTMBool) {}
-  // KvDelete is called by the worker to delete a value from the key-value store.
-  rpc KvDelete(WTMKvDelete) returns (WTMBool) {}
-  // KvFind is called by the worker to find all key-value pairs with keys that start with a given prefix.
-  //
-  // @returns Vec<KvRecord> (msgpack encoded)
-  rpc KvFind(WTMKvFind) returns (AnyValue) {}
-
-  // GlobalKvFind finds all global kv pairs with a given query/scope pair
-  //
-  // @returns Vec<GlobalKvRecord> (msgpack encoded)
-  rpc GlobalKvFind(WTMGlobalKvFind) returns (AnyValue) {}
-  // GlobalKvGet retrieves a global kv pair with a given scope/key
-  // @returns GlobalKvRecord? (msgpack encoded)
-  rpc GlobalKvGet(WTMGlobalKvGet) returns (AnyValue) {}
-  // GlobalKvCreate creates a new global kv pair with the given scope and data.
-  rpc GlobalKvCreate(WTMGlobalKvCreate) returns (WTMBool) {}
-  // GlobalKvDelete deletes a global kv pair with the given scope and key, if the version matches.
-  rpc GlobalKvDelete(WTMGlobalKvDelete) returns (WTMBool) {}
+  // @returns StateExecResponse? (msgpack encoded)
+  rpc ExecStateOp(WTMExecStateOp) returns (AnyValue) {}
 
   // ListTenantStates returns a list of all tenant states from the Mesophyll server
   //
   // @returns HashMap<Id, TenantState> (msgpack encoded)
   rpc ListTenantStates(WTMListTenantStates) returns (AnyValue) {}
-  // SetTenantStateFor sets the tenant state for a given tenant
-  rpc SetTenantStateFor(WTMSetTenantStateFor) returns (WTMBool) {}
-
 
   // BaseWorkerInfo enables the worker to get common info from the master
   rpc BaseWorkerInfo(Worker) returns (MTWBaseWorkerInfo) {}

@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use khronos_runtime::rt::mlua::prelude::*;
+
 use crate::worker::workervmmanager::Id;
 
 #[derive(Clone)]
@@ -53,23 +55,6 @@ impl TenantStateDb {
 
         Ok(states)
     }
-
-    /// Sets the tenant state for a specific tenant
-    /// 
-    /// Does not allow setting modflags
-    pub async fn set_tenant_state_for(&self, id: Id, events: &[String], flags: i32) -> Result<(), crate::Error> {
-        sqlx::query(
-            "INSERT INTO tenant_state (owner_id, owner_type, events, flags) VALUES ($1, $2, $3, $4) ON CONFLICT (owner_id, owner_type) DO UPDATE SET events = EXCLUDED.events, flags = EXCLUDED.flags",
-        )
-        .bind(id.tenant_id())
-        .bind(id.tenant_type())
-        .bind(&events)
-        .bind(&flags)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
-    }
 }
 
 bitflags::bitflags! {
@@ -88,4 +73,14 @@ pub struct TenantState {
     pub events: HashSet<String>,
     pub flags: i32,
     pub modflags: ModFlags,
+}
+
+impl IntoLua for TenantState {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        let table = lua.create_table()?;
+
+        table.set("events", self.events)?;
+        table.set("flags", self.flags)?;
+        Ok(LuaValue::Table(table))
+    }
 }

@@ -1,21 +1,20 @@
-use crate::{geese::{gkv::GlobalKeyValueDb, tenantstate::TenantStateDb}};
-use crate::geese::kv::KeyValueDb;
+use crate::geese::{gkv::GlobalKeyValueDb, state::StateDb, tenantstate::TenantStateDb};
 
 #[derive(Clone)]
 pub struct DbState {
     pool: sqlx::PgPool,
-    key_value_db: KeyValueDb,
     global_key_value_db: GlobalKeyValueDb,
     tenant_state_db: TenantStateDb,
+    state_db: StateDb,
     num_workers: usize,
 }
 
 impl DbState {
     pub async fn new(num_workers: usize, pool: sqlx::PgPool) -> Result<Self, crate::Error> {
         let s = Self {
-            key_value_db: KeyValueDb::new(pool.clone()),
             global_key_value_db: GlobalKeyValueDb::new(pool.clone()),
             tenant_state_db: TenantStateDb::new(pool.clone()),
+            state_db: StateDb::new(pool.clone()),
             pool,
             num_workers,
         };
@@ -33,11 +32,6 @@ impl DbState {
         &self.pool
     }
 
-    /// Returns the underlying key-value database interface
-    pub fn key_value_db(&self) -> &KeyValueDb {
-        &self.key_value_db
-    }
-
     /// Returns the underlying global key-value database interface
     pub fn global_key_value_db(&self) -> &GlobalKeyValueDb {
         &self.global_key_value_db
@@ -46,5 +40,10 @@ impl DbState {
     /// Returns the underlying tenant state db
     pub fn tenant_state_db(&self) -> &TenantStateDb {
         &self.tenant_state_db
+    }
+
+    /// Returns the underlying key-value database interface
+    pub fn state_db(&self) -> &StateDb {
+        &self.state_db
     }
 }

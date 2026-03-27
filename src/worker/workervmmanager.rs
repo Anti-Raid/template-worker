@@ -7,6 +7,8 @@ use std::{collections::HashMap, rc::Rc};
 use khronos_runtime::rt::mlua::prelude::*;
 use crate::worker::builtins::{Builtins, TemplatingTypes};
 use crate::worker::limits::TEMPLATE_GIVE_TIME;
+use crate::worker::vmcontext::TemplateContextProvider;
+use crate::worker::workertenantstate::WorkerTenantState;
 
 use super::limits::{LuaKVConstraints, Ratelimits};
 
@@ -86,6 +88,13 @@ pub struct VmData {
     pub ratelimits: Rc<Ratelimits>,
 }
 
+/// Represents the vmdata and the dispatch function as well
+#[derive(Clone)]
+pub struct VmState {
+    pub data: VmData,
+    pub dispatch_func: LuaFunction
+}
+
 /// A WorkerVmManager manages the state and VMs for a worker
 /// 
 /// # Notes
@@ -97,7 +106,7 @@ pub struct WorkerVmManager {
     /// The state all VMs in the WorkerVmManager share
     worker_state: WorkerState,
     /// The VMs managed by this WorkerVmManager, keyed by their tenant ID
-    vms: Rc<RefCell<HashMap<Id, VmData>>>
+    vms: Rc<RefCell<HashMap<Id, VmState>>>,
 }
 
 impl WorkerVmManager {
@@ -110,20 +119,20 @@ impl WorkerVmManager {
     }
 
     /// Returns the VM for the given tenant ID creating it if needed
-    pub fn get_vm_for(&self, id: Id) -> LuaResult<VmData> {
+    pub fn get_vm_for(&self, id: Id, wts: &WorkerTenantState) -> LuaResult<VmState> {
         let mut vms = self.vms.borrow_mut();
         if let Some(vm) = vms.get(&id) {
             return Ok(vm.clone());
         }
 
-        let vm = self.create_vm()?;
+        let vm = self.create_vm(id, wts.clone())?;
         vms.insert(id, vm.clone());
 
         Ok(vm)
     }
 
     /// Creates a new VmData
-    fn create_vm(&self) -> LuaResult<VmData> {
+    fn create_vm(&self, id: Id, wts: WorkerTenantState) -> LuaResult<VmState> {
         // If it doesn't exist, create a new VM
         let runtime = self.configure_runtime()
             .map_err(|e| LuaError::external(e))?;
@@ -135,7 +144,26 @@ impl WorkerVmManager {
             ratelimits: Ratelimits::new().map_err(|e| LuaError::external(e.to_string()))?.into(),
         };
 
-        Ok(vmd)
+        let func: LuaFunction = vmd
+        .runtime
+        .eval_script("./builtins.templateloop")?;
+
+        let provider = TemplateContextProvider::new(
+            id,
+            vmd.clone(),
+            wts.clone()
+        );
+        let context = vmd.runtime.create_context(provider)?;
+
+        let tenant_state = wts.get_cached_tenant_state_for(id)
+            .map_err(|e| LuaError::external(format!("Failed to get tenant state for ID {id:?}: {e}")))?;
+
+        let dispatch_func = func.call::<LuaFunction>((context, tenant_state))?;
+
+        Ok(VmState {
+            data: vmd,
+            dispatch_func
+        })
     }
 
     /// Removes the VM for the given tenant ID and cleans up its resources
@@ -146,7 +174,7 @@ impl WorkerVmManager {
 
         // If it existed and was initialized, mark it broken
         if let Some(vm) = cell_opt {
-            vm.runtime.mark_broken(true)?;
+            vm.data.runtime.mark_broken(true)?;
         }
         
         Ok(())

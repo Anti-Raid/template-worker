@@ -1,22 +1,18 @@
 use super::workerstate::WorkerState;
 use super::workervmmanager::Id;
 use crate::geese::objectstore::{Bucket, BucketWithKey, BucketWithPrefix};
+use crate::geese::state::StateOp;
 use crate::worker::builtins::EXPOSED_VFS;
 use crate::worker::workertenantstate::WorkerTenantState;
 use crate::worker::workervmmanager::VmData;
 use khronos_runtime::core::typesext::Vfs;
 use khronos_runtime::traits::context::KhronosContext;
-use khronos_runtime::traits::globalkvprovider::GlobalKVProvider;
-use khronos_runtime::traits::ir::globalkv::{PartialGlobalKv, CreateGlobalKv, GlobalKv};
 use khronos_runtime::traits::ir::runtime as runtime_ir;
 use dapi::controller::{DiscordProvider, DiscordProviderContext};
 use khronos_runtime::traits::httpclientprovider::HTTPClientProvider;
-use khronos_runtime::traits::ir::kv::KvRecord;
 use khronos_runtime::traits::ir::ObjectMetadata;
-use khronos_runtime::traits::kvprovider::KVProvider;
 use khronos_runtime::traits::objectstorageprovider::ObjectStorageProvider;
 use khronos_runtime::traits::runtimeprovider::RuntimeProvider;
-use khronos_runtime::utils::khronos_value::KhronosValue;
 use serde_json::Value;
 use std::rc::Rc;
 use super::limits::{LuaKVConstraints, Ratelimits};
@@ -59,29 +55,10 @@ impl TemplateContextProvider {
 }
 
 impl KhronosContext for TemplateContextProvider {
-    type KVProvider = ArKVProvider;
-    type GlobalKVProvider = ArGlobalKvProvider;
     type DiscordProvider = ArDiscordProvider;
     type ObjectStorageProvider = ArObjectStorageProvider;
     type HTTPClientProvider = ArHTTPClientProvider;
     type RuntimeProvider = ArRuntimeProvider;
-
-    fn kv_provider(&self) -> Option<Self::KVProvider> {
-        Some(ArKVProvider {
-            id: self.id(),
-            state: self.state.clone(),
-            kv_constraints: self.kv_constraints.clone(),
-            ratelimits: self.ratelimits.clone(),
-        })
-    }
-
-    fn global_kv_provider(&self) -> Option<Self::GlobalKVProvider> {
-        Some(ArGlobalKvProvider {
-            id: self.id(),
-            state: self.state.clone(),
-            ratelimits: self.ratelimits.clone(),
-        })
-    }
 
     fn discord_provider(&self) -> Option<Self::DiscordProvider> {
         Some(ArDiscordProvider {
@@ -115,92 +92,6 @@ impl KhronosContext for TemplateContextProvider {
             state: self.state.clone(),
             ratelimits: self.ratelimits.clone(),
         })
-    }
-}
-
-#[derive(Clone)]
-pub struct ArKVProvider {
-    id: Id,
-    state: WorkerState,
-    kv_constraints: LuaKVConstraints,
-    ratelimits: Rc<Ratelimits>,
-}
-
-impl KVProvider for ArKVProvider {
-    fn attempt_action(&self, bucket: &str) -> Result<(), crate::Error> {
-        self.ratelimits.kv.check(bucket)
-    }
-
-    async fn get(&self, scope: String, key: String) -> Result<Option<KvRecord>, crate::Error> {
-        // Check key length
-        if key.len() > self.kv_constraints.max_key_length {
-            return Err("Key length too long".into());
-        }
-
-        self.state.mesophyll_client.kv_get(
-            self.id,
-            scope,
-            key,
-        ).await
-        .map(|x| x.map(|y| y.into()))
-    }
-
-    async fn list_scopes(&self) -> Result<Vec<String>, crate::Error> {
-        let scopes = self.state.mesophyll_client.kv_list_scopes(self.id).await?;
-        Ok(scopes)
-    }
-
-    async fn set(
-        &self,
-        scope: String,
-        key: String,
-        data: KhronosValue,
-    ) -> Result<(), crate::Error> {
-        // Check key length
-        if key.len() > self.kv_constraints.max_key_length {
-            return Err("Key length too long".into());
-        }
-
-        // Check bytes length
-        let data_str = serde_json::to_string(&data)?;
-
-        if data_str.len() > self.kv_constraints.max_value_bytes {
-            return Err("Value length too long".into());
-        }
-
-        self.state.mesophyll_client.kv_set(
-            self.id,
-            scope,
-            key,
-            data,
-        ).await
-    }
-
-    async fn delete(&self, scope: String, key: String) -> Result<(), crate::Error> {
-        // Check key length
-        if key.len() > self.kv_constraints.max_key_length {
-            return Err("Key length too long".into());
-        }
-
-        self.state.mesophyll_client.kv_delete(
-            self.id,
-            scope,
-            key,
-        ).await
-    }
-
-    async fn find(&self, scope: String, query: String) -> Result<Vec<KvRecord>, crate::Error> {
-        // Check key length
-        if query.len() > self.kv_constraints.max_key_length {
-            return Err("Query length too long".into());
-        }
-
-        self.state.mesophyll_client.kv_find(
-            self.id,
-            scope,
-            query,
-        ).await
-        .map(|x| x.into_iter().map(|y| y.into()).collect())
     }
 }
 
@@ -485,6 +376,8 @@ pub struct ArRuntimeProvider {
 }
 
 impl RuntimeProvider for ArRuntimeProvider {
+    type StateOps = StateOp;
+
     fn attempt_action(&self, bucket: &str) -> Result<(), khronos_runtime::Error> {
         self.ratelimits.runtime.check(bucket)
     }
@@ -534,55 +427,13 @@ impl RuntimeProvider for ArRuntimeProvider {
         })
     }
 
-    async fn get_tenant_state(&self) -> Result<runtime_ir::TenantState, khronos_runtime::Error> {
-        let ts = self.wts.get_cached_tenant_state_for(self.id)?;
-        Ok(runtime_ir::TenantState {
-            events: ts.events.into_iter().collect(),
-            flags: ts.flags,
-        })
-    }
-
-    async fn set_tenant_state(&self, state: runtime_ir::TenantState) -> Result<(), khronos_runtime::Error> {
-        self.wts
-            .set_tenant_state_for(
-                self.id,
-                state.events,
-                state.flags,
-            )
-            .await?;
-        Ok(())
-    }
-}
-
-#[derive(Clone)]
-pub struct ArGlobalKvProvider {
-    id: Id,
-    state: WorkerState,
-    ratelimits: Rc<Ratelimits>,
-}
-
-impl GlobalKVProvider for ArGlobalKvProvider {
-    fn attempt_action(&self, bucket: &str) -> Result<(), khronos_runtime::Error> {
-        self.ratelimits.globalkv.check(bucket)
-    }
-
-    async fn find(&self, scope: String, query: String) -> Result<Vec<PartialGlobalKv>, khronos_runtime::Error> {
-        let globals = self.state.mesophyll_client.global_kv_find(scope, query).await?;
-        Ok(globals.into_iter().map(|x| x.into()).collect())
-    }
-
-    async fn get(&self, key: String, version: i32, scope: String) -> Result<Option<GlobalKv>, khronos_runtime::Error> {
-        let Some(global) = self.state.mesophyll_client.global_kv_get(key, version, scope, Some(self.id)).await? else {
-            return Ok(None);
-        };
-        Ok(Some(global.into()))
-    }
-
-    async fn create(&self, entry: CreateGlobalKv) -> Result<(), khronos_runtime::Error> {
-        self.state.mesophyll_client.global_kv_create(self.id, entry.into()).await
-    }
-
-    async fn delete(&self, key: String, version: i32, scope: String) -> Result<(), khronos_runtime::Error> {
-        self.state.mesophyll_client.global_kv_delete(self.id, key, version, scope).await
+    async fn state_op(&self, ops: Vec<StateOp>) -> Result<Vec<runtime_ir::StateExecResult>, khronos_runtime::Error> {
+        let res = self.state.mesophyll_client.exec_state_op(self.id, ops).await?;
+        if let Some((ts_new_events, ts_new_flags)) = res.new_tenant_state {
+            self.wts.reload_for_tenant(self.id, ts_new_events, ts_new_flags, None).map_err(|e| e.to_string())?;
+        }
+        Ok(res.results.into_iter().map(|x| {
+            runtime_ir::StateExecResult { key: x.key, value: x.value, created_at: x.created_at, last_updated_at: x.last_updated_at }
+        }).collect())
     }
 }

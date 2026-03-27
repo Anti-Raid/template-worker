@@ -1,9 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use futures::{StreamExt, stream::FuturesUnordered};
-use khronos_runtime::utils::khronos_value::KhronosValue;
-use crate::{geese::gkv::{CreateGlobalKv, GlobalKv, PartialGlobalKv}, geese::tenantstate::TenantState, worker::{workerlike::WorkerLike, workerthread::WorkerThread, workervmmanager::Id}};
-use crate::geese::kv::SerdeKvRecord;
+use crate::{geese::{state::{StateExecResponse, StateOp}, tenantstate::TenantState}, worker::{workerlike::WorkerLike, workerthread::WorkerThread, workervmmanager::Id}};
 use crate::mesophyll::server::pb;
 
 /// Mesophyll client
@@ -177,146 +175,17 @@ impl MesophyllClient {
     }
 
     /// Sets the tenant state for a given tenant ID
-    pub async fn set_tenant_state_for(&self, id: Id, events: Vec<String>, flags: i32) -> Result<(), crate::Error> {
+    pub async fn exec_state_op(&self, id: Id, state_op: Vec<StateOp>) -> Result<StateExecResponse, crate::Error> {
         let mut cli = self.client.clone();
-        cli.set_tenant_state_for(pb::WtmSetTenantStateFor { 
+        Ok(cli.exec_state_op(pb::WtmExecStateOp { 
             worker: Some(self.worker.clone()), 
             id: Some(pb::Id::from_real_id(&id)),
-            events,
-            flags
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    }
-
-    /// Fetch a key-value record given a tenant ID, list of scopes, and key
-    pub async fn kv_get(&self, id: Id, scope: String, key: String) -> Result<Option<SerdeKvRecord>, crate::Error> {
-        let mut cli = self.client.clone();
-        log::info!("MesophyllClient: Fetching KV record for ID {:?}, scopes {:?}, key {:?}", id, scope, key);
-        cli.kv_get(pb::WtmKvGet { 
-            worker: Some(self.worker.clone()), 
-            id: Some(pb::Id::from_real_id(&id)),
-            scope,
-            key,
-        })
-        .await
-        .map_err(|e| e.to_string())?
-        .into_inner()
-        .to_real_exec()
-    }
-
-    /// List all scopes that have key-value records for a given tenant ID
-    pub async fn kv_list_scopes(&self, id: Id) -> Result<Vec<String>, crate::Error> {
-        let mut cli = self.client.clone();
-        Ok(cli.kv_list_scopes(pb::WtmKvListScopes {
-            worker: Some(self.worker.clone()),
-            id: Some(pb::Id::from_real_id(&id)),
-        })
-        .await
-        .map_err(|e| e.to_string())?
-        .into_inner()
-        .scopes)
-    }
-
-    /// Set a key-value record for a given tenant ID, list of scopes, and key
-    pub async fn kv_set(&self, id: Id, scope: String, key: String, value: KhronosValue) -> Result<(), crate::Error> {
-        let mut cli = self.client.clone();
-        cli.kv_set(pb::WtmKvSet {
-            worker: Some(self.worker.clone()),
-            id: Some(pb::Id::from_real_id(&id)),
-            scope,
-            key,
-            value: Some(pb::AnyValue::from_real_exec(&value)?),
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    }
-
-    /// Delete a key-value record for a given tenant ID, list of scopes, and key
-    pub async fn kv_delete(&self, id: Id, scope: String, key: String) -> Result<(), crate::Error> {
-        let mut cli = self.client.clone();
-        cli.kv_delete(pb::WtmKvDelete {
-            worker: Some(self.worker.clone()),
-            id: Some(pb::Id::from_real_id(&id)),
-            scope,
-            key,
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    }
-
-    /// Find key-value records with keys that start with a given prefix for a given tenant ID and list of scopes
-    pub async fn kv_find(&self, id: Id, scope: String, prefix: String) -> Result<Vec<SerdeKvRecord>, crate::Error> {
-        let mut cli = self.client.clone();
-        Ok(cli.kv_find(pb::WtmKvFind {
-            worker: Some(self.worker.clone()),
-            id: Some(pb::Id::from_real_id(&id)),
-            scope,
-            prefix,
+            state_op: Some(pb::AnyValue::from_real_exec(&state_op)?),
         })
         .await
         .map_err(|e| e.to_string())?
         .into_inner()
         .to_real_exec()?)
-    }
-
-    /// Find global key-value records with keys that start with a given prefix for a given scope and optional tenant ID
-    pub async fn global_kv_find(&self, scope: String, query: String) -> Result<Vec<PartialGlobalKv>, crate::Error> {
-        let mut cli = self.client.clone();
-        Ok(cli.global_kv_find(pb::WtmGlobalKvFind {
-            scope,
-            query,
-        })
-        .await
-        .map_err(|e| e.to_string())?
-        .into_inner()
-        .to_real_exec()?)
-    }
-
-    /// Get a global key-value record for a given key, version, scope, and optional tenant ID
-    pub async fn global_kv_get(&self, key: String, version: i32, scope: String, id: Option<Id>) -> Result<Option<GlobalKv>, crate::Error> {
-        let mut cli = self.client.clone();
-        Ok(cli.global_kv_get(pb::WtmGlobalKvGet {
-            key,
-            version,
-            scope,
-            id: id.map(|id| pb::Id::from_real_id(&id)),
-        })
-        .await
-        .map_err(|e| e.to_string())?
-        .into_inner()
-        .to_real_exec()?)
-    }
-
-    /// Create a global key-value record for a given tenant ID and CreateGlobalKv struct
-    pub async fn global_kv_create(&self, id: Id, gkv: CreateGlobalKv) -> Result<(), crate::Error> {
-        let mut cli = self.client.clone();
-        cli.global_kv_create(pb::WtmGlobalKvCreate {
-            worker: Some(self.worker.clone()),
-            id: Some(pb::Id::from_real_id(&id)),
-            data: Some(pb::AnyValue::from_real_exec(&gkv)?),
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    }
-
-    /// Delete a global key-value record for a given key, version, scope, and tenant ID
-    pub async fn global_kv_delete(&self, id: Id, key: String, version: i32, scope: String) -> Result<(), crate::Error> {
-        let mut cli = self.client.clone();
-        cli.global_kv_delete(pb::WtmGlobalKvDelete {
-            worker: Some(self.worker.clone()),
-            key,
-            version,
-            scope,
-            id: Some(pb::Id::from_real_id(&id)),
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-        Ok(())
     }
 
     /// Fetch common information for the worker from the Mesophyll server, such as number of workers in the pool
