@@ -433,7 +433,7 @@ impl RuntimeProvider for ArRuntimeProvider {
             self.wts.reload_for_tenant(self.id, ts_new_events, ts_new_flags, None).map_err(|e| e.to_string())?;
         }
         Ok(res.results.into_iter().map(|x| {
-            runtime_ir::StateExecResult { key: x.key, value: x.value, created_at: x.created_at, last_updated_at: x.last_updated_at }
+            runtime_ir::StateExecResult { key: x.key, scope: x.scope, value: x.value, created_at: x.created_at, last_updated_at: x.last_updated_at }
         }).collect())
     }
 }

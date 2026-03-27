@@ -358,8 +358,8 @@ pub struct StateExecResult {
     pub key: String,
     pub scope: String,
     pub value: KhronosValue,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub last_updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub last_updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// The response from a state execution
@@ -375,10 +375,8 @@ struct KvLookup {
     #[sqlx(json)]
     value: KhronosValue,
     scope: String,
-    #[sqlx(default)]
-    created_at: Option<chrono::DateTime<chrono::Utc>>,
-    #[sqlx(default)]
-    last_updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    last_updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl KvLookup {
@@ -428,8 +426,8 @@ impl PartialGlobalKv {
                 (KhronosValue::Text("long".to_string()), l.long.map_or(KhronosValue::Null, |s| KhronosValue::Text(s))),
                 (KhronosValue::Text("price".to_string()), l.price.map_or(KhronosValue::Null, |p| KhronosValue::Integer(p))),
             ]),
-            created_at: Some(l.created_at),
-            last_updated_at: Some(l.last_updated_at),
+            created_at: l.created_at,
+            last_updated_at: l.last_updated_at,
         })
     }
 
