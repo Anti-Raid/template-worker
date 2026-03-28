@@ -432,11 +432,11 @@ impl IntoLua for StateExecResult {
                 table.set("long", l.long)?;
             }
             Self::GlobalKvData { data, opaque } => {
-                table.set("op", "GlobalKvData")?;
-                table.set("opaque", opaque)?;
                 if opaque {
+                    table.set("op", "GlobalKvData.Opaque")?;
                     table.set("data", Opaque::new(data))?;
                 } else {
+                    table.set("op", "GlobalKvData")?;
                     table.set("data", data)?;
                 }
             }
