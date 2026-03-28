@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use khronos_runtime::rt::mlua::prelude::*;
 use khronos_runtime::utils::khronos_value::KhronosValue;
+use khronos_runtime::core::datetime::DateTime as LuaDateTime;
 use rand::distr::{Alphanumeric, SampleString};
 
 use crate::worker::workervmmanager::Id;
@@ -360,6 +361,19 @@ pub struct StateExecResult {
     pub value: KhronosValue,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub last_updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl IntoLua for StateExecResult {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        let table = lua.create_table()?;
+        table.set("key", self.key)?;
+        table.set("scope", self.scope)?;
+        table.set("value", self.value)?;
+        table.set("created_at", LuaDateTime::from_utc(self.created_at))?;
+        table.set("last_updated_at", LuaDateTime::from_utc(self.last_updated_at))?;
+        table.set_readonly(true); // We want StateExecResult's to be immutable
+        Ok(LuaValue::Table(table))
+    }
 }
 
 /// The response from a state execution

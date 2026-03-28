@@ -1,7 +1,7 @@
 use super::workerstate::WorkerState;
 use super::workervmmanager::Id;
 use crate::geese::objectstore::{Bucket, BucketWithKey, BucketWithPrefix};
-use crate::geese::state::StateOp;
+use crate::geese::state::{StateExecResult, StateOp};
 use crate::worker::builtins::EXPOSED_VFS;
 use crate::worker::workertenantstate::WorkerTenantState;
 use crate::worker::workervmmanager::VmData;
@@ -377,6 +377,7 @@ pub struct ArRuntimeProvider {
 
 impl RuntimeProvider for ArRuntimeProvider {
     type StateOps = StateOp;
+    type StateResult = StateExecResult;
 
     fn attempt_action(&self, bucket: &str) -> Result<(), khronos_runtime::Error> {
         self.ratelimits.runtime.check(bucket)
@@ -427,13 +428,11 @@ impl RuntimeProvider for ArRuntimeProvider {
         })
     }
 
-    async fn state_op(&self, ops: Vec<StateOp>) -> Result<Vec<runtime_ir::StateExecResult>, khronos_runtime::Error> {
+    async fn state_op(&self, ops: Vec<StateOp>) -> Result<Vec<StateExecResult>, khronos_runtime::Error> {
         let res = self.state.mesophyll_client.exec_state_op(self.id, ops).await?;
         if let Some((ts_new_events, ts_new_flags)) = res.new_tenant_state {
             self.wts.reload_for_tenant(self.id, ts_new_events, ts_new_flags, None).map_err(|e| e.to_string())?;
         }
-        Ok(res.results.into_iter().map(|x| {
-            runtime_ir::StateExecResult { key: x.key, scope: x.scope, value: x.value, created_at: x.created_at, last_updated_at: x.last_updated_at }
-        }).collect())
+        Ok(res.results)
     }
 }
