@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use khronos_runtime::rt::mlua::prelude::*;
+use khronos_runtime::{primitives::opaque::Opaque, rt::mlua::prelude::*};
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use khronos_runtime::core::datetime::DateTime as LuaDateTime;
 use rand::distr::{Alphanumeric, SampleString};
@@ -359,6 +359,7 @@ pub struct StateExecResult {
     pub key: String,
     pub scope: String,
     pub value: KhronosValue,
+    pub opaque: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub last_updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -368,7 +369,11 @@ impl IntoLua for StateExecResult {
         let table = lua.create_table()?;
         table.set("key", self.key)?;
         table.set("scope", self.scope)?;
-        table.set("value", self.value)?;
+        if self.opaque {
+            table.set("value", Opaque::new(self.value))?;
+        } else {
+            table.set("value", self.value)?;
+        }
         table.set("created_at", LuaDateTime::from_utc(self.created_at))?;
         table.set("last_updated_at", LuaDateTime::from_utc(self.last_updated_at))?;
         table.set_readonly(true); // We want StateExecResult's to be immutable
@@ -395,7 +400,7 @@ struct KvLookup {
 
 impl KvLookup {
     fn apply_one(state: &mut StateExecResponse, l: KvLookup) {
-        state.results.push(StateExecResult { key: l.key, value: l.value, scope: l.scope, created_at: l.created_at, last_updated_at: l.last_updated_at })
+        state.results.push(StateExecResult { key: l.key, value: l.value, scope: l.scope, created_at: l.created_at, last_updated_at: l.last_updated_at, opaque: false })
     }
     fn apply(state: &mut StateExecResponse, lookups: Vec<KvLookup>) {
         for l in lookups {
@@ -442,6 +447,7 @@ impl PartialGlobalKv {
             ]),
             created_at: l.created_at,
             last_updated_at: l.last_updated_at,
+            opaque: !l.public_data
         })
     }
 
