@@ -447,7 +447,7 @@ impl PartialGlobalKv {
             ]),
             created_at: l.created_at,
             last_updated_at: l.last_updated_at,
-            opaque: !l.public_data
+            opaque: false
         })
     }
 
