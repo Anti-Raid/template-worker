@@ -386,7 +386,9 @@ pub enum StateExecResult {
     },
     GlobalKvData {
         data: KhronosValue,
-        opaque: bool,
+    },
+    GlobalKvDataOpaque {
+        data: KhronosValue
     }
 }
 
@@ -431,14 +433,13 @@ impl IntoLua for StateExecResult {
                 table.set("review_state", l.review_state)?;
                 table.set("long", l.long)?;
             }
-            Self::GlobalKvData { data, opaque } => {
-                if opaque {
-                    table.set("op", "GlobalKvData.Opaque")?;
-                    table.set("data", Opaque::new(data))?;
-                } else {
-                    table.set("op", "GlobalKvData")?;
-                    table.set("data", data)?;
-                }
+            Self::GlobalKvData { data } => {
+                table.set("op", "GlobalKvData")?;
+                table.set("data", data)?;
+            }
+            Self::GlobalKvDataOpaque { data } => {
+                table.set("op", "GlobalKvDataOpaque")?;
+                table.set("data", Opaque::new(data))?;
             }
         }
         table.set_readonly(true); // We want StateExecResult's to be immutable
@@ -505,6 +506,10 @@ pub struct GlobalKvData {
 
 impl IntoStateExecResult for GlobalKvData {
     fn into_result(self) -> StateExecResult {
-        StateExecResult::GlobalKvData { data: self.data, opaque: !self.public_data || self.price.is_some() } // if the data is not public, we mark it as opaque so that it doesn't get exposed to user code
+        if self.public_data && self.price.is_none() { 
+            StateExecResult::GlobalKvData { data: self.data } 
+        } else { 
+            StateExecResult::GlobalKvDataOpaque { data: self.data }
+        }
     }
 }
