@@ -360,7 +360,7 @@ impl StateDb {
             }
             StateOp::GlobalKvGetData { key, version, scope } => {
                 if let Some(rec) = sqlx::query_as(
-                "SELECT data, key, scope, public_data, price, created_at, last_updated_at FROM global_kv WHERE key = $1 AND version = $2 AND scope = $3 AND review_state = 'approved'",
+                "SELECT data, public_data, price FROM global_kv WHERE key = $1 AND version = $2 AND scope = $3 AND review_state = 'approved'",
                 )
                 .bind(&key)
                 .bind(version)
@@ -376,29 +376,71 @@ impl StateDb {
     }
 }
 
-/// A single record from performing a state execution using the low-level state-exec API
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct StateExecResult {
-    pub key: String,
-    pub scope: String,
-    pub value: KhronosValue,
-    pub opaque: bool,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub last_updated_at: chrono::DateTime<chrono::Utc>,
+pub enum StateExecResult {
+    Kv {
+        l: KvLookup
+    },
+    GlobalKv {
+        l: PartialGlobalKv
+    },
+    GlobalKvData {
+        data: KhronosValue,
+        opaque: bool,
+    }
+}
+
+pub trait IntoStateExecResult {
+    fn into_result(self) -> StateExecResult;
+
+    fn apply_one(state: &mut StateExecResponse, l: Self) where Self: Sized {
+        state.results.push(l.into_result())
+    }
+    fn apply(state: &mut StateExecResponse, lookups: Vec<Self>) where Self: Sized {
+        for l in lookups {
+            Self::apply_one(state, l);
+        }
+    }
 }
 
 impl IntoLua for StateExecResult {
     fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
         let table = lua.create_table()?;
-        table.set("key", self.key)?;
-        table.set("scope", self.scope)?;
-        if self.opaque {
-            table.set("value", Opaque::new(self.value))?;
-        } else {
-            table.set("value", self.value)?;
+        match self {
+            Self::Kv { l } => {
+                table.set("op", "Kv")?;
+                table.set("key", l.key)?;
+                table.set("scope", l.scope)?;
+                table.set("value", l.value)?;
+                table.set("created_at", LuaDateTime::from_utc(l.created_at))?;
+                table.set("last_updated_at", LuaDateTime::from_utc(l.last_updated_at))?;
+            }
+            Self::GlobalKv { l } => {
+                table.set("op", "GlobalKv")?;
+                table.set("key", l.key)?;
+                table.set("version", l.version)?;
+                table.set("owner_id", l.owner_id)?;
+                table.set("owner_type", l.owner_type)?;
+                table.set("price", l.price)?;
+                table.set("short", l.short)?;
+                table.set("public_metadata", l.public_metadata)?;
+                table.set("scope", l.scope)?;
+                table.set("created_at", LuaDateTime::from_utc(l.created_at))?;
+                table.set("last_updated_at", LuaDateTime::from_utc(l.last_updated_at))?;
+                table.set("public_data", l.public_data)?;
+                table.set("review_state", l.review_state)?;
+                table.set("long", l.long)?;
+            }
+            Self::GlobalKvData { data, opaque } => {
+                table.set("op", "GlobalKvData")?;
+                table.set("opaque", opaque)?;
+                if opaque {
+                    table.set("data", Opaque::new(data))?;
+                } else {
+                    table.set("data", data)?;
+                }
+            }
         }
-        table.set("created_at", LuaDateTime::from_utc(self.created_at))?;
-        table.set("last_updated_at", LuaDateTime::from_utc(self.last_updated_at))?;
         table.set_readonly(true); // We want StateExecResult's to be immutable
         Ok(LuaValue::Table(table))
     }
@@ -411,8 +453,8 @@ pub struct StateExecResponse {
     pub new_tenant_state: Option<(Vec<String>, i32)>
 }
 
-#[derive(sqlx::FromRow)]
-struct KvLookup {
+#[derive(sqlx::FromRow, serde::Serialize, serde::Deserialize)]
+pub struct KvLookup {
     key: String,
     #[sqlx(json)]
     value: KhronosValue,
@@ -421,18 +463,13 @@ struct KvLookup {
     last_updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-impl KvLookup {
-    fn apply_one(state: &mut StateExecResponse, l: KvLookup) {
-        state.results.push(StateExecResult { key: l.key, value: l.value, scope: l.scope, created_at: l.created_at, last_updated_at: l.last_updated_at, opaque: false })
-    }
-    fn apply(state: &mut StateExecResponse, lookups: Vec<KvLookup>) {
-        for l in lookups {
-            Self::apply_one(state, l);
-        }
+impl IntoStateExecResult for KvLookup {
+    fn into_result(self) -> StateExecResult {
+        StateExecResult::Kv { l: self }
     }
 }
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug, sqlx::FromRow, serde::Serialize, serde::Deserialize)]
 pub struct PartialGlobalKv {
     pub key: String,
     pub version: i32,
@@ -452,56 +489,22 @@ pub struct PartialGlobalKv {
     pub long: Option<String>, // long description for the key-value.
 }
 
-impl PartialGlobalKv { 
-    fn apply_one(state: &mut StateExecResponse, l: PartialGlobalKv) {
-        state.results.push(StateExecResult {
-            key: l.key,
-            scope: l.scope,
-            value: KhronosValue::Map(vec![
-                (KhronosValue::Text("version".to_string()), KhronosValue::Integer(l.version as i64)),
-                (KhronosValue::Text("owner_id".to_string()), KhronosValue::Text(l.owner_id)),
-                (KhronosValue::Text("owner_type".to_string()), KhronosValue::Text(l.owner_type)),
-                (KhronosValue::Text("short".to_string()), KhronosValue::Text(l.short)),
-                (KhronosValue::Text("public_metadata".to_string()), l.public_metadata),
-                (KhronosValue::Text("public_data".to_string()), KhronosValue::Boolean(l.public_data)),
-                (KhronosValue::Text("review_state".to_string()), KhronosValue::Text(l.review_state)),
-                (KhronosValue::Text("long".to_string()), l.long.map_or(KhronosValue::Null, |s| KhronosValue::Text(s))),
-                (KhronosValue::Text("price".to_string()), l.price.map_or(KhronosValue::Null, |p| KhronosValue::Integer(p))),
-            ]),
-            created_at: l.created_at,
-            last_updated_at: l.last_updated_at,
-            opaque: false
-        })
+impl IntoStateExecResult for PartialGlobalKv {
+    fn into_result(self) -> StateExecResult {
+        StateExecResult::GlobalKv { l: self }
     }
-
-    fn apply(state: &mut StateExecResponse, lookups: Vec<PartialGlobalKv>) {
-        for l in lookups {
-            Self::apply_one(state, l);
-        }
-    }
-}  
+}
 
 #[derive(Debug, sqlx::FromRow)]
 pub struct GlobalKvData {
     #[sqlx(json)]
     pub data: KhronosValue,
-    pub key: String,
-    pub scope: String,
     pub public_data: bool,
     pub price: Option<i64>, // will only be set for shop items, otherwise None
-    pub created_at: DateTime<Utc>,
-    pub last_updated_at: DateTime<Utc>,
 }
 
-impl GlobalKvData {
-    fn apply_one(state: &mut StateExecResponse, l: GlobalKvData) {
-        state.results.push(StateExecResult {
-            key: l.key, // key and scope are not returned by GlobalKvGetData since it's only used to get the data field of a global kv, so we'll set them to empty strings
-            scope: l.scope,
-            value: l.data,
-            created_at: l.created_at,
-            last_updated_at: l.last_updated_at,
-            opaque: !l.public_data || l.price.is_some(), // if the data is not public, we mark it as opaque so that it doesn't get exposed to user code
-        })
+impl IntoStateExecResult for GlobalKvData {
+    fn into_result(self) -> StateExecResult {
+        StateExecResult::GlobalKvData { data: self.data, opaque: !self.public_data || self.price.is_some() } // if the data is not public, we mark it as opaque so that it doesn't get exposed to user code
     }
 }
