@@ -49,6 +49,11 @@ pub enum StateOp {
         version: i32,
         scope: String
     },
+    GlobalKvGetData {
+        key: String,
+        version: i32,
+        scope: String
+    },
     UpdateTenantState {
         events: Vec<String>,
         flags: i32
@@ -120,6 +125,12 @@ impl FromLua for StateOp {
                 let version = tab.get("version")?;
                 let scope = tab.get("scope")?;
                 Ok(Self::GlobalKvDelete { key, version, scope })
+            },
+            "GlobalKvGetData" => {
+                let key = tab.get("key")?;
+                let version = tab.get("version")?;
+                let scope = tab.get("scope")?;
+                Ok(Self::GlobalKvGetData { key, version, scope })
             },
             _ => {
                 Err(LuaError::FromLuaConversionError {
@@ -347,6 +358,18 @@ impl StateDb {
                     return Err("No matching Global KV found to delete or insufficient permissions".into());
                 }
             }
+            StateOp::GlobalKvGetData { key, version, scope } => {
+                if let Some(rec) = sqlx::query_as(
+                "SELECT data, key, scope, public_data, price, created_at, last_updated_at FROM global_kv WHERE key = $1 AND version = $2 AND scope = $3 AND review_state = 'approved'",
+                )
+                .bind(&key)
+                .bind(version)
+                .bind(scope)
+                .fetch_optional(executor)
+                .await? {
+                    GlobalKvData::apply_one(state, rec);
+                }
+            }
         }
 
         Ok(())
@@ -456,4 +479,29 @@ impl PartialGlobalKv {
             Self::apply_one(state, l);
         }
     }
-}   
+}  
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct GlobalKvData {
+    #[sqlx(json)]
+    pub data: KhronosValue,
+    pub key: String,
+    pub scope: String,
+    pub public_data: bool,
+    pub price: Option<i64>, // will only be set for shop items, otherwise None
+    pub created_at: DateTime<Utc>,
+    pub last_updated_at: DateTime<Utc>,
+}
+
+impl GlobalKvData {
+    fn apply_one(state: &mut StateExecResponse, l: GlobalKvData) {
+        state.results.push(StateExecResult {
+            key: l.key, // key and scope are not returned by GlobalKvGetData since it's only used to get the data field of a global kv, so we'll set them to empty strings
+            scope: l.scope,
+            value: l.data,
+            created_at: l.created_at,
+            last_updated_at: l.last_updated_at,
+            opaque: !l.public_data || l.price.is_some(), // if the data is not public, we mark it as opaque so that it doesn't get exposed to user code
+        })
+    }
+}
