@@ -52,7 +52,6 @@ impl MesophyllClient {
         let mut server_stream = stream.server_stream;
         tokio::task::spawn(async move {
             let mut dispatches = FuturesUnordered::new();
-            let mut run_scripts = FuturesUnordered::new();
             let mut drop_tenants = FuturesUnordered::new();
             loop {
                 tokio::select! {
@@ -82,28 +81,6 @@ impl MesophyllClient {
                                             (req_id, resp)
                                         });
                                     },
-                                    pb::mtw_message::Payload::RunScript(de) => {
-                                        let Some(id) = de.id else {
-                                            log::error!("Mesophyll client received Dispatch message with no ID");
-                                            continue;
-                                        };
-                                        let Some(event) = de.event else {
-                                            log::error!("Mesophyll client received Dispatch message with no event");
-                                            continue;
-                                        };
-                                        let evt = match pb::AnyValue::to_real(&event) {
-                                            Ok(ev) => ev,
-                                            Err(e) => {
-                                                log::error!("Mesophyll client failed to convert event payload to real value: {:?}", e);
-                                                continue;
-                                            }
-                                        };
-                                        let wt = wt.clone();
-                                        run_scripts.push(async move {
-                                            let resp = wt.run_script(id.to_real_id(), de.name, de.code, evt).await;
-                                            (req_id, resp)
-                                        });
-                                    },
                                     pb::mtw_message::Payload::DropTenant(id) => {
                                         let wt = wt.clone();
                                         drop_tenants.push(async move {
@@ -129,14 +106,6 @@ impl MesophyllClient {
                         }
                     }
                     Some((id, result)) = dispatches.next() => {
-                        let Some(id) = id else { continue };
-                        let response = pb::wtm_message::Payload::DispatchResponse(pb::DispatchEventResponse::from_real(result));
-                        let _ = self_ref.client_stream_tx.send(pb::WtmMessage {
-                            payload: Some(response),
-                            resp_id: Some(id),
-                        });
-                    }
-                    Some((id, result)) = run_scripts.next() => {
                         let Some(id) = id else { continue };
                         let response = pb::wtm_message::Payload::DispatchResponse(pb::DispatchEventResponse::from_real(result));
                         let _ = self_ref.client_stream_tx.send(pb::WtmMessage {

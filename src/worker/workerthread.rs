@@ -21,13 +21,6 @@ enum WorkerThreadMessage {
         id: Id,
         tx: OneShotSender<Result<(), crate::Error>>,
     },
-    RunScript {
-        id: Id,
-        name: String,
-        code: String,
-        event: CreateEvent,
-        tx: OneShotSender<Result<KhronosValue, crate::Error>>,
-    },
     DispatchEvent {
         id: Id,
         event: CreateEvent,
@@ -87,10 +80,6 @@ impl WorkerThread {
                                         let _ = tx.send(res.map_err(|e| e.to_string().into()));
                                     }
                                 }
-                                WorkerThreadMessage::RunScript { id, name, code, event, tx } => {
-                                    let res = worker.dispatch.run_script(id, name, code, event).await;
-                                    let _ = tx.send(res.map_err(|e| e.to_string().into()));
-                                }
                                 WorkerThreadMessage::DropTenant { id, tx } => {
                                     let res = worker.vm_manager.remove_vm_for(id);
                                     let _ = tx.send(res.map_err(|e| e.to_string().into()));
@@ -126,13 +115,6 @@ impl WorkerLike for WorkerThread {
 
     fn clone_to_arc(&self) -> Arc<dyn WorkerLike + Send + Sync> {
         Arc::new(self.clone())
-    }
-
-    async fn run_script(&self, id: Id, name: String, code: String, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.tx.send(WorkerThreadMessage::RunScript { id, name, code, event, tx })
-            .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
-        Ok(rx.await.map_err(|e| format!("Failed to receive response from worker thread: {e}"))??)
     }
 
     async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {

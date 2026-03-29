@@ -14,42 +14,6 @@ impl<T: WorkerLike> LuaWorkerLike<T> {
     }
 }
 
-/*
-    /// Returns the worker's ID, if present
-    /// 
-    /// May return 0 for worker pools etc where a worker ID is not applicable
-    fn id(&self) -> usize {
-        0
-    }
-
-    fn clone_to_arc(&self) -> Arc<dyn WorkerLike + Send + Sync>;
-
-    /// Runs a script with the given chunk name, code and event
-    /// 
-    /// This is the special version of dispatch event that directly enables for running arbitrary scripts
-    /// (which is useful for the fauxpas staff API and other future internal tooling etc.)
-    async fn run_script(&self, id: Id, name: String, code: String, event: CreateEvent) -> Result<KhronosValue, crate::Error>;
-
-    /// Kill the worker like
-    async fn kill(&self) -> Result<(), crate::Error>;
-
-    /// Dispatch an event to the templates managed by this worker
-    async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error>;
-
-    /// Dispatch an event to the templates managed by this worker without waiting for the result
-    fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error>;
-
-    /// Drop a tenant from the worker
-    async fn drop_tenant(&self, id: Id) -> Result<(), crate::Error>;
-
-    /// For a pool, returns the length of the pool
-    /// 
-    /// Returns 0 for non-pool workers
-    fn len(&self) -> usize {
-        0
-    }
- */
-
 #[allow(dead_code)]
 impl<T: WorkerLike> LuaUserData for LuaWorkerLike<T> {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
@@ -60,12 +24,6 @@ impl<T: WorkerLike> LuaUserData for LuaWorkerLike<T> {
         methods.add_scheduler_async_method("Kill", async move |_, this, _: ()| {
             this.wl.kill().await.map_err(|x| LuaError::external(x.to_string()))?;
             Ok(())
-        });
-
-        methods.add_scheduler_async_method("RunScript", async move |_lua, this, (id, name, code, event): (LuaId, String, String, CreateEvent)| {
-            let res = this.wl.run_script(id.0, name, code, event).await
-                .map_err(|x| LuaError::external(x.to_string()))?;
-            Ok(res)
         });
 
         methods.add_scheduler_async_method("DispatchEvent", async move |_lua, this, (id, event): (LuaId, CreateEvent)| {

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use chrono::DateTime;
 use chrono::Utc;
+use dapi::types::CreateCommand;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serenity::all::ChannelType;
@@ -13,31 +14,26 @@ use serenity::all::RoleId;
 use serenity::all::UserId;
 use serenity::all::CommandOptionType;
 use serenity::all::CommandType;
-use ts_rs::TS;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 
-use crate::geese::gkv::PartialGlobalKv;
+use super::gkv::PartialGlobalKv;
+use crate::worker::workervmmanager::Id;
 
-#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 pub struct GuildChannelWithPermissions {
     #[schema(value_type = String)]
-    #[ts(as = "String")]
     /// User permissions
     pub user: Permissions,
     #[schema(value_type = String)]
-    #[ts(as = "String")]
     /// Bot permissions
     pub bot: Permissions,
     /// Channel data
     pub channel: ApiPartialGuildChannel,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 pub struct ApiPartialGuildChannel {
     #[schema(value_type = String)]
-    #[ts(as = "String")]
     /// The ID of the channel
     pub id: GenericChannelId,
     /// The name of the channel
@@ -46,18 +42,15 @@ pub struct ApiPartialGuildChannel {
     pub position: u16,
     /// The ID of the parent channel, if any
     #[schema(value_type = Option<String>)]
-    #[ts(as = "Option<String>")]
     pub parent_id: Option<GenericChannelId>,
     #[schema(value_type = u8)]
     /// The type of the channel
     pub r#type: u8,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 pub struct ApiPartialRole {
     #[schema(value_type = String)]
-    #[ts(as = "String")]
     /// The ID of the role
     pub id: RoleId,
     /// The name of the role
@@ -66,12 +59,10 @@ pub struct ApiPartialRole {
     pub position: i16,
     /// Permissions of the role
     #[schema(value_type = String)]
-    #[ts(as = "String")]
     pub permissions: Permissions,
 }
 
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct BaseGuildUserInfo {
     pub owner_id: String,
     pub name: String,
@@ -80,24 +71,21 @@ pub struct BaseGuildUserInfo {
     pub roles: Vec<ApiPartialRole>,
     /// List of roles the user has
     #[schema(value_type = Vec<String>)]
-    #[ts(as = "Vec<String>")]
     pub user_roles: Vec<RoleId>,
     /// List of roles the bot has
     #[schema(value_type = Vec<String>)]
-    #[ts(as = "Vec<String>")]
     pub bot_roles: Vec<RoleId>,
     /// List of all channels in the server
     pub channels: Vec<GuildChannelWithPermissions>,
 }
 
-#[derive(Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Serialize, Deserialize, utoipa::ToSchema)]
 pub struct TwState {
-    pub commands: Vec<ApiCreateCommand>,
+    #[schema(value_type = Vec<ApiCreateCommand>)]
+    pub commands: Vec<CreateCommand>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DashboardGuild {
     pub id: String,
     pub name: String,
@@ -106,31 +94,26 @@ pub struct DashboardGuild {
     pub owner: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DashboardGuildData {
     pub guilds: Vec<DashboardGuild>,
     pub bot_in_guilds: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ApiConfig {
     /// The ID of the main AntiRaid support server
     #[schema(value_type = String)]
-    #[ts(as = "String")]
     pub main_server: GuildId,
     /// Discord Support Server Link
     pub support_server_invite: String,
     /// The ID of the AntiRaid bot client
     #[schema(value_type = String)]
-    #[ts(as = "String")]
     pub client_id: UserId,
 }
 
 /// Defines the structure of an authorization request
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct AuthorizeRequest {
     /// Discord Oauth2 code
     pub code: String,
@@ -140,13 +123,11 @@ pub struct AuthorizeRequest {
     pub code_verifier: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 /// Create a API user session
 pub struct CreateUserSession {
     pub name: String,
     pub r#type: String, // Currently must be 'api'
-    #[ts(type = "number")]
     pub expiry: i64, // Expiry in seconds
 }
 
@@ -154,8 +135,7 @@ pub struct CreateUserSession {
 /// after creation of a session
 /// 
 /// May contain partial user information if the session was created via OAuth2 login
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct CreateUserSessionResponse {
     /// The ID of the user who created the session
     pub user_id: String,
@@ -170,8 +150,7 @@ pub struct CreateUserSessionResponse {
 }
 
 /// The PartialUser of a user, which contains only the necessary fields for the API
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct PartialUser {
     /// The ID of the user
     pub id: String,
@@ -183,8 +162,7 @@ pub struct PartialUser {
     pub avatar: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 /// Represents an authorized session and its associated user
 /// 
 /// Note: this is *very* different from a UserSession and provides different/limited data
@@ -199,8 +177,7 @@ pub struct AuthorizedSession {
     pub r#type: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct UserSession {
     /// The ID of the session
     pub id: String,
@@ -216,65 +193,54 @@ pub struct UserSession {
     pub expiry: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+
 pub struct UserSessionList {
     /// The list of user sessions
     pub sessions: Vec<UserSession>,
 }
 
 /// A shard connection (for bot statistics)
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ShardConn {
     /// The status of the shard connection
     pub status: String,
     /// The real latency of the shard connection in milliseconds
-    #[ts(type = "number")]
     pub latency: f64,
 }
 
 /// A response containing the status of all shards
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct GetStatusResponse {
     /// A map of shard group ID to shard connection information
-    #[ts(as = "HashMap<u32, ShardConn>")]
     pub shard_conns: HashMap<u32, ShardConn>,
     /// The total number of guilds the bot is connected to
-    #[ts(type = "number")]
     pub total_guilds: u64,
     /// The total number of users
-    #[ts(type = "number")]
     pub total_users: u64,
 }
 
 /// Publicly accessible representation of a Discord command
-#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ApiCreateCommand {
     #[serde(rename = "type")]
     #[schema(value_type = u8)]
-    #[ts(as = "u8")]
     pub kind: Option<CommandType>,
     pub name: Option<String>,
     pub name_localizations: HashMap<String, String>,
     pub description: Option<String>,
     pub description_localizations: HashMap<String, String>,
     #[schema(value_type = u8)]
-    #[ts(as = "u8")]
     pub integration_types: Option<Vec<InstallationContext>>,
     pub nsfw: bool,
     pub options: Vec<ApiCreateCommandOption>,
 }
 
 /// Publicly accessible representation of a Discord command option
-#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ApiCreateCommandOption {
     #[serde(rename = "type")]
     #[schema(value_type = u8)]
-    #[ts(as = "u8")]
     pub kind: CommandOptionType,
     pub name: String,
     pub name_localizations: Option<HashMap<String, String>>,
@@ -289,15 +255,12 @@ pub struct ApiCreateCommandOption {
     pub options: Vec<ApiCreateCommandOption>,
     #[serde(default)]
     #[schema(value_type = u8)]
-    #[ts(as = "u8")]
     pub channel_types: Vec<ChannelType>,
     #[serde(default)]
     #[schema(value_type = u64)]
-    #[ts(as = "Option<u32>")]
     pub min_value: Option<serde_json::Number>,
     #[serde(default)]
     #[schema(value_type = Option<u64>)]
-    #[ts(as = "Option<u32>")]
     pub max_value: Option<serde_json::Number>,
     #[serde(default)]
     pub min_length: Option<u16>,
@@ -308,51 +271,36 @@ pub struct ApiCreateCommandOption {
 }
 
 /// Represents a choice for a command option
-#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ApiCreateCommandOptionChoice {
     pub name: String,
     pub name_localizations: Option<HashMap<String, String>>,
     pub value: Value,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema, TS)]
-#[ts(export)]
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct PublicLuauExecute {
     /// The event name, must start with 'Web' for security reasons
     pub name: String,
 
-    #[schema(value_type = KhronosValueApi)]
-    #[ts(as = "KhronosValueApi")]
+    #[schema(value_type = Object)]
     /// The event data
     pub data: KhronosValue,
+
+    /// Tenant Id
+    #[schema(value_type = ApiId)]
+    pub id: Id
 }
 
-// Type for documentation and TypeScript generation purposes
-#[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema)]
-#[schema(no_recursion)]
-pub enum KhronosValueApi {
-    Text(String),
-    Integer(i64),
-    UnsignedInteger(u64),
-    Float(f64),
-    Boolean(bool),
-    Buffer(Vec<u8>),   
-    Vector((f32, f32, f32)), 
-    #[schema(value_type = Object)]
-    Map(Vec<(KhronosValueApi, KhronosValueApi)>),
-    #[schema(value_type = Object)]
-    List(Vec<KhronosValueApi>),
-    Timestamptz(chrono::DateTime<chrono::Utc>),
-    Interval(chrono::Duration),
-    TimeZone(String),
-    LazyStringMap(HashMap<String, String>), 
-    Null,
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(tag = "type", content = "id")]
+pub enum ApiId {
+    Guild(String),
+    User(String), 
 }
 
 /// A list of global key-values
-#[derive(Debug, Serialize, Deserialize, TS, utoipa::ToSchema)]
-#[ts(export)]
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct PartialGlobalKvList {
     pub items: Vec<PartialGlobalKv>,
 }

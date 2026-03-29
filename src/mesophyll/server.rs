@@ -321,28 +321,6 @@ impl MesophyllServerConn {
         Ok(())
     }
 
-    pub async fn run_script(&self, id: RealId, name: String, code: String, event: RealCreateEvent) -> Result<RealKhronosValue, crate::Error> {
-        let pb_event = pb::AnyValue::from_real(&event)?;
-
-        let (resp_tx, resp_rx) = oneshot::channel();
-        let resp_id = rand::random::<u64>();
-        self.dispatch_response_handlers.insert(resp_id, resp_tx);
-
-        let msg = pb::MtwMessage {
-            payload: Some(pb::mtw_message::Payload::RunScript(pb::RunScript {
-                id: Some(pb::Id::from_real_id(&id)),
-                name,
-                code,
-                event: Some(pb_event),
-            })),
-            id: Some(resp_id),
-        };
-
-        self.tx.send(Ok(msg)).map_err(|e| Status::internal(format!("Failed to send run script message to worker {}: {}", self.id, e)))?;
-        let resp = resp_rx.await?;
-        resp.to_real()
-    }
-
     pub async fn drop_tenant(&self, id: RealId) -> Result<(), crate::Error> {
         let (ack_tx, ack_rx) = oneshot::channel();
         let resp_id = rand::random::<u64>();

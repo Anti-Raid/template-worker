@@ -8,7 +8,6 @@ mod migrations;
 mod geese;
 
 use crate::config::CONFIG;
-use crate::api::data::ApiData;
 use crate::fauxpas::layers::shell::ShellData;
 use crate::mesophyll::client::MesophyllClient;
 use crate::migrations::apply_migrations;
@@ -195,7 +194,7 @@ async fn main_impl(args: CmdArgs) {
             });
         }
         WorkerType::ProcessPool => {
-            let (http, stratum, current_user) = setup_discord().await;
+            let (_, stratum, current_user) = setup_discord().await;
 
             // Ask stratum for its worker count
             let worker_count: usize = stratum.get_config()
@@ -217,7 +216,6 @@ async fn main_impl(args: CmdArgs) {
             )
             .await
             .expect("Failed to create Mesophyll server");
-            let db_state = mesophyll_server.db_state().clone();
 
             let worker_pool = Arc::new(
                 WorkerPool::<WorkerProcessHandle>::new(
@@ -226,21 +224,18 @@ async fn main_impl(args: CmdArgs) {
                 )
                 .expect("Failed to create worker process pool"),
             );
-
-            let data = Arc::new(ApiData {
-                reqwest,
-                current_user,
-                worker: worker_pool.clone(),
-                stratum: stratum.clone()
-            });
-
-            let data1 = data.clone();
-            let http1 = http.clone();
-            let db_state1 = db_state.clone();
+            
+            let worker_pool_ref = worker_pool.clone();
             tokio::task::spawn(async move {
                 log::info!("Starting RPC server");
 
-                let rpc_server = crate::api::server::create(data1, db_state1, pg_pool.clone(), http1);
+                let rpc_server = crate::api::server::create(
+                    current_user,
+                    worker_pool_ref,
+                    stratum,
+                    reqwest,
+                    pg_pool
+                );
 
                 let listener = tokio::net::TcpListener::bind(&CONFIG.addrs.template_worker).await.unwrap();
 

@@ -39,14 +39,6 @@ message DispatchEventResponse {
   }
 }
 
-// RunScript is a message sent from the master to a worker to instruct it to run a script. The worker will execute the script and respond with a DispatchEventResponse containing the result of the script execution or an error message if the execution failed.
-message RunScript {
-  Id id = 1; 
-  string name = 2; 
-  string code = 3; 
-  AnyValue event = 4;
-}
-
 message MTWMessage { // master-to-worker message
   optional uint64 id = 1; // Unique identifier for the message, used for tracking and correlation if needed.
   oneof payload {
@@ -54,9 +46,6 @@ message MTWMessage { // master-to-worker message
     // 
     // Discord related events are dispatched via Sandwich
     DispatchEvent dispatch = 2;
-
-    // Run a script in the worker
-    RunScript run_script = 3;
 
     // Requests that a tenant be dropped
     Id drop_tenant = 4;

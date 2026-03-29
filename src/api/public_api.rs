@@ -4,22 +4,19 @@ use crate::api::auth::delete_user_session;
 use crate::api::auth::get_user_sessions;
 use crate::api::auth::SessionType;
 use crate::api::extractors::AuthorizedUser;
+use crate::api::gkv::PartialGlobalKv;
 use crate::api::server::ApiResponseError;
 use crate::api::types::ApiConfig;
-use crate::api::types::ApiCreateCommand;
-use crate::api::types::ApiCreateCommandOption;
-use crate::api::types::ApiCreateCommandOptionChoice;
 use crate::api::types::ApiPartialGuildChannel;
 use crate::api::types::ApiPartialRole;
 use crate::api::types::AuthorizeRequest;
 use crate::api::types::GetStatusResponse;
 use crate::api::types::GuildChannelWithPermissions;
-use crate::api::types::KhronosValueApi;
-use crate::geese::gkv::GlobalKv;
 use crate::api::types::PartialGlobalKvList;
 use crate::api::types::PublicLuauExecute;
 use crate::api::types::ShardConn;
 use crate::api::types::UserSessionList;
+use crate::geese::stratum::Stratum;
 use crate::worker::workervmmanager::Id;
 use axum::{
     extract::{Path, Query, State},
@@ -27,9 +24,6 @@ use axum::{
 };
 use axum::Json;
 use chrono::Utc;
-use dapi::types::CreateCommand;
-use dapi::types::CreateCommandOption;
-use dapi::types::CreateCommandOptionChoice;
 use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use moka::future::Cache;
@@ -45,58 +39,58 @@ use super::types::{
 };
 use super::server::{AppData, ApiResponse, ApiError, ApiErrorCode}; 
 
-static BOT_HAS_GUILD_CACHE: LazyLock<Cache<serenity::all::GuildId, ()>> = LazyLock::new(|| {
-    Cache::builder()
-        .time_to_live(std::time::Duration::from_secs(120)) // 2 minutes
-        .build()
-});
-
 // For App
 const APP_OAUTH2_REDIRECT_URI: &str = "antiraid://oauth-callback";
 
+static BOT_HAS_GUILD_CACHE: LazyLock<Cache<serenity::all::GuildId, bool>> = LazyLock::new(|| {
+    Cache::builder()
+        .time_to_live(std::time::Duration::from_secs(60)) // 1 minutes
+        .build()
+});
+
 /// Helper function to check if the bot is in a guild
 async fn check_guild_has_bot(
-    data: &super::data::ApiData,
+    stratum: &Stratum,
     guild_id: serenity::all::GuildId,
 ) -> Result<(), ApiResponseError> {
-    if !BOT_HAS_GUILD_CACHE.contains_key(&guild_id) {
-        let guild_exists = data.stratum.has_guilds(&[guild_id])
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
-
-        if guild_exists.is_empty() || !guild_exists[0] {
-            return Err((StatusCode::NOT_FOUND, Json("Guild to get settings for does not have the bot?".into())));
+    let has_bot = BOT_HAS_GUILD_CACHE.try_get_with::<_, crate::Error>(guild_id, async move {
+        let guild_exists = stratum.has_guilds(&[guild_id]).await?;
+        if guild_exists.is_empty() {
+            Err("internal error: guild_exists is empty when it shouldnt be".into())
+        } else {
+            Ok(guild_exists[0])
         }
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
-        BOT_HAS_GUILD_CACHE.insert(guild_id, ()).await;
+    if !has_bot {
+        return Err((StatusCode::NOT_FOUND, Json("Guild to get settings for does not have the bot?".into())));
     }
 
     Ok(())
 }
 
-/// Dispatch an event to a guild and wait for a response
+/// Dispatch an event to a tenant and wait for a response
 #[utoipa::path(
     post, 
     tag = "Public API",
-    path = "/guilds/{guild_id}/events",
+    path = "/events",
     security(
         ("UserAuth" = []) 
     ),
-    params(
-        ("guild_id" = String, description = "The ID of the guild to get the user info for")
-    ),
     responses(
-        (status = 200, description = "The results of the dispatched event", body = KhronosValueApi),
+        (status = 200, description = "The results of the dispatched event", body = Object),
         (status = 400, description = "API Error", body = ApiError),
     )
 )]
 pub(super) async fn dispatch_event(
     State(AppData {
-        data,
+        stratum,
+        worker,
         ..
     }): State<AppData>,
     AuthorizedUser { user_id, .. }: AuthorizedUser,
-    Path(guild_id): Path<serenity::all::GuildId>,
     Json(req): Json<PublicLuauExecute>,
 ) -> ApiResponse<KhronosValue> {
     if !req.name.starts_with("Web") {
@@ -107,13 +101,22 @@ pub(super) async fn dispatch_event(
     let user_id: UserId = user_id.parse()
         .map_err(|e: serenity::all::ParseIdError| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
-    // Ensure the bot is in the guild
-    check_guild_has_bot(&data, guild_id).await?;
+    match req.id {
+        Id::Guild(id) => {
+            // Ensure the bot is in the guild
+            check_guild_has_bot(&stratum, id).await?;        
+        }
+        Id::User(id) => {
+            if user_id != id {
+                return Err((StatusCode::FORBIDDEN, Json("Cannot currently send events to users who are not yourself".into())));
+            }
+        }
+    }
 
     let event = CreateEvent::new_khronos_value(req.name, Some(user_id.to_string()), req.data);
 
-    let resp = data.worker.dispatch_event(
-        Id::Guild(guild_id), // TODO: make this tenant-agnostic in the future
+    let resp = worker.dispatch_event(
+        req.id, 
         event,
     )
     .await
@@ -144,7 +147,8 @@ pub(super) struct GetUserGuildsQuery {
 )]
 pub(super) async fn get_user_guilds(
         State(AppData {
-        data,
+        reqwest,
+        stratum,
         pool,
         ..
     }): State<AppData>,
@@ -201,7 +205,7 @@ pub(super) async fn get_user_guilds(
                 return Err((StatusCode::BAD_REQUEST, Json("User has not logged in/authenticated via OAuth2 yet!".into())));
             };
 
-            let resp = data.reqwest.get(format!("{}/api/v10/users/@me/guilds", crate::CONFIG.meta.proxy))
+            let resp = reqwest.get(format!("{}/api/v10/users/@me/guilds", crate::CONFIG.meta.proxy))
             .header("Authorization", format!("Bearer {access_token}"))
             .send()
             .await
@@ -263,7 +267,7 @@ pub(super) async fn get_user_guilds(
             .map_err(|e: serenity::all::ParseIdError| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?);
     }
 
-    let guilds_exist = data.stratum.has_guilds(&guild_ids)
+    let guilds_exist = stratum.has_guilds(&guild_ids)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
@@ -307,7 +311,8 @@ pub(super) async fn get_user_guilds(
 )]
 pub(super) async fn base_guild_user_info(
     State(AppData {
-        data,
+        current_user,
+        stratum,
         ..
     }): State<AppData>,
     AuthorizedUser { user_id, .. }: AuthorizedUser, // Internal endpoint
@@ -316,8 +321,8 @@ pub(super) async fn base_guild_user_info(
     let user_id: UserId = user_id.parse()
         .map_err(|e: serenity::all::ParseIdError| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
-    let bot_user_id = data.current_user.id;
-    let Some(guild_json) = data.stratum.guild(guild_id)
+    let bot_user_id = current_user.id;
+    let Some(guild_json) = stratum.guild(guild_id)
     .await
     .map_err(|e| {
         (
@@ -335,7 +340,7 @@ pub(super) async fn base_guild_user_info(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
     // Next fetch the member and bot_user
-    let member_json = match data.stratum.guild_member(
+    let member_json = match stratum.guild_member(
         guild_id,
         user_id,
     )
@@ -356,7 +361,7 @@ pub(super) async fn base_guild_user_info(
     let member = serde_json::from_value::<serenity::all::Member>(member_json)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
-    let bot_user_json = match data.stratum.guild_member(
+    let bot_user_json = match stratum.guild_member(
         guild_id,
         bot_user_id,
     )
@@ -378,7 +383,7 @@ pub(super) async fn base_guild_user_info(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string().into())))?;
 
     // Fetch the channels
-    let Some(channels_json) = data.stratum.guild_channels(guild_id)
+    let Some(channels_json) = stratum.guild_channels(guild_id)
     .await
     .map_err(|e| {
         (
@@ -452,7 +457,8 @@ static OAUTH2_CODE_CACHE: LazyLock<Cache<String, ()>> = LazyLock::new(|| {
 )]
 pub(super) async fn create_oauth2_session(
     State(AppData {
-        data,
+        reqwest,
+        current_user,
         pool,
         ..
     }): State<AppData>,
@@ -503,9 +509,9 @@ pub(super) async fn create_oauth2_session(
         code_verifier: Option<String>,
     }
 
-    let resp = data.reqwest.post(format!("{}/api/v10/oauth2/token", crate::CONFIG.meta.proxy))
+    let resp = reqwest.post(format!("{}/api/v10/oauth2/token", crate::CONFIG.meta.proxy))
         .form(&Response {
-            client_id: data.current_user.id,
+            client_id: current_user.id,
             client_secret: &crate::CONFIG.discord_auth.client_secret,
             grant_type: "authorization_code",
             code: req.code,
@@ -552,7 +558,7 @@ pub(super) async fn create_oauth2_session(
     }    
 
     // Fetch user info
-    let user_resp = data.reqwest.get(format!("{}/api/v10/users/@me", crate::CONFIG.meta.proxy))
+    let user_resp = reqwest.get(format!("{}/api/v10/users/@me", crate::CONFIG.meta.proxy))
         .header("Authorization", format!("Bearer {}", &token_response.access_token))
         .send()
         .await
@@ -753,53 +759,9 @@ pub(super) async fn delete_user_session_api(
     Ok(Json(()))
 } 
 
-static STATE_CACHE: std::sync::LazyLock<Arc<TwState>> = std::sync::LazyLock::new(|| {
-    fn command_option_choice_into_api_command_option_choice(
-        choice: CreateCommandOptionChoice,
-    ) -> ApiCreateCommandOptionChoice {
-        ApiCreateCommandOptionChoice {
-            name: choice.name,
-            name_localizations: choice.name_localizations,
-            value: choice.value,
-        }
-    }
-    
-    fn command_option_into_api_command_option(option: CreateCommandOption) -> ApiCreateCommandOption {
-        ApiCreateCommandOption {
-            kind: option.kind,
-            name: option.name,
-            name_localizations: option.name_localizations,
-            description: option.description,
-            description_localizations: option.description_localizations,
-            required: option.required,
-            options: option.options.into_iter().map(command_option_into_api_command_option).collect(),
-            channel_types: option.channel_types,
-            min_value: option.min_value,
-            max_value: option.max_value,
-            min_length: option.min_length,
-            max_length: option.max_length,
-            choices: option.choices.into_iter().map(command_option_choice_into_api_command_option_choice).collect(),
-            autocomplete: option.autocomplete
-        }
-    }
-    
-    fn command_into_api_command(command: CreateCommand) -> ApiCreateCommand {
-        ApiCreateCommand {
-            kind: command.kind,
-            name: command.fields.name,
-            name_localizations: command.fields.name_localizations,
-            description: command.fields.description,
-            description_localizations: command.fields.description_localizations,
-            integration_types: command.fields.integration_types,
-            nsfw: command.fields.nsfw,
-            options: command.fields.options.into_iter().map(command_option_into_api_command_option).collect(),
-        }
-    }
-    
+static STATE_CACHE: std::sync::LazyLock<Arc<TwState>> = std::sync::LazyLock::new(|| {    
     let state = TwState {
-        commands: crate::register::REGISTER.commands.iter()
-            .map(|cmd| command_into_api_command(cmd.clone()))
-            .collect(),
+        commands: crate::register::REGISTER.commands.clone(),
     };
 
     Arc::new(state)
@@ -861,30 +823,25 @@ static STATS_CACHE: std::sync::LazyLock<Cache<(), GetStatusResponse>> = std::syn
     )
 )]
 pub(super) async fn get_bot_stats(
-    State(AppData { data, .. }): State<AppData>,
+    State(AppData { stratum, .. }): State<AppData>,
 ) -> ApiResponse<GetStatusResponse> {
-    let stats = STATS_CACHE.get(&()).await;
+    let stats = STATS_CACHE.try_get_with::<_, crate::Error>((), async move {
+        let raw_stats = stratum.get_status().await?;
 
-    if let Some(stats) = stats {
-        return Ok(Json(stats));
-    }
+        let stats = GetStatusResponse {
+            shard_conns: raw_stats.shards.into_iter().map(|shard| {
+                (shard.shard_id, ShardConn {
+                    status: shard.state().as_str_name().to_string(),
+                    latency: shard.latency,
+                })
+            }).collect(),
+            total_guilds: raw_stats.guild_count,
+            total_users: raw_stats.user_count,
+        };
 
-    let raw_stats = data.stratum.get_status()
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get bot stats: {e:?}").into())))?;
-
-    let stats = GetStatusResponse {
-        shard_conns: raw_stats.shards.into_iter().map(|shard| {
-            (shard.shard_id, ShardConn {
-                status: shard.state().as_str_name().to_string(),
-                latency: shard.latency,
-            })
-        }).collect(),
-        total_guilds: raw_stats.guild_count,
-        total_users: raw_stats.user_count,
-    };
-
-    STATS_CACHE.insert((), stats.clone()).await;
+        Ok(stats)
+    }).await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get bot stats: {e:?}").into())))?;
 
     Ok(Json(stats))
 }
@@ -912,10 +869,10 @@ pub(super) struct ListGlobalKvParams {
     )
 )]
 pub(super) async fn list_global_kv(
-    State(AppData { mesophyll_db_state, .. }): State<AppData>,
+    State(AppData { gkv, .. }): State<AppData>,
     Query(params): Query<ListGlobalKvParams>,
 ) -> ApiResponse<PartialGlobalKvList> {
-    let items = mesophyll_db_state.global_key_value_db().global_kv_find(params.scope, params.query.unwrap_or_else(|| "%".to_string()))
+    let items = gkv.global_kv_find(params.scope, params.query.unwrap_or_else(|| "%".to_string()))
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to list global kvs: {e:?}").into())))?;
 
@@ -934,21 +891,21 @@ pub(super) async fn list_global_kv(
         ("version" = String, description = "The version of the global kv to get")
     ),
     responses(
-        (status = 200, description = "The global kv", body = GlobalKv),
+        (status = 200, description = "The global kv", body = PartialGlobalKv),
         (status = 400, description = "API Error", body = ApiError),
     )
 )]
 pub(super) async fn get_global_kv(
-    State(AppData { mesophyll_db_state, .. }): State<AppData>,
+    State(AppData { gkv, .. }): State<AppData>,
     Path((scope, key, version)): Path<(String, String, i32)>,
-) -> ApiResponse<GlobalKv> {
-    let item = mesophyll_db_state.global_key_value_db().global_kv_get(key, version, scope, None)
+) -> ApiResponse<PartialGlobalKv> {
+    let item = gkv.global_kv_get(key, version, scope)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(format!("Failed to get global kv: {e:?}").into())))?;
 
         match item {
         Some(item) => {
-            Ok(Json(item.drop_sensitive()))
+            Ok(Json(item))
         },
         None => Err((StatusCode::NOT_FOUND, Json("Global KV not found".into()))),
     }

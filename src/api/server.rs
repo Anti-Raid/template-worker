@@ -1,4 +1,4 @@
-use crate::mesophyll::dbstate::DbState;
+use crate::{geese::stratum::Stratum, worker::workerlike::WorkerLike};
 
 use super::public_api;
 use axum::{
@@ -49,16 +49,31 @@ impl<'a> From<&'a str> for ApiError {
 }
 
 #[derive(Clone)]
-pub struct AppData {
-    pub data: Arc<super::data::ApiData>,
-    pub mesophyll_db_state: DbState,
+pub(super) struct AppData {
+    pub current_user: serenity::all::CurrentUser,
+    pub reqwest: reqwest::Client,
+    pub worker: Arc<dyn WorkerLike + Send + Sync>,
+    pub stratum: Stratum,
     pub pool: sqlx::PgPool,
-    pub _http: Arc<serenity::http::Http>,
+    pub(super) gkv: super::gkv::ApiPartialGkvFetcher
 }
 
 impl AppData {
-    pub fn new(data: Arc<super::data::ApiData>, http: Arc<serenity::http::Http>, pool: sqlx::PgPool, mesophyll_db_state: DbState) -> Self {
-        Self { data, _http: http, pool, mesophyll_db_state }
+    fn new(
+        current_user: serenity::all::CurrentUser, 
+        worker: Arc<dyn WorkerLike + Send + Sync>,
+        stratum: Stratum,
+        reqwest: reqwest::Client,
+        pool: sqlx::PgPool
+    ) -> Self {
+        Self { 
+            gkv: super::gkv::ApiPartialGkvFetcher::new(pool.clone()), 
+            pool: pool.clone(), 
+            current_user,
+            reqwest,
+            stratum,
+            worker
+        }
     }
 }
 
@@ -80,10 +95,11 @@ async fn logger(
 }
 
 pub fn create(
-    data: Arc<super::data::ApiData>,
-    mesophyll_db_state: DbState,
+    current_user: serenity::all::CurrentUser, 
+    worker: Arc<dyn WorkerLike + Send + Sync>,
+    stratum: Stratum,
+    reqwest: reqwest::Client,
     pool: sqlx::PgPool,
-    http: Arc<serenity::http::Http>,
 ) -> axum::routing::IntoMakeService<Router> {
     let mut router = Router::new();
 
@@ -156,6 +172,6 @@ pub fn create(
         .layer(tower_http::cors::CorsLayer::very_permissive())
         .layer(axum::middleware::from_fn(logger));
 
-    let router: Router<()> = router.with_state(AppData::new(data, http, pool, mesophyll_db_state));
+    let router: Router<()> = router.with_state(AppData::new(current_user, worker, stratum, reqwest, pool));
     router.into_make_service()
 }

@@ -1,9 +1,8 @@
-use crate::geese::{gkv::GlobalKeyValueDb, state::StateDb, tenantstate::TenantStateDb};
+use crate::geese::{state::StateDb, tenantstate::TenantStateDb};
 
 #[derive(Clone)]
 pub struct DbState {
     pool: sqlx::PgPool,
-    global_key_value_db: GlobalKeyValueDb,
     tenant_state_db: TenantStateDb,
     state_db: StateDb,
     num_workers: usize,
@@ -12,7 +11,6 @@ pub struct DbState {
 impl DbState {
     pub async fn new(num_workers: usize, pool: sqlx::PgPool) -> Result<Self, crate::Error> {
         let s = Self {
-            global_key_value_db: GlobalKeyValueDb::new(pool.clone()),
             tenant_state_db: TenantStateDb::new(pool.clone()),
             state_db: StateDb::new(pool.clone()),
             pool,
@@ -30,11 +28,6 @@ impl DbState {
     /// Returns the underlying SQLx Postgres pool
     pub fn get_pool(&self) -> &sqlx::PgPool {
         &self.pool
-    }
-
-    /// Returns the underlying global key-value database interface
-    pub fn global_key_value_db(&self) -> &GlobalKeyValueDb {
-        &self.global_key_value_db
     }
 
     /// Returns the underlying tenant state db
