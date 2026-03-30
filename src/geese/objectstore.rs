@@ -194,29 +194,46 @@ impl<'a> BucketWithPrefix<'a> {
 
 impl ObjectStore {
     /// Returns if a file exists in the object store
-    pub async fn exists(&self, b: BucketWithKey<'_>) -> Result<bool, crate::Error> {
+    pub async fn get_object_metadata(&self, b: BucketWithKey<'_>) -> Result<Option<ListObjectsResponse>, crate::Error> {
+        let key = b.key()?;
         match self {
             ObjectStore::S3 { client, .. } => {
-                let action = client.head_object().bucket(b.bucket()).key(b.key()?);
+                let action = client.head_object().bucket(b.bucket()).key(&key);
 
                 match action.send().await {
-                    Ok(_) => Ok(true),
+                    Ok(r) => Ok(Some(ListObjectsResponse {
+                        key,
+                        last_modified: match r.last_modified {
+                            Some(last_modified) => {
+                                chrono::DateTime::from_timestamp(last_modified.secs(), 0)
+                            }
+                            None => None,
+                        },
+                        size: r.content_length().unwrap_or(0),
+                        etag: r.e_tag().map(|etag| etag.to_string()),
+                    })),
                     Err(e) => {
                         let Some(e) = e.as_service_error() else {
                             return Err(format!("Failed to list objects: {}", e).into());
                         };
 
                         if e.is_not_found() {
-                            Ok(false)
+                            Ok(None)
                         } else {
-                            Err(format!("Failed to list objects: {}", e).into())
+                            Err(format!("Failed to get object metadata: {}", e).into())
                         }
                     }
                 }
             }
             ObjectStore::Local { dir } => {
                 let path = std::path::Path::new(dir).join(b.bucket()).join(b.key()?);
-                Ok(path.exists())
+                let meta = std::fs::metadata(&path)?;
+                Ok(Some(ListObjectsResponse {
+                    key: path.to_string_lossy().to_string(),
+                    size: meta.len() as i64,
+                    last_modified: Some(meta.modified().map(|x| x.into())?),
+                    etag: None
+                }))
             }
         }
     }

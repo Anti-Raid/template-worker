@@ -6,7 +6,7 @@ use rand::distr::{Alphanumeric, SampleString};
 
 use crate::worker::workervmmanager::Id;
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub enum StateOp {
     KvFind {
         query: String,
@@ -376,7 +376,7 @@ impl StateDb {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub enum StateExecResult {
     Kv {
         l: KvLookup
@@ -454,7 +454,7 @@ pub struct StateExecResponse {
     pub new_tenant_state: Option<(Vec<String>, i32)>
 }
 
-#[derive(sqlx::FromRow, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, sqlx::FromRow, serde::Serialize, serde::Deserialize)]
 pub struct KvLookup {
     key: String,
     #[sqlx(json)]

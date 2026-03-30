@@ -1,6 +1,5 @@
 use super::workerstate::WorkerState;
 use super::workervmmanager::Id;
-use crate::geese::objectstore::{Bucket, BucketWithKey, BucketWithPrefix};
 use crate::worker::builtins::EXPOSED_VFS;
 use crate::worker::syscall::{SyscallArgs, SyscallHandler, SyscallRet};
 use crate::worker::workertenantstate::WorkerTenantState;
@@ -10,12 +9,10 @@ use khronos_runtime::traits::context::KhronosContext;
 use khronos_runtime::traits::ir::runtime as runtime_ir;
 use dapi::controller::{DiscordProvider, DiscordProviderContext};
 use khronos_runtime::traits::httpclientprovider::HTTPClientProvider;
-use khronos_runtime::traits::ir::ObjectMetadata;
-use khronos_runtime::traits::objectstorageprovider::ObjectStorageProvider;
 use khronos_runtime::traits::runtimeprovider::RuntimeProvider;
 use serde_json::Value;
-use std::rc::Rc;
-use super::limits::{LuaKVConstraints, Ratelimits};
+use std::sync::Arc;
+use super::limits::Ratelimits;
 
 #[derive(Clone)]
 pub struct TemplateContextProvider {
@@ -25,12 +22,9 @@ pub struct TemplateContextProvider {
     syscall_handler: SyscallHandler,
 
     id: Id,
-
-    /// The KV constraints for this template
-    kv_constraints: LuaKVConstraints,
     
     /// The ratelimits of the VM
-    ratelimits: Rc<Ratelimits>,
+    ratelimits: Arc<Ratelimits>,
 }
 
 impl TemplateContextProvider {
@@ -42,9 +36,8 @@ impl TemplateContextProvider {
     ) -> Self {
         Self {
             id,
-            syscall_handler: SyscallHandler::new(vm_data.state.clone(), wts),
+            syscall_handler: SyscallHandler::new(vm_data.state.clone(), wts, vm_data.kv_constraints, vm_data.ratelimits.clone()),
             state: vm_data.state,
-            kv_constraints: vm_data.kv_constraints,
             ratelimits: vm_data.ratelimits,
         }
     }
@@ -56,7 +49,6 @@ impl TemplateContextProvider {
 
 impl KhronosContext for TemplateContextProvider {
     type DiscordProvider = ArDiscordProvider;
-    type ObjectStorageProvider = ArObjectStorageProvider;
     type HTTPClientProvider = ArHTTPClientProvider;
     type RuntimeProvider = ArRuntimeProvider;
 
@@ -77,15 +69,6 @@ impl KhronosContext for TemplateContextProvider {
         })
     }
 
-    fn objectstorage_provider(&self) -> Option<Self::ObjectStorageProvider> {
-        Some(ArObjectStorageProvider {
-            bucket: Bucket::from_id(self.id()),
-            state: self.state.clone(),
-            kv_constraints: self.kv_constraints.clone(),
-            ratelimits: self.ratelimits.clone(),
-        })
-    }
-
     fn httpclient_provider(&self) -> Option<Self::HTTPClientProvider> {
         Some(ArHTTPClientProvider {
             id: self.id(),
@@ -99,7 +82,7 @@ impl KhronosContext for TemplateContextProvider {
 pub struct ArDiscordProvider {
     id: Id,
     state: WorkerState,
-    ratelimits: Rc<Ratelimits>,
+    ratelimits: Arc<Ratelimits>,
 }
 
 impl ArDiscordProvider {
@@ -255,110 +238,11 @@ impl DiscordProvider for ArDiscordProvider {
 }
 
 #[derive(Clone)]
-pub struct ArObjectStorageProvider {
-    bucket: Bucket,
-    ratelimits: Rc<Ratelimits>,
-    state: WorkerState,
-    kv_constraints: LuaKVConstraints,
-}
-
-impl ObjectStorageProvider for ArObjectStorageProvider {
-    fn attempt_action(&self, bucket: &str) -> Result<(), khronos_runtime::Error> {
-        self.ratelimits.object_storage.check(bucket)
-    }
-
-    fn bucket_name(&self) -> String {
-        self.bucket.prefix()
-    }
-
-    async fn list_files(
-        &self,
-        prefix: Option<String>,
-    ) -> Result<Vec<ObjectMetadata>, khronos_runtime::Error> {
-        Ok(self
-            .state
-            .object_store
-            .list_files(
-                BucketWithPrefix::new(self.bucket, prefix.as_deref())
-            )
-            .await?
-            .into_iter()
-            .map(|x| ObjectMetadata {
-                key: x.key,
-                last_modified: x.last_modified,
-                size: x.size,
-                etag: x.etag,
-            })
-            .collect::<Vec<_>>())
-    }
-
-    async fn file_exists(&self, key: String) -> Result<bool, khronos_runtime::Error> {
-        Ok(self
-            .state
-            .object_store
-            .exists(BucketWithKey::new(self.bucket, &key))
-            .await?)
-    }
-
-    async fn download_file(&self, key: String) -> Result<Vec<u8>, khronos_runtime::Error> {
-        Ok(self
-            .state
-            .object_store
-            .download_file(BucketWithKey::new(self.bucket, &key))
-            .await?)
-    }
-
-    async fn get_file_url(
-        &self,
-        key: String,
-        expiry: std::time::Duration,
-    ) -> Result<String, khronos_runtime::Error> {
-        Ok(self
-            .state
-            .object_store
-            .get_url(
-                BucketWithKey::new(self.bucket, &key),
-                expiry,
-            )
-            .await?)
-    }
-
-    async fn upload_file(&self, key: String, data: Vec<u8>) -> Result<(), khronos_runtime::Error> {
-        if key.len()
-            > self
-                .kv_constraints
-                .max_object_storage_path_length
-        {
-            return Err("Path length too long".into());
-        }
-
-        if data.len() > self.kv_constraints.max_object_storage_bytes {
-            return Err("Data too large".into());
-        }
-
-        self.state
-            .object_store
-            .upload_file(BucketWithKey::new(self.bucket, &key), data)
-            .await?;
-
-        Ok(())
-    }
-
-    async fn delete_file(&self, key: String) -> Result<(), khronos_runtime::Error> {
-        Ok(self
-            .state
-            .object_store
-            .delete(BucketWithKey::new(self.bucket, &key))
-            .await?)
-    }
-}
-
-#[derive(Clone)]
 #[allow(dead_code)]
 pub struct ArHTTPClientProvider {
     id: Id,
     state: WorkerState,
-    ratelimits: Rc<Ratelimits>,
+    ratelimits: Arc<Ratelimits>,
 }
 
 impl HTTPClientProvider for ArHTTPClientProvider {
@@ -372,7 +256,7 @@ pub struct ArRuntimeProvider {
     id: Id,
     state: WorkerState,
     syscall_handler: SyscallHandler,
-    ratelimits: Rc<Ratelimits>,
+    ratelimits: Arc<Ratelimits>,
 }
 
 impl RuntimeProvider for ArRuntimeProvider {

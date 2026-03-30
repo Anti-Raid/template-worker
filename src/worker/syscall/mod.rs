@@ -1,11 +1,20 @@
-use crate::{geese::state::{StateExecResult, StateOp}, worker::{workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
+mod objstorage;
+
+use std::sync::Arc;
+
+use crate::{geese::state::{StateExecResult, StateOp}, worker::{limits::{LuaKVConstraints, Ratelimits}, syscall::objstorage::{ObjectStorageCall, ObjectStorageResult}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
 use khronos_runtime::rt::mluau::prelude::*;
+use log::info;
 
 /// The core underlying syscall
+#[derive(Debug)]
 pub enum SyscallArgs {
     State {
         // Set of state ops to perform, all ops here are guaranteed to be atomically handled
         ops: Vec<StateOp>
+    },
+    ObjectStorage {
+        op: ObjectStorageCall
     }
 }
 
@@ -25,6 +34,10 @@ impl FromLua for SyscallArgs {
                 let ops = tab.get("ops")?;
                 Ok(Self::State { ops })
             },
+            "ObjectStorage" => {
+                let op = tab.get("op")?;
+                Ok(Self::ObjectStorage { op })
+            }
             _ => {
                 Err(LuaError::FromLuaConversionError {
                     from: "table",
@@ -39,6 +52,9 @@ impl FromLua for SyscallArgs {
 pub enum SyscallRet {
     State {
         res: Vec<StateExecResult>
+    },
+    ObjectStorage {
+        res: ObjectStorageResult
     }
 }
 
@@ -47,6 +63,9 @@ impl IntoLua for SyscallRet {
         let table = lua.create_table()?;
         match self {
             Self::State { res } => {
+                table.set("res", res)?;
+            }
+            Self::ObjectStorage { res } => {
                 table.set("res", res)?;
             }
         }
@@ -60,16 +79,22 @@ impl IntoLua for SyscallRet {
 pub struct SyscallHandler {
     state: WorkerState,
     wts: WorkerTenantState,
+    kv_constraints: LuaKVConstraints,
+    ratelimits: Arc<Ratelimits>,
 }
 
 impl SyscallHandler {
     /// Creates a new syscall handler
-    pub fn new(state: WorkerState, wts: WorkerTenantState) -> Self {
-        Self { state, wts }
+    pub fn new(state: WorkerState, wts: WorkerTenantState, kv_constraints: LuaKVConstraints, ratelimits: Arc<Ratelimits>) -> Self {
+        Self { state, wts, kv_constraints, ratelimits }
     }
 
     /// Handles a syscall
     pub async fn handle_syscall(&self, id: Id, args: SyscallArgs) -> Result<SyscallRet, crate::Error> {
+        if self.state.worker_print {
+            info!("Executing syscall {args:?}");
+        }
+
         match args {
             SyscallArgs::State { ops } => {
                 let res = self.state.mesophyll_client.exec_state_op(id, ops).await?;
@@ -78,6 +103,10 @@ impl SyscallHandler {
                 }
 
                 Ok(SyscallRet::State { res: res.results })
+            }
+            SyscallArgs::ObjectStorage { op } => {
+                let res = op.exec(id, self).await?;
+                Ok(SyscallRet::ObjectStorage { res })
             }
         }
     }

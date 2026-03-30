@@ -1066,7 +1066,7 @@ dependencies = [
 [[package]]
 name = "dapi"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#59b7b8c4cda14ecc2d5c85c2111cf3016213f4bb"
+source = "git+https://github.com/anti-raid/khronos#35b2827badbd5686ec5c004c92070578c16d2b37"
 dependencies = [
  "async-trait",
  "bitflags 2.11.0",
@@ -2278,7 +2278,7 @@ dependencies = [
 [[package]]
 name = "khronos_ext"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#59b7b8c4cda14ecc2d5c85c2111cf3016213f4bb"
+source = "git+https://github.com/anti-raid/khronos#35b2827badbd5686ec5c004c92070578c16d2b37"
 dependencies = [
  "mlua_scheduler",
  "mluau",
@@ -2290,7 +2290,7 @@ dependencies = [
 [[package]]
 name = "khronos_runtime"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#59b7b8c4cda14ecc2d5c85c2111cf3016213f4bb"
+source = "git+https://github.com/anti-raid/khronos#35b2827badbd5686ec5c004c92070578c16d2b37"
 dependencies = [
  "aes-gcm",
  "argon2",

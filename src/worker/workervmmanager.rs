@@ -3,6 +3,7 @@ use khronos_runtime::rt::{KhronosRuntime, RuntimeCreateOpts};
 use serde::{Deserialize, Serialize};
 use serenity::all::{GuildId, UserId};
 use std::cell::RefCell;
+use std::sync::Arc;
 use std::{collections::HashMap, rc::Rc};
 use khronos_runtime::rt::mlua::prelude::*;
 use crate::worker::builtins::{Builtins, TemplatingTypes};
@@ -85,7 +86,7 @@ pub struct VmData {
     pub state: WorkerState,
     pub runtime: KhronosRuntime,
     pub kv_constraints: LuaKVConstraints,
-    pub ratelimits: Rc<Ratelimits>,
+    pub ratelimits: Arc<Ratelimits>,
 }
 
 /// Represents the vmdata and the dispatch function as well
