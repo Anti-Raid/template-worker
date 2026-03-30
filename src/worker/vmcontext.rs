@@ -1,8 +1,8 @@
 use super::workerstate::WorkerState;
 use super::workervmmanager::Id;
 use crate::geese::objectstore::{Bucket, BucketWithKey, BucketWithPrefix};
-use crate::geese::state::{StateExecResult, StateOp};
 use crate::worker::builtins::EXPOSED_VFS;
+use crate::worker::syscall::{SyscallArgs, SyscallHandler, SyscallRet};
 use crate::worker::workertenantstate::WorkerTenantState;
 use crate::worker::workervmmanager::VmData;
 use khronos_runtime::core::typesext::Vfs;
@@ -21,8 +21,8 @@ use super::limits::{LuaKVConstraints, Ratelimits};
 pub struct TemplateContextProvider {
     state: WorkerState,
 
-    /// Worker tenant state
-    wts: WorkerTenantState,
+    /// system call handler
+    syscall_handler: SyscallHandler,
 
     id: Id,
 
@@ -42,7 +42,7 @@ impl TemplateContextProvider {
     ) -> Self {
         Self {
             id,
-            wts,
+            syscall_handler: SyscallHandler::new(vm_data.state.clone(), wts),
             state: vm_data.state,
             kv_constraints: vm_data.kv_constraints,
             ratelimits: vm_data.ratelimits,
@@ -72,7 +72,7 @@ impl KhronosContext for TemplateContextProvider {
         Some(ArRuntimeProvider {
             id: self.id(),
             state: self.state.clone(),
-            wts: self.wts.clone(),
+            syscall_handler: self.syscall_handler.clone(),
             ratelimits: self.ratelimits.clone(),
         })
     }
@@ -371,13 +371,13 @@ impl HTTPClientProvider for ArHTTPClientProvider {
 pub struct ArRuntimeProvider {
     id: Id,
     state: WorkerState,
-    wts: WorkerTenantState,
+    syscall_handler: SyscallHandler,
     ratelimits: Rc<Ratelimits>,
 }
 
 impl RuntimeProvider for ArRuntimeProvider {
-    type StateOps = StateOp;
-    type StateResult = StateExecResult;
+    type SyscallArgs = SyscallArgs;
+    type SyscallRet = SyscallRet;
 
     fn attempt_action(&self, bucket: &str) -> Result<(), khronos_runtime::Error> {
         self.ratelimits.runtime.check(bucket)
@@ -428,11 +428,7 @@ impl RuntimeProvider for ArRuntimeProvider {
         })
     }
 
-    async fn state_op(&self, ops: Vec<StateOp>) -> Result<Vec<StateExecResult>, khronos_runtime::Error> {
-        let res = self.state.mesophyll_client.exec_state_op(self.id, ops).await?;
-        if let Some((ts_new_events, ts_new_flags)) = res.new_tenant_state {
-            self.wts.reload_for_tenant(self.id, ts_new_events, ts_new_flags, None).map_err(|e| e.to_string())?;
-        }
-        Ok(res.results)
+    async fn syscall(&self, args: SyscallArgs) -> Result<SyscallRet, khronos_runtime::Error> {
+        self.syscall_handler.handle_syscall(self.id, args).await
     }
 }
