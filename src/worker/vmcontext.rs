@@ -8,7 +8,6 @@ use khronos_runtime::core::typesext::Vfs;
 use khronos_runtime::traits::context::KhronosContext;
 use khronos_runtime::traits::ir::runtime as runtime_ir;
 use dapi::controller::{DiscordProvider, DiscordProviderContext};
-use khronos_runtime::traits::httpclientprovider::HTTPClientProvider;
 use khronos_runtime::traits::runtimeprovider::RuntimeProvider;
 use serde_json::Value;
 use std::sync::Arc;
@@ -49,7 +48,6 @@ impl TemplateContextProvider {
 
 impl KhronosContext for TemplateContextProvider {
     type DiscordProvider = ArDiscordProvider;
-    type HTTPClientProvider = ArHTTPClientProvider;
     type RuntimeProvider = ArRuntimeProvider;
 
     fn discord_provider(&self) -> Option<Self::DiscordProvider> {
@@ -65,14 +63,6 @@ impl KhronosContext for TemplateContextProvider {
             id: self.id(),
             state: self.state.clone(),
             syscall_handler: self.syscall_handler.clone(),
-            ratelimits: self.ratelimits.clone(),
-        })
-    }
-
-    fn httpclient_provider(&self) -> Option<Self::HTTPClientProvider> {
-        Some(ArHTTPClientProvider {
-            id: self.id(),
-            state: self.state.clone(),
             ratelimits: self.ratelimits.clone(),
         })
     }
@@ -234,20 +224,6 @@ impl DiscordProvider for ArDiscordProvider {
             .map_err(|e| format!("Failed to delete channel: {}", e))?;
 
         Ok(chan)
-    }
-}
-
-#[derive(Clone)]
-#[allow(dead_code)]
-pub struct ArHTTPClientProvider {
-    id: Id,
-    state: WorkerState,
-    ratelimits: Arc<Ratelimits>,
-}
-
-impl HTTPClientProvider for ArHTTPClientProvider {
-    fn attempt_action(&self, bucket: &str, _url: &str) -> Result<(), khronos_runtime::Error> {
-        self.ratelimits.http.check(bucket)
     }
 }
 
