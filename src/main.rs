@@ -278,6 +278,7 @@ async fn main_impl(args: CmdArgs) {
                 Arc::new(current_user.clone()),
                 Arc::new(meso_client.clone()),
                 stratum.clone(),
+                reqwest,
                 args.worker_debug
             );
 

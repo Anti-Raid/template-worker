@@ -1,8 +1,9 @@
 mod objstorage;
+mod cdn;
 
 use std::sync::Arc;
 
-use crate::{geese::state::{StateExecResult, StateOp}, worker::{limits::{LuaKVConstraints, Ratelimits}, syscall::objstorage::{ObjectStorageCall, ObjectStorageResult}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
+use crate::{geese::state::{StateExecResult, StateOp}, worker::{limits::{LuaKVConstraints, Ratelimits}, syscall::{cdn::{CdnCall, CdnResult}, objstorage::{ObjectStorageCall, ObjectStorageResult}}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
 use khronos_runtime::rt::mluau::prelude::*;
 use log::info;
 
@@ -15,6 +16,9 @@ pub enum SyscallArgs {
     },
     ObjectStorage {
         op: ObjectStorageCall
+    },
+    Cdn {
+        op: CdnCall
     }
 }
 
@@ -35,8 +39,12 @@ impl FromLua for SyscallArgs {
                 Ok(Self::State { ops })
             },
             "ObjectStorage" => {
-                let op = tab.get("op")?;
+                let op = tab.get("req")?;
                 Ok(Self::ObjectStorage { op })
+            },
+            "Cdn" => {
+                let op = tab.get("req")?;
+                Ok(Self::Cdn { op })
             }
             _ => {
                 Err(LuaError::FromLuaConversionError {
@@ -55,17 +63,26 @@ pub enum SyscallRet {
     },
     ObjectStorage {
         res: ObjectStorageResult
+    },
+    Cdn {
+        res: CdnResult
     }
 }
 
 impl IntoLua for SyscallRet {
     fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
-        let table = lua.create_table()?;
+        let table = lua.create_table_with_capacity(0, 2)?;
         match self {
             Self::State { res } => {
+                table.set("op", "State")?;
                 table.set("res", res)?;
             }
             Self::ObjectStorage { res } => {
+                table.set("op", "ObjectStorage")?;
+                table.set("res", res)?;
+            }
+            Self::Cdn { res } => {
+                table.set("op", "Cdn")?;
                 table.set("res", res)?;
             }
         }
@@ -107,6 +124,10 @@ impl SyscallHandler {
             SyscallArgs::ObjectStorage { op } => {
                 let res = op.exec(id, self).await?;
                 Ok(SyscallRet::ObjectStorage { res })
+            }
+            SyscallArgs::Cdn { op } => {
+                let res = op.exec(id, self).await?;
+                Ok(SyscallRet::Cdn { res })
             }
         }
     }

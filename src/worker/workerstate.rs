@@ -11,6 +11,7 @@ pub struct WorkerState {
     pub mesophyll_client: Arc<MesophyllClient>,
     pub stratum: Stratum,
     pub worker_print: bool,
+    pub reqwest: reqwest::Client,
 }
 
 impl WorkerState {
@@ -21,6 +22,7 @@ impl WorkerState {
         current_user: Arc<serenity::all::CurrentUser>,
         mesophyll_client: Arc<MesophyllClient>,
         stratum: Stratum,
+        reqwest: reqwest::Client,
         worker_print: bool
     ) -> Self {
         Self {
@@ -29,6 +31,7 @@ impl WorkerState {
             current_user,
             mesophyll_client,
             stratum,
+            reqwest,
             worker_print
         }
     }
