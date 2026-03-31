@@ -39,7 +39,7 @@ impl FromLua for ObjectStorageCall {
             })
         };
 
-        let typ: String = tab.get("op")?;
+        let typ: String = tab.get("req")?;
         match typ.as_str() {
             "ListFileMetas" => {
                 let prefix = tab.get("prefix")?;
