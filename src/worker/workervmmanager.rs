@@ -80,6 +80,38 @@ impl Id {
     }
 }
 
+impl FromLua for Id {
+    fn from_lua(value: LuaValue, _lua: &Lua) -> LuaResult<Self> {
+        match value {
+            LuaValue::Table(table) => {
+                let tenant_type: String = table.get("tenant_type")?;
+                let tenant_id: String = table.get("tenant_id")?;
+                let Some(id) = Id::from_parts(&tenant_type, &tenant_id) else {
+                    return Err(LuaError::external(format!("Failed to parse Id from tenant_type: {}, tenant_id: {}", tenant_type, tenant_id)));
+                };
+                Ok(id)
+            }
+            _ => {
+                Err(LuaError::FromLuaConversionError {
+                    from: value.type_name(),
+                    to: "Id".to_string(),
+                    message: Some("Expected a table representing an Id".to_string()),
+                })
+            }
+        }
+    }
+}
+
+impl IntoLua for Id {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        let table = lua.create_table_with_capacity(0, 2)?;
+        table.set("tenant_type", self.tenant_type())?;
+        table.set("tenant_id", self.tenant_id())?;
+        table.set_readonly(true);
+        Ok(LuaValue::Table(table))
+    }
+}
+
 /// Represents the data associated with a VM, which includes the guild state and the Khronos runtime manager
 #[derive(Clone)]
 pub struct VmData {
@@ -94,6 +126,21 @@ pub struct VmData {
 pub struct VmState {
     pub data: VmData,
     pub dispatch_func: LuaFunction
+}
+
+struct BaseTenantData<'a> {
+    bot: &'a serenity::all::CurrentUser,
+    id: Id
+}
+
+impl<'a> IntoLua for BaseTenantData<'a> {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        let table = lua.create_table_with_capacity(0, 2)?;
+        table.set("bot", lua.to_value(&self.bot)?)?;
+        table.set("id", self.id)?;
+        table.set_readonly(true);
+        Ok(LuaValue::Table(table))
+    }
 }
 
 /// A WorkerVmManager manages the state and VMs for a worker
@@ -158,8 +205,9 @@ impl WorkerVmManager {
 
         let tenant_state = wts.get_cached_tenant_state_for(id)
             .map_err(|e| LuaError::external(format!("Failed to get tenant state for ID {id:?}: {e}")))?;
+        let lts = BaseTenantData { id, bot: &vmd.state.current_user };
 
-        let dispatch_func = func.call::<LuaFunction>((context, tenant_state))?;
+        let dispatch_func = func.call::<LuaFunction>((context, tenant_state, lts))?;
 
         Ok(VmState {
             data: vmd,
