@@ -1,10 +1,12 @@
 mod objstorage;
 mod cdn;
+mod discord;
 
 use std::sync::Arc;
 
-use crate::{geese::state::{StateExecResult, StateOp}, worker::{limits::{LuaKVConstraints, Ratelimits}, syscall::{cdn::{CdnCall, CdnResult}, objstorage::{ObjectStorageCall, ObjectStorageResult}}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
-use khronos_runtime::rt::mluau::prelude::*;
+use crate::{geese::state::{StateExecResult, StateOp}, worker::{limits::{LuaKVConstraints, Ratelimits}, syscall::{cdn::{CdnCall, CdnResult}, discord::ArDiscordProvider, objstorage::{ObjectStorageCall, ObjectStorageResult}}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
+use dapi::context::DiscordContext;
+use khronos_runtime::{primitives::lazy::Lazy, rt::mluau::prelude::*};
 use log::info;
 
 /// The core underlying syscall
@@ -19,6 +21,9 @@ pub enum SyscallArgs {
     },
     Cdn {
         op: CdnCall
+    },
+    Discord {
+        op: dapi::apilist::API
     }
 }
 
@@ -45,6 +50,10 @@ impl FromLua for SyscallArgs {
             "Cdn" => {
                 let op = tab.get("req")?;
                 Ok(Self::Cdn { op })
+            },
+            "Discord" => {
+                let op = tab.get("req")?;
+                Ok(Self::Discord { op })
             }
             _ => {
                 Err(LuaError::FromLuaConversionError {
@@ -66,6 +75,11 @@ pub enum SyscallRet {
     },
     Cdn {
         res: CdnResult
+    },
+    Discord {
+        op: &'static str,
+        res: serde_json::Value, 
+        mrm: dapi::apilist::MapResponseMetadata
     }
 }
 
@@ -84,6 +98,21 @@ impl IntoLua for SyscallRet {
             Self::Cdn { res } => {
                 table.set("op", "Cdn")?;
                 table.set("res", res)?;
+            }
+            Self::Discord { op, res, mrm } => {
+                table.set("op", "Discord")?;
+                let res_table = lua.create_table()?;
+                res_table.set("op", op)?;
+                if mrm.is_primitive_response {
+                    let v = lua.to_value_with(&res, khronos_runtime::plugins::antiraid::LUA_SERIALIZE_OPTIONS)?;
+                    if !v.is_null() {
+                        res_table.set("res", v)?;
+                    }
+                } else {
+                    let lazy = Lazy::new(res);
+                    res_table.set("res", lazy)?;
+                }
+                table.set("res", res_table)?;
             }
         }
         table.set_readonly(true);
@@ -128,6 +157,12 @@ impl SyscallHandler {
             SyscallArgs::Cdn { op } => {
                 let res = op.exec(id, self).await?;
                 Ok(SyscallRet::Cdn { res })
+            }
+            SyscallArgs::Discord { op } => {
+                let op_name = op.api_name();
+                let dp = DiscordContext::new(ArDiscordProvider { id, state: self.state.clone(), ratelimits: self.ratelimits.clone() });
+                let (value, mrm) = op.execute(&dp).await?;
+                Ok(SyscallRet::Discord { op: op_name, res: value, mrm })
             }
         }
     }
