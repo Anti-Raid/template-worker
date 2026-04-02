@@ -1,4 +1,5 @@
 use dapi::controller::DiscordProviderContext;
+use khronos_runtime::core::typesext::Vfs;
 use khronos_runtime::rt::{KhronosRuntime, RuntimeCreateOpts};
 use serde::{Deserialize, Serialize};
 use serenity::all::{GuildId, UserId};
@@ -130,7 +131,9 @@ pub struct VmState {
 
 struct BaseTenantData<'a> {
     bot: &'a serenity::all::CurrentUser,
-    id: Id
+    id: Id,
+    dispatchable_events: &'a [&'static str],
+    base_vfs: &'a HashMap<String, Vfs>
 }
 
 impl<'a> IntoLua for BaseTenantData<'a> {
@@ -138,6 +141,14 @@ impl<'a> IntoLua for BaseTenantData<'a> {
         let table = lua.create_table_with_capacity(0, 2)?;
         table.set("bot", lua.to_value(&self.bot)?)?;
         table.set("id", self.id)?;
+        table.set("dispatchable_events", self.dispatchable_events)?;
+        
+        let base_vfs_tab = lua.create_table_with_capacity(0, self.base_vfs.len())?;
+        for (s, vfs) in self.base_vfs {
+            base_vfs_tab.set(s.as_str(), vfs.clone())?;
+        }
+        base_vfs_tab.set_readonly(true);
+        table.set("base_vfs", base_vfs_tab)?;
         table.set_readonly(true);
         Ok(LuaValue::Table(table))
     }
@@ -205,7 +216,7 @@ impl WorkerVmManager {
 
         let tenant_state = wts.get_cached_tenant_state_for(id)
             .map_err(|e| LuaError::external(format!("Failed to get tenant state for ID {id:?}: {e}")))?;
-        let lts = BaseTenantData { id, bot: &vmd.state.current_user };
+        let lts = BaseTenantData { id, bot: &vmd.state.current_user, dispatchable_events: &dapi::EVENT_LIST, base_vfs: &super::builtins::EXPOSED_VFS };
 
         let dispatch_func = func.call::<LuaFunction>((context, tenant_state, lts))?;
 
