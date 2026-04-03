@@ -2,14 +2,11 @@ use crate::worker::workerstate::WorkerState;
 use crate::worker::workervmmanager::Id;
 use dapi::controller::{DiscordProvider, DiscordProviderContext};
 use serde_json::Value;
-use std::sync::Arc;
-use crate::worker::limits::Ratelimits;
 
 #[derive(Clone)]
 pub(super) struct ArDiscordProvider {
     pub id: Id,
     pub state: WorkerState,
-    pub ratelimits: Arc<Ratelimits>,
 }
 
 impl ArDiscordProvider {
@@ -24,10 +21,6 @@ impl ArDiscordProvider {
 }
 
 impl DiscordProvider for ArDiscordProvider {
-    fn attempt_action(&self, bucket: &str) -> serenity::Result<(), crate::Error> {
-        self.ratelimits.discord.check(bucket)
-    }
-
     // inject disclaimer into messages sent by the bot that are not interaction responses
     fn superuser_transform_message_before_send(&self, msg: dapi::controller::SuperUserMessageTransform, flags: dapi::controller::SuperUserMessageTransformFlags) -> Result<dapi::controller::SuperUserMessageTransform, dapi::Error> {
         if flags.is_interaction_response() {

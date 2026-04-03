@@ -133,7 +133,9 @@ struct BaseTenantData<'a> {
     bot: &'a serenity::all::CurrentUser,
     id: Id,
     dispatchable_events: &'a [&'static str],
-    base_vfs: &'a HashMap<String, Vfs>
+    base_vfs: &'a HashMap<String, Vfs>,
+    support_server: &'a str,
+    website: &'a str
 }
 
 impl<'a> IntoLua for BaseTenantData<'a> {
@@ -149,6 +151,8 @@ impl<'a> IntoLua for BaseTenantData<'a> {
         }
         base_vfs_tab.set_readonly(true);
         table.set("base_vfs", base_vfs_tab)?;
+        table.set("support_server", self.support_server)?;
+        table.set("website", self.website)?;
         table.set_readonly(true);
         Ok(LuaValue::Table(table))
     }
@@ -216,7 +220,14 @@ impl WorkerVmManager {
 
         let tenant_state = wts.get_cached_tenant_state_for(id)
             .map_err(|e| LuaError::external(format!("Failed to get tenant state for ID {id:?}: {e}")))?;
-        let lts = BaseTenantData { id, bot: &vmd.state.current_user, dispatchable_events: &dapi::EVENT_LIST, base_vfs: &super::builtins::EXPOSED_VFS };
+        let lts = BaseTenantData { 
+            id, 
+            bot: &vmd.state.current_user, 
+            dispatchable_events: &dapi::EVENT_LIST, 
+            base_vfs: &super::builtins::EXPOSED_VFS,
+            support_server: &crate::CONFIG.meta.support_server_invite,
+            website: &crate::CONFIG.sites.frontend
+        };
 
         let dispatch_func = func.call::<LuaFunction>((context, tenant_state, lts))?;
 

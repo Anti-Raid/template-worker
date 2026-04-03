@@ -39,31 +39,31 @@ impl FromLua for ObjectStorageCall {
             })
         };
 
-        let typ: String = tab.get("op")?;
-        match typ.as_str() {
-            "ListFileMetas" => {
+        let typ: LuaString = tab.get("op")?;
+        match typ.as_bytes().as_ref() {
+            b"ListFileMetas" => {
                 let prefix = tab.get("prefix")?;
                 Ok(ObjectStorageCall::ListFileMetas { prefix })
             },
-            "GetFileMeta" => {
+            b"GetFileMeta" => {
                 let key = tab.get("key")?;
                 Ok(ObjectStorageCall::GetFileMeta { key })
             },
-            "GetFileUrl" => {
+            b"GetFileUrl" => {
                 let key = tab.get("key")?;
                 let expiry = tab.get::<LuaUserDataRef<LuaTimeDelta>>("expiry")?;
                 Ok(ObjectStorageCall::GetFileUrl { key, expiry: expiry.timedelta.to_std().map_err(LuaError::external)? })
             },
-            "DownloadFile" => {
+            b"DownloadFile" => {
                 let key = tab.get("key")?;
                 Ok(ObjectStorageCall::DownloadFile { key })
             }
-            "UploadFile" => {
+            b"UploadFile" => {
                 let key = tab.get("key")?;
                 let data = tab.get::<BlobTaker>("data")?;
                 Ok(ObjectStorageCall::UploadFile { key, data: data.0 })
             }
-            "DeleteFile" => {
+            b"DeleteFile" => {
                 let key = tab.get("key")?;
                 Ok(ObjectStorageCall::DeleteFile { key })
             }
@@ -119,9 +119,9 @@ impl IntoLua for ObjectStorageResult {
 impl ObjectStorageCall {
     pub(super) async fn exec(self, id: Id, handler: &SyscallHandler) -> Result<ObjectStorageResult, crate::Error> {
         let bucket = Bucket::from_id(id);
-        handler.ratelimits.object_storage.check("syscall")?;
         match self {
             Self::ListFileMetas { prefix } => {
+                handler.ratelimits.object_storage.check("ListFileMetas")?;
                 let objs = handler
                 .state
                 .object_store
@@ -139,6 +139,7 @@ impl ObjectStorageCall {
                 Ok(ObjectStorageResult::ObjectMetadata { objs })
             }
             Self::GetFileMeta { key } => {
+                handler.ratelimits.object_storage.check("GetFileMeta")?;
                 let mut objs = vec![];
                 let obj = handler.state.object_store.get_object_metadata(BucketWithKey::new(bucket, &key)).await?;
                 if let Some(obj) = obj {
@@ -153,14 +154,17 @@ impl ObjectStorageCall {
                 Ok(ObjectStorageResult::ObjectMetadata { objs })
             }
             Self::GetFileUrl { key, expiry } => {
+                handler.ratelimits.object_storage.check("GetFileUrl")?;
                 let url = handler.state.object_store.get_url(BucketWithKey::new(bucket, &key), expiry).await?;
                 Ok(ObjectStorageResult::FileUrl { url })
             }
             ObjectStorageCall::DownloadFile { key } => {
+                handler.ratelimits.object_storage.check("DownloadFile")?;
                 let data = handler.state.object_store.download_file(BucketWithKey::new(bucket, &key)).await?;
                 Ok(ObjectStorageResult::Blob { data })
             }
             ObjectStorageCall::UploadFile { key, data } => {
+                handler.ratelimits.object_storage.check("UploadFile")?;
                 if key.len() > handler.kv_constraints.max_object_storage_path_length {
                     return Err("Path length too long".into());
                 }
@@ -177,6 +181,7 @@ impl ObjectStorageCall {
                 Ok(ObjectStorageResult::Ack)
             }
             ObjectStorageCall::DeleteFile { key } => {
+                handler.ratelimits.object_storage.check("DeleteFile")?;
                 handler.state.object_store
                 .delete(BucketWithKey::new(bucket, &key))
                 .await?;

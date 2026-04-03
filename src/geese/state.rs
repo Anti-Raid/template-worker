@@ -70,46 +70,46 @@ impl FromLua for StateOp {
             })
         };
 
-        let typ: String = tab.get("op")?;
-        match typ.as_str() {
-            "KvFind" => {
+        let typ: LuaString = tab.get("op")?;
+        match typ.as_bytes().as_ref() {
+            b"KvFind" => {
                 let query = tab.get("query")?;
                 let scope = tab.get("scope")?;
                 Ok(Self::KvFind { query, scope })
             },
-            "KvGet" => {
+            b"KvGet" => {
                 let key = tab.get("key")?;
                 let scope = tab.get("scope")?;
                 Ok(Self::KvGet { key, scope })
             },
-            "KvSet" => {
+            b"KvSet" => {
                 let key = tab.get("key")?;
                 let scope = tab.get("scope")?;
                 let value = tab.get("value")?;
                 Ok(Self::KvSet { key, scope, value })
             },
-            "KvDelete" => {
+            b"KvDelete" => {
                 let key = tab.get("key")?;
                 let scope = tab.get("scope")?;
                 Ok(Self::KvDelete { key, scope })
             },
-            "UpdateTenantState" => {
+            b"UpdateTenantState" => {
                 let events = tab.get("events")?;
                 let flags = tab.get("flag")?;
                 Ok(Self::UpdateTenantState { events, flags })
             },
-            "GlobalKvFind" => {
+            b"GlobalKvFind" => {
                 let query = tab.get("query")?;
                 let scope = tab.get("scope")?;
                 Ok(Self::GlobalKvFind { query, scope })
             },
-            "GlobalKvGet" => {
+            b"GlobalKvGet" => {
                 let key = tab.get("key")?;
                 let version = tab.get("version")?;
                 let scope = tab.get("scope")?;
                 Ok(Self::GlobalKvGet { key, version, scope })
             },
-            "GlobalKvCreate" => {
+            b"GlobalKvCreate" => {
                 let key = tab.get("key")?;
                 let version = tab.get("version")?;
                 let short = tab.get("short")?;
@@ -120,13 +120,13 @@ impl FromLua for StateOp {
                 let data = tab.get("data")?;
                 Ok(Self::GlobalKvCreate { key, version, short, public_metadata, scope, public_data, long, data })
             },
-            "GlobalKvDelete" => {
+            b"GlobalKvDelete" => {
                 let key = tab.get("key")?;
                 let version = tab.get("version")?;
                 let scope = tab.get("scope")?;
                 Ok(Self::GlobalKvDelete { key, version, scope })
             },
-            "GlobalKvGetData" => {
+            b"GlobalKvGetData" => {
                 let key = tab.get("key")?;
                 let version = tab.get("version")?;
                 let scope = tab.get("scope")?;

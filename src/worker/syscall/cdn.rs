@@ -23,9 +23,9 @@ impl FromLua for CdnCall {
             })
         };
 
-        let typ: String = tab.get("op")?;
-        match typ.as_str() {
-            "DownloadFile" => {
+        let typ: LuaString = tab.get("op")?;
+        match typ.as_bytes().as_ref() {
+            b"DownloadFile" => {
                 let url = tab.get("url")?;
                 let as_buffer = tab.get("as_buffer")?;
                 Ok(CdnCall::DownloadFile { url, as_buffer })
@@ -70,9 +70,9 @@ impl IntoLua for CdnResult {
 
 impl CdnCall {
     pub(super) async fn exec(self, _id: Id, handler: &SyscallHandler) -> Result<CdnResult, crate::Error> {
-        handler.ratelimits.http.check("syscall")?;
         match self {
             Self::DownloadFile { url, as_buffer } => {
+                handler.ratelimits.http.check("DownloadFile")?;
                 if !url.is_ascii() {
                     return Err("Url must be ascii-only".into());
                 }
