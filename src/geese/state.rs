@@ -4,6 +4,7 @@ use khronos_runtime::utils::khronos_value::KhronosValue;
 use khronos_runtime::core::datetime::DateTime as LuaDateTime;
 use rand::distr::{Alphanumeric, SampleString};
 
+use crate::geese::tenantstate::{DEFAULT_EVENTS, TenantState, TenantStateDb, TenantStateEventRefs, TenantStatePartial};
 use crate::worker::workervmmanager::Id;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -54,9 +55,20 @@ pub enum StateOp {
         version: i32,
         scope: String
     },
-    UpdateTenantState {
-        events: Vec<String>,
-        flags: i32
+    SubscribeEvent {
+        event: String,
+        system: String,
+    },
+    UnsubscribeEvent {
+        event: String,
+        system: String,
+    }
+}
+
+impl StateOp {
+    /// Returns true if the operation may alter the tenant state
+    fn alters_tenant_state(&self) -> bool {
+        matches!(self, Self::SubscribeEvent { .. } | Self::UnsubscribeEvent { .. })
     }
 }
 
@@ -93,10 +105,15 @@ impl FromLua for StateOp {
                 let scope = tab.get("scope")?;
                 Ok(Self::KvDelete { key, scope })
             },
-            b"UpdateTenantState" => {
-                let events = tab.get("events")?;
-                let flags = tab.get("flag")?;
-                Ok(Self::UpdateTenantState { events, flags })
+            b"SubscribeEvent" => {
+                let event = tab.get("event")?;
+                let system = tab.get("system")?;
+                Ok(Self::SubscribeEvent { event, system })
+            },
+            b"UnsubscribeEvent" => {
+                let event = tab.get("event")?;
+                let system = tab.get("system")?;
+                Ok(Self::UnsubscribeEvent { event, system })
             },
             b"GlobalKvFind" => {
                 let query = tab.get("query")?;
@@ -156,24 +173,47 @@ impl StateDb {
 
     /// Perform execution of an op
     pub async fn do_op(&self, tid: Id, op: Vec<StateOp>) -> Result<StateExecResponse, crate::Error> {
-        let mut result = StateExecResponse { results: vec![], new_tenant_state: None };
-        match op.len() {
-            0 => {},
-            1 => {
-                for op in op {
-                    Self::apply_op(&self.pool, tid, op, &mut result).await?
-                }
-            },
-            _ => {
-                // atomic
-                let mut tx = self.pool.begin().await?;
-                for op in op {
-                    Self::apply_op(&mut *tx, tid, op, &mut result).await?
-                }
-                tx.commit().await?;
+        let mut result = StateExecResponse { results: vec![], tenant_state_changed: false, new_tenant_state: None };
+        // fast path of no explicit transaction can only be applied if none of the inner ops alter the tenant state
+        let fastpath = op.len() <= 1 && op.iter().all(|x| !x.alters_tenant_state());
 
+        if fastpath {
+            for op in op {
+                Self::apply_op(&self.pool, tid, op, &mut result).await?
             }
-        };
+            if result.tenant_state_changed {
+                return Err("internal error: tenant state changed in unsupported fastpath".into());
+            }
+        } else {
+            // atomic
+            let mut tx = self.pool.begin().await?;
+            for op in op {
+                Self::apply_op(&mut *tx, tid, op, &mut result).await?
+            }
+
+            if result.tenant_state_changed {
+                let partials: TenantStatePartial = sqlx::query_as("SELECT owner_id, owner_type, flags, modflags FROM tenant_state WHERE owner_id = $1 AND owner_type = $2")
+                    .bind(tid.tenant_id())
+                    .bind(tid.tenant_type())
+                    .fetch_one(&mut *tx)
+                    .await?;
+
+                let partial_refs: Vec<TenantStateEventRefs> = sqlx::query_as("
+                    SELECT owner_id, owner_type, event, array_agg(system) as systems
+                    FROM tenant_state_events
+                    WHERE owner_id = $1 AND owner_type = $2
+                    GROUP BY owner_id, owner_type, event
+                ")
+                    .bind(tid.tenant_id())
+                    .bind(tid.tenant_type())
+                    .fetch_all(&mut *tx)
+                    .await?;
+
+                result.new_tenant_state = Some(TenantStateDb::into_tenant_state_single(partials, partial_refs));
+            }
+
+            tx.commit().await?;
+        }
 
         return Ok(result)
     }
@@ -255,18 +295,57 @@ impl StateDb {
                 .execute(executor)
                 .await?;
             }
-            StateOp::UpdateTenantState { events, flags } => {
-                sqlx::query(
-                    "INSERT INTO tenant_state (owner_id, owner_type, events, flags) VALUES ($1, $2, $3, $4) ON CONFLICT (owner_id, owner_type) DO UPDATE SET events = EXCLUDED.events, flags = EXCLUDED.flags",
+            StateOp::SubscribeEvent { event, system } => {
+                if DEFAULT_EVENTS.contains(&event.as_str()) {
+                    return Err("Cannot subscribe to default event".into())
+                }
+
+                let res = sqlx::query(
+                    r#"
+                    WITH ensure_tenant AS (
+                        INSERT INTO tenant_state (owner_id, owner_type) 
+                        VALUES ($1, $2) 
+                        ON CONFLICT (owner_id, owner_type) DO NOTHING
+                    )
+                    INSERT INTO tenant_state_events (owner_id, owner_type, event, system)
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (owner_id, owner_type, event, system) DO NOTHING
+                    "#
                 )
                 .bind(tid.tenant_id())
                 .bind(tid.tenant_type())
-                .bind(&events)
-                .bind(&flags)
+                .bind(&event)
+                .bind(&system)
                 .execute(executor)
                 .await?;
 
-                state.new_tenant_state = Some((events, flags));
+                if res.rows_affected() > 0 {
+                    state.tenant_state_changed = true;
+                }
+                
+                //state.new_tenant_state = Some((events, flags));
+            }
+            StateOp::UnsubscribeEvent { event, system } => {
+                if DEFAULT_EVENTS.contains(&event.as_str()) {
+                    return Err("Cannot subscribe to default event".into())
+                }
+
+                let res = sqlx::query(
+                    r#"
+                    DELETE FROM tenant_state_events 
+                    WHERE owner_id = $1 AND owner_type = $2 AND event = $3 AND system = $4
+                    "#
+                )
+                .bind(tid.tenant_id())
+                .bind(tid.tenant_type())
+                .bind(&event)
+                .bind(&system)
+                .execute(executor)
+                .await?;
+
+                if res.rows_affected() > 0 {
+                    state.tenant_state_changed = true;
+                }
             }
             StateOp::GlobalKvFind { query, scope } => {
                 let items: Vec<PartialGlobalKv> = if query == "%%" {
@@ -451,7 +530,9 @@ impl IntoLua for StateExecResult {
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct StateExecResponse {
     pub results: Vec<StateExecResult>,
-    pub new_tenant_state: Option<(Vec<String>, i32)>
+    #[serde(skip)]
+    tenant_state_changed: bool,
+    pub new_tenant_state: Option<TenantState>
 }
 
 #[derive(Debug, sqlx::FromRow, serde::Serialize, serde::Deserialize)]

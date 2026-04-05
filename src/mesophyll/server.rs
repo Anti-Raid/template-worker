@@ -240,7 +240,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
     async fn list_tenant_states(&self, request: tonic::Request<pb::WtmListTenantStates>) -> Result<tonic::Response<pb::AnyValue>, Status> {
         let req = request.into_inner();
         let wid = self.verify_worker(req.worker)?;
-        match self.db_state.tenant_state_db().get_tenant_state(Some((wid as i64, self.db_state.num_workers() as i64))).await {
+        match self.db_state.tenant_state_db().get_tenant_state(wid as i64, self.db_state.num_workers() as i64).await {
             Ok(ts) => Ok(tonic::Response::new(pb::AnyValue::from_real(&ts)?)),
             Err(e) => Err(Status::internal(e.to_string())),
         }

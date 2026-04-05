@@ -5,7 +5,7 @@ mod meta;
 
 use std::sync::Arc;
 
-use crate::{geese::state::{StateExecResult, StateOp}, worker::{limits::{LuaKVConstraints, Ratelimits}, syscall::{cdn::{CdnCall, CdnResult}, discord::ArDiscordProvider, meta::{MetaCall, MetaResult}, objstorage::{ObjectStorageCall, ObjectStorageResult}}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
+use crate::{geese::{state::{StateExecResult, StateOp}, tenantstate::TenantState}, worker::{limits::{LuaKVConstraints, Ratelimits}, syscall::{cdn::{CdnCall, CdnResult}, discord::ArDiscordProvider, meta::{MetaCall, MetaResult}, objstorage::{ObjectStorageCall, ObjectStorageResult}}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
 use dapi::context::DiscordContext;
 use khronos_runtime::{primitives::lazy::Lazy, rt::mluau::prelude::*};
 use log::info;
@@ -76,7 +76,8 @@ impl FromLua for SyscallArgs {
 
 pub enum SyscallRet {
     State {
-        res: Vec<StateExecResult>
+        res: Vec<StateExecResult>,
+        new_tenant_state: Option<TenantState>
     },
     ObjectStorage {
         res: ObjectStorageResult
@@ -98,9 +99,10 @@ impl IntoLua for SyscallRet {
     fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
         let table = lua.create_table_with_capacity(0, 2)?;
         match self {
-            Self::State { res } => {
+            Self::State { res, new_tenant_state } => {
                 table.set("op", "State")?;
                 table.set("res", res)?;
+                table.set("new_tenant_state", new_tenant_state)?;
             }
             Self::ObjectStorage { res } => {
                 table.set("op", "ObjectStorage")?;
@@ -161,10 +163,10 @@ impl SyscallHandler {
             SyscallArgs::State { ops } => {
                 self.ratelimits.object_storage.check("syscall")?;
                 let res = self.state.mesophyll_client.exec_state_op(id, ops).await?;
-                if let Some((ts_new_events, ts_new_flags)) = res.new_tenant_state {
-                    self.wts.reload_for_tenant(id, ts_new_events, ts_new_flags, None).map_err(|e| e.to_string())?;
+                if let Some(ref ts) = res.new_tenant_state {
+                    self.wts.reload_for_tenant(id, ts).map_err(|e| e.to_string())?;
                 }
-                Ok(SyscallRet::State { res: res.results })
+                Ok(SyscallRet::State { res: res.results, new_tenant_state: res.new_tenant_state })
             }
             SyscallArgs::ObjectStorage { op } => {
                 let res = op.exec(id, self).await?;

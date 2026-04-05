@@ -5,6 +5,7 @@ mod cleanup_v8;
 mod drop_tenant_kv_expires_at;
 mod tenantstate_data_to_flags;
 mod tenantstate_add_modflags;
+mod tenantstate_add_eventrefs;
 mod kv_scope_unnest;
 
 use futures::future::BoxFuture;
@@ -17,7 +18,7 @@ pub struct Migration {
     pub up: fn(sqlx::Pool<sqlx::Postgres>) -> BoxFuture<'static, Result<(), crate::Error>>,
 }
 
-pub const MIGRATIONS: [Migration; 8] = [
+pub const MIGRATIONS: [Migration; 9] = [
     // This relies on kv_generic not being applied yet so order matters
     //
     // Do not change this list without verifying order
@@ -28,7 +29,8 @@ pub const MIGRATIONS: [Migration; 8] = [
     drop_tenant_kv_expires_at::MIGRATION,
     tenantstate_data_to_flags::MIGRATION,
     tenantstate_add_modflags::MIGRATION,
-    kv_scope_unnest::MIGRATION
+    kv_scope_unnest::MIGRATION,
+    tenantstate_add_eventrefs::MIGRATION
 ];
 
 pub async fn apply_migrations(pool: sqlx::PgPool) -> Result<(), crate::Error> {

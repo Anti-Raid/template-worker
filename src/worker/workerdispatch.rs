@@ -1,6 +1,6 @@
 use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
 use serde_json::json;
-use crate::worker::workertenantstate::WorkerTenantState;
+use crate::{geese::tenantstate::DEFAULT_EVENTS, worker::workertenantstate::WorkerTenantState};
 
 use super::workervmmanager::{Id, WorkerVmManager, VmData};
 use khronos_runtime::rt::mlua;
@@ -54,7 +54,7 @@ impl WorkerDispatch {
         let tenant_state = self.tenant_state.get_cached_tenant_state_for(id)
             .map_err(|e| mlua::Error::external(format!("Failed to get tenant state for ID {id:?}: {e}")))?;
 
-        if !tenant_state.events.contains(event.name()) {
+        if !tenant_state.events.contains_key(event.name()) && !DEFAULT_EVENTS.contains(&event.name()) {
             // Event not registered for this tenant, skip
             return Ok(KhronosValue::Null);
         }

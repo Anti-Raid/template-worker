@@ -1,22 +1,6 @@
-use std::{cell::RefCell, collections::{HashMap, HashSet, hash_map::Entry}, rc::Rc, sync::{Arc, LazyLock}};
+use std::{cell::RefCell, collections::{HashMap, HashSet}, rc::Rc, sync::Arc};
 
 use crate::{geese::tenantstate::{ModFlags, TenantState}, mesophyll::client::MesophyllClient, worker::workervmmanager::{Id, WorkerVmManager}};
-
-static DEFAULT_TENANT_STATE: LazyLock<TenantState> = LazyLock::new(|| {
-    let ts = TenantState {
-        events: {
-            let mut set = HashSet::new();
-            set.insert("INTERACTION_CREATE".to_string());
-            set.insert("WebGetSettings".to_string());
-            set.insert("WebExecuteSetting".to_string());
-            set
-        },
-        flags: 0,
-        modflags: ModFlags::empty()
-    };
-
-    ts
-});
 
 #[derive(Clone)]
 pub struct WorkerTenantState {
@@ -37,35 +21,16 @@ impl WorkerTenantState {
     }
 
     /// Reloads the tenant state cache for a worker
-    pub fn reload_for_tenant(&self, id: Id, events: Vec<String>, flags: i32, modflags: Option<ModFlags>) -> Result<(), crate::Error> {
-        let events_set = HashSet::from_iter(events);
-
+    pub fn reload_for_tenant(&self, id: Id, tenant_state: &TenantState) -> Result<(), crate::Error> {
+        let reload_vm = tenant_state.modflags.contains(ModFlags::BANNED);
         {
             let mut cache = self.tenant_state_cache.borrow_mut();
-            match cache.entry(id) {
-                Entry::Occupied(mut e) => {
-                    let old_modflags = if let Some(modflags) = modflags { modflags } else { e.get().modflags };
-                    e.insert(TenantState {
-                        events: events_set,
-                        flags,
-                        modflags: old_modflags,
-                    }); 
-                }
-                Entry::Vacant(vc) => {
-                    vc.insert(TenantState { 
-                        events: events_set, 
-                        flags, 
-                        modflags: if let Some(modflags) = modflags { modflags } else { ModFlags::empty() }
-                    });
-                }
-            };
+            cache.insert(id, tenant_state.clone());
         }
 
-        // Drop any bad tenants here if modflags is set
-        if let Some(modflags) = modflags {
-            if modflags.contains(ModFlags::BANNED) {
-                self.vm_manager.remove_vm_for(id)?;
-            }
+        // Drop any bad tenants here 
+        if reload_vm {
+            self.vm_manager.remove_vm_for(id)?; 
         }
 
         Ok(())
@@ -76,10 +41,7 @@ impl WorkerTenantState {
         let cache = self.tenant_state_cache.borrow();
         match cache.get(&id) {
             Some(state) => Ok(state.clone()),
-            None => {
-                // Return the default tenant state if not found in cache
-                Ok(DEFAULT_TENANT_STATE.clone())
-            }
+            None => Ok(TenantState::default())
         }
     }
     /// Returns the set of tenant IDs that have startup events enabled
@@ -88,7 +50,7 @@ impl WorkerTenantState {
         let ts = self.tenant_state_cache.borrow();
         for (id, ts) in ts.iter() {
             // Track startup events
-            if ts.events.contains("OnStartup") {
+            if ts.events.contains_key("OnStartup") {
                 startup_events.insert(*id);
             }
         }
