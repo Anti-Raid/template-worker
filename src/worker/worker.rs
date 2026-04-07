@@ -15,12 +15,12 @@ pub struct Worker {
 
 impl Worker {
     pub async fn new(state: WorkerState) -> Result<Self, crate::Error> {        
-        let vm_manager = WorkerVmManager::new(state.clone());
+        let vm_manager = WorkerVmManager::new();
         let wts = WorkerTenantState::new(state.mesophyll_client.clone(), vm_manager.clone()).await?;
                 
         // This will automatically fire key resumption tasks to all keys with resume flag upon creation
         // of this structure (in addition to providing dispatch services)
-        let dispatch = WorkerDispatch::new(vm_manager.clone(), wts);
+        let dispatch = WorkerDispatch::new(vm_manager.clone(), state, wts);
 
         Ok(Self {
             vm_manager,

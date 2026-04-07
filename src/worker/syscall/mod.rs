@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::{geese::{state::{StateExecResult, StateOp}, tenantstate::TenantState}, worker::{limits::{LuaKVConstraints, Ratelimits}, syscall::{cdn::{CdnCall, CdnResult}, discord::ArDiscordProvider, meta::{MetaCall, MetaResult}, objstorage::{ObjectStorageCall, ObjectStorageResult}}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
 use dapi::context::DiscordContext;
-use khronos_runtime::{primitives::lazy::Lazy, rt::mluau::prelude::*};
+use khronos_runtime::{primitives::{lazy::Lazy, syscall::Syscall}, rt::mluau::prelude::*};
 use log::info;
 
 /// The core underlying syscall
@@ -145,16 +145,17 @@ pub struct SyscallHandler {
     wts: WorkerTenantState,
     kv_constraints: LuaKVConstraints,
     ratelimits: Arc<Ratelimits>,
+    id: Id
 }
 
 impl SyscallHandler {
     /// Creates a new syscall handler
-    pub fn new(state: WorkerState, wts: WorkerTenantState, kv_constraints: LuaKVConstraints, ratelimits: Arc<Ratelimits>) -> Self {
-        Self { state, wts, kv_constraints, ratelimits }
+    pub fn new(state: WorkerState, wts: WorkerTenantState, kv_constraints: LuaKVConstraints, ratelimits: Arc<Ratelimits>, id: Id) -> Self {
+        Self { state, wts, kv_constraints, ratelimits, id }
     }
 
     /// Handles a syscall
-    pub async fn handle_syscall(&self, id: Id, args: SyscallArgs) -> Result<SyscallRet, crate::Error> {
+    pub async fn handle_syscall(&self, args: SyscallArgs) -> Result<SyscallRet, crate::Error> {
         if self.state.worker_print {
             info!("Executing syscall {args:?}");
         }
@@ -162,31 +163,41 @@ impl SyscallHandler {
         match args {
             SyscallArgs::State { ops } => {
                 self.ratelimits.object_storage.check("syscall")?;
-                let res = self.state.mesophyll_client.exec_state_op(id, ops).await?;
+                let res = self.state.mesophyll_client.exec_state_op(self.id, ops).await?;
                 if let Some(ref ts) = res.new_tenant_state {
-                    self.wts.reload_for_tenant(id, ts).map_err(|e| e.to_string())?;
+                    self.wts.reload_for_tenant(self.id, ts).map_err(|e| e.to_string())?;
                 }
                 Ok(SyscallRet::State { res: res.results, new_tenant_state: res.new_tenant_state })
             }
             SyscallArgs::ObjectStorage { op } => {
-                let res = op.exec(id, self).await?;
+                let res = op.exec(self.id, self).await?;
                 Ok(SyscallRet::ObjectStorage { res })
             }
             SyscallArgs::Cdn { op } => {
-                let res = op.exec(id, self).await?;
+                let res = op.exec(self.id, self).await?;
                 Ok(SyscallRet::Cdn { res })
             }
             SyscallArgs::Discord { op } => {
                 let op_name = op.api_name();
                 self.ratelimits.discord.check(op_name)?;
-                let dp = DiscordContext::new(ArDiscordProvider { id, state: self.state.clone() });
+                let dp = DiscordContext::new(ArDiscordProvider { id: self.id, state: self.state.clone() });
                 let (value, mrm) = op.execute(&dp).await?;
                 Ok(SyscallRet::Discord { op: op_name, res: value, mrm })
             }
             SyscallArgs::Meta { op } => {
-                let res = op.exec(id, self).await?;
+                let res = op.exec(self.id, self).await?;
                 Ok(SyscallRet::Meta { res })
             }
         }
+    }
+}
+
+impl Syscall for SyscallHandler {
+    type SyscallArgs = SyscallArgs;
+    type SyscallRet = SyscallRet;
+
+
+    async fn syscall(&self, args: SyscallArgs) -> Result<SyscallRet, khronos_runtime::Error> {
+        self.handle_syscall(args).await
     }
 }

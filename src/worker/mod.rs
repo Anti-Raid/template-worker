@@ -21,7 +21,6 @@ pub mod workerdispatch;
 pub mod workervmmanager;
 pub mod workerstate;
 pub mod limits;
-pub mod vmcontext;
 pub mod builtins;
 pub mod worker;
 pub mod workerthread;

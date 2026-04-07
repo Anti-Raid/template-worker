@@ -11,7 +11,7 @@ pub static MIGRATION: Migration = Migration {
                     owner_id TEXT NOT NULL, owner_type TEXT NOT NULL, 
                     event TEXT NOT NULL, 
                     system TEXT NOT NULL,
-                    PRIMARY KEY (owner_id, owner_type, event, system)
+                    PRIMARY KEY (owner_id, owner_type, event, system),
                     FOREIGN KEY (owner_id, owner_type) REFERENCES tenant_state(owner_id, owner_type) ON DELETE CASCADE
                 )",
                 "ALTER TABLE tenant_state DROP COLUMN events",

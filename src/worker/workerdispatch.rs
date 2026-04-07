@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
 use serde_json::json;
-use crate::{geese::tenantstate::DEFAULT_EVENTS, worker::workertenantstate::WorkerTenantState};
+use crate::{geese::tenantstate::DEFAULT_EVENTS, worker::{workerstate::WorkerState, workertenantstate::WorkerTenantState}};
 
-use super::workervmmanager::{Id, WorkerVmManager, VmData};
+use super::workervmmanager::{Id, WorkerVmManager};
 use khronos_runtime::rt::mlua;
 
 /// A WorkerDispatch manages the dispatching of events to a Luau VM
@@ -11,13 +13,16 @@ use khronos_runtime::rt::mlua;
 pub struct WorkerDispatch {
     /// VM Manager for the worker
     vm_manager: WorkerVmManager,
-    tenant_state: WorkerTenantState
+    /// Worker tenant state
+    tenant_state: WorkerTenantState,
+    /// The state all VMs in the WorkerVmManager share
+    worker_state: WorkerState,
 }
 
 impl WorkerDispatch {
     /// Creates a new WorkerDispatch with the given WorkerVmManager
-    pub fn new(vm_manager: WorkerVmManager, tenant_state: WorkerTenantState) -> Self {
-        let dispatch = Self { vm_manager, tenant_state };
+    pub fn new(vm_manager: WorkerVmManager, worker_state: WorkerState, tenant_state: WorkerTenantState) -> Self {
+        let dispatch = Self { vm_manager, worker_state, tenant_state };
 
         // Dispatch startup events for all tenants in the background upon creation of the WorkerDispatch
         dispatch.dispatch_startup_events();
@@ -59,19 +64,20 @@ impl WorkerDispatch {
             return Ok(KhronosValue::Null);
         }
 
-        let vm_data = self.vm_manager.get_vm_for(id, &self.tenant_state)
+        let vm_data = self.vm_manager.get_vm_for(id, &self.worker_state, &self.tenant_state)
             .map_err(|e| mlua::Error::external(format!("Failed to get VM for ID {id:?}: {e}")))?;
 
-        if vm_data.data.runtime.is_broken() {
+        if vm_data.runtime.is_broken() {
             return Err(mlua::Error::external("Lua VM to dispatch to is broken"));
         }
 
-        match vm_data.data.runtime.call_in_scheduler::<_, KhronosValue>(vm_data.dispatch_func, event).await {
+        let http = self.worker_state.serenity_http.clone();
+        match vm_data.runtime.call_in_scheduler::<_, KhronosValue>(vm_data.dispatch_func, event).await {
             Ok(result) => Ok(result),
             Err(e) => {
                 let err_str = e.to_string();
                 tokio::task::spawn_local(async move {
-                    if let Err(e) = Self::log_error_to_main_server(&vm_data.data, err_str.clone()).await {
+                    if let Err(e) = Self::log_error_to_main_server(http, err_str.clone()).await {
                         log::error!("Failed to log error for ID {id:?}: {}", e);
                     }
                 });
@@ -110,12 +116,12 @@ impl WorkerDispatch {
 
     /// Helper method to log a template error to the main server
     async fn log_error_to_main_server(
-        vm_data: &VmData,
+        serenity_http: Arc<serenity::all::Http>,
         error: String,
     ) -> Result<(), crate::Error> {
         let error = format!("```lua\n{}```", error.replace('`', "\\`"));
         // Send to main server
-        vm_data.state.serenity_http.send_message(
+        serenity_http.send_message(
             crate::CONFIG.meta.default_error_channel.widen(),
             Vec::with_capacity(0),
             &Self::error_message(error),

@@ -1,5 +1,6 @@
 use dapi::controller::DiscordProviderContext;
 use khronos_runtime::core::typesext::Vfs;
+use khronos_runtime::primitives::syscall::RawSyscall;
 use khronos_runtime::rt::{KhronosRuntime, RuntimeCreateOpts};
 use serde::{Deserialize, Serialize};
 use serenity::all::{GuildId, UserId};
@@ -9,7 +10,7 @@ use std::{collections::HashMap, rc::Rc};
 use khronos_runtime::rt::mlua::prelude::*;
 use crate::worker::builtins::{Builtins, TemplatingTypes};
 use crate::worker::limits::TEMPLATE_GIVE_TIME;
-use crate::worker::vmcontext::TemplateContextProvider;
+use crate::worker::syscall::SyscallHandler;
 use crate::worker::workertenantstate::WorkerTenantState;
 
 use super::limits::{LuaKVConstraints, Ratelimits};
@@ -113,24 +114,15 @@ impl IntoLua for Id {
     }
 }
 
-/// Represents the data associated with a VM, which includes the guild state and the Khronos runtime manager
-#[derive(Clone)]
-pub struct VmData {
-    pub state: WorkerState,
-    pub runtime: KhronosRuntime,
-    pub kv_constraints: LuaKVConstraints,
-    pub ratelimits: Arc<Ratelimits>,
-}
-
 /// Represents the vmdata and the dispatch function as well
 #[derive(Clone)]
 pub struct VmState {
-    pub data: VmData,
+    pub runtime: KhronosRuntime,
     pub dispatch_func: LuaFunction
 }
 
 struct BaseTenantData<'a> {
-    bot: &'a serenity::all::CurrentUser,
+    bot: Arc<serenity::all::CurrentUser>,
     id: Id,
     dispatchable_events: &'a [&'static str],
     base_vfs: &'a HashMap<String, Vfs>,
@@ -166,73 +158,63 @@ impl<'a> IntoLua for BaseTenantData<'a> {
 /// 2. A WorkerVmManager only manages the VMs for a single worker and nothing more 
 #[derive(Clone)]
 pub struct WorkerVmManager {
-    /// The state all VMs in the WorkerVmManager share
-    worker_state: WorkerState,
     /// The VMs managed by this WorkerVmManager, keyed by their tenant ID
     vms: Rc<RefCell<HashMap<Id, VmState>>>,
 }
 
 impl WorkerVmManager {
     /// Creates a new WorkerVmManager with the given worker state
-    pub fn new(worker_state: WorkerState) -> Self {
+    pub fn new() -> Self {
         Self {
-            worker_state,
             vms: RefCell::default().into()
         }
     }
 
     /// Returns the VM for the given tenant ID creating it if needed
-    pub fn get_vm_for(&self, id: Id, wts: &WorkerTenantState) -> LuaResult<VmState> {
+    pub fn get_vm_for(&self, id: Id, worker_state: &WorkerState, wts: &WorkerTenantState) -> LuaResult<VmState> {
         let mut vms = self.vms.borrow_mut();
         if let Some(vm) = vms.get(&id) {
             return Ok(vm.clone());
         }
 
-        let vm = self.create_vm(id, wts.clone())?;
+        let vm = self.create_vm(id, worker_state.clone(), wts.clone())?;
         vms.insert(id, vm.clone());
 
         Ok(vm)
     }
 
     /// Creates a new VmData
-    fn create_vm(&self, id: Id, wts: WorkerTenantState) -> LuaResult<VmState> {
+    fn create_vm(&self, id: Id, worker_state: WorkerState, wts: WorkerTenantState) -> LuaResult<VmState> {
         // If it doesn't exist, create a new VM
-        let runtime = self.configure_runtime()
+        let runtime = self.configure_runtime(&worker_state)
             .map_err(|e| LuaError::external(e))?;
 
-        let vmd = VmData {
-            state: self.worker_state.clone(),
-            runtime,
-            kv_constraints: LuaKVConstraints::default(),
-            ratelimits: Ratelimits::new().map_err(|e| LuaError::external(e.to_string()))?.into(),
-        };
-
-        let func: LuaFunction = vmd
-        .runtime
+        let func: LuaFunction = runtime
         .eval_script("./builtins.templateloop")?;
-
-        let provider = TemplateContextProvider::new(
-            id,
-            vmd.clone(),
-            wts.clone()
-        );
-        let context = vmd.runtime.create_context(provider)?;
 
         let tenant_state = wts.get_cached_tenant_state_for(id)
             .map_err(|e| LuaError::external(format!("Failed to get tenant state for ID {id:?}: {e}")))?;
         let lts = BaseTenantData { 
             id, 
-            bot: &vmd.state.current_user, 
+            bot: worker_state.current_user.clone(), 
             dispatchable_events: &dapi::EVENT_LIST, 
             base_vfs: &super::builtins::EXPOSED_VFS,
             support_server: &crate::CONFIG.meta.support_server_invite,
             website: &crate::CONFIG.sites.frontend
         };
 
-        let dispatch_func = func.call::<LuaFunction>((context, tenant_state, lts))?;
+        let syscall_h = SyscallHandler::new(
+            worker_state,
+            wts,
+            LuaKVConstraints::default(),
+            Ratelimits::new().map_err(|e| LuaError::external(e.to_string()))?.into(),
+            id
+        );
+
+        let dispatch_func = func.call::<LuaFunction>((RawSyscall::new(syscall_h), tenant_state, lts))?;
 
         Ok(VmState {
-            data: vmd,
+            runtime,
             dispatch_func
         })
     }
@@ -245,7 +227,7 @@ impl WorkerVmManager {
 
         // If it existed and was initialized, mark it broken
         if let Some(vm) = cell_opt {
-            vm.data.runtime.mark_broken(true)?;
+            vm.runtime.mark_broken(true)?;
         }
         
         Ok(())
@@ -270,7 +252,7 @@ impl WorkerVmManager {
     }
 
     /// Configures a new khronos runtime
-    fn configure_runtime(&self) -> LuaResult<KhronosRuntime> {
+    fn configure_runtime(&self, worker_state: &WorkerState) -> LuaResult<KhronosRuntime> {
         let rt = KhronosRuntime::new(
             RuntimeCreateOpts {
                 disable_task_lib: false,
@@ -289,7 +271,7 @@ impl WorkerVmManager {
 
         rt.set_memory_limit(MAX_TEMPLATE_MEMORY_USAGE)?;
 
-        if self.worker_state.worker_print {
+        if worker_state.worker_print {
             let gtab = rt.global_table().clone();
             rt.with_lua(|lua| {
                 gtab.set("_debug", lua.create_function(|_, values: LuaMultiValue| {
