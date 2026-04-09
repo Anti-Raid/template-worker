@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use futures::{StreamExt, stream::FuturesUnordered};
-use crate::{geese::{state::{StateExecResponse, StateOp}, tenantstate::TenantState}, worker::{workerlike::WorkerLike, workerthread::WorkerThread, workervmmanager::Id}};
+use crate::{geese::{state::{StateExecResponse, StateOp}, tenantstate::TenantState}, worker::{workerthread::WorkerThread, workervmmanager::Id}};
 use crate::mesophyll::server::pb;
 
 /// Mesophyll client

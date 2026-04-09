@@ -8,7 +8,7 @@ use stratum_common::{GuildFetchOpts, pb};
 use tokio::sync::watch;
 use serde_json::value::RawValue;
 
-use crate::{Error, config::CONFIG, worker::{workerlike::WorkerLike, workerthread::WorkerThread, workervmmanager::Id}};
+use crate::{Error, config::CONFIG, worker::{workerthread::WorkerThread, workervmmanager::Id}};
 
 #[derive(Clone)]
 pub struct Stratum {

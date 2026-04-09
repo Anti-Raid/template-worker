@@ -1,14 +1,10 @@
-use serenity::async_trait;
 use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 use tokio::sync::oneshot::Sender as OneShotSender;
-use std::sync::Arc;
 use std::panic::AssertUnwindSafe;
 
 use crate::worker::limits::MAX_VM_THREAD_STACK_SIZE;
-use crate::worker::workerlike::WorkerLike;
-use crate::worker::workerpool::Poolable;
 use crate::worker::workerstate::WorkerState;
 use super::{worker::Worker, workervmmanager::Id};
 
@@ -100,51 +96,36 @@ impl WorkerThread {
     }
 }
 
-#[async_trait]
-impl WorkerLike for WorkerThread {
-    fn id(&self) -> usize {
+impl WorkerThread {
+    pub fn id(&self) -> usize {
         self.id
     }
 
-    async fn kill(&self) -> Result<(), crate::Error> {
+    pub async fn kill(&self) -> Result<(), crate::Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.tx.send(WorkerThreadMessage::Kill { tx: tx })
             .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
         Ok(rx.await.map_err(|e| format!("Failed to receive response from worker thread: {e}"))??)
     }
 
-    fn clone_to_arc(&self) -> Arc<dyn WorkerLike + Send + Sync> {
-        Arc::new(self.clone())
-    }
-
-    async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
+    pub async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.tx.send(WorkerThreadMessage::DispatchEvent { id, event, tx: Some(tx) })
             .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
         Ok(rx.await.map_err(|e| format!("Failed to receive response from worker thread: {e}"))??)
     }
 
-    fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
+    pub fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
         self.tx.send(WorkerThreadMessage::DispatchEvent { id, event, tx: None })
             .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
         Ok(())
     }
 
-    async fn drop_tenant(&self, id: Id) -> Result<(), crate::Error> {
+    pub async fn drop_tenant(&self, id: Id) -> Result<(), crate::Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.tx.send(WorkerThreadMessage::DropTenant { id, tx })
             .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
         Ok(rx.await.map_err(|e| format!("Failed to receive response from worker thread: {e}"))??)
-    }
-}
-
-// WorkerThread's can be pooled via WorkerPool!
-impl Poolable for WorkerThread {
-    type ExtState = WorkerState;
-    fn new(id: usize, _total: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
-        where
-            Self: Sized {
-        Self::new(ext_state.clone(), id)
     }
 }
 

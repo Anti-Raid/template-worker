@@ -1,5 +1,3 @@
-use serenity::async_trait;
-use std::sync::Arc;
 use std::time::Duration;
 
 use khronos_runtime::primitives::event::CreateEvent;
@@ -7,8 +5,6 @@ use khronos_runtime::utils::khronos_value::KhronosValue;
 use tokio::process::Command;
 use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 use crate::mesophyll::server::MesophyllServer;
-use crate::worker::workerlike::WorkerLike;
-use crate::worker::workerpool::Poolable;
 use crate::worker::workervmmanager::Id;
 
 /// A WorkerProcessHandle is a handle to a worker process from the master process
@@ -133,34 +129,29 @@ impl WorkerProcessHandle {
     }
 }
 
-#[async_trait]
-impl WorkerLike for WorkerProcessHandle {
-    fn id(&self) -> usize {
+impl WorkerProcessHandle {
+    pub fn id(&self) -> usize {
         self.id
     }
 
-    async fn kill(&self) -> Result<(), crate::Error> {
+    pub async fn kill(&self) -> Result<(), crate::Error> {
         self.kill_msg_tx.send(())
         .map_err(|e| format!("Failed to send kill message to worker process with ID: {}: {}", self.id, e).into())
     }
 
-    fn clone_to_arc(&self) -> Arc<dyn WorkerLike + Send + Sync> {
-        Arc::new(self.clone())
-    }
-
-    async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
+    pub async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
         let r = self.mesophyll_server.get_connection(self.id)
             .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", self.id))?;
         r.dispatch_event(id, event).await
     }
     
-    fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
+    pub fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
         let r = self.mesophyll_server.get_connection(self.id)
             .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", self.id))?;
         r.dispatch_event_nowait(id, event)
     }
 
-    async fn drop_tenant(&self, id: Id) -> Result<(), crate::Error> {
+    pub async fn drop_tenant(&self, id: Id) -> Result<(), crate::Error> {
         let r = self.mesophyll_server.get_connection(self.id)
             .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", self.id))?;
         r.drop_tenant(id).await
@@ -179,17 +170,6 @@ impl WorkerProcessHandleCreateOpts {
             mesophyll_server,
             worker_debug,
         }
-    }
-}
-
-// WorkerProcessHandle's can be pooled via WorkerPool!
-impl Poolable for WorkerProcessHandle {
-    type ExtState = WorkerProcessHandleCreateOpts;
-
-    fn new(id: usize, _total: usize, ext_state: &Self::ExtState) -> Result<Self, crate::Error>
-    where Self: Sized 
-    {
-        Self::new(id, ext_state.worker_debug, ext_state.mesophyll_server.clone())
     }
 }
 

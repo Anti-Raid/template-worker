@@ -1,4 +1,4 @@
-use crate::{geese::stratum::Stratum, worker::workerlike::WorkerLike};
+use crate::geese::stratum::Stratum;
 
 use super::public_api;
 use axum::{
@@ -105,14 +105,6 @@ pub fn create(
 
     // Public routes
     let public_routes = [
-        routes!(public_api::dispatch_event),
-        routes!(public_api::get_user_guilds),
-        routes!(public_api::base_guild_user_info),
-        routes!(public_api::create_oauth2_session),
-        routes!(public_api::get_authorized_session),
-        routes!(public_api::get_user_sessions_api),
-        routes!(public_api::create_user_session),
-        routes!(public_api::delete_user_session_api),
         routes!(public_api::state),
         routes!(public_api::api_config),
         routes!(public_api::get_bot_stats),

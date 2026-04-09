@@ -24,8 +24,5 @@ pub mod limits;
 pub mod builtins;
 pub mod worker;
 pub mod workerthread;
-pub mod workerlike;
-pub mod workerprocesshandle; // TODO: Replace with mesophyll
-pub mod workerpool;
 pub mod workertenantstate;
 pub mod syscall;

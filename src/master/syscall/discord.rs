@@ -1,0 +1,202 @@
+use chrono::{DateTime, TimeDelta, Utc};
+use serde::Serialize;
+use serenity::all::{GuildId, UserId};
+use sqlx::Row;
+use crate::master::syscall::{MSyscallError, MSyscallHandler};
+use super::types::discord::*;
+
+#[derive(Serialize)]
+#[serde(tag = "op")]
+pub enum MDiscordSyscall {
+    /// Get a list of all user guilds
+    GetUserGuilds {
+        refresh: bool,
+    },
+    GetGuildInfo {
+        guild_id: GuildId
+    }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "op")]
+pub enum MDiscordSyscallRet {
+    /// List of all user guilds
+    UserGuilds {
+        data: DashboardGuildData
+    },
+    GuildInfo {
+        data: BaseGuildUserInfo
+    }
+}
+
+impl MDiscordSyscall {
+    const ACCESS_TOKEN_MAX_LIFETIME: TimeDelta = TimeDelta::hours(60); // 1 hour
+    pub async fn exec(self, user_id: UserId, handler: &MSyscallHandler) -> Result<MDiscordSyscallRet, MSyscallError> {
+        match self {
+            Self::GetUserGuilds { refresh } => {
+                let mut guilds_cache = None;
+                if !refresh {
+                    // Check for guilds cache
+                    let cached_guilds = sqlx::query("SELECT guilds_cache FROM users WHERE user_id = $1")
+                        .bind(&user_id)
+                        .fetch_one(&handler.pool)
+                        .await?;
+
+                    if let Some(cached_guilds_data) = cached_guilds.try_get::<Option<serde_json::Value>, _>(0)? {
+                        guilds_cache = Some(serde_json::from_value::<Vec<DashboardGuild>>(cached_guilds_data)?);
+                    }
+                }
+
+                let guilds = match guilds_cache {
+                    Some(gc) => gc,
+                    None => {
+                        // Get the access token
+                        #[derive(sqlx::FromRow)]
+                        struct AccessToken {
+                            access_token: Option<String>,
+                            access_token_last_fetched: DateTime<Utc>
+                        }
+
+                        let data: AccessToken = sqlx::query_as("SELECT access_token, access_token_last_fetched FROM users WHERE user_id = $1")
+                            .bind(&user_id)
+                            .fetch_one(&handler.pool)
+                            .await?;
+
+                        let Some(access_token) = data.access_token else {
+                            return Err(MSyscallError::UserOauth2Needed);
+                        };
+                        if Utc::now() - data.access_token_last_fetched > Self::ACCESS_TOKEN_MAX_LIFETIME {
+                            return Err(MSyscallError::UserOauth2Needed);
+                        }
+
+                        let resp = handler.reqwest.get(format!("{}/api/v10/users/@me/guilds", crate::CONFIG.meta.proxy))
+                        .header("Authorization", format!("Bearer {access_token}"))
+                        .send()
+                        .await?;
+
+                        if resp.status() != reqwest::StatusCode::OK {
+                            let error_text = resp.text().await?;
+                            return Err(format!("Failed to get user guilds: {}", error_text).into());
+                        }
+
+                        #[derive(serde::Deserialize)]
+                        pub struct OauthGuild {
+                            id: String,
+                            name: String,
+                            icon: Option<String>,
+                            permissions: String,
+                            owner: bool,
+                        }
+
+                        let guilds: Vec<OauthGuild> = resp.json().await?;
+
+                        let mut dashboard_guilds = Vec::with_capacity(guilds.len());
+
+                        for guild in guilds {
+                            let dashboard_guild = DashboardGuild {
+                                id: guild.id,
+                                name: guild.name,
+                                icon: guild.icon,
+                                permissions: guild.permissions,
+                                owner: guild.owner,
+                            };
+
+                            dashboard_guilds.push(dashboard_guild);
+                        }
+
+                        // Now update the database
+                        sqlx::query("UPDATE users SET guilds_cache = $1 WHERE user_id = $2")
+                            .bind(serde_json::to_value(&dashboard_guilds)?)
+                            .bind(&user_id)
+                            .execute(&handler.pool)
+                            .await?;
+
+                        dashboard_guilds
+                    }
+                };
+
+                let mut guild_ids = Vec::with_capacity(guilds.len());
+                for guild in guilds.iter() {
+                    guild_ids.push(guild.id.parse::<serenity::all::GuildId>()?);
+                }
+
+                let guilds_exist = handler.has_bot(&guild_ids).await?;
+
+                Ok(MDiscordSyscallRet::UserGuilds {
+                    data: DashboardGuildData {
+                        guilds,
+                        guilds_exist,
+                    }
+                })
+            }
+            Self::GetGuildInfo { guild_id } => {
+                let bot_id = handler.current_user.id;
+                let Some(guild_json) = handler.stratum.guild(guild_id)
+                .await? else {
+                    return Err(MSyscallError::EntityNotFound { reason: "Failed to fetch guild data from stratum" });
+                };
+
+                let guild = serde_json::from_value::<serenity::all::PartialGuild>(guild_json)?;
+
+                // Next fetch the member and bot_user
+                let Some(member_json) = handler.stratum.guild_member(guild_id, user_id).await? else {
+                    return Err(MSyscallError::EntityNotFound { reason: "Failed to find member info from stratum" });
+                };
+
+                let member = serde_json::from_value::<serenity::all::Member>(member_json)?;
+
+                let bot_user_json = match handler.stratum.guild_member(guild_id, bot_id).await?
+                {
+                    Some(member) => member,
+                    None => {
+                        return Err(MSyscallError::EntityNotFound { reason: "Failed to find bot user info" });
+                    }
+                };
+
+                let bot_user = serde_json::from_value::<serenity::all::Member>(bot_user_json)?;
+
+                // Fetch the channels
+                let Some(channels_json) = handler.stratum.guild_channels(guild_id).await? else {
+                    return Err(MSyscallError::EntityNotFound { reason: "Failed to find guild channel info" });
+                };
+
+                let channels = serde_json::from_value::<Vec<serenity::all::GuildChannel>>(channels_json)?;
+
+                let mut channels_with_permissions = Vec::with_capacity(channels.len());
+
+                for channel in channels.iter() {
+                    channels_with_permissions.push(GuildChannelWithPermissions {
+                        user: guild.user_permissions_in(channel, &member),
+                        bot: guild.user_permissions_in(channel, &bot_user),
+                        channel: ApiPartialGuildChannel {
+                            id: channel.id.widen(),
+                            name: channel.base.name.to_string(),
+                            position: channel.position,
+                            parent_id: channel.parent_id.map(|id| id.widen()),
+                            r#type: channel.base.kind.0,
+                        },
+                    });
+                }
+
+                Ok(MDiscordSyscallRet::GuildInfo { 
+                    data: BaseGuildUserInfo {
+                        name: guild.name.to_string(),
+                        icon: guild.icon_url(),
+                        owner_id: guild.owner_id.to_string(),
+                        roles: guild.roles.into_iter().map(|role| {
+                            ApiPartialRole {
+                                id: role.id,
+                                name: role.name.to_string(),
+                                position: role.position,
+                                permissions: role.permissions,
+                            }
+                        }).collect(),
+                        user_roles: member.roles.to_vec(),
+                        bot_roles: bot_user.roles.to_vec(),
+                        channels: channels_with_permissions,
+                    }
+                })
+            }
+        }
+    }
+}

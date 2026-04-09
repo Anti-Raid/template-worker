@@ -6,15 +6,14 @@ mod register;
 mod worker;
 mod migrations;
 mod geese;
+mod master;
 
 use crate::config::CONFIG;
 use crate::fauxpas::layers::shell::ShellData;
 use crate::mesophyll::client::MesophyllClient;
 use crate::migrations::apply_migrations;
 use crate::geese::stratum::Stratum;
-use crate::worker::workerlike::WorkerLike;
-use crate::worker::workerpool::WorkerPool;
-use crate::worker::workerprocesshandle::{WorkerProcessHandle, WorkerProcessHandleCreateOpts};
+use crate::master::workerpool::WorkerPool;
 use crate::worker::workerstate::WorkerState;
 use crate::worker::workerthread::WorkerThread;
 use clap::{Parser, ValueEnum};
@@ -218,10 +217,7 @@ async fn main_impl(args: CmdArgs) {
             .expect("Failed to create Mesophyll server");
 
             let worker_pool = Arc::new(
-                WorkerPool::<WorkerProcessHandle>::new(
-                    worker_count,
-                    &WorkerProcessHandleCreateOpts::new(mesophyll_server, args.worker_debug),
-                )
+                WorkerPool::new(worker_count, args.worker_debug, &mesophyll_server)
                 .expect("Failed to create worker process pool"),
             );
             
