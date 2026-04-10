@@ -1,5 +1,6 @@
 use chrono::{DateTime, Duration, Utc};
 use rand::distr::{Alphanumeric, SampleString};
+use serenity::all::UserId;
 use sqlx::PgPool;
 use crate::master::syscall::types::auth::UserSession;
 
@@ -9,13 +10,13 @@ use crate::master::syscall::types::auth::UserSession;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AuthResponse {
     Success {
-        user_id: String,
+        user_id: UserId,
         session_id: String,
         state: String,
         session_type: String,
     },
     ApiBanned {
-        user_id: String,
+        user_id: UserId,
         session_id: String,
         session_type: String,
     },
@@ -65,7 +66,7 @@ pub async fn check_web_auth(
 
     if user_state.state == "banned" {
         return Ok(AuthResponse::ApiBanned {
-            user_id: auth.user_id,
+            user_id: auth.user_id.parse()?,
             session_id: auth.session_id.to_string(),
             session_type: auth.session_type,
         });
@@ -73,7 +74,7 @@ pub async fn check_web_auth(
 
     // If everything is fine, return the success response
     Ok(AuthResponse::Success {
-        user_id: auth.user_id,
+        user_id: auth.user_id.parse()?,
         session_id: auth.session_id.to_string(),
         session_type: auth.session_type,
         state: user_state.state,

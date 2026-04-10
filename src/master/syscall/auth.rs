@@ -61,7 +61,7 @@ pub enum AuthError {
 impl MAuthSyscall {
     // For App
     const APP_OAUTH2_REDIRECT_URI: &str = "antiraid://oauth-callback";
-    pub async fn exec(self, handler: &MSyscallHandler, ctx: MSyscallContext) -> Result<MAuthSyscallRet, MSyscallError> {
+    pub(super) async fn exec(self, handler: &MSyscallHandler, ctx: MSyscallContext) -> Result<MAuthSyscallRet, MSyscallError> {
         match self {
             Self::CreateLoginSession { code, redirect_uri, code_verifier } => {
                 if !crate::CONFIG.discord_auth.allowed_redirects.contains(&redirect_uri) {

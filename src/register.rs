@@ -5,11 +5,11 @@ use khronos_runtime::rt::mlua::prelude::*;
 use khronos_runtime::rt::KhronosRuntime;
 use serde::{Deserialize, Serialize};
 use serenity::all::*;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RegisterResult {
-    pub commands: Vec<CreateCommand>,
+    pub commands: Arc<Vec<CreateCommand>>,
 }
 
 pub static REGISTER: LazyLock<RegisterResult> =

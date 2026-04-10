@@ -1,6 +1,9 @@
 pub mod auth;
 pub mod discord;
 pub mod types;
+pub mod bot;
+pub mod gkv;
+pub mod webapi;
 pub(super) mod internal;
 
 use std::{error::Error, time::Duration};
@@ -8,7 +11,7 @@ use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::Khro
 use moka::future::Cache;
 use serde::{Deserialize, Serialize};
 use serenity::all::UserId;
-use crate::{geese::stratum::Stratum, master::{syscall::{auth::{AuthError, MAuthSyscall, MAuthSyscallRet}, discord::{MDiscordSyscall, MDiscordSyscallRet}}, workerpool::WorkerPool}, worker::workervmmanager::Id};
+use crate::{geese::stratum::Stratum, master::{syscall::{auth::{AuthError, MAuthSyscall, MAuthSyscallRet}, bot::{MBotSyscall, MBotSyscallRet}, discord::{MDiscordSyscall, MDiscordSyscallRet}, gkv::{MGkvSyscall, MGkvSyscallRet}, types::bot::BotStatus}, workerpool::WorkerPool}, worker::workervmmanager::Id};
 
 /// The context in which the syscall is executing in
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -55,6 +58,10 @@ pub enum MSyscallArgs {
         /// Data to send
         data: KhronosValue
     },
+    /// A bot-specific system calls
+    Bot {
+        req: MBotSyscall
+    },
     /// A discord-specific syscall
     Discord {
         req: MDiscordSyscall
@@ -62,6 +69,10 @@ pub enum MSyscallArgs {
     /// A auth-specific syscall
     Auth {
         req: MAuthSyscall
+    },
+    /// A global-kv specific syscall
+    Gkv {
+        req: MGkvSyscall
     }
 }
 
@@ -71,11 +82,17 @@ pub enum MSyscallRet {
     KhronosValue {
         data: KhronosValue
     },
+    Bot {
+        data: MBotSyscallRet
+    },
     Discord {
         data: MDiscordSyscallRet
     },
     Auth {
         data: MAuthSyscallRet
+    },
+    Gkv {
+        data: MGkvSyscallRet
     }
 }
 
@@ -97,7 +114,7 @@ pub enum MSyscallError {
     /// An authentication error has occurred
     AuthError { reason: AuthError },
     /// Unauthorized
-    Unauthorized { reason: String },
+    Unauthorized { reason: &'static str },
     /// Entity not found
     EntityNotFound { reason: &'static str }
 }
@@ -109,13 +126,14 @@ impl<T: Error + Send + Sync + 'static> From<T> for MSyscallError {
 }
 
 pub struct MSyscallHandler {
-    pub current_user: serenity::all::CurrentUser,
-    pub reqwest: reqwest::Client,
-    pub worker_pool: WorkerPool,
-    pub stratum: Stratum,
-    pub pool: sqlx::PgPool,
-    pub bot_has_guild_cache: Cache<serenity::all::GuildId, bool>,
-    pub oauth2_code_cache: Cache<String, ()>
+    pub(super) current_user: serenity::all::CurrentUser,
+    pub(super) reqwest: reqwest::Client,
+    pub(super) worker_pool: WorkerPool,
+    pub(super) stratum: Stratum,
+    pub(super) pool: sqlx::PgPool,
+    pub(super) bot_has_guild_cache: Cache<serenity::all::GuildId, bool>,
+    pub(super) oauth2_code_cache: Cache<String, ()>,
+    pub(super) status_cache: Cache<(), BotStatus>
 }
 
 impl MSyscallHandler {
@@ -134,7 +152,8 @@ impl MSyscallHandler {
             stratum,
             worker_pool,
             bot_has_guild_cache: Cache::builder().time_to_live(Duration::from_secs(60)).build(),
-            oauth2_code_cache: Cache::builder().time_to_live(Duration::from_secs(60 * 10)).build()
+            oauth2_code_cache: Cache::builder().time_to_live(Duration::from_secs(60 * 10)).build(),
+            status_cache: Cache::builder().time_to_live(Duration::from_secs(100)).build()
         }
     }
 
@@ -192,11 +211,17 @@ impl MSyscallHandler {
 
                 Ok(MSyscallRet::KhronosValue { data: self.worker_pool.dispatch_event(id, event).await? })
             }
+            MSyscallArgs::Bot { req } => {
+                Ok(MSyscallRet::Bot { data: req.exec(self, ctx).await? })
+            }
             MSyscallArgs::Discord { req } => {
                 Ok(MSyscallRet::Discord { data: req.exec(ctx.into_user_id()?, self).await? })
             }
             MSyscallArgs::Auth { req } => {
                 Ok(MSyscallRet::Auth { data: req.exec(self, ctx).await? })
+            }
+            MSyscallArgs::Gkv { req } => {
+                Ok(MSyscallRet::Gkv { data: req.exec(self, ctx).await? })
             }
         }
     }

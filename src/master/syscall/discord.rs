@@ -31,7 +31,7 @@ pub enum MDiscordSyscallRet {
 
 impl MDiscordSyscall {
     const ACCESS_TOKEN_MAX_LIFETIME: TimeDelta = TimeDelta::hours(60); // 1 hour
-    pub async fn exec(self, user_id: UserId, handler: &MSyscallHandler) -> Result<MDiscordSyscallRet, MSyscallError> {
+    pub(super) async fn exec(self, user_id: UserId, handler: &MSyscallHandler) -> Result<MDiscordSyscallRet, MSyscallError> {
         match self {
             Self::GetUserGuilds { refresh } => {
                 let mut guilds_cache = None;

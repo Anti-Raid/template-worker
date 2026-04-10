@@ -105,9 +105,6 @@ pub fn create(
 
     // Public routes
     let public_routes = [
-        routes!(public_api::state),
-        routes!(public_api::api_config),
-        routes!(public_api::get_bot_stats),
         routes!(public_api::list_global_kv),
         routes!(public_api::get_global_kv),
     ];

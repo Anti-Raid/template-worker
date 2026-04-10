@@ -348,7 +348,7 @@ impl StateDb {
                 }
             }
             StateOp::GlobalKvFind { query, scope } => {
-                let items: Vec<PartialGlobalKv> = if query == "%%" {
+                let items: Vec<GlobalKv> = if query == "%%" {
                     sqlx::query_as(
                         "SELECT key, version, owner_id, owner_type, short, public_metadata, public_data, scope, created_at, last_updated_at, price, review_state FROM global_kv WHERE scope = $1 AND review_state = 'approved'"
                     )
@@ -365,7 +365,7 @@ impl StateDb {
                     .await?
                 };
 
-                PartialGlobalKv::apply(state, items);
+                GlobalKv::apply(state, items);
             }
             StateOp::GlobalKvGet { key, version, scope } => {
                 if let Some(rec) = sqlx::query_as(
@@ -376,7 +376,7 @@ impl StateDb {
                     .bind(scope)
                     .fetch_optional(executor)
                     .await? {
-                        PartialGlobalKv::apply_one(state, rec);
+                        GlobalKv::apply_one(state, rec);
                     }
             }
             StateOp::GlobalKvCreate { key, version, short, public_metadata, scope, public_data, long, data } => {
@@ -461,7 +461,7 @@ pub enum StateExecResult {
         l: KvLookup
     },
     GlobalKv {
-        l: PartialGlobalKv
+        l: GlobalKv
     },
     GlobalKvData {
         data: KhronosValue,
@@ -552,7 +552,7 @@ impl IntoStateExecResult for KvLookup {
 }
 
 #[derive(Debug, sqlx::FromRow, serde::Serialize, serde::Deserialize)]
-pub struct PartialGlobalKv {
+pub struct GlobalKv {
     pub key: String,
     pub version: i32,
     pub owner_id: String,
@@ -571,7 +571,7 @@ pub struct PartialGlobalKv {
     pub long: Option<String>, // long description for the key-value.
 }
 
-impl IntoStateExecResult for PartialGlobalKv {
+impl IntoStateExecResult for GlobalKv {
     fn into_result(self) -> StateExecResult {
         StateExecResult::GlobalKv { l: self }
     }
