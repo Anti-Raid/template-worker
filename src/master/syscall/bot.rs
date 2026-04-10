@@ -5,6 +5,7 @@ use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::Khro
 use serde::{Deserialize, Serialize};
 use serenity::all::{GuildId, UserId};
 use crate::{geese::tenantstate::ModFlags, master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::bot::{BotStatus, ShardConn}}, worker::workervmmanager::Id};
+use khronos_ext::mluau_ext::prelude::*;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "op")]
@@ -30,6 +31,48 @@ pub enum MBotSyscall {
     AdminDropTenant { id: Id },
     /// Admin API to set tenant state moderation flags (ban them etc.) (works in secure contexts only)
     AdminSetTenantStateModFlags { id: Id, modflags: ModFlags },
+}
+
+impl FromLua for MBotSyscall {
+    fn from_lua(value: LuaValue, _lua: &Lua) -> LuaResult<Self> {
+        let LuaValue::Table(tab) = value else {
+            return Err(LuaError::FromLuaConversionError {
+                from: value.type_name(),
+                to: "MBotSyscall".to_string(),
+                message: Some("expected a table".to_string()),
+            })
+        };
+
+        let typ: LuaString = tab.get("op")?;
+        match typ.as_bytes().as_ref() {
+            b"GetBotCommands" => Ok(Self::GetBotCommands {}),
+            b"GetBotConfig" => Ok(Self::GetBotConfig {}),
+            b"GetBotStatus" => Ok(Self::GetBotStatus {}),
+            b"DispatchEvent" => {
+                let id = tab.get("id")?;
+                let name = tab.get("name")?;
+                let data = tab.get("data")?;
+                Ok(Self::DispatchEvent { id, name, data })
+            },
+            b"GetUncachedBotStatus" => Ok(Self::GetUncachedBotStatus {}),
+            b"AdminDropTenant" => {
+                let id = tab.get("id")?;
+                Ok(Self::AdminDropTenant { id })
+            },
+            b"AdminSetTenantStateModFlags" => {
+                let id = tab.get("id")?;
+                let modflags: u8 = tab.get("modflags")?;
+                Ok(Self::AdminSetTenantStateModFlags { id, modflags: ModFlags::from_bits_retain(modflags) })
+            },
+            _ => {
+                Err(LuaError::FromLuaConversionError {
+                    from: "table",
+                    to: "MBotSyscall".to_string(),
+                    message: Some("invalid op provided".to_string()),
+                })
+            }
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -58,6 +101,20 @@ pub enum MBotSyscallRet {
         data: KhronosValue
     },
     Ack,
+}
+
+impl IntoLua for MBotSyscallRet {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        match self {
+            Self::KhronosValue { data } => {
+                let table = lua.create_table_with_capacity(0, 2)?;
+                table.set("op", "KhronosValue")?;
+                table.set("data", data)?;
+                Ok(LuaValue::Table(table))
+            }
+            _ => lua.to_value(&self) // hack to speed up dev
+        }
+    }
 }
 
 impl MBotSyscall {

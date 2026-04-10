@@ -4,6 +4,7 @@ use serenity::all::{GuildId, UserId};
 use sqlx::Row;
 use crate::master::syscall::{MSyscallError, MSyscallHandler};
 use super::types::discord::*;
+use khronos_ext::mluau_ext::prelude::*;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "op")]
@@ -17,6 +18,37 @@ pub enum MDiscordSyscall {
     }
 }
 
+impl FromLua for MDiscordSyscall {
+    fn from_lua(value: LuaValue, _lua: &Lua) -> LuaResult<Self> {
+        let LuaValue::Table(tab) = value else {
+            return Err(LuaError::FromLuaConversionError {
+                from: value.type_name(),
+                to: "MDiscordSyscall".to_string(),
+                message: Some("expected a table".to_string()),
+            })
+        };
+
+        let typ: LuaString = tab.get("op")?;
+        match typ.as_bytes().as_ref() {
+            b"GetUserGuilds" => {
+                let refresh = tab.get("refresh")?;
+                Ok(Self::GetUserGuilds { refresh })
+            },
+            b"GetGuildInfo" => {
+                let guild_id = tab.get::<String>("guild_id")?;
+                Ok(Self::GetGuildInfo { guild_id: guild_id.parse().into_lua_err()? })
+            },
+            _ => {
+                Err(LuaError::FromLuaConversionError {
+                    from: "table",
+                    to: "MDiscordSyscall".to_string(),
+                    message: Some("invalid op provided".to_string()),
+                })
+            }
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[serde(tag = "op")]
 pub enum MDiscordSyscallRet {
@@ -26,6 +58,12 @@ pub enum MDiscordSyscallRet {
     },
     GuildInfo {
         data: BaseGuildUserInfo
+    }
+}
+
+impl IntoLua for MDiscordSyscallRet {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        lua.to_value(&self) // hack to speed up dev
     }
 }
 
