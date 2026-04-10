@@ -1,11 +1,11 @@
 use chrono::{DateTime, TimeDelta, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serenity::all::{GuildId, UserId};
 use sqlx::Row;
 use crate::master::syscall::{MSyscallError, MSyscallHandler};
 use super::types::discord::*;
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "op")]
 pub enum MDiscordSyscall {
     /// Get a list of all user guilds
@@ -38,7 +38,7 @@ impl MDiscordSyscall {
                 if !refresh {
                     // Check for guilds cache
                     let cached_guilds = sqlx::query("SELECT guilds_cache FROM users WHERE user_id = $1")
-                        .bind(&user_id)
+                        .bind(user_id.to_string())
                         .fetch_one(&handler.pool)
                         .await?;
 
@@ -58,7 +58,7 @@ impl MDiscordSyscall {
                         }
 
                         let data: AccessToken = sqlx::query_as("SELECT access_token, access_token_last_fetched FROM users WHERE user_id = $1")
-                            .bind(&user_id)
+                            .bind(user_id.to_string())
                             .fetch_one(&handler.pool)
                             .await?;
 
@@ -107,7 +107,7 @@ impl MDiscordSyscall {
                         // Now update the database
                         sqlx::query("UPDATE users SET guilds_cache = $1 WHERE user_id = $2")
                             .bind(serde_json::to_value(&dashboard_guilds)?)
-                            .bind(&user_id)
+                            .bind(user_id.to_string())
                             .execute(&handler.pool)
                             .await?;
 
@@ -131,8 +131,7 @@ impl MDiscordSyscall {
             }
             Self::GetGuildInfo { guild_id } => {
                 let bot_id = handler.current_user.id;
-                let Some(guild_json) = handler.stratum.guild(guild_id)
-                .await? else {
+                let Some(guild_json) = handler.stratum.guild(guild_id).await? else {
                     return Err(MSyscallError::EntityNotFound { reason: "Failed to fetch guild data from stratum" });
                 };
 

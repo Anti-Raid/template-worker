@@ -1,4 +1,4 @@
-use crate::fauxpas::mainthread::{run_in_thread, RunInThreadFn};
+use crate::master::mainthread::{run_in_thread, RunInThreadFn};
 use crate::worker::builtins::{Builtins, TemplatingTypes};
 use dapi::types::CreateCommand;
 use khronos_runtime::rt::mlua::prelude::*;

@@ -5,7 +5,7 @@ use khronos_runtime::rt::{KhronosRuntime, mluau::prelude::*};
 use tokio::sync::{oneshot::Sender as OneshotSender, mpsc::{unbounded_channel, UnboundedSender}};
 use crate::worker::builtins::TemplatingTypes;
 use rust_embed::Embed;
-use crate::fauxpas::mainthread::{run_in_thread, RunInThreadFn};
+use crate::master::mainthread::{run_in_thread, RunInThreadFn};
 
 #[derive(Embed, Debug)]
 #[folder = "$CARGO_MANIFEST_DIR/luau/twshell"]

@@ -1,10 +1,10 @@
 use axum::response::Response;
-use axum::{extract::FromRequestParts, response::IntoResponse};
-use axum::Json;
+use axum::routing::{get, post};
+use axum::{extract::{State, FromRequestParts, Json}, Router, response::IntoResponse};
 use reqwest::StatusCode;
+use reqwest::header::AUTHORIZATION;
 use serenity::all::UserId;
-
-use crate::master::syscall::MSyscallRet;
+use crate::master::syscall::{MSyscallArgs, MSyscallContext, MSyscallRet};
 use crate::master::syscall::{MSyscallError, MSyscallHandler, internal::auth as iauth};
 
 impl IntoResponse for MSyscallRet {
@@ -23,9 +23,23 @@ impl IntoResponse for MSyscallError {
 /// from the DB and if so, returns the user id
 struct AuthorizedUser {
     pub user_id: UserId,
-    pub session_id: String,
-    pub state: String,
-    pub session_type: String,
+}
+
+struct OptionalAuthorizedUser(Option<AuthorizedUser>);
+
+impl FromRequestParts<MSyscallHandler> for OptionalAuthorizedUser {
+    type Rejection = MSyscallError;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &MSyscallHandler,
+    ) -> Result<Self, Self::Rejection> {
+        if parts.headers.contains_key(AUTHORIZATION) {
+            Ok(Self(Some(AuthorizedUser::from_request_parts(parts, state).await?)))
+        } else {
+            Ok(Self(None))
+        }
+    }
 }
 
 impl FromRequestParts<MSyscallHandler> for AuthorizedUser {
@@ -37,29 +51,61 @@ impl FromRequestParts<MSyscallHandler> for AuthorizedUser {
     ) -> Result<Self, Self::Rejection> {
         let token = parts
             .headers
-            .get("Authorization")
+            .get(AUTHORIZATION)
             .and_then(|h| h.to_str().ok())
             .ok_or_else(|| MSyscallError::Unauthorized { reason: "No Authorization header found" })?;
 
-        let auth_response = iauth::check_web_auth(&state.pool, token)
-            .await?;
+        let auth_response = iauth::check_web_auth(&state.pool, token).await?;
 
         match auth_response {
-            iauth::AuthResponse::Success {
-                user_id,
-                session_id,
-                state,
-                session_type,
-            } => Ok(AuthorizedUser {
-                user_id,
-                session_id,
-                session_type,
-                state,
-            }),
-            iauth::AuthResponse::ApiBanned { user_id, .. } => {
+            iauth::AuthResponse::Success { user_id, .. } => Ok(AuthorizedUser { user_id }),
+            iauth::AuthResponse::ApiBanned { .. } => {
                 return Err(MSyscallError::Unauthorized { reason: "You have banned from using this service" })
             }
             iauth::AuthResponse::InvalidToken => return Err(MSyscallError::Unauthorized { reason: "The token provided is invalid. Check that it hasn't expired and try again?" })
         }
     }
+}
+
+pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router> {
+    async fn logger(
+        request: axum::extract::Request,
+        next: axum::middleware::Next,
+    ) -> axum::response::Response {
+        log::info!(
+            "Received request: method = {}, path={}",
+            request.method(),
+            request.uri().path()
+        );
+
+        let response = next.run(request).await;
+        response
+    }
+
+    pub(super) async fn msyscall(
+        user: OptionalAuthorizedUser,
+        State(handler): State<MSyscallHandler>,
+        Json(args): Json<MSyscallArgs>,
+    ) -> Result<MSyscallRet, MSyscallError> {
+        let ctx = if let Some(user) = user.0 { MSyscallContext::Api(user.user_id) } else { MSyscallContext::ApiAnon };
+        let resp = handler.handle_syscall(args, ctx).await?;
+        Ok(resp)
+    }
+
+    let mut router = Router::new();
+
+    router = router
+        .route("/healthcheck", post(|| async { Json(()) }))
+        .route("/msyscall", post(msyscall))
+        .fallback(get(|| async {
+            (
+                StatusCode::NOT_FOUND,
+                "Use /msyscall for msyscall (insecure) and /msyscall/secure for msyscall (secure, staff-only)"
+            )
+        }))
+        .layer(tower_http::cors::CorsLayer::very_permissive())
+        .layer(axum::middleware::from_fn(logger));
+
+    let router: Router<()> = router.with_state(handler);
+    router.into_make_service()
 }

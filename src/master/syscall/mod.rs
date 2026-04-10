@@ -6,16 +6,19 @@ pub mod gkv;
 pub mod webapi;
 pub(super) mod internal;
 
-use std::{error::Error, time::Duration};
-use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
+use std::{sync::Arc, time::Duration};
+use std::fmt::{Display, Debug};
 use moka::future::Cache;
 use serde::{Deserialize, Serialize};
-use serenity::all::UserId;
-use crate::{geese::stratum::Stratum, master::{syscall::{auth::{AuthError, MAuthSyscall, MAuthSyscallRet}, bot::{MBotSyscall, MBotSyscallRet}, discord::{MDiscordSyscall, MDiscordSyscallRet}, gkv::{MGkvSyscall, MGkvSyscallRet}, types::bot::BotStatus}, workerpool::WorkerPool}, worker::workervmmanager::Id};
+use serenity::all::{GuildId, UserId};
+use crate::{geese::stratum::Stratum, master::{syscall::{auth::{AuthError, MAuthSyscall, MAuthSyscallRet}, bot::{MBotSyscall, MBotSyscallRet}, discord::{MDiscordSyscall, MDiscordSyscallRet}, gkv::{MGkvSyscall, MGkvSyscallRet}, types::bot::BotStatus}, workerpool::WorkerPool}};
 
 /// The context in which the syscall is executing in
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum MSyscallContext {
+    /// API context (anonymous/logged out)
+    ApiAnon,
     /// API context (normal)
     Api(UserId),
     //// A 'secure' API context (w/ 2fa etc used)
@@ -27,12 +30,14 @@ pub enum MSyscallContext {
 }
 
 impl MSyscallContext {
-    /// Returns if the given context is secure
+    /// Returns if the given context is secure (admin/root access only)
+    #[inline(always)]
     pub const fn is_secure(self) -> bool {
-        matches!(self, Self::ApiSecure(_) | Self::ShellAnon | Self::ShellWithUser(_))
+        matches!(self, Self::ApiSecure(_)) | self.is_shell()
     }
 
     /// Returns if the given context is a shell
+    #[inline(always)]
     pub const fn is_shell(self) -> bool {
         matches!(self, Self::ShellAnon | Self::ShellWithUser(_))
     }
@@ -49,15 +54,6 @@ impl MSyscallContext {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "op")]
 pub enum MSyscallArgs {
-    /// Dispatch an event to a worker process
-    DispatchEvent {
-        /// Tenant ID to dispatch the event to
-        id: Id,
-        /// Name of the event
-        name: String,
-        /// Data to send
-        data: KhronosValue
-    },
     /// A bot-specific system calls
     Bot {
         req: MBotSyscall
@@ -76,12 +72,9 @@ pub enum MSyscallArgs {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[serde(tag = "op")]
 pub enum MSyscallRet {
-    KhronosValue {
-        data: KhronosValue
-    },
     Bot {
         data: MBotSyscallRet
     },
@@ -96,11 +89,11 @@ pub enum MSyscallRet {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(tag = "op")]
 pub enum MSyscallError {
     /// Generic error response
-    Generic(crate::Error),
+    Generic(String),
     /// Invalid event name/data
     InvalidEvent { reason: &'static str },
     /// Context is too insecure to perform this operation
@@ -119,28 +112,29 @@ pub enum MSyscallError {
     EntityNotFound { reason: &'static str }
 }
 
-impl<T: Error + Send + Sync + 'static> From<T> for MSyscallError {
+impl<T: Debug + Display + 'static> From<T> for MSyscallError {
     fn from(value: T) -> Self {
-        Self::Generic(value.into())
+        Self::Generic(value.to_string())
     }
 }
 
+#[derive(Clone)]
 pub struct MSyscallHandler {
-    pub(super) current_user: serenity::all::CurrentUser,
+    pub(super) current_user: Arc<serenity::all::CurrentUser>,
     pub(super) reqwest: reqwest::Client,
-    pub(super) worker_pool: WorkerPool,
+    pub(super) worker_pool: Arc<WorkerPool>,
     pub(super) stratum: Stratum,
     pub(super) pool: sqlx::PgPool,
-    pub(super) bot_has_guild_cache: Cache<serenity::all::GuildId, bool>,
+    pub(super) bot_has_guild_cache: Cache<GuildId, bool>,
     pub(super) oauth2_code_cache: Cache<String, ()>,
-    pub(super) status_cache: Cache<(), BotStatus>
+    pub(super) status_cache: Cache<(), BotStatus>,
 }
 
 impl MSyscallHandler {
     /// Creates a new MSyscallHandler
     pub fn new(
-        current_user: serenity::all::CurrentUser, 
-        worker_pool: WorkerPool,
+        current_user: Arc<serenity::all::CurrentUser>, 
+        worker_pool: Arc<WorkerPool>,
         stratum: Stratum,
         reqwest: reqwest::Client,
         pool: sqlx::PgPool
@@ -158,10 +152,7 @@ impl MSyscallHandler {
     }
 
     /// Helper function to check if the bot is in a guild
-    async fn has_bot(
-        &self,
-        guilds: &[serenity::all::GuildId],
-    ) -> Result<Vec<bool>, MSyscallError> {
+    async fn has_bot(&self, guilds: &[serenity::all::GuildId]) -> Result<Vec<bool>, MSyscallError> {
         if guilds.len() == 1 {
             let hb = self.bot_has_guild_cache.try_get_with::<_, crate::Error>(guilds[0], async move {
                 let guild_exists = self.stratum.has_guilds(guilds).await?;
@@ -177,40 +168,15 @@ impl MSyscallHandler {
         };
         let guild_exists = self.stratum.has_guilds(guilds).await?;
         if guild_exists.len() != guilds.len() {
-            return Err("internal error: guild_exists is empty when it shouldnt be")
+            return Err("internal error: guild_exists is empty when it shouldnt be".into())
         }
 
         Ok(guild_exists)
     }
 
-
     /// Handles a syscall
     pub async fn handle_syscall(&self, args: MSyscallArgs, ctx: MSyscallContext) -> Result<MSyscallRet, MSyscallError> {
         match args {
-            MSyscallArgs::DispatchEvent { id, name, data } => {
-                if !ctx.is_secure() && !name.starts_with("Web") {
-                    return Err(MSyscallError::InvalidEvent { reason: "Event name must start with Web in insecure contexts"});
-                }
-                let user_id = ctx.into_user_id()?;
-                match id {
-                    Id::Guild(id) => {
-                        // Ensure the bot is in the guild
-                        let hb = self.has_bot(&[id]).await?;    
-                        if !hb[0] {
-                            return Err(MSyscallError::BotNotOnGuild);
-                        }    
-                    }
-                    Id::User(id) => {
-                        if user_id != id {
-                            return Err(MSyscallError::InvalidEvent { reason: "Cannot send events to users who are not yourself" });
-                        }
-                    }
-                }
-
-                let event = CreateEvent::new_khronos_value(name, Some(user_id.to_string()), data);
-
-                Ok(MSyscallRet::KhronosValue { data: self.worker_pool.dispatch_event(id, event).await? })
-            }
             MSyscallArgs::Bot { req } => {
                 Ok(MSyscallRet::Bot { data: req.exec(self, ctx).await? })
             }

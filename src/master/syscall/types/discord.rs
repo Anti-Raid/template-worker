@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serenity::all::{GenericChannelId, Permissions, RoleId};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DashboardGuild {
     pub id: String,
     pub name: String,

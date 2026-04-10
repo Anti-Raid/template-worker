@@ -16,11 +16,3 @@ pub struct UserSession {
     /// The time the session expires
     pub expiry: DateTime<Utc>,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-/// Create a API user session
-pub struct CreateUserSession {
-    pub name: String,
-    pub r#type: String, // Currently must be 'api'
-    pub expiry: i64, // Expiry in seconds
-}

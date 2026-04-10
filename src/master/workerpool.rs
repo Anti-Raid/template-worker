@@ -46,10 +46,6 @@ impl WorkerPool {
         self.get_worker_for(id).dispatch_event(id, event).await
     }
 
-    pub fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
-        self.get_worker_for(id).dispatch_event_nowait(id, event)
-    }
-
     pub async fn drop_tenant(&self, id: Id) -> Result<(), crate::Error> {
         self.get_worker_for(id).drop_tenant(id).await
     }

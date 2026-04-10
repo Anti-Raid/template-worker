@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
 use dapi::types::CreateCommand;
-use serde::Serialize;
+use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
+use serde::{Deserialize, Serialize};
 use serenity::all::{GuildId, UserId};
-use crate::master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::bot::{BotStatus, ShardConn}};
+use crate::{geese::tenantstate::ModFlags, master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::bot::{BotStatus, ShardConn}}, worker::workervmmanager::Id};
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "op")]
 pub enum MBotSyscall {
     /// Returns the commands registered on the bot
@@ -14,8 +15,21 @@ pub enum MBotSyscall {
     GetBotConfig {},
     /// Returns the bots status
     GetBotStatus {},
+    /// Dispatch an event to a worker process
+    DispatchEvent {
+        /// Tenant ID to dispatch the event to
+        id: Id,
+        /// Name of the event
+        name: String,
+        /// Data to send
+        data: KhronosValue
+    },
     /// Returns the uncached bot status (works in secure contexts only)
-    GetUncachedBotStatus {}
+    GetUncachedBotStatus {},
+    /// Admin API to drop a tenant (works in secure contexts only)
+    AdminDropTenant { id: Id },
+    /// Admin API to set tenant state moderation flags (ban them etc.) (works in secure contexts only)
+    AdminSetTenantStateModFlags { id: Id, modflags: ModFlags },
 }
 
 #[derive(Serialize)]
@@ -26,6 +40,7 @@ pub enum MBotSyscallRet {
         /// The ID of the user who created the session
         commands: Arc<Vec<CreateCommand>>
     },
+    /// Bot config
     BotConfig {
         /// The ID of the main AntiRaid support server
         main_server: GuildId,
@@ -34,16 +49,22 @@ pub enum MBotSyscallRet {
         /// The ID of the AntiRaid bot client
         client_id: UserId,
     },
+    /// Bot status
     BotStatus {
         status: BotStatus
-    }
+    },
+    /// Khronos value response
+    KhronosValue {
+        data: KhronosValue
+    },
+    Ack,
 }
 
 impl MBotSyscall {
     pub(super) async fn exec(self, handler: &MSyscallHandler, ctx: MSyscallContext) -> Result<MBotSyscallRet, MSyscallError> {
         match self {
             Self::GetBotCommands {  } => {
-                Ok(MBotSyscallRet::CommandList { commands: crate::register::REGISTER.commands.clone() })
+                Ok(MBotSyscallRet::CommandList { commands: crate::master::register::REGISTER.commands.clone() })
             }
             Self::GetBotConfig {  } => {
                 Ok(MBotSyscallRet::BotConfig { 
@@ -72,6 +93,31 @@ impl MBotSyscall {
 
                 Ok(MBotSyscallRet::BotStatus { status })
             }
+            Self::DispatchEvent { id, name, data } => {
+                if !ctx.is_secure() && !name.starts_with("Web") {
+                    return Err(MSyscallError::InvalidEvent { reason: "Event name must start with Web in insecure contexts"});
+                }
+                let user_id = ctx.into_user_id()?;
+                match id {
+                    Id::Guild(id) => {
+                        // Ensure the bot is in the guild
+                        let hb = handler.has_bot(&[id]).await?;    
+                        if !hb[0] {
+                            return Err(MSyscallError::BotNotOnGuild);
+                        }
+                        // Ensure guild is in server
+                    }
+                    Id::User(id) => {
+                        if user_id != id {
+                            return Err(MSyscallError::InvalidEvent { reason: "Cannot send events to users who are not yourself" });
+                        }
+                    }
+                }
+
+                let event = CreateEvent::new_khronos_value(name, Some(user_id.to_string()), data);
+
+                Ok(MBotSyscallRet::KhronosValue { data: handler.worker_pool.dispatch_event(id, event).await? })
+            }
             Self::GetUncachedBotStatus {  } => {
                 if !ctx.is_secure() {
                     return Err(MSyscallError::ContextInsecure);
@@ -91,6 +137,28 @@ impl MBotSyscall {
                 };
 
                 Ok(MBotSyscallRet::BotStatus { status })
+            }
+            Self::AdminDropTenant { id } => {
+                if !ctx.is_secure() {
+                    return Err(MSyscallError::ContextInsecure);
+                }
+
+                handler.worker_pool.drop_tenant(id).await?;
+                Ok(MBotSyscallRet::Ack)
+            }
+            Self::AdminSetTenantStateModFlags { id, modflags } => {
+                if !ctx.is_secure() {
+                    return Err(MSyscallError::ContextInsecure);
+                }
+                sqlx::query("UPDATE tenant_state SET modflags = $1 WHERE owner_id = $2 AND owner_type = $3")
+                    .bind(modflags.bits() as i32)
+                    .bind(id.tenant_id())
+                    .bind(id.tenant_type())
+                    .execute(&handler.pool)
+                    .await?;
+                
+                handler.worker_pool.drop_tenant(id).await?;
+                Ok(MBotSyscallRet::Ack)
             }
         }
     }

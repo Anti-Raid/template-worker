@@ -306,21 +306,6 @@ impl MesophyllServerConn {
         resp.to_real()
     }
     
-    pub fn dispatch_event_nowait(&self, id: RealId, event: RealCreateEvent) -> Result<(), crate::Error> {
-        let pb_event = pb::AnyValue::from_real(&event)?;
-
-        let msg = pb::MtwMessage {
-            payload: Some(pb::mtw_message::Payload::Dispatch(pb::DispatchEvent {
-                id: Some(pb::Id::from_real_id(&id)),
-                event_payload: Some(pb_event),
-            })),
-            id: None,
-        };
-        
-        self.tx.send(Ok(msg)).map_err(|e| Status::internal(format!("Failed to send dispatch message to worker {}: {}", self.id, e)))?;
-        Ok(())
-    }
-
     pub async fn drop_tenant(&self, id: RealId) -> Result<(), crate::Error> {
         let (ack_tx, ack_rx) = oneshot::channel();
         let resp_id = rand::random::<u64>();

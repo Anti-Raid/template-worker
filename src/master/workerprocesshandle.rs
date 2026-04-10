@@ -145,31 +145,10 @@ impl WorkerProcessHandle {
         r.dispatch_event(id, event).await
     }
     
-    pub fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
-        let r = self.mesophyll_server.get_connection(self.id)
-            .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", self.id))?;
-        r.dispatch_event_nowait(id, event)
-    }
-
     pub async fn drop_tenant(&self, id: Id) -> Result<(), crate::Error> {
         let r = self.mesophyll_server.get_connection(self.id)
             .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", self.id))?;
         r.drop_tenant(id).await
-    }
-}
-
-pub struct WorkerProcessHandleCreateOpts {
-    pub(super) mesophyll_server: MesophyllServer,
-    pub(super) worker_debug: bool,
-}
-
-impl WorkerProcessHandleCreateOpts {
-    /// Creates a new WorkerProcessHandleCreateOpts with the given communication layer
-    pub fn new(mesophyll_server: MesophyllServer, worker_debug: bool) -> Self {
-        Self {
-            mesophyll_server,
-            worker_debug,
-        }
     }
 }
 

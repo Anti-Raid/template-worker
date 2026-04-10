@@ -1,11 +1,10 @@
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serenity::all::UserId;
-use sqlx::Row;
 use crate::master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, internal::auth as iauth, types::auth::UserSession};
 use super::types::discord::*;
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "op")]
 pub enum MAuthSyscall {
     CreateLoginSession {
@@ -43,7 +42,7 @@ pub enum MAuthSyscallRet {
     Success
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[serde(tag = "op")]
 pub enum AuthError {
     /// Invalid redirect URI not allowed by server
@@ -134,7 +133,7 @@ impl MAuthSyscall {
                     .map_err(|e| format!("Failed to get user info from discord: {e:?}"))?;
 
                 if user_resp.status() != reqwest::StatusCode::OK {
-                    let error_text = resp.text().await?;
+                    let error_text = user_resp.text().await?;
                     return Err(format!("Failed to get user info: {}", error_text).into());
                 }
 
@@ -146,7 +145,7 @@ impl MAuthSyscall {
                     &user_info.id,
                     &token_response.access_token,
                 ).await
-                .map_err(|e| format!("Failed to create user: {e:?}").into())?;
+                .map_err(|e| format!("Failed to create user: {e:?}"))?;
 
                 let session = iauth::create_web_session(
                     &handler.pool,
@@ -159,11 +158,11 @@ impl MAuthSyscall {
                     },
                 )
                     .await
-                    .map_err(|e| format!("Failed to create session: {e:?}").into())?;
+                    .map_err(|e| format!("Failed to create session: {e:?}"))?;
 
                 Ok(
                     MAuthSyscallRet::Session { 
-                        user_id: user_info.id,
+                        user_id: user_info.id.clone(),
                         token: session.token,
                         session_id: session.session_id,
                         expiry: session.expires_at,

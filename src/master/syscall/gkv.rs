@@ -1,7 +1,7 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use crate::master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::gkv::PartialGlobalKv};
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "op")]
 pub enum MGkvSyscall {
     FindGlobalKvs {
@@ -17,7 +17,9 @@ pub enum MGkvSyscall {
         key: String, 
         /// Version of the global kv
         version: i32
-    }
+    },
+    /// Admin API to set global kv review state (works in secure contexts only)
+    AdminSetGlobalKvReviewState { key: String, version: i32, scope: String, review_state: String}
 }
 
 #[derive(Serialize)]
@@ -28,7 +30,8 @@ pub enum MGkvSyscallRet {
     },
     GlobalKv {
         gkv: PartialGlobalKv
-    }
+    },
+    Ack,
 }
 
 impl MGkvSyscall {
@@ -61,7 +64,7 @@ impl MGkvSyscall {
                 .bind(&key)
                 .bind(version)
                 .bind(&scope)
-                .fetch_optional(&self.pool)
+                .fetch_optional(&handler.pool)
                 .await?;
 
                 let Some(mut gkv) = item else {
@@ -75,13 +78,26 @@ impl MGkvSyscall {
                     .bind(&key)
                     .bind(version)
                     .bind(scope)
-                    .fetch_optional(&self.pool)
+                    .fetch_optional(&handler.pool)
                     .await?;
 
                     gkv.data = data;
                 }
 
                 Ok(MGkvSyscallRet::GlobalKv { gkv })
+            }
+            Self::AdminSetGlobalKvReviewState { key, version, scope, review_state } => {
+                if !ctx.is_secure() {
+                    return Err(MSyscallError::ContextInsecure);
+                }
+                sqlx::query("UPDATE global_kv SET review_state = $1 WHERE scope = $2 AND key = $3 AND version = $4")
+                    .bind(review_state)
+                    .bind(scope)
+                    .bind(key)
+                    .bind(version)
+                    .execute(&handler.pool)
+                    .await?;
+                Ok(MGkvSyscallRet::Ack)
             }
         }
     }

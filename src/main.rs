@@ -1,15 +1,13 @@
-mod api;
 mod config;
 mod mesophyll;
-mod fauxpas;
-mod register;
 mod worker;
 mod migrations;
 mod geese;
 mod master;
 
 use crate::config::CONFIG;
-use crate::fauxpas::layers::shell::ShellData;
+use crate::master::{shell, register};
+use crate::master::syscall::MSyscallHandler;
 use crate::mesophyll::client::MesophyllClient;
 use crate::migrations::apply_migrations;
 use crate::geese::stratum::Stratum;
@@ -186,7 +184,7 @@ async fn main_impl(args: CmdArgs) {
 
 
             // If we're running the shell, just run the shell and exit
-            crate::fauxpas::layers::shell::init_shell(ShellData {
+            shell::init_shell(shell::ShellData {
                 pg_pool,
                 http,
                 reqwest,
@@ -225,16 +223,16 @@ async fn main_impl(args: CmdArgs) {
             tokio::task::spawn(async move {
                 log::info!("Starting RPC server");
 
-                let rpc_server = crate::api::server::create(
-                    current_user,
+                // Start msyscall server
+                let msyscall_handler = MSyscallHandler::new(
+                    current_user.into(),
                     worker_pool_ref,
                     stratum,
                     reqwest,
                     pg_pool
                 );
-
+                let rpc_server = master::syscall::webapi::create(msyscall_handler);
                 let listener = tokio::net::TcpListener::bind(&CONFIG.addrs.template_worker).await.unwrap();
-
                 axum::serve(listener, rpc_server).await.unwrap();
             });
 
