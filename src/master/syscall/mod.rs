@@ -25,15 +25,20 @@ pub enum MSyscallContext {
     ApiSecure(UserId),
     /// The tw shell (anonymous)
     ShellAnon,
-    /// The tw shell (logged in)
+    /// The tw shell (mocking as a specific user)
     ShellWithUser(UserId)
 }
 
+#[allow(dead_code)]
 impl MSyscallContext {
     /// Returns if the given context is secure (admin/root access only)
+    /// 
+    /// A context is considered secure iff it originates from a user (with admin permissions)
+    /// running under the secure msyscall API endpoint (which verifies that the user has admin)
+    /// or if the request comes from the tw shell (which is assumed to have admin permissions)
     #[inline(always)]
     pub const fn is_secure(self) -> bool {
-        matches!(self, Self::ApiSecure(_)) | self.is_shell()
+        matches!(self, Self::ApiSecure(_) | Self::ShellAnon | Self::ShellWithUser(_))
     }
 
     /// Returns if the given context is a shell
