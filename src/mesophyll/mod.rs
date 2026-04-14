@@ -10,4 +10,3 @@
 /// through projects like khronos dapi
 pub mod client;
 pub mod server;
-pub mod dbstate;

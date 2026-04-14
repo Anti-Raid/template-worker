@@ -8,7 +8,7 @@ mod master;
 use crate::config::CONFIG;
 use crate::master::{shell, register};
 use crate::master::syscall::MSyscallHandler;
-use crate::mesophyll::client::MesophyllClient;
+use crate::mesophyll::client::{MesophyllClient, MesophyllShellClient};
 use crate::migrations::apply_migrations;
 use crate::geese::stratum::Stratum;
 use crate::master::workerpool::WorkerPool;
@@ -173,22 +173,8 @@ async fn main_impl(args: CmdArgs) {
 
             apply_migrations(pg_pool).await.expect("Failed to apply migrations");
         }
-        WorkerType::Shell => {
-            let (http, _, _) = setup_discord().await;
-
-            let pg_pool = PgPoolOptions::new()
-                .max_connections(args.max_db_connections)
-                .connect(&CONFIG.meta.postgres_url)
-                .await
-                .expect("Could not initialize connection");
-
-
-            // If we're running the shell, just run the shell and exit
-            shell::init_shell(shell::ShellData {
-                pg_pool,
-                http,
-                reqwest,
-            });
+        WorkerType::Shell => {            
+            shell::init_shell(MesophyllShellClient::new().await.expect("failed to create meso shell client"));
         }
         WorkerType::ProcessPool => {
             let (_, stratum, current_user) = setup_discord().await;
@@ -219,18 +205,20 @@ async fn main_impl(args: CmdArgs) {
                 .expect("Failed to create worker process pool"),
             );
             
-            let worker_pool_ref = worker_pool.clone();
+            // Start msyscall server
+            let msyscall_handler = MSyscallHandler::new(
+                current_user.into(),
+                worker_pool.clone(),
+                stratum,
+                reqwest,
+                pg_pool
+            );
+
+            mesophyll_server.set_msyscall_handler(msyscall_handler.clone()).unwrap();
+
             tokio::task::spawn(async move {
                 log::info!("Starting RPC server");
 
-                // Start msyscall server
-                let msyscall_handler = MSyscallHandler::new(
-                    current_user.into(),
-                    worker_pool_ref,
-                    stratum,
-                    reqwest,
-                    pg_pool
-                );
                 let rpc_server = master::syscall::webapi::create(msyscall_handler);
                 let listener = tokio::net::TcpListener::bind(&CONFIG.addrs.template_worker).await.unwrap();
                 axum::serve(listener, rpc_server).await.unwrap();

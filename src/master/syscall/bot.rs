@@ -75,7 +75,7 @@ impl FromLua for MBotSyscall {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(tag = "op")]
 pub enum MBotSyscallRet {
     /// A list of bot commands

@@ -1,9 +1,7 @@
-use std::sync::Arc;
-use dapi::types::CreateCommand;
 use khronos_ext::mlua_scheduler_ext::LuaSchedulerAsyncUserData;
 use khronos_runtime::rt::{KhronosRuntime, mluau::prelude::*};
 use tokio::sync::{oneshot::Sender as OneshotSender, mpsc::{unbounded_channel, UnboundedSender}};
-use crate::worker::builtins::TemplatingTypes;
+use crate::{master::syscall::MSyscallArgs, mesophyll::client::MesophyllShellClient, worker::builtins::TemplatingTypes};
 use rust_embed::Embed;
 use crate::master::mainthread::{run_in_thread, RunInThreadFn};
 
@@ -18,23 +16,16 @@ pub struct TwShell;
 pub struct LuaurcVfs;
 
 
-#[allow(dead_code)]
-pub struct ShellData {
-    pub pg_pool: sqlx::PgPool,
-    pub http: Arc<serenity::http::Http>,
-    pub reqwest: reqwest::Client,
-}
-
 type ShellInputValue = Result<Option<String>, String>;
 
 pub struct ShellContext {
-    pub data: ShellData,
+    pub shell_meso: MesophyllShellClient,
     pub input_handle: UnboundedSender<(String, OneshotSender<ShellInputValue>)>,
     pub _jh: std::thread::JoinHandle<()>, // Ensure input thread is dropped when ShellContext is dropped
 }
 
 impl ShellContext {
-    pub fn new(data: ShellData) -> Self {
+    pub fn new(shell_meso: MesophyllShellClient) -> Self {
         let (tx, mut rx) = unbounded_channel::<(String, OneshotSender<ShellInputValue>)>();
         let jh = std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
@@ -71,29 +62,26 @@ impl ShellContext {
                 }
             });
         });
-        Self { data, input_handle: tx, _jh: jh }
-    }
-}
-
-impl std::ops::Deref for ShellContext {
-    type Target = ShellData;
-
-    fn deref(&self) -> &Self::Target {
-        &self.data
+        Self { shell_meso, input_handle: tx, _jh: jh }
     }
 }
 
 impl LuaUserData for ShellContext {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        methods.add_scheduler_async_method("RegisterGlobalCommands", async move |lua, this, value: LuaValue| {
-            let res: Vec<CreateCommand> = lua.from_value(value)
-                .map_err(|e| LuaError::external(format!("Failed to parse command definitions: {e:?}")))?;
-
-            let resp = this.http.create_global_commands(&res)
-                .await
-                .map_err(|e| LuaError::external(format!("Failed to register global commands: {e:?}")))?;
-
-            lua.to_value(&resp)
+        methods.add_scheduler_async_method("MSyscall", async move |lua, this, args: MSyscallArgs| {
+            let resp = this.shell_meso.msyscall(args).await;
+            let table = lua.create_table_with_capacity(0, 2)?;
+            match resp {
+                Ok(r) => {
+                    table.set("status", "Ok")?;
+                    table.set("data", r)?;
+                }
+                Err(r) => {
+                    table.set("status", "Err")?;
+                    table.set("data", r)?;
+                }
+            }
+            Ok(table)
         });
 
         methods.add_scheduler_async_method("GetInput", async move |_lua, this, (prompt,): (String,)| {
@@ -115,10 +103,10 @@ impl LuaUserData for ShellContext {
     }
 }
 
-pub fn init_shell(ctx: ShellData) {
+pub fn init_shell(shell_meso: MesophyllShellClient) {
     pub struct RunInThreadShell;
-    impl RunInThreadFn<ShellData, ()> for RunInThreadShell {
-        async fn run(rt: &KhronosRuntime, data: ShellData) -> () {
+    impl RunInThreadFn<MesophyllShellClient, ()> for RunInThreadShell {
+        async fn run(rt: &KhronosRuntime, data: MesophyllShellClient) -> () {
             let func = rt
             .eval_script::<LuaFunction>(
                 "./entrypoint.shell",
@@ -138,6 +126,6 @@ pub fn init_shell(ctx: ShellData) {
             vfs::EmbeddedFS::<TwShell>::new().into(),
             vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
         ]),
-        ctx
+        shell_meso
     );
 }

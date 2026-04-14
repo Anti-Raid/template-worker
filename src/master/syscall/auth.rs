@@ -63,7 +63,7 @@ impl FromLua for MAuthSyscall {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(tag = "op")]
 pub enum MAuthSyscallRet {
     /// A created session returned by a syscall

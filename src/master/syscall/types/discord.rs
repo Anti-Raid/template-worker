@@ -11,13 +11,13 @@ pub struct DashboardGuild {
     pub owner: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DashboardGuildData {
     pub guilds: Vec<DashboardGuild>,
     pub guilds_exist: Vec<bool>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GuildChannelWithPermissions {
     /// User permissions
     pub user: Permissions,
@@ -27,7 +27,7 @@ pub struct GuildChannelWithPermissions {
     pub channel: ApiPartialGuildChannel,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ApiPartialGuildChannel {
     /// The ID of the channel
     pub id: GenericChannelId,
@@ -41,7 +41,7 @@ pub struct ApiPartialGuildChannel {
     pub r#type: u8,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ApiPartialRole {
     /// The ID of the role
     pub id: RoleId,
@@ -53,7 +53,7 @@ pub struct ApiPartialRole {
     pub permissions: Permissions,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BaseGuildUserInfo {
     pub owner_id: String,
     pub name: String,

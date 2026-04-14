@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// A shard connection (for bot statistics)
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShardConn {
     /// The status of the shard connection
     pub status: String,
@@ -12,7 +12,7 @@ pub struct ShardConn {
 }
 
 /// Status of all shards and other info like total guilds/users
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BotStatus {
     /// A map of shard group ID to shard connection information
     pub shard_conns: HashMap<u32, ShardConn>,

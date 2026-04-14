@@ -49,7 +49,7 @@ impl FromLua for MDiscordSyscall {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(tag = "op")]
 pub enum MDiscordSyscallRet {
     /// List of all user guilds

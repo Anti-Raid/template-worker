@@ -20,8 +20,7 @@ message Id {
 message Worker {
   // The worker ID
   uint64 worker_id = 1;
-  // The token for the worker. In the event that a worker crashes, this token may be regenerated etc which will autokill
-  // other workers the moment they try to send anything to the master, prompting them to shutdown.
+  // The token for the worker
   string token = 2;
 }
 
@@ -79,6 +78,11 @@ message WTMExecStateOp {
   AnyValue state_op = 3;
 }
 
+message ShellMSyscall {
+  string token = 1;
+  AnyValue msyscall = 2;
+}
+
 // Mesophyll service (runs on master and called by worker)
 service MesophyllMaster {
   // WorkerInit establishes a bidirectional stream between the master and worker. The master sends MasterToWorkerMessage messages to the worker, and the worker responds with WorkerToMasterMessage messages. 
@@ -98,4 +102,7 @@ service MesophyllMaster {
 
   // BaseWorkerInfo enables the worker to get common info from the master
   rpc BaseWorkerInfo(Worker) returns (MTWBaseWorkerInfo) {}
+
+  // ShellMsyscall allows the shell to perform msyscalls with the master
+  rpc ShellMsyscall(ShellMSyscall) returns (AnyValue) {}
 }

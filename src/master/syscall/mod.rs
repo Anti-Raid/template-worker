@@ -12,6 +12,7 @@ use moka::future::Cache;
 use serde::{Deserialize, Serialize};
 use serenity::all::{GuildId, UserId};
 use crate::{geese::stratum::Stratum, master::{syscall::{auth::{AuthError, MAuthSyscall, MAuthSyscallRet}, bot::{MBotSyscall, MBotSyscallRet}, discord::{MDiscordSyscall, MDiscordSyscallRet}, gkv::{MGkvSyscall, MGkvSyscallRet}, types::bot::BotStatus}, workerpool::WorkerPool}};
+use khronos_ext::mluau_ext::prelude::*;
 
 /// The context in which the syscall is executing in
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -77,7 +78,46 @@ pub enum MSyscallArgs {
     }
 }
 
-#[derive(Serialize)]
+impl FromLua for MSyscallArgs {
+    fn from_lua(value: LuaValue, _lua: &Lua) -> LuaResult<Self> {
+        let LuaValue::Table(tab) = value else {
+            return Err(LuaError::FromLuaConversionError {
+                from: value.type_name(),
+                to: "MSyscallArgs".to_string(),
+                message: Some("expected a table".to_string()),
+            })
+        };
+
+        let typ: LuaString = tab.get("op")?;
+        match typ.as_bytes().as_ref() {
+            b"Bot" => {
+                let req = tab.get("data")?;
+                Ok(Self::Bot { req })
+            },
+            b"Discord" => {
+                let req = tab.get("data")?;
+                Ok(Self::Discord { req })
+            },
+            b"Auth" => {
+                let req = tab.get("data")?;
+                Ok(Self::Auth { req })
+            },
+            b"Gkv" => {
+                let req = tab.get("data")?;
+                Ok(Self::Gkv { req })
+            },
+            _ => {
+                Err(LuaError::FromLuaConversionError {
+                    from: "table",
+                    to: "MSyscallArgs".to_string(),
+                    message: Some("invalid op provided".to_string()),
+                })
+            }
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(tag = "op")]
 pub enum MSyscallRet {
     Bot {
@@ -91,6 +131,32 @@ pub enum MSyscallRet {
     },
     Gkv {
         data: MGkvSyscallRet
+    }
+}
+
+impl MSyscallRet {
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::Bot { .. } => "Bot",
+            Self::Discord { .. } => "Discord",
+            Self::Auth { .. } => "Auth",
+            Self::Gkv { .. } => "Gkv",
+        }
+    }
+}
+
+impl IntoLua for MSyscallRet {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        let table = lua.create_table_with_capacity(0, 2)?;
+        table.set("op", self.name())?;
+        match self {
+            Self::Bot { data } => table.set("data", data)?,
+            Self::Discord { data } => table.set("data", data)?,
+            Self::Auth { data } => table.set("data", data)?,
+            Self::Gkv { data } => table.set("data", data)?,
+        }
+        table.set_readonly(true);
+        Ok(LuaValue::Table(table))
     }
 }
 
@@ -120,6 +186,12 @@ pub enum MSyscallError {
 impl<T: Debug + Display + 'static> From<T> for MSyscallError {
     fn from(value: T) -> Self {
         Self::Generic(value.to_string())
+    }
+}
+
+impl IntoLua for MSyscallError {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        lua.to_value(&self)
     }
 }
 

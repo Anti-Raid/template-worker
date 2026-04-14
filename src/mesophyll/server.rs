@@ -1,11 +1,11 @@
 use futures::{Stream, StreamExt};
 use serenity::all::{UserId, GuildId};
 use tonic::Status;
-use crate::{mesophyll::dbstate::DbState, worker::workervmmanager::Id as RealId};
+use crate::{geese::{state::StateDb, tenantstate::TenantStateDb}, master::syscall::{MSyscallContext, MSyscallHandler}, worker::workervmmanager::Id as RealId};
 use khronos_runtime::utils::khronos_value::KhronosValue as RealKhronosValue;
 use khronos_runtime::primitives::event::CreateEvent as RealCreateEvent;
 use dashmap::DashMap;
-use std::net::ToSocketAddrs;
+use std::{net::ToSocketAddrs, sync::OnceLock};
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::{oneshot, mpsc};
@@ -85,7 +85,7 @@ impl pb::Worker {
     /// Validates the workers session against the Mesophyll server state
     fn validate(&self, server: &MesophyllServer) -> Result<(), Status> {
         let wid = self.worker_id_usize()?;
-        if wid > server.db_state().num_workers() {
+        if wid > server.num_workers {
             return Err(Status::permission_denied(format!("Invalid worker ID: {}, exceeds number of workers in pool", wid)));
         }
 
@@ -124,14 +124,20 @@ impl pb::DispatchEventResponse {
 #[derive(Clone)]
 pub struct MesophyllServer {
     conns: Arc<DashMap<usize, MesophyllServerConn>>,
-    db_state: DbState,
+    tenant_state_db: TenantStateDb,
+    state_db: StateDb,
+    num_workers: usize,
+    msyscall_handler: Arc<OnceLock<MSyscallHandler>>,
 }
 
 impl MesophyllServer {
     pub async fn new(num_workers: usize, pool: sqlx::PgPool) -> Result<Self, crate::Error> {
         let s = Self {
-            db_state: DbState::new(num_workers, pool).await?,
             conns: Arc::new(DashMap::new()),
+            msyscall_handler: Arc::new(OnceLock::new()),
+            tenant_state_db: TenantStateDb::new(pool.clone()),
+            state_db: StateDb::new(pool),
+            num_workers,
         };
 
         let meso_addr = crate::CONFIG.addrs.mesophyll_server.to_socket_addrs()?.next().ok_or("Invalid Mesophyll server address")?;
@@ -148,11 +154,14 @@ impl MesophyllServer {
         Ok(s)
     }
 
+    pub fn set_msyscall_handler(&self, handler: MSyscallHandler) -> Result<(), crate::Error> {
+        self.msyscall_handler.set(handler).map_err(|_x| format!("msyscall handler already set"))?;
+        Ok(())
+    }
+
     pub fn get_connection(&self, worker_id: usize) -> Option<MesophyllServerConn> {
         self.conns.get(&worker_id).map(|r| r.value().clone())
     }
-
-    pub fn db_state(&self) -> &DbState { &self.db_state }
 
     fn verify_worker(&self, worker: Option<pb::Worker>) -> Result<usize, Status> {
         let worker = worker.ok_or_else(|| Status::invalid_argument("Missing worker info in request"))?;
@@ -231,7 +240,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
         let state_op = req.state_op.ok_or_else(|| Status::invalid_argument("Missing state_op"))?.to_real()?;
 
-        match self.db_state.state_db().do_op(id, state_op).await {
+        match self.state_db.do_op(id, state_op).await {
             Ok(result) => Ok(tonic::Response::new(pb::AnyValue::from_real(&result)?)),
             Err(e) => Err(Status::internal(e.to_string())),
         }
@@ -240,7 +249,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
     async fn list_tenant_states(&self, request: tonic::Request<pb::WtmListTenantStates>) -> Result<tonic::Response<pb::AnyValue>, Status> {
         let req = request.into_inner();
         let wid = self.verify_worker(req.worker)?;
-        match self.db_state.tenant_state_db().get_tenant_state(wid as i64, self.db_state.num_workers() as i64).await {
+        match self.tenant_state_db.get_tenant_state(wid as i64, self.num_workers as i64).await {
             Ok(ts) => Ok(tonic::Response::new(pb::AnyValue::from_real(&ts)?)),
             Err(e) => Err(Status::internal(e.to_string())),
         }
@@ -251,8 +260,25 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         req.validate(self)?;
 
         Ok(tonic::Response::new(pb::MtwBaseWorkerInfo {
-            num_workers: self.db_state().num_workers().try_into().map_err(|_e| Status::internal("num_workers exceeds u32 max"))?,
+            num_workers: self.num_workers.try_into().map_err(|_e| Status::internal("num_workers exceeds u32 max"))?,
         }))
+    }
+
+    async fn shell_msyscall(&self, request: tonic::Request<pb::ShellMSyscall>) -> Result<tonic::Response<pb::AnyValue>, Status> {
+        let req = request.into_inner();
+        if req.token != crate::CONFIG.meta.mesophyll_token {
+            return Err(Status::permission_denied("Invalid token"));
+        }
+        let Some(req) = req.msyscall else {
+            return Err(Status::permission_denied("No msyscall found"));
+        };
+        let handler_g = self.msyscall_handler.get();
+        let Some(ref handler) = handler_g else {
+            return Err(Status::permission_denied("No msyscall handler found"));
+        };
+        let args = req.to_real()?;
+        let resp = handler.handle_syscall(args, MSyscallContext::ShellAnon).await;
+        Ok(tonic::Response::new(pb::AnyValue::from_real(&resp)?))
     }
 }
 
