@@ -4,6 +4,7 @@ use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use tokio::process::Command;
 use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
+use crate::geese::tenantstate::TenantState;
 use crate::mesophyll::server::MesophyllServer;
 use crate::worker::workervmmanager::Id;
 
@@ -130,6 +131,7 @@ impl WorkerProcessHandle {
 }
 
 impl WorkerProcessHandle {
+    #[allow(dead_code)]
     pub fn id(&self) -> usize {
         self.id
     }
@@ -149,6 +151,12 @@ impl WorkerProcessHandle {
         let r = self.mesophyll_server.get_connection(self.id)
             .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", self.id))?;
         r.drop_tenant(id).await
+    }
+
+    pub async fn update_tenant_state(&self, id: Id, ts: TenantState) -> Result<(), crate::Error> {
+        let r = self.mesophyll_server.get_connection(self.id)
+            .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", self.id))?;
+        r.update_tenant_state(id, ts).await
     }
 }
 

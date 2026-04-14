@@ -171,10 +171,6 @@ impl MesophyllServer {
         self.conns.get(&worker_id).map(|r| r.value().clone())
     }
 
-    pub fn get_connection_for(&self, id: RealId) -> Option<MesophyllServerConn> {
-        self.get_connection(id.worker_id(self.num_workers))
-    }
-
     fn verify_worker(&self, worker: Option<pb::Worker>) -> Result<usize, Status> {
         let worker = worker.ok_or_else(|| Status::invalid_argument("Missing worker info in request"))?;
         worker.validate(self)?;

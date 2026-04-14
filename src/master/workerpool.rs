@@ -1,6 +1,7 @@
 use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 
+use crate::geese::tenantstate::TenantState;
 use crate::master::workerprocesshandle::WorkerProcessHandle;
 use crate::mesophyll::server::MesophyllServer;
 use crate::worker::workervmmanager::Id;
@@ -50,6 +51,11 @@ impl WorkerPool {
         self.get_worker_for(id).drop_tenant(id).await
     }
 
+    pub async fn update_tenant_state(&self, id: Id, ts: TenantState) -> Result<(), crate::Error> {
+        self.get_worker_for(id).update_tenant_state(id, ts).await
+    }
+
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.workers.len()
     }

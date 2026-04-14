@@ -220,9 +220,7 @@ impl MBotSyscall {
                     return Err("failed to find tenant state after update".into())
                 };
                 
-                let conn = handler.mesophyll_server.get_connection_for(id)
-                .ok_or_else(|| format!("No Mesophyll connection found for worker process for ID: {id:?}"))?;
-                conn.update_tenant_state(id, ts).await?;
+                handler.worker_pool.update_tenant_state(id, ts).await?;
                 Ok(MBotSyscallRet::Ack)
             }
         }

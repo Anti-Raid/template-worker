@@ -212,7 +212,6 @@ async fn main_impl(args: CmdArgs) {
                 stratum,
                 reqwest,
                 pg_pool,
-                mesophyll_server.clone()
             );
 
             mesophyll_server.set_msyscall_handler(msyscall_handler.clone()).unwrap();
