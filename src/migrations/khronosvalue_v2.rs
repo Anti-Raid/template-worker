@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use khronos_runtime::utils::khronos_value::KhronosValue as KhronosValueV2;
 
 use serde::{Deserialize, Serialize};
 
@@ -101,51 +101,37 @@ impl From<KhronosValue> for KhronosProxy {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum KhronosValueV2 {
-    Text(String),
-    Integer(i64),
-    UnsignedInteger(u64),
-    Float(f64),
-    Boolean(bool),
-    Buffer(Vec<u8>),   // Binary data
-    Vector((f32, f32, f32)), // Luau vector
-    Map(Vec<(KhronosValueV2, KhronosValueV2)>),
-    List(Vec<KhronosValueV2>),
-    Timestamptz(chrono::DateTime<chrono::Utc>),
-    Interval(chrono::Duration),
-    TimeZone(khronos_runtime::chrono_tz::Tz),
-    MemoryVfs(HashMap<String, String>), // For lazy string maps
-    Null,
-}
+fn from_v1(v: KhronosValue) -> KhronosValueV2 {
+    match v {
+        KhronosValue::Text(t) => KhronosValueV2::Text(t),
+        KhronosValue::Integer(i) => {
+            assert!(i < (2_i64).pow(53) && i > -(2_i64).pow(53));
+            KhronosValueV2::Integer(i)
+        },
+        KhronosValue::UnsignedInteger(u) => {
+            assert!(u < i64::MAX as u64);
+            KhronosValueV2::Integer(u as i64)
+        },
+        KhronosValue::Float(f) => KhronosValueV2::Float(f),
+        KhronosValue::Boolean(b) => KhronosValueV2::Boolean(b),
+        KhronosValue::Buffer(b) => KhronosValueV2::Buffer(b.0),
+        KhronosValue::Vector(v) => KhronosValueV2::Vector(v),
+        KhronosValue::Map(m) => {
+            let mut arr = Vec::new();
+            for (k, v) in m {
+                arr.push((KhronosValueV2::Text(k), from_v1(v)));
+            }
 
-impl KhronosValueV2 {
-    fn from_v1(v: KhronosValue) -> Self {
-        match v {
-            KhronosValue::Text(t) => KhronosValueV2::Text(t),
-            KhronosValue::Integer(i) => KhronosValueV2::Integer(i),
-            KhronosValue::UnsignedInteger(u) => KhronosValueV2::UnsignedInteger(u),
-            KhronosValue::Float(f) => KhronosValueV2::Float(f),
-            KhronosValue::Boolean(b) => KhronosValueV2::Boolean(b),
-            KhronosValue::Buffer(b) => KhronosValueV2::Buffer(b.0),
-            KhronosValue::Vector(v) => KhronosValueV2::Vector(v),
-            KhronosValue::Map(m) => {
-                let mut arr = Vec::new();
-                for (k, v) in m {
-                    arr.push((KhronosValueV2::Text(k), KhronosValueV2::from_v1(v)));
-                }
-
-                KhronosValueV2::Map(arr)
-            },
-            KhronosValue::List(l) => {
-                let new_list = l.into_iter().map(KhronosValueV2::from_v1).collect();
-                KhronosValueV2::List(new_list)
-            },
-            KhronosValue::Timestamptz(t) => KhronosValueV2::Timestamptz(t),
-            KhronosValue::Interval(i) => KhronosValueV2::Interval(i),
-            KhronosValue::TimeZone(t) => KhronosValueV2::TimeZone(t),
-            KhronosValue::Null => KhronosValueV2::Null,
-        }
+            KhronosValueV2::Map(arr)
+        },
+        KhronosValue::List(l) => {
+            let new_list = l.into_iter().map(from_v1).collect();
+            KhronosValueV2::List(new_list)
+        },
+        KhronosValue::Timestamptz(t) => KhronosValueV2::Timestamptz(t),
+        KhronosValue::Interval(i) => KhronosValueV2::Interval(i),
+        KhronosValue::TimeZone(t) => KhronosValueV2::TimeZone(t),
+        KhronosValue::Null => KhronosValueV2::Null,
     }
 }
 
@@ -172,7 +158,7 @@ pub static MIGRATION: Migration = Migration {
                     .map_err(|e| format!("Failed to deserialize old KhronosValue for id {}: {}", id, e))?;
 
                 // Convert to new KhronosValueV2
-                let new_value = KhronosValueV2::from_v1(old_value);
+                let new_value = from_v1(old_value);
 
                 // Serialize the new value to JSON
                 let json_value = serde_json::to_value(&new_value)
