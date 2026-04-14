@@ -31,11 +31,16 @@ message DispatchEvent {
   AnyValue event_payload = 2;
 }
 
-message DispatchEventResponse {
+message WTMMessageResponse {
   oneof resp {
     AnyValue value = 1; // msgpack khronos value
     string error = 2;
   }
+}
+
+message UpdateTenantState {
+  Id id = 1; 
+  AnyValue new_tenant_state = 2;
 }
 
 message MTWMessage { // master-to-worker message
@@ -51,6 +56,9 @@ message MTWMessage { // master-to-worker message
 
     // Requests the worker shuts down due to another worker with the same ID coming online
     string shutdown = 5;
+
+    // Update the tenant state cache for a worker process
+    UpdateTenantState update_tenant_state = 6;
   }
 }
 
@@ -58,8 +66,7 @@ message WTMMessage { // worker-to-master message
   optional uint64 resp_id = 1; // If set, this corresponds to the id of the MasterToWorkerMessage being responded to.
   oneof payload {
     Worker worker_ident = 2; // Authenticate the worker
-    DispatchEventResponse dispatch_response = 3;
-    int32 drop_tenant_ack = 4; // 0 for success, non-zero for failure 
+    WTMMessageResponse resp = 3; // response to wtm message
   }
 }
 

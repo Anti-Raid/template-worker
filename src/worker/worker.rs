@@ -11,6 +11,8 @@ pub struct Worker {
     pub vm_manager: WorkerVmManager,
     /// The event dispatcher
     pub dispatch: WorkerDispatch,
+    /// Worker tenant state manager
+    pub wts: WorkerTenantState,
 }
 
 impl Worker {
@@ -20,11 +22,12 @@ impl Worker {
                 
         // This will automatically fire key resumption tasks to all keys with resume flag upon creation
         // of this structure (in addition to providing dispatch services)
-        let dispatch = WorkerDispatch::new(vm_manager.clone(), state, wts);
+        let dispatch = WorkerDispatch::new(vm_manager.clone(), state, wts.clone());
 
         Ok(Self {
             vm_manager,
             dispatch,
+            wts
         })
     }
 }

@@ -1,7 +1,7 @@
 use futures::{Stream, StreamExt};
 use serenity::all::{UserId, GuildId};
 use tonic::Status;
-use crate::{geese::{state::StateDb, tenantstate::TenantStateDb}, master::syscall::{MSyscallContext, MSyscallHandler}, worker::workervmmanager::Id as RealId};
+use crate::{geese::{state::StateDb, tenantstate::{TenantState, TenantStateDb}}, master::syscall::{MSyscallContext, MSyscallHandler}, worker::workervmmanager::Id as RealId};
 use khronos_runtime::utils::khronos_value::KhronosValue as RealKhronosValue;
 use khronos_runtime::primitives::event::CreateEvent as RealCreateEvent;
 use dashmap::DashMap;
@@ -97,26 +97,34 @@ impl pb::Worker {
     }
 }
 
-impl pb::DispatchEventResponse {
+impl pb::WtmMessageResponse {
     pub fn from_real(result: Result<RealKhronosValue, crate::Error>) -> Self {
         Self {
             resp: Some(match result {
                 Ok(v) => {
                     match pb::AnyValue::from_real_exec(&v) {
-                        Ok(v) => pb::dispatch_event_response::Resp::Value(v),
-                        Err(e) => pb::dispatch_event_response::Resp::Error(format!("Failed to convert dispatch result to AnyValue: {:?}", e)),
+                        Ok(v) => pb::wtm_message_response::Resp::Value(v),
+                        Err(e) => pb::wtm_message_response::Resp::Error(format!("Failed to convert dispatch result to AnyValue: {:?}", e)),
                     }
                 },
-                Err(e) => pb::dispatch_event_response::Resp::Error(e.to_string()),
+                Err(e) => pb::wtm_message_response::Resp::Error(e.to_string()),
             })
         }
     }
 
     pub fn to_real(self) -> Result<RealKhronosValue, crate::Error> {
         match self.resp {
-            Some(pb::dispatch_event_response::Resp::Value(v)) => v.to_real_exec(),
-            Some(pb::dispatch_event_response::Resp::Error(e)) => Err(e.into()),
-            None => Err("DispatchEventResponse missing payload".into()),
+            Some(pb::wtm_message_response::Resp::Value(v)) => v.to_real_exec(),
+            Some(pb::wtm_message_response::Resp::Error(e)) => Err(e.into()),
+            None => Err("WtmMessageResponse missing payload".into()),
+        }
+    }
+
+    pub fn ensure_ok(self) -> Result<(), crate::Error> {
+        match self.resp {
+            Some(pb::wtm_message_response::Resp::Value(_)) => Ok(()),
+            Some(pb::wtm_message_response::Resp::Error(e)) => Err(e.into()),
+            None => Err("WtmMessageResponse missing payload".into()),
         }
     }
 }
@@ -163,6 +171,10 @@ impl MesophyllServer {
         self.conns.get(&worker_id).map(|r| r.value().clone())
     }
 
+    pub fn get_connection_for(&self, id: RealId) -> Option<MesophyllServerConn> {
+        self.get_connection(id.worker_id(self.num_workers))
+    }
+
     fn verify_worker(&self, worker: Option<pb::Worker>) -> Result<usize, Status> {
         let worker = worker.ok_or_else(|| Status::invalid_argument("Missing worker info in request"))?;
         worker.validate(self)?;
@@ -201,7 +213,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
                         // Handle incoming messages here, potentially using resp_id to correlate responses
                         let Some(resp_id) = resp_id else { continue };
                         match p {
-                            pb::wtm_message::Payload::DispatchResponse(der) => {
+                            pb::wtm_message::Payload::Resp(der) => {
                                 let Some((_, handler)) = conn.dispatch_response_handlers.remove(&resp_id) else {
                                     continue;
                                 };
@@ -211,12 +223,6 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
                                 log::error!("Received unexpected WorkerIdent message from worker {}, ignoring", wk.worker_id);
                                 break;
                             },
-                            pb::wtm_message::Payload::DropTenantAck(_) => {
-                                let Some((_, handler)) = conn.drop_tenant_ack_handlers.remove(&resp_id) else {
-                                    continue;
-                                };
-                                let _ = handler.send(());
-                            }
                         }
                     },
                     Ok(_) => {
@@ -286,8 +292,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
 pub struct MesophyllServerConn {
     id: u64,
     tx: mpsc::UnboundedSender<Result<pb::MtwMessage, Status>>,
-    pub(super) dispatch_response_handlers: Arc<DashMap<u64, oneshot::Sender<pb::DispatchEventResponse>>>,
-    pub(super) drop_tenant_ack_handlers: Arc<DashMap<u64, oneshot::Sender<()>>>,
+    pub(super) dispatch_response_handlers: Arc<DashMap<u64, oneshot::Sender<pb::WtmMessageResponse>>>,
 }
 
 // On drop, shutdown
@@ -303,21 +308,23 @@ impl Drop for MesophyllServerConn {
 }
 
 impl MesophyllServerConn {
-    fn new(
-        id: u64, 
-        tx: mpsc::UnboundedSender<Result<pb::MtwMessage, Status>>,
-    ) -> Self {
+    fn new(id: u64, tx: mpsc::UnboundedSender<Result<pb::MtwMessage, Status>>) -> Self {
         let dispatch_response_handlers = Arc::new(DashMap::new());
-        let drop_tenant_ack_handlers = Arc::new(DashMap::new());
-        Self { id, tx, dispatch_response_handlers, drop_tenant_ack_handlers }
+        Self { id, tx, dispatch_response_handlers }
+    }
+
+    fn setup_handler(&self) -> (u64, DropG, oneshot::Receiver<pb::WtmMessageResponse>) {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        let resp_id = rand::random::<u64>();
+        self.dispatch_response_handlers.insert(resp_id, resp_tx);
+        let dg = DropG { resp_id, dispatch_response_handlers: self.dispatch_response_handlers.clone() };
+        (resp_id, dg, resp_rx)
     }
 
     pub async fn dispatch_event(&self, id: RealId, event: RealCreateEvent) -> Result<RealKhronosValue, crate::Error> {
         let pb_event = pb::AnyValue::from_real(&event)?;
 
-        let (resp_tx, resp_rx) = oneshot::channel();
-        let resp_id = rand::random::<u64>();
-        self.dispatch_response_handlers.insert(resp_id, resp_tx);
+        let (resp_id, _dg, resp_rx) = self.setup_handler();
 
         let msg = pb::MtwMessage {
             payload: Some(pb::mtw_message::Payload::Dispatch(pb::DispatchEvent {
@@ -333,9 +340,7 @@ impl MesophyllServerConn {
     }
     
     pub async fn drop_tenant(&self, id: RealId) -> Result<(), crate::Error> {
-        let (ack_tx, ack_rx) = oneshot::channel();
-        let resp_id = rand::random::<u64>();
-        self.drop_tenant_ack_handlers.insert(resp_id, ack_tx);
+        let (resp_id, _dg, resp_rx) = self.setup_handler();
 
         let msg = pb::MtwMessage {
             payload: Some(pb::mtw_message::Payload::DropTenant(pb::Id::from_real_id(&id))),
@@ -343,6 +348,36 @@ impl MesophyllServerConn {
         };
 
         self.tx.send(Ok(msg)).map_err(|e| Status::internal(format!("Failed to send drop tenant message to worker {}: {}", self.id, e)))?;
-        ack_rx.await.map_err(|e| format!("Failed to receive drop tenant ack from worker {}: {}", self.id, e).into())
+        let resp = resp_rx.await?;
+        resp.ensure_ok()?;
+        Ok(())
+    }
+
+    pub async fn update_tenant_state(&self, id: RealId, tenant_state: TenantState) -> Result<(), crate::Error> {
+        let (resp_id, _dg, resp_rx) = self.setup_handler();
+
+        let msg = pb::MtwMessage {
+            payload: Some(pb::mtw_message::Payload::UpdateTenantState(pb::UpdateTenantState {
+                id: Some(pb::Id::from_real_id(&id)),
+                new_tenant_state: Some(pb::AnyValue::from_real(&tenant_state)?)
+            })),
+            id: Some(resp_id),
+        };
+
+        self.tx.send(Ok(msg)).map_err(|e| Status::internal(format!("Failed to send drop tenant message to worker {}: {}", self.id, e)))?;
+        let resp = resp_rx.await?;
+        resp.ensure_ok()?;
+        Ok(())
+    }
+}
+
+struct DropG {
+    resp_id: u64,
+    dispatch_response_handlers: Arc<DashMap<u64, oneshot::Sender<pb::WtmMessageResponse>>>
+}
+
+impl Drop for DropG {
+    fn drop(&mut self) {
+        self.dispatch_response_handlers.remove(&self.resp_id);
     }
 }

@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use futures::{StreamExt, stream::FuturesUnordered};
 use crate::{geese::{state::{StateExecResponse, StateOp}, tenantstate::TenantState}, master::syscall::{MSyscallArgs, MSyscallError, MSyscallRet}, worker::{workerthread::WorkerThread, workervmmanager::Id}};
 use crate::mesophyll::server::pb;
+use khronos_runtime::utils::khronos_value::KhronosValue;
 
 /// Mesophyll client
 #[derive(Clone)]
@@ -80,6 +81,7 @@ impl MesophyllClient {
         tokio::task::spawn(async move {
             let mut dispatches = FuturesUnordered::new();
             let mut drop_tenants = FuturesUnordered::new();
+            let mut update_tenant_state = FuturesUnordered::new();
             loop {
                 tokio::select! {
                     Some(recv) = server_stream.next() => {
@@ -120,6 +122,28 @@ impl MesophyllClient {
                                         wt.kill().await.expect("Failed to kill worker thread");
                                         std::process::exit(0);
                                     }
+                                    pb::mtw_message::Payload::UpdateTenantState(payload) => {
+                                        let Some(id) = payload.id else {
+                                            log::error!("Mesophyll client received UpdateTenantState message with no ID");
+                                            continue;
+                                        };
+                                        let Some(new_tenant_state) = payload.new_tenant_state  else {
+                                            log::error!("Mesophyll client received UpdateTenantState message with no event");
+                                            continue;
+                                        };
+                                        let new_tenant_state: TenantState = match pb::AnyValue::to_real(&new_tenant_state) {
+                                            Ok(ev) => ev,
+                                            Err(e) => {
+                                                log::error!("Mesophyll client failed to convert event payload to real value: {:?}", e);
+                                                continue;
+                                            }
+                                        };
+                                        let wt = wt.clone();
+                                        update_tenant_state.push(async move {
+                                            let resp = wt.update_tenant_state(id.to_real_id(), new_tenant_state).await;
+                                            (req_id, resp)
+                                        });
+                                    }
                                 }
                             }
                             Ok(_) => {
@@ -134,7 +158,7 @@ impl MesophyllClient {
                     }
                     Some((id, result)) = dispatches.next() => {
                         let Some(id) = id else { continue };
-                        let response = pb::wtm_message::Payload::DispatchResponse(pb::DispatchEventResponse::from_real(result));
+                        let response = pb::wtm_message::Payload::Resp(pb::WtmMessageResponse::from_real(result));
                         let _ = self_ref.client_stream_tx.send(pb::WtmMessage {
                             payload: Some(response),
                             resp_id: Some(id),
@@ -142,14 +166,15 @@ impl MesophyllClient {
                     }
                     Some((id, result)) = drop_tenants.next() => {
                         let Some(id) = id else { continue };
-                        let response = pb::wtm_message::Payload::DropTenantAck({
-                            if let Err(err) = result { 
-                                log::error!("Error dropping tenant: {err:?}"); 
-                                1 
-                            } else { 
-                                0 
-                            }
+                        let response = pb::wtm_message::Payload::Resp(pb::WtmMessageResponse::from_real(result.map(|_| KhronosValue::Null)));
+                        let _ = self_ref.client_stream_tx.send(pb::WtmMessage {
+                            payload: Some(response),
+                            resp_id: Some(id),
                         });
+                    }
+                    Some((id, result)) = update_tenant_state.next() => {
+                        let Some(id) = id else { continue };
+                        let response = pb::wtm_message::Payload::Resp(pb::WtmMessageResponse::from_real(result.map(|_| KhronosValue::Null)));
                         let _ = self_ref.client_stream_tx.send(pb::WtmMessage {
                             payload: Some(response),
                             resp_id: Some(id),

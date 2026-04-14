@@ -4,6 +4,7 @@ use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 use tokio::sync::oneshot::Sender as OneShotSender;
 use std::panic::AssertUnwindSafe;
 
+use crate::geese::tenantstate::TenantState;
 use crate::worker::limits::MAX_VM_THREAD_STACK_SIZE;
 use crate::worker::workerstate::WorkerState;
 use super::{worker::Worker, workervmmanager::Id};
@@ -15,6 +16,11 @@ enum WorkerThreadMessage {
     },
     DropTenant {
         id: Id,
+        tx: OneShotSender<Result<(), crate::Error>>,
+    },
+    UpdateTenantState {
+        id: Id,
+        ts: TenantState,
         tx: OneShotSender<Result<(), crate::Error>>,
     },
     DispatchEvent {
@@ -80,6 +86,10 @@ impl WorkerThread {
                                     let res = worker.vm_manager.remove_vm_for(id);
                                     let _ = tx.send(res.map_err(|e| e.to_string().into()));
                                 }
+                                WorkerThreadMessage::UpdateTenantState {id, ts, tx } => {
+                                    let res = worker.wts.reload_for_tenant(id, &ts);
+                                    let _ = tx.send(res.map_err(|e| e.to_string().into()));
+                                }
                             }
                         }
                     });
@@ -124,6 +134,13 @@ impl WorkerThread {
     pub async fn drop_tenant(&self, id: Id) -> Result<(), crate::Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.tx.send(WorkerThreadMessage::DropTenant { id, tx })
+            .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
+        Ok(rx.await.map_err(|e| format!("Failed to receive response from worker thread: {e}"))??)
+    }
+
+    pub async fn update_tenant_state(&self, id: Id, ts: TenantState) -> Result<(), crate::Error> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tx.send(WorkerThreadMessage::UpdateTenantState { id, ts, tx })
             .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
         Ok(rx.await.map_err(|e| format!("Failed to receive response from worker thread: {e}"))??)
     }

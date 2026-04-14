@@ -4,7 +4,7 @@ use khronos_runtime::utils::khronos_value::KhronosValue;
 use khronos_runtime::core::datetime::DateTime as LuaDateTime;
 use rand::distr::{Alphanumeric, SampleString};
 
-use crate::geese::tenantstate::{DEFAULT_EVENTS, TenantState, TenantStateDb, TenantStateEventRefs, TenantStatePartial};
+use crate::geese::tenantstate::{DEFAULT_EVENTS, TenantState, TenantStateDb};
 use crate::worker::workervmmanager::Id;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -164,11 +164,12 @@ impl FromLua for StateOp {
 /// A simple wrapper around the database pool that provides luau state manipulation functionality
 pub struct StateDb {
     pool: sqlx::PgPool,
+    tsdb: TenantStateDb
 }
 
 impl StateDb {
     pub fn new(pool: sqlx::PgPool) -> Self {
-        StateDb { pool }
+        StateDb { pool: pool.clone(), tsdb: TenantStateDb::new(pool) }
     }
 
     /// Perform execution of an op
@@ -192,24 +193,7 @@ impl StateDb {
             }
 
             if result.tenant_state_changed {
-                let partials: TenantStatePartial = sqlx::query_as("SELECT owner_id, owner_type, flags, modflags FROM tenant_state WHERE owner_id = $1 AND owner_type = $2")
-                    .bind(tid.tenant_id())
-                    .bind(tid.tenant_type())
-                    .fetch_one(&mut *tx)
-                    .await?;
-
-                let partial_refs: Vec<TenantStateEventRefs> = sqlx::query_as("
-                    SELECT owner_id, owner_type, event, array_agg(system) as systems
-                    FROM tenant_state_events
-                    WHERE owner_id = $1 AND owner_type = $2
-                    GROUP BY owner_id, owner_type, event
-                ")
-                    .bind(tid.tenant_id())
-                    .bind(tid.tenant_type())
-                    .fetch_all(&mut *tx)
-                    .await?;
-
-                result.new_tenant_state = Some(TenantStateDb::into_tenant_state_single(partials, partial_refs));
+                result.new_tenant_state = self.tsdb.get_tenant_state_for(&mut tx, tid).await?;
             }
 
             tx.commit().await?;

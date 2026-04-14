@@ -12,7 +12,7 @@ pub struct TenantStateDb {
 
 #[derive(sqlx::FromRow)]
 /// Internally used for storing raw tenant state without refs
-pub(super) struct TenantStatePartial {
+struct TenantStatePartial {
     flags: i32,
     modflags: i32,
     owner_id: String,
@@ -21,7 +21,7 @@ pub(super) struct TenantStatePartial {
 
 #[derive(sqlx::FromRow)]
 /// Internally used for storing tenant state event refs
-pub(super) struct TenantStateEventRefs {
+struct TenantStateEventRefs {
     owner_id: String,
     owner_type: String,
     event: String, 
@@ -64,7 +64,32 @@ impl TenantStateDb {
         Ok(Self::into_tenant_state(partials, partial_refs))
     }
 
-    pub(super) fn into_tenant_state(partials: Vec<TenantStatePartial>, partial_refs: Vec<TenantStateEventRefs>) -> HashMap<Id, TenantState> {
+    /// Returns the tenant state(s) for all tenant in the database
+    /// 
+    /// Should only be called once, on startup, to initialize the tenant state cache
+    pub async fn get_tenant_state_for<'c>(&self, tx: &mut sqlx::Transaction<'c, sqlx::Postgres>, tid: Id) -> Result<Option<TenantState>, crate::Error> {
+        let Some(partials) = sqlx::query_as("SELECT owner_id, owner_type, flags, modflags FROM tenant_state WHERE owner_id = $1 AND owner_type = $2")
+            .bind(tid.tenant_id())
+            .bind(tid.tenant_type())
+            .fetch_optional(&mut **tx)
+            .await? else {
+                return Ok(None)
+            };
+
+        let partial_refs: Vec<TenantStateEventRefs> = sqlx::query_as("
+            SELECT owner_id, owner_type, event, array_agg(system) as systems
+            FROM tenant_state_events
+            WHERE owner_id = $1 AND owner_type = $2
+            GROUP BY owner_id, owner_type, event
+        ")
+            .bind(tid.tenant_id())
+            .bind(tid.tenant_type())
+            .fetch_all(&mut **tx)
+            .await?;
+        Ok(Some(TenantStateDb::into_tenant_state_single(partials, partial_refs)))
+    }
+
+    fn into_tenant_state(partials: Vec<TenantStatePartial>, partial_refs: Vec<TenantStateEventRefs>) -> HashMap<Id, TenantState> {
         let mut states = HashMap::new();  
         for partial in partials {
             let Some(id) = Id::from_parts(&partial.owner_type, &partial.owner_id) else {
@@ -90,7 +115,7 @@ impl TenantStateDb {
         states
     }
 
-    pub(super) fn into_tenant_state_single(partial: TenantStatePartial, partial_refs: Vec<TenantStateEventRefs>) -> TenantState {
+    fn into_tenant_state_single(partial: TenantStatePartial, partial_refs: Vec<TenantStateEventRefs>) -> TenantState {
         let mut state =  TenantState {
             events: HashMap::new(),
             flags: partial.flags,

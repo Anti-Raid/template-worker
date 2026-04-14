@@ -207,14 +207,22 @@ impl MBotSyscall {
                 if !ctx.is_secure() {
                     return Err(MSyscallError::ContextInsecure);
                 }
-                sqlx::query("UPDATE tenant_state SET modflags = $1 WHERE owner_id = $2 AND owner_type = $3")
-                    .bind(modflags.bits() as i32)
+                let mut tx = handler.pool.begin().await?;
+                sqlx::query("INSERT INTO tenant_state (owner_id, owner_type, modflags) VALUES ($1, $2, $3) ON CONFLICT (owner_id, owner_type) DO UPDATE SET modflags = EXCLUDED.modflags")
                     .bind(id.tenant_id())
                     .bind(id.tenant_type())
-                    .execute(&handler.pool)
+                    .bind(modflags.bits() as i32)
+                    .execute(&mut *tx)
                     .await?;
+
+                // Refresh tenant state now
+                let Some(ts) = handler.tsdb.get_tenant_state_for(&mut tx, id).await? else {
+                    return Err("failed to find tenant state after update".into())
+                };
                 
-                handler.worker_pool.drop_tenant(id).await?;
+                let conn = handler.mesophyll_server.get_connection_for(id)
+                .ok_or_else(|| format!("No Mesophyll connection found for worker process for ID: {id:?}"))?;
+                conn.update_tenant_state(id, ts).await?;
                 Ok(MBotSyscallRet::Ack)
             }
         }
