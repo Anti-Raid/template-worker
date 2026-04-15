@@ -7,7 +7,7 @@ mod tenantstate_data_to_flags;
 mod tenantstate_add_modflags;
 mod tenantstate_add_eventrefs;
 mod kv_scope_unnest;
-mod user_access_token_last_fetched;
+mod user_oauth_v2;
 
 use futures::future::BoxFuture;
 use log::info;
@@ -32,7 +32,7 @@ pub const MIGRATIONS: [Migration; 10] = [
     tenantstate_add_modflags::MIGRATION,
     kv_scope_unnest::MIGRATION,
     tenantstate_add_eventrefs::MIGRATION,
-    user_access_token_last_fetched::MIGRATION
+    user_oauth_v2::MIGRATION
 ];
 
 pub async fn apply_migrations(pool: sqlx::PgPool) -> Result<(), crate::Error> {

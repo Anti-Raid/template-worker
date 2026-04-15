@@ -23,6 +23,7 @@ impl IntoResponse for MSyscallError {
 /// from the DB and if so, returns the user id
 struct AuthorizedUser {
     pub user_id: UserId,
+    pub session_type: String
 }
 
 struct OptionalAuthorizedUser(Option<AuthorizedUser>);
@@ -58,7 +59,7 @@ impl FromRequestParts<MSyscallHandler> for AuthorizedUser {
         let auth_response = iauth::check_web_auth(&state.pool, token).await?;
 
         match auth_response {
-            iauth::AuthResponse::Success { user_id, .. } => Ok(AuthorizedUser { user_id }),
+            iauth::AuthResponse::Success { user_id, session_type, .. } => Ok(AuthorizedUser { user_id, session_type }),
             iauth::AuthResponse::ApiBanned { .. } => {
                 return Err(MSyscallError::Unauthorized { reason: "You have banned from using this service" })
             }
@@ -87,7 +88,12 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
         State(handler): State<MSyscallHandler>,
         Json(args): Json<MSyscallArgs>,
     ) -> Result<MSyscallRet, MSyscallError> {
-        let ctx = if let Some(user) = user.0 { MSyscallContext::Api(user.user_id) } else { MSyscallContext::ApiAnon };
+        let ctx = if let Some(user) = user.0 { 
+            match user.session_type.as_str() {
+                "login" | "app_login" => MSyscallContext::ApiOauth(user.user_id),
+                _ => MSyscallContext::ApiToken(user.user_id) 
+            }
+        } else { MSyscallContext::ApiAnon };
         let resp = handler.handle_syscall(args, ctx).await?;
         Ok(resp)
     }

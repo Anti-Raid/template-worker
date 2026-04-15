@@ -2,7 +2,7 @@ use chrono::{DateTime, Duration, Utc};
 use rand::distr::{Alphanumeric, SampleString};
 use serenity::all::UserId;
 use sqlx::PgPool;
-use crate::master::syscall::types::auth::UserSession;
+use crate::master::syscall::{MSyscallError, MSyscallHandler, types::auth::UserSession};
 
 /// The response from checking web auth
 /// 
@@ -82,14 +82,14 @@ pub async fn check_web_auth(
 }
 
 /// Creates a new web user
-pub async fn create_web_user_from_oauth2(pool: &PgPool, user_id: &str, access_token: &str) -> Result<(), crate::Error> {
+pub async fn create_web_user_from_oauth2<'c, E>(executor: E, user_id: &str) -> Result<(), crate::Error> 
+where E: sqlx::PgExecutor<'c> {
     // Insert the user into the database
     sqlx::query(
-        "INSERT INTO users (user_id, access_token) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET access_token = EXCLUDED.access_token",
+        "INSERT INTO users (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING",
     )
     .bind(&user_id)
-    .bind(access_token)
-    .execute(pool)
+    .execute(executor)
     .await?;
 
     Ok(())
@@ -115,12 +115,13 @@ const LOGIN_EXPIRY_TIME: Duration = Duration::seconds(3600);
 const APP_LOGIN_EXPIRY_TIME: Duration = Duration::days(14);
 
 /// Create a new session for a web user
-pub async fn create_web_session(
-    pool: &PgPool, 
+pub async fn create_web_session<'c, E>(
+    executor: E,
     user_id: &str, 
     name: Option<String>,
     session_type: SessionType,
-) -> Result<ICreatedWebSession, crate::Error> {
+) -> Result<ICreatedWebSession, crate::Error> 
+where E: sqlx::PgExecutor<'c> {
     // Generate a new session ID
     #[derive(sqlx::FromRow)]
     struct NewSession {
@@ -143,7 +144,7 @@ pub async fn create_web_session(
     .bind(&token)
     .bind(expiry)
     .bind(name)
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await?;
 
     Ok(ICreatedWebSession { 
@@ -201,4 +202,98 @@ pub async fn delete_user_session(pool: &PgPool, user_id: &str, session_id: &str)
     }
 
     Ok(())
+}
+
+/// Helper method to fetch user access token, refreshing it if needed
+pub async fn get_user_access_token(handler: &MSyscallHandler, user_id: &str) -> Result<String, MSyscallError> {
+    let mut tx = handler.pool.begin().await?;
+
+    let (data, access_token_last_set) = OauthTokenResponse::get(&mut *tx, user_id).await?;
+
+    if Utc::now() > access_token_last_set + Duration::seconds(data.expires_in as i64) {
+        // expired
+        #[derive(serde::Serialize)]
+        pub struct Response {
+            grant_type: &'static str,
+            refresh_token: String
+        }
+
+        let resp = handler.reqwest.post(format!("{}/api/v10/oauth2/token", crate::CONFIG.meta.proxy))
+            .form(&Response {
+                grant_type: "refresh_token",
+                refresh_token: data.refresh_token
+            })
+            .send()
+            .await
+            .map_err(|e| format!("Failed to get new access token: {e:?}"))?;
+
+        if resp.status() != reqwest::StatusCode::OK {
+            let error_text = resp.text().await?;
+            return Err(format!("Failed to get new access token: {}", error_text).into());
+        }
+
+        let token_response: OauthTokenResponse = resp.json().await?;
+        token_response.save(&mut *tx, user_id).await?;
+
+        return Ok(token_response.access_token)
+    }
+
+    Ok(data.access_token)
+}
+
+#[derive(serde::Deserialize)]
+pub struct OauthTokenResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_in: i32,
+    pub scope: String,
+}
+
+impl OauthTokenResponse {
+    /// Gets a oauth token response to database as well as when it was created
+    pub async fn get<'c, E>(executor: E, user_id: &str) -> Result<(Self, DateTime<Utc>), MSyscallError> 
+    where E: sqlx::PgExecutor<'c> 
+    {
+        #[derive(sqlx::FromRow)]
+        struct AccessToken {
+            access_token: String,
+            access_token_last_set: DateTime<Utc>,
+            refresh_token: String,
+            access_token_expiry: i32,
+            scope: String
+        }
+
+        let data = sqlx::query_as::<_, AccessToken>("SELECT access_token, access_token_last_set, refresh_token, access_token_expiry, scope FROM user_oauths WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_optional(executor)
+            .await?;
+
+        let Some(data) = data else {
+            return Err(MSyscallError::UserOauth2Needed);
+        };
+        Ok((Self {
+            access_token: data.access_token,
+            refresh_token: data.refresh_token,
+            expires_in: data.access_token_expiry,
+            scope: data.scope
+        }, data.access_token_last_set))
+    }
+
+    /// Saves a oauth token response to database
+    pub async fn save<'c, E>(&self, executor: E, user_id: &str) -> Result<(), MSyscallError> 
+    where E: sqlx::PgExecutor<'c> 
+    {
+        sqlx::query("INSERT INTO user_oauths (user_id, access_token, refresh_token, access_token_expiry, access_token_last_set, scope)
+        VALUES ($1, $2, $3, $4, NOW(), $5) ON CONFLICT (user_id) DO UPDATE SET access_token = EXCLUDED.access_token, refresh_token = EXCLUDED.refresh_token,
+        access_token_last_set = EXCLUDED.access_token_last_set, access_token_expiry = EXCLUDED.access_token_expiry, scope = EXCLUDED.scope
+        ")
+        .bind(user_id)
+        .bind(&self.access_token)
+        .bind(&self.refresh_token)
+        .bind(&self.expires_in)
+        .bind(&self.scope)
+        .execute(executor)
+        .await?;
+        Ok(())
+    }
 }

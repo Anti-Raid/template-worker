@@ -169,13 +169,7 @@ impl MAuthSyscall {
                     return Err(format!("Failed to get access token: {}", error_text).into());
                 }
 
-                #[derive(serde::Deserialize)]
-                pub struct OauthTokenResponse {
-                    pub access_token: String,
-                    pub scope: String,
-                }
-
-                let token_response: OauthTokenResponse = resp.json().await?;
+                let token_response: iauth::OauthTokenResponse = resp.json().await?;
 
                 let scopes = token_response.scope.replace("%20", " ")
                     .split(' ')
@@ -200,16 +194,22 @@ impl MAuthSyscall {
 
                 let user_info: PartialUser = user_resp.json().await?;
 
-                // Create a session for the user
+                // Create a session for the user and save the oauth2
+                let mut tx = handler.pool.begin().await?;
+                
+                // Ensure we have a web user for this user
                 iauth::create_web_user_from_oauth2(
-                    &handler.pool,
+                    &mut *tx,
                     &user_info.id,
-                    &token_response.access_token,
                 ).await
                 .map_err(|e| format!("Failed to create user: {e:?}"))?;
+                
+                // Save oauth2 resp to database
+                token_response.save(&mut *tx, &user_info.id).await?;
 
+                // Make the session
                 let session = iauth::create_web_session(
-                    &handler.pool,
+                    &mut *tx,
                     &user_info.id,
                     None, // No name for the session
                     if app_login {
@@ -220,6 +220,9 @@ impl MAuthSyscall {
                 )
                     .await
                     .map_err(|e| format!("Failed to create session: {e:?}"))?;
+                
+                // Commit atomically once the above steps have succeeded
+                tx.commit().await?;
 
                 Ok(
                     MAuthSyscallRet::CreatedSession { 

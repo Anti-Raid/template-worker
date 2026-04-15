@@ -1,8 +1,7 @@
-use chrono::{DateTime, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
-use serenity::all::{GuildId, UserId};
+use serenity::all::GuildId;
 use sqlx::Row;
-use crate::master::syscall::{MSyscallError, MSyscallHandler};
+use crate::master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, internal::auth as iauth};
 use super::types::discord::*;
 use khronos_ext::mluau_ext::prelude::*;
 
@@ -68,10 +67,13 @@ impl IntoLua for MDiscordSyscallRet {
 }
 
 impl MDiscordSyscall {
-    const ACCESS_TOKEN_MAX_LIFETIME: TimeDelta = TimeDelta::hours(60); // 1 hour
-    pub(super) async fn exec(self, user_id: UserId, handler: &MSyscallHandler) -> Result<MDiscordSyscallRet, MSyscallError> {
+    pub(super) async fn exec(self, handler: &MSyscallHandler, ctx: MSyscallContext) -> Result<MDiscordSyscallRet, MSyscallError> {
+        let user_id = ctx.into_user_id()?;
         match self {
             Self::GetUserGuilds { refresh } => {
+                if !ctx.is_oauth() {
+                    return Err(MSyscallError::ContextRequiresOauth); // disable for now to avoid abuse
+                }
                 let mut guilds_cache = None;
                 if !refresh {
                     // Check for guilds cache
@@ -89,23 +91,7 @@ impl MDiscordSyscall {
                     Some(gc) => gc,
                     None => {
                         // Get the access token
-                        #[derive(sqlx::FromRow)]
-                        struct AccessToken {
-                            access_token: Option<String>,
-                            access_token_last_fetched: DateTime<Utc>
-                        }
-
-                        let data: AccessToken = sqlx::query_as("SELECT access_token, access_token_last_fetched FROM users WHERE user_id = $1")
-                            .bind(user_id.to_string())
-                            .fetch_one(&handler.pool)
-                            .await?;
-
-                        let Some(access_token) = data.access_token else {
-                            return Err(MSyscallError::UserOauth2Needed);
-                        };
-                        if Utc::now() - data.access_token_last_fetched > Self::ACCESS_TOKEN_MAX_LIFETIME {
-                            return Err(MSyscallError::UserOauth2Needed);
-                        }
+                        let access_token = iauth::get_user_access_token(handler, &user_id.to_string()).await?;
 
                         let resp = handler.reqwest.get(format!("{}/api/v10/users/@me/guilds", crate::CONFIG.meta.proxy))
                         .header("Authorization", format!("Bearer {access_token}"))

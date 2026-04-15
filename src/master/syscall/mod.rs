@@ -21,8 +21,10 @@ use khronos_ext::mluau_ext::prelude::*;
 pub enum MSyscallContext {
     /// API context (anonymous/logged out)
     ApiAnon,
-    /// API context (normal)
-    Api(UserId),
+    /// API context (login session/login token)
+    ApiOauth(UserId),
+    /// API context (api token)
+    ApiToken(UserId),
     //// A 'secure' API context (w/ 2fa etc used)
     ApiSecure(UserId),
     /// The tw shell (anonymous)
@@ -43,6 +45,13 @@ impl MSyscallContext {
         matches!(self, Self::ApiSecure(_) | Self::ShellAnon | Self::ShellWithUser(_))
     }
 
+    /// Returns if the given context comes from an oauth authorization
+    /// 
+    /// Required for oauth2-related APIs like GetUserGuilds (with refresh true) to work
+    pub const fn is_oauth(self) -> bool {
+        self.is_shell() || matches!(self, Self::ApiOauth(_))
+    }
+
     /// Returns if the given context is a shell
     #[inline(always)]
     pub const fn is_shell(self) -> bool {
@@ -52,7 +61,7 @@ impl MSyscallContext {
     /// Gets the user id, erroring if not found in the context
     pub const fn into_user_id(self) -> Result<UserId, MSyscallError> {
         match self {
-            Self::Api(u) | Self::ApiSecure(u) | Self::ShellWithUser(u) => Ok(u),
+            Self::ApiOauth(u) | Self::ApiToken(u) | Self::ApiSecure(u) | Self::ShellWithUser(u) => Ok(u),
             _ => Err(MSyscallError::ContextRequiresUser)
         }
     }
@@ -172,6 +181,8 @@ pub enum MSyscallError {
     ContextInsecure,
     /// Context requires a user to actually perform this operation on/with
     ContextRequiresUser,
+    /// Context requires oauth2 login token to work
+    ContextRequiresOauth,
     /// Guild does not have bot added to it
     BotNotOnGuild,
     /// User needs to login via OAuth2 once first *before* using this API
@@ -261,7 +272,7 @@ impl MSyscallHandler {
                 Ok(MSyscallRet::Bot { data: req.exec(self, ctx).await? })
             }
             MSyscallArgs::Discord { req } => {
-                Ok(MSyscallRet::Discord { data: req.exec(ctx.into_user_id()?, self).await? })
+                Ok(MSyscallRet::Discord { data: req.exec(self, ctx).await? })
             }
             MSyscallArgs::Auth { req } => {
                 Ok(MSyscallRet::Auth { data: req.exec(self, ctx).await? })
