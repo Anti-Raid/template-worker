@@ -8,6 +8,7 @@ use crate::geese::tenantstate::{DEFAULT_EVENTS, TenantState, TenantStateDb};
 use crate::worker::workervmmanager::Id;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "op")]
 pub enum StateOp {
     KvFind {
         query: String,
@@ -440,6 +441,7 @@ impl StateDb {
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "op")]
 pub enum StateExecResult {
     Kv {
         l: KvLookup
