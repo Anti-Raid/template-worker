@@ -1,11 +1,11 @@
 use std::time::Duration;
 
-use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use tokio::process::Command;
 use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 use crate::geese::tenantstate::TenantState;
 use crate::mesophyll::server::MesophyllServer;
+use crate::worker::workerdispatch::SimpleEvent;
 use crate::worker::workervmmanager::Id;
 
 /// A WorkerProcessHandle is a handle to a worker process from the master process
@@ -141,7 +141,7 @@ impl WorkerProcessHandle {
         .map_err(|e| format!("Failed to send kill message to worker process with ID: {}: {}", self.id, e).into())
     }
 
-    pub async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
+    pub async fn dispatch_event(&self, id: Id, event: SimpleEvent) -> Result<KhronosValue, crate::Error> {
         let r = self.mesophyll_server.get_connection(self.id)
             .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", self.id))?;
         r.dispatch_event(id, event).await

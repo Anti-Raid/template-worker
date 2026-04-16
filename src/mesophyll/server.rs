@@ -1,9 +1,8 @@
 use futures::{Stream, StreamExt};
 use serenity::all::{UserId, GuildId};
 use tonic::Status;
-use crate::{geese::{state::StateDb, tenantstate::{TenantState, TenantStateDb}}, master::syscall::{MSyscallContext, MSyscallHandler}, worker::workervmmanager::Id as RealId};
+use crate::{geese::{state::StateDb, tenantstate::{TenantState, TenantStateDb}}, master::syscall::{MSyscallContext, MSyscallHandler}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id as RealId}};
 use khronos_runtime::utils::khronos_value::KhronosValue as RealKhronosValue;
-use khronos_runtime::primitives::event::CreateEvent as RealCreateEvent;
 use dashmap::DashMap;
 use std::{net::ToSocketAddrs, sync::OnceLock};
 use std::pin::Pin;
@@ -317,7 +316,7 @@ impl MesophyllServerConn {
         (resp_id, dg, resp_rx)
     }
 
-    pub async fn dispatch_event(&self, id: RealId, event: RealCreateEvent) -> Result<RealKhronosValue, crate::Error> {
+    pub async fn dispatch_event(&self, id: RealId, event: SimpleEvent) -> Result<RealKhronosValue, crate::Error> {
         let pb_event = pb::AnyValue::from_real(&event)?;
 
         let (resp_id, _dg, resp_rx) = self.setup_handler();

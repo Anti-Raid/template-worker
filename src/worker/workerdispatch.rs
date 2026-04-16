@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
-use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
-use serde_json::json;
+use khronos_runtime::primitives::LUA_SERIALIZE_OPTIONS;
+use khronos_runtime::rt::mlua::prelude::*;
+use khronos_runtime::{utils::khronos_value::KhronosValue};
+use serde::{Deserialize, Serialize};
 use crate::{geese::tenantstate::DEFAULT_EVENTS, worker::{workerstate::WorkerState, workertenantstate::WorkerTenantState}};
 
 use super::workervmmanager::{Id, WorkerVmManager};
@@ -39,13 +41,9 @@ impl WorkerDispatch {
                 "Dispatching startup event for ID {id:?}",
             );
 
-            let event = CreateEvent::new("OnStartup".to_string(), None, json!({
-                "reason": "worker_startup"
-            }));
-
             let self_ref = self.clone();
             tokio::task::spawn_local(async move {
-                if let Err(e) = self_ref.dispatch_event(id, event).await {
+                if let Err(e) = self_ref.dispatch_event_complex(id, "OnStartup", None, OnStartupData { reason: "worker_startup"}).await {
                     log::error!("Failed to dispatch startup event for ID {id:?}: {e}");
                 }
             });
@@ -53,13 +51,16 @@ impl WorkerDispatch {
     }
 
     /// Dispatches an event to the appropriate VM based on the tenant ID
-    pub async fn dispatch_event(&self, id: Id, event: CreateEvent) -> mlua::Result<KhronosValue> {
-        use khronos_runtime::rt::mlua;
+    pub async fn dispatch_event(&self, id: Id, event: SimpleEvent) -> LuaResult<KhronosValue> {
+        let (name, author, data) = (event.name, event.author, event.data);
+        self.dispatch_event_complex(id, &name, author.as_deref(), data).await
+    }
 
+    pub async fn dispatch_event_complex<Data: IntoLua>(&self, id: Id, name: &str, author: Option<&str>, data: Data) -> LuaResult<KhronosValue> {
         let tenant_state = self.tenant_state.get_cached_tenant_state_for(id)
             .map_err(|e| mlua::Error::external(format!("Failed to get tenant state for ID {id:?}: {e}")))?;
 
-        if !tenant_state.events.contains_key(event.name()) && !DEFAULT_EVENTS.contains(&event.name()) {
+        if !tenant_state.events.contains_key(name) && !DEFAULT_EVENTS.contains(&name) {
             // Event not registered for this tenant, skip
             return Ok(KhronosValue::Null);
         }
@@ -72,7 +73,7 @@ impl WorkerDispatch {
         }
 
         let http = self.worker_state.serenity_http.clone();
-        match vm_data.runtime.call_in_scheduler::<_, KhronosValue>(vm_data.dispatch_func, event).await {
+        match vm_data.runtime.call_in_scheduler::<_, KhronosValue>(vm_data.dispatch_func, Event { name, author, data }).await {
             Ok(result) => Ok(result),
             Err(e) => {
                 let err_str = e.to_string();
@@ -129,5 +130,86 @@ impl WorkerDispatch {
         .await?;
 
         Ok(())
+    }
+}
+
+pub struct Event<'a, Data: IntoLua> {
+    name: &'a str,
+    author: Option<&'a str>,
+    data: Data
+}
+
+impl<'a, Data: IntoLua> IntoLua for Event<'a, Data> {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        let tab = lua.create_table()?;
+        tab.set("name", self.name)?;
+        match self.author {
+            Some(author) => tab.set("author", author)?,
+            None => {},
+        }
+        tab.set(
+            "data",
+            self.data
+        )?;
+        tab.set_readonly(true);
+        Ok(LuaValue::Table(tab))
+    }
+}
+
+pub struct OnStartupData {
+    reason: &'static str
+}
+
+impl IntoLua for OnStartupData {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        let tab = lua.create_table_with_capacity(0, 1)?;
+        tab.set("reason", self.reason)?;
+        tab.set_readonly(true);
+        Ok(LuaValue::Table(tab))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Inner event data to a simple event
+enum SimpleEventData {
+    KhronosValue(KhronosValue),
+    JsonString(String),
+}
+
+impl IntoLua for SimpleEventData {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        match self {
+            Self::KhronosValue(value) => {
+                value.into_lua(lua)
+            },
+            Self::JsonString(ref value) => {
+                let value: serde_json::Value = serde_json::from_str(value)
+                    .map_err(|e| LuaError::external(e))?;
+                lua.to_value_with(&value, LUA_SERIALIZE_OPTIONS)
+            },
+        }
+    }
+}
+
+/// An `SimpleEvent` is a/an thread-safe object that can be used to create a Event
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct SimpleEvent {
+    /// The name of the event
+    name: String,
+    /// The author of the event
+    author: Option<String>,
+    /// The inner data of the object
+    data: SimpleEventData,
+}
+
+impl SimpleEvent {
+    /// Create a new Event given a khronos value
+    pub fn new_khronos_value(name: String, author: Option<String>, data: KhronosValue) -> Self {
+        Self { name, author, data: SimpleEventData::KhronosValue(data) }
+    }
+
+    /// Create a new Event given a raw json string
+    pub fn new_json_string(name: String, author: Option<String>, data: String) -> Self {
+        Self { name, author, data: SimpleEventData::JsonString(data) }
     }
 }

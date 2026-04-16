@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use dapi::types::CreateCommand;
-use khronos_runtime::{primitives::event::CreateEvent, utils::khronos_value::KhronosValue};
+use khronos_runtime::{utils::khronos_value::KhronosValue};
 use serde::{Deserialize, Serialize};
 use serenity::all::{GuildId, UserId};
-use crate::{geese::tenantstate::ModFlags, master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::bot::{BotStatus, ShardConn}}, worker::workervmmanager::Id};
+use crate::{geese::tenantstate::ModFlags, master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::bot::{BotStatus, ShardConn}}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id}};
 use khronos_ext::mluau_ext::prelude::*;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -171,7 +171,7 @@ impl MBotSyscall {
                     }
                 }
 
-                let event = CreateEvent::new_khronos_value(name, Some(user_id.to_string()), data);
+                let event = SimpleEvent::new_khronos_value(name, Some(user_id.to_string()), data);
 
                 Ok(MBotSyscallRet::KhronosValue { data: handler.worker_pool.dispatch_event(id, event).await? })
             }

@@ -1,4 +1,3 @@
-use khronos_runtime::primitives::event::CreateEvent;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 use tokio::sync::oneshot::Sender as OneShotSender;
@@ -6,6 +5,7 @@ use std::panic::AssertUnwindSafe;
 
 use crate::geese::tenantstate::TenantState;
 use crate::worker::limits::MAX_VM_THREAD_STACK_SIZE;
+use crate::worker::workerdispatch::SimpleEvent;
 use crate::worker::workerstate::WorkerState;
 use super::{worker::Worker, workervmmanager::Id};
 
@@ -25,7 +25,7 @@ enum WorkerThreadMessage {
     },
     DispatchEvent {
         id: Id,
-        event: CreateEvent,
+        event: SimpleEvent,
         tx: Option<OneShotSender<Result<KhronosValue, crate::Error>>>,
     },
 }
@@ -93,10 +93,8 @@ impl WorkerThread {
                                     if let Ok(reloaded) = res && !reloaded {
                                         let wd = worker.dispatch.clone();
                                         tokio::task::spawn_local(async move {
-                                            if let Ok(tsv) = serde_json::to_value(ts) {
-                                                if let Err(e) = wd.dispatch_event(id, CreateEvent::new("_UpdateTenantState".to_string(), None, tsv)).await {
-                                                    log::error!("failed to dispatch ts update: {e:?}");
-                                                }
+                                            if let Err(e) = wd.dispatch_event_complex(id, "_UpdateTenantState", None, ts).await {
+                                                log::error!("failed to dispatch ts update: {e:?}");
                                             }
                                         });
                                     }
@@ -131,14 +129,14 @@ impl WorkerThread {
         Ok(rx.await.map_err(|e| format!("Failed to receive response from worker thread: {e}"))??)
     }
 
-    pub async fn dispatch_event(&self, id: Id, event: CreateEvent) -> Result<KhronosValue, crate::Error> {
+    pub async fn dispatch_event(&self, id: Id, event: SimpleEvent) -> Result<KhronosValue, crate::Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.tx.send(WorkerThreadMessage::DispatchEvent { id, event, tx: Some(tx) })
             .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
         Ok(rx.await.map_err(|e| format!("Failed to receive response from worker thread: {e}"))??)
     }
 
-    pub fn dispatch_event_nowait(&self, id: Id, event: CreateEvent) -> Result<(), crate::Error> {
+    pub fn dispatch_event_nowait(&self, id: Id, event: SimpleEvent) -> Result<(), crate::Error> {
         self.tx.send(WorkerThreadMessage::DispatchEvent { id, event, tx: None })
             .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
         Ok(())

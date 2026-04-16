@@ -1,14 +1,12 @@
 use std::sync::Arc;
 
-use khronos_runtime::primitives::event::CreateEvent;
 use serde_json::Value;
 use serenity::all::{GenericChannelId, GuildId, ResultJson, UserId};
 use stratum_client::{BulkIsResourceInCacheRequest, GetResourceRequest, StratumClient};
 use stratum_common::{GuildFetchOpts, pb};
 use tokio::sync::watch;
-use serde_json::value::RawValue;
 
-use crate::{Error, config::CONFIG, worker::{workerthread::WorkerThread, workervmmanager::Id}};
+use crate::{Error, config::CONFIG, worker::{workerdispatch::SimpleEvent, workerthread::WorkerThread, workervmmanager::Id}};
 
 #[derive(Clone)]
 pub struct Stratum {
@@ -86,10 +84,10 @@ impl Stratum {
 
         wt.dispatch_event_nowait(
             id,
-            CreateEvent::new_raw_value(
+            SimpleEvent::new_json_string(
                 evt.event_name,
                 None,
-                RawValue::from_string(evt.payload)?,
+                evt.payload,
             ),
         )?;
 

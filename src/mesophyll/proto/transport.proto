@@ -26,8 +26,6 @@ message Worker {
 
 message DispatchEvent {
   Id id = 1; 
-  
-  // CreateEvent
   AnyValue event_payload = 2;
 }
 
