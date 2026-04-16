@@ -21,7 +21,9 @@ impl WorkerTenantState {
     }
 
     /// Reloads the tenant state cache for a worker
-    pub fn reload_for_tenant(&self, id: Id, tenant_state: &TenantState) -> Result<(), crate::Error> {
+    /// 
+    /// Returns if the worker was reloaded (true) or not (false)
+    pub fn reload_for_tenant(&self, id: Id, tenant_state: &TenantState) -> Result<bool, crate::Error> {
         let reload_vm = tenant_state.modflags.contains(ModFlags::BANNED);
         {
             let mut cache = self.tenant_state_cache.borrow_mut();
@@ -33,7 +35,7 @@ impl WorkerTenantState {
             self.vm_manager.remove_vm_for(id)?; 
         }
 
-        Ok(())
+        Ok(reload_vm)
     }
 
     /// Gets the tenant state for a specific tenant

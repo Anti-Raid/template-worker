@@ -21,7 +21,7 @@ enum WorkerThreadMessage {
     UpdateTenantState {
         id: Id,
         ts: TenantState,
-        tx: OneShotSender<Result<(), crate::Error>>,
+        tx: OneShotSender<Result<bool, crate::Error>>,
     },
     DispatchEvent {
         id: Id,
@@ -88,6 +88,19 @@ impl WorkerThread {
                                 }
                                 WorkerThreadMessage::UpdateTenantState {id, ts, tx } => {
                                     let res = worker.wts.reload_for_tenant(id, &ts);
+
+                                    // If ok, push a event with new tenant state
+                                    if let Ok(reloaded) = res && !reloaded {
+                                        let wd = worker.dispatch.clone();
+                                        tokio::task::spawn_local(async move {
+                                            if let Ok(tsv) = serde_json::to_value(ts) {
+                                                if let Err(e) = wd.dispatch_event(id, CreateEvent::new("_UpdateTenantState".to_string(), None, tsv)).await {
+                                                    log::error!("failed to dispatch ts update: {e:?}");
+                                                }
+                                            }
+                                        });
+                                    }
+
                                     let _ = tx.send(res.map_err(|e| e.to_string().into()));
                                 }
                             }
@@ -138,7 +151,7 @@ impl WorkerThread {
         Ok(rx.await.map_err(|e| format!("Failed to receive response from worker thread: {e}"))??)
     }
 
-    pub async fn update_tenant_state(&self, id: Id, ts: TenantState) -> Result<(), crate::Error> {
+    pub async fn update_tenant_state(&self, id: Id, ts: TenantState) -> Result<bool, crate::Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.tx.send(WorkerThreadMessage::UpdateTenantState { id, ts, tx })
             .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;

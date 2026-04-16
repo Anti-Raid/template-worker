@@ -174,7 +174,7 @@ impl MesophyllClient {
                     }
                     Some((id, result)) = update_tenant_state.next() => {
                         let Some(id) = id else { continue };
-                        let response = pb::wtm_message::Payload::Resp(pb::WtmMessageResponse::from_real(result.map(|_| KhronosValue::Null)));
+                        let response = pb::wtm_message::Payload::Resp(pb::WtmMessageResponse::from_real(result.map(KhronosValue::Boolean)));
                         let _ = self_ref.client_stream_tx.send(pb::WtmMessage {
                             payload: Some(response),
                             resp_id: Some(id),
