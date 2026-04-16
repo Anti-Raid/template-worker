@@ -238,6 +238,8 @@ pub async fn get_user_access_token(handler: &MSyscallHandler, user_id: &str) -> 
         return Ok(token_response.access_token)
     }
 
+    tx.commit().await?;
+
     Ok(data.access_token)
 }
 

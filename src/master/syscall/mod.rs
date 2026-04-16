@@ -11,6 +11,7 @@ use std::fmt::{Display, Debug};
 use moka::future::Cache;
 use serde::{Deserialize, Serialize};
 use serenity::all::{GuildId, UserId};
+use crate::geese::state::StateDb;
 use crate::geese::tenantstate::TenantStateDb;
 use crate::{geese::stratum::Stratum, master::{syscall::{auth::{AuthError, MAuthSyscall, MAuthSyscallRet}, bot::{MBotSyscall, MBotSyscallRet}, discord::{MDiscordSyscall, MDiscordSyscallRet}, gkv::{MGkvSyscall, MGkvSyscallRet}, types::bot::BotStatus}, workerpool::WorkerPool}};
 use khronos_ext::mluau_ext::prelude::*;
@@ -217,7 +218,8 @@ pub struct MSyscallHandler {
     pub(super) bot_has_guild_cache: Cache<GuildId, bool>,
     pub(super) oauth2_code_cache: Cache<String, ()>,
     pub(super) status_cache: Cache<(), BotStatus>,
-    pub(super) tsdb: TenantStateDb
+    pub(super) tsdb: TenantStateDb,
+    pub(super) statedb: StateDb,
 }
 
 impl MSyscallHandler {
@@ -238,7 +240,8 @@ impl MSyscallHandler {
             bot_has_guild_cache: Cache::builder().time_to_live(Duration::from_secs(60)).build(),
             oauth2_code_cache: Cache::builder().time_to_live(Duration::from_secs(60 * 10)).build(),
             status_cache: Cache::builder().time_to_live(Duration::from_secs(100)).build(),
-            tsdb: TenantStateDb::new(pool)
+            tsdb: TenantStateDb::new(pool.clone()),
+            statedb: StateDb::new(pool)
         }
     }
 

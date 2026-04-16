@@ -155,8 +155,8 @@ pub struct TenantState {
 }
 
 // DEFAULT_EVENTS is handled by WorkerDispatch directly
-pub static DEFAULT_EVENTS: [&str; 3] = [
-    "INTERACTION_CREATE", "WebGetSettings", "WebExecuteSetting"
+pub static DEFAULT_EVENTS: [&str; 4] = [
+    "INTERACTION_CREATE", "WebGetSettings", "WebExecuteSetting", "$UpdateTenantState"
 ];
 
 impl Default for TenantState {

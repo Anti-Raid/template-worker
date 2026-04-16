@@ -4,7 +4,7 @@ use dapi::types::CreateCommand;
 use khronos_runtime::{utils::khronos_value::KhronosValue};
 use serde::{Deserialize, Serialize};
 use serenity::all::{GuildId, UserId};
-use crate::{geese::tenantstate::ModFlags, master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::bot::{BotStatus, ShardConn}}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id}};
+use crate::{geese::{state::{StateExecResult, StateOp}, tenantstate::ModFlags}, master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::bot::{BotStatus, ShardConn}}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id}};
 use khronos_ext::mluau_ext::prelude::*;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -31,6 +31,8 @@ pub enum MBotSyscall {
     AdminDropTenant { id: Id },
     /// Admin API to set tenant state moderation flags (ban them etc.) (works in secure contexts only)
     AdminSetTenantStateModFlags { id: Id, modflags: ModFlags },
+    /// Admin API to run a set of state ops on a tenant (works in secure contexts only)
+    AdminState { id: Id, ops: Vec<StateOp> }
 }
 
 impl FromLua for MBotSyscall {
@@ -61,8 +63,13 @@ impl FromLua for MBotSyscall {
             },
             b"AdminSetTenantStateModFlags" => {
                 let id = tab.get("id")?;
-                let modflags: u8 = tab.get("modflags")?;
+                let modflags = tab.get("modflags")?;
                 Ok(Self::AdminSetTenantStateModFlags { id, modflags: ModFlags::from_bits_retain(modflags) })
+            },
+            b"AdminState" => {
+                let id = tab.get("id")?;
+                let ops = tab.get("ops")?;
+                Ok(Self::AdminState { id, ops })
             },
             _ => {
                 Err(LuaError::FromLuaConversionError {
@@ -100,6 +107,9 @@ pub enum MBotSyscallRet {
     KhronosValue {
         data: KhronosValue
     },
+    State {
+        res: Vec<StateExecResult>,
+    },
     Ack,
 }
 
@@ -112,6 +122,12 @@ impl IntoLua for MBotSyscallRet {
                 table.set("data", data)?;
                 Ok(LuaValue::Table(table))
             }
+            Self::State { res } => {
+                let table = lua.create_table_with_capacity(0, 2)?;
+                table.set("op", "State")?;
+                table.set("res", res)?;
+                Ok(LuaValue::Table(table))
+            },
             _ => lua.to_value(&self) // hack to speed up dev
         }
     }
@@ -219,9 +235,25 @@ impl MBotSyscall {
                 let Some(ts) = handler.tsdb.get_tenant_state_for(&mut tx, id).await? else {
                     return Err("failed to find tenant state after update".into())
                 };
+
+                tx.commit().await?;
                 
                 handler.worker_pool.update_tenant_state(id, ts).await?;
                 Ok(MBotSyscallRet::Ack)
+            }
+            Self::AdminState { id, ops } => {
+                if !ctx.is_secure() {
+                    return Err(MSyscallError::ContextInsecure);
+                }
+
+                let res = handler.statedb.do_op(id, ops).await?;
+
+                // inform worker of new tenant state if we have a new tenant state
+                if let Some(new_ts) = res.new_tenant_state {
+                    handler.worker_pool.update_tenant_state(id, new_ts).await?;
+                }
+
+                Ok(MBotSyscallRet::State { res: res.results })
             }
         }
     }
