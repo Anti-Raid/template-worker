@@ -359,7 +359,7 @@ impl MesophyllServerConn {
             id: Some(resp_id),
         };
 
-        self.tx.send(Ok(msg)).map_err(|e| Status::internal(format!("Failed to send drop tenant message to worker {}: {}", self.id, e)))?;
+        self.tx.send(Ok(msg)).map_err(|e| Status::internal(format!("Failed to send update tenant state message to worker {}: {}", self.id, e)))?;
         let resp = resp_rx.await?;
         resp.ensure_ok()?;
         Ok(())
