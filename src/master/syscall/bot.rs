@@ -4,7 +4,7 @@ use dapi::types::CreateCommand;
 use khronos_runtime::{utils::khronos_value::KhronosValue};
 use serde::{Deserialize, Serialize};
 use serenity::all::{GuildId, UserId};
-use crate::{geese::{state::{StateExecResult, StateOp}, tenantstate::ModFlags}, master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::bot::{BotStatus, ShardConn}}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id}};
+use crate::{geese::{state::{StateExecResult, StateOp}, tenantstate::{ModFlags, TenantState}}, master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::bot::{BotStatus, ShardConn}}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id}};
 use khronos_ext::mluau_ext::prelude::*;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -32,7 +32,9 @@ pub enum MBotSyscall {
     /// Admin API to set tenant state moderation flags (ban them etc.) (works in secure contexts only)
     AdminSetTenantStateModFlags { id: Id, modflags: ModFlags },
     /// Admin API to run a set of state ops on a tenant (works in secure contexts only)
-    AdminState { id: Id, ops: Vec<StateOp> }
+    AdminState { id: Id, ops: Vec<StateOp> },
+    /// Admin API to fetch tenant state for a tenant (works in secure contexts only)
+    AdminFetchTenantState { id: Id }
 }
 
 impl FromLua for MBotSyscall {
@@ -71,6 +73,10 @@ impl FromLua for MBotSyscall {
                 let ops = tab.get("ops")?;
                 Ok(Self::AdminState { id, ops })
             },
+            b"AdminFetchTenantState" => {
+                let id = tab.get("id")?;
+                Ok(Self::AdminFetchTenantState { id })
+            },
             _ => {
                 Err(LuaError::FromLuaConversionError {
                     from: "table",
@@ -107,8 +113,14 @@ pub enum MBotSyscallRet {
     KhronosValue {
         data: KhronosValue
     },
+    /// State exec response (admin only)
     State {
         res: Vec<StateExecResult>,
+        new_tenant_state: Option<TenantState>
+    },
+    /// Tenant state response (admin only)
+    TenantState {
+        ts: TenantState
     },
     Ack,
 }
@@ -122,12 +134,19 @@ impl IntoLua for MBotSyscallRet {
                 table.set("data", data)?;
                 Ok(LuaValue::Table(table))
             }
-            Self::State { res } => {
+            Self::State { res, new_tenant_state } => {
                 let table = lua.create_table_with_capacity(0, 2)?;
                 table.set("op", "State")?;
                 table.set("res", res)?;
+                table.set("new_tenant_state", new_tenant_state)?;
                 Ok(LuaValue::Table(table))
             },
+            Self::TenantState { ts } => {
+                let table = lua.create_table_with_capacity(0, 2)?;
+                table.set("op", "TenantState")?;
+                table.set("ts", ts)?;
+                Ok(LuaValue::Table(table))
+            }
             _ => lua.to_value(&self) // hack to speed up dev
         }
     }
@@ -249,11 +268,26 @@ impl MBotSyscall {
                 let res = handler.statedb.do_op(id, ops).await?;
 
                 // inform worker of new tenant state if we have a new tenant state
-                if let Some(new_ts) = res.new_tenant_state {
-                    handler.worker_pool.update_tenant_state(id, new_ts).await?;
+                if let Some(ref new_ts) = res.new_tenant_state {
+                    handler.worker_pool.update_tenant_state(id, new_ts.clone()).await?;
                 }
 
-                Ok(MBotSyscallRet::State { res: res.results })
+                Ok(MBotSyscallRet::State { res: res.results, new_tenant_state: res.new_tenant_state })
+            }
+            Self::AdminFetchTenantState { id } => {
+                if !ctx.is_secure() {
+                    return Err(MSyscallError::ContextInsecure);
+                }
+
+                let mut tx = handler.pool.begin().await?;
+                let ts = handler.tsdb.get_tenant_state_for(&mut tx, id).await?;
+                tx.commit().await?;
+
+                let Some(ts) = ts else {
+                    return Err(MSyscallError::EntityNotFound { reason: "tenant state not found" });
+                };
+
+                Ok(MBotSyscallRet::TenantState { ts })
             }
         }
     }

@@ -2,7 +2,7 @@ use crate::migrations::Migration;
 
 pub static MIGRATION: Migration = Migration {
     id: "user_oauth_v2",
-    description: "Create refresh token and last_set/expiry for access tokens on users table",
+    description: "Create refresh token and last_set/expiry for access tokens on new user_oauths table",
     up: |pool| {
         Box::pin(async move {
             let mut tx = pool.begin().await?;
@@ -18,6 +18,7 @@ pub static MIGRATION: Migration = Migration {
                     access_token_expiry integer not null,
                     scope text not null
                 )",
+
             ];
 
             for stmt in stmts.iter() {

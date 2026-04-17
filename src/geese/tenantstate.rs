@@ -13,7 +13,6 @@ pub struct TenantStateDb {
 #[derive(sqlx::FromRow)]
 /// Internally used for storing raw tenant state without refs
 struct TenantStatePartial {
-    flags: i32,
     modflags: i32,
     owner_id: String,
     owner_type: String,
@@ -38,7 +37,7 @@ impl TenantStateDb {
     /// 
     /// Should only be called once, on startup, to initialize the tenant state cache
     pub async fn get_tenant_state(&self, id: i64, num_workers: i64) -> Result<HashMap<Id, TenantState>, crate::Error> {
-        let partials: Vec<TenantStatePartial> = sqlx::query_as("SELECT owner_id, owner_type, flags, modflags FROM tenant_state WHERE ((owner_id::bigint >> 22) % $1 = $2)")
+        let partials: Vec<TenantStatePartial> = sqlx::query_as("SELECT owner_id, owner_type, modflags FROM tenant_state WHERE ((owner_id::bigint >> 22) % $1 = $2)")
             .bind(num_workers)
             .bind(id)
             .fetch_all(&self.pool)
@@ -68,7 +67,7 @@ impl TenantStateDb {
     /// 
     /// Should only be called once, on startup, to initialize the tenant state cache
     pub async fn get_tenant_state_for<'c>(&self, tx: &mut sqlx::Transaction<'c, sqlx::Postgres>, tid: Id) -> Result<Option<TenantState>, crate::Error> {
-        let Some(partials) = sqlx::query_as("SELECT owner_id, owner_type, flags, modflags FROM tenant_state WHERE owner_id = $1 AND owner_type = $2")
+        let Some(partials) = sqlx::query_as("SELECT owner_id, owner_type, modflags FROM tenant_state WHERE owner_id = $1 AND owner_type = $2")
             .bind(tid.tenant_id())
             .bind(tid.tenant_type())
             .fetch_optional(&mut **tx)
@@ -97,7 +96,6 @@ impl TenantStateDb {
             };
             let state = TenantState {
                 events: HashMap::new(),
-                flags: partial.flags,
                 modflags: ModFlags::from_bits_truncate(partial.modflags.try_into().unwrap_or(0))
             };
 
@@ -118,7 +116,6 @@ impl TenantStateDb {
     fn into_tenant_state_single(partial: TenantStatePartial, partial_refs: Vec<TenantStateEventRefs>) -> TenantState {
         let mut state =  TenantState {
             events: HashMap::new(),
-            flags: partial.flags,
             modflags: ModFlags::from_bits_truncate(partial.modflags.try_into().unwrap_or(0))
         };
 
@@ -150,20 +147,13 @@ impl Default for ModFlags {
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct TenantState {
     pub events: HashMap<String, HashSet<String>>,
-    pub flags: i32,
     pub modflags: ModFlags,
 }
-
-// DEFAULT_EVENTS is handled by WorkerDispatch directly
-pub static DEFAULT_EVENTS: [&str; 4] = [
-    "INTERACTION_CREATE", "WebGetSettings", "WebExecuteSetting", "$UpdateTenantState"
-];
 
 impl Default for TenantState {
     fn default() -> Self {
         Self {
             events: HashMap::new(),
-            flags: 0,
             modflags: ModFlags::empty()
         }
     }
@@ -171,10 +161,15 @@ impl Default for TenantState {
 
 impl IntoLua for TenantState {
     fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
-        let table = lua.create_table()?;
+        let table = lua.create_table_with_capacity(0, 3)?;
 
         table.set("events", self.events)?;
-        table.set("flags", self.flags)?;
+        table.set("modflags", self.modflags.bits())?;
         Ok(LuaValue::Table(table))
     }
 }
+
+// DEFAULT_EVENTS is handled by WorkerDispatch directly
+pub static DEFAULT_EVENTS: [&str; 4] = [
+    "INTERACTION_CREATE", "WebGetSettings", "WebExecuteSetting", "$UpdateTenantState"
+];
