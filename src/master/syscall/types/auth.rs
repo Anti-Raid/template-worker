@@ -26,6 +26,7 @@ impl IntoLua for UserSession {
         table.set("name", self.name)?;
         table.set("user_id", self.user_id)?;
         table.set("created_at", LuaDateTime::from_utc(self.created_at))?;
+        table.set("type", self.r#type)?;
         table.set("expiry", LuaDateTime::from_utc(self.expiry))?;
         Ok(LuaValue::Table(table))
     }

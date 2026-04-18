@@ -18,7 +18,7 @@ pub enum KhronosValue {
 }
  */
 
-type KhronosValue = {
+type RawKhronosValue = {
     Text: string;
 } | {
     Integer: number;
@@ -33,9 +33,9 @@ type KhronosValue = {
 } | {
     Vector: [number, number, number];
 } | {
-    Map: [KhronosValue, KhronosValue][];
+    Map: [RawKhronosValue, RawKhronosValue][];
 } | {
-    List: KhronosValue[];
+    List: RawKhronosValue[];
 } | {
     Timestamptz: string; // ISO 8601 format
 } | {
@@ -48,7 +48,7 @@ type KhronosValue = {
     Null: null;
 }
 
-class MemoryVfs {
+export class MemoryVfs {
     public map: Record<string, string>;
 
     constructor(map: Record<string, string>) {
@@ -56,7 +56,7 @@ class MemoryVfs {
     }
 }
 
-class Vector {
+export class Vector {
     public vector: [number, number, number];
     
     constructor(vector: [number, number, number]) {
@@ -64,7 +64,7 @@ class Vector {
     }
 }
 
-class Interval {
+export class Interval {
     public seconds: number;
     public nanoseconds: number;
 
@@ -79,7 +79,7 @@ class Interval {
     }
 }
 
-class TimeZone {
+export class TimeZone {
     public timezone: string;
 
     constructor(timezone: string) {
@@ -87,11 +87,27 @@ class TimeZone {
     }
 }
 
+export type KhronosValue = 
+    | string 
+    | number 
+    | bigint 
+    | boolean 
+    | null 
+    | undefined 
+    | Uint8Array 
+    | Vector 
+    | Date 
+    | Interval 
+    | TimeZone 
+    | MemoryVfs 
+    | Map<KhronosValue, KhronosValue> 
+    | KhronosValue[];
+
 /**
- * Decode a KhronosValue into a nicer to work with JavaScript value
+ * Decode a RawKhronosValue into a nicer to work with JavaScript value
  * @param data The data from the server
  */
-const decode = (data: KhronosValue, depth?: number): any => {
+export const decode = (data: RawKhronosValue, depth?: number): KhronosValue => {
     if ((depth || 0) > 100) {
         return null; // Prevent excessive recursion
     }
@@ -155,7 +171,7 @@ export type EncodableKhronosValue =
  * Encode a JavaScript value into a KhronosValue, unknown types are encoded using toString()
  * @param value The Value to encode into a KhronosValue
  */
-const encode = (value: EncodableKhronosValue): KhronosValue => {
+export const encode = (value: EncodableKhronosValue): RawKhronosValue => {
     if (value === null || value === undefined) {
         return { Null: null };
     } else if (typeof value === 'string') {
@@ -185,14 +201,14 @@ const encode = (value: EncodableKhronosValue): KhronosValue => {
     } else if (value instanceof TimeZone) {
         return { TimeZone: value.timezone };
     } else if (value instanceof Map) {
-        const mapEntries: [KhronosValue, KhronosValue][] = [];
+        const mapEntries: [RawKhronosValue, RawKhronosValue][] = [];
         for (const [key, val] of value.entries()) {
             mapEntries.push([encode(key), encode(val)]);
         }
         return { Map: mapEntries };
     } else if (value !== null && typeof value === 'object' && value.constructor === Object) {
         // Fallback for simple objects
-        const mapEntries: [KhronosValue, KhronosValue][] = [];
+        const mapEntries: [RawKhronosValue, RawKhronosValue][] = [];
         for (const [key, val] of Object.entries(value)) {
             // Objects only allow string keys
             mapEntries.push([{ Text: key }, encode(val)]);
@@ -203,7 +219,8 @@ const encode = (value: EncodableKhronosValue): KhronosValue => {
     }
 }
 
-const json: KhronosValue = {
+// test
+const json: RawKhronosValue = {
   "Map": [
     [
       {
