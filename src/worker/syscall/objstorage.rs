@@ -1,7 +1,7 @@
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use khronos_runtime::{primitives::blob::{BlobTaker, Blob}, core::datetime::{DateTime as LuaDateTime, TimeDelta as LuaTimeDelta}, rt::mluau::prelude::*};
-
 use crate::{geese::objectstore::{Bucket, BucketWithKey, BucketWithPrefix}, worker::{syscall::SyscallHandler, workervmmanager::Id}};
 
 /// The core underlying syscall
@@ -193,7 +193,7 @@ impl ObjectStorageCall {
 
 pub struct ObjectMetadata {
     pub key: String,
-    pub last_modified: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_modified: Option<DateTime<Utc>>,
     pub size: i64,
     pub etag: Option<String>,
 }
