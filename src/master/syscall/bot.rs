@@ -25,8 +25,23 @@ pub enum MBotSyscall {
         /// Data to send
         data: KhronosValue
     },
+    /// Dispatch an event to a worker process with some safety checks removed
+    AdminRelaxedDispatchEvent {
+        /// Tenant ID to dispatch the event to
+        id: Id,
+        /// Name of the event
+        name: String,
+        /// Data to send
+        data: KhronosValue,
+        /// Whether or not to allow non-Web event names
+        allow_non_web_event_names: bool,
+        /// Whether or not to allow self-events
+        allow_self_event: bool,
+        /// The author ID to mock
+        mock_id: Option<String>
+    },
     /// Returns the uncached bot status (works in secure contexts only)
-    GetUncachedBotStatus {},
+    AdminGetUncachedBotStatus {},
     /// Admin API to drop a tenant (works in secure contexts only)
     AdminDropTenant { id: Id },
     /// Admin API to set tenant state moderation flags (ban them etc.) (works in secure contexts only)
@@ -58,7 +73,16 @@ impl FromLua for MBotSyscall {
                 let data = tab.get("data")?;
                 Ok(Self::DispatchEvent { id, name, data })
             },
-            b"GetUncachedBotStatus" => Ok(Self::GetUncachedBotStatus {}),
+            b"AdminRelaxedDispatchEvent" => {
+                let id = tab.get("id")?;
+                let name = tab.get("name")?;
+                let data = tab.get("data")?;
+                let allow_non_web_event_names = tab.get("allow_non_web_event_names")?;
+                let allow_self_event = tab.get("allow_self_event")?;
+                let mock_id = tab.get("mock_id")?;
+                Ok(Self::AdminRelaxedDispatchEvent { id, name, data, allow_non_web_event_names, allow_self_event, mock_id })
+            },
+            b"AdminGetUncachedBotStatus" => Ok(Self::AdminGetUncachedBotStatus {}),
             b"AdminDropTenant" => {
                 let id = tab.get("id")?;
                 Ok(Self::AdminDropTenant { id })
@@ -186,8 +210,8 @@ impl MBotSyscall {
                 Ok(MBotSyscallRet::BotStatus { status })
             }
             Self::DispatchEvent { id, name, data } => {
-                if !ctx.is_secure() && !name.starts_with("Web") {
-                    return Err(MSyscallError::InvalidEvent { reason: "Event name must start with Web in insecure contexts"});
+                if !name.starts_with("Web") {
+                    return Err(MSyscallError::InvalidEvent { reason: "Event name must start with Web"});
                 }
                 let user_id = ctx.into_user_id()?;
                 match id {
@@ -210,7 +234,41 @@ impl MBotSyscall {
 
                 Ok(MBotSyscallRet::KhronosValue { data: handler.worker_pool.dispatch_event(id, event).await? })
             }
-            Self::GetUncachedBotStatus {  } => {
+            Self::AdminRelaxedDispatchEvent { id, name, data, allow_non_web_event_names, allow_self_event, mock_id } => {
+                if !ctx.is_secure() {
+                    return Err(MSyscallError::ContextInsecure);
+                }
+
+                if !allow_non_web_event_names && !name.starts_with("Web") {
+                    return Err(MSyscallError::InvalidEvent { reason: "Event name must start with Web"});
+                }
+
+                let user_id = match mock_id {
+                    Some(id) => id.parse()?,
+                    None => ctx.into_user_id()?
+                };
+                
+                match id {
+                    Id::Guild(id) => {
+                        // Ensure the bot is in the guild
+                        let hb = handler.has_bot(&[id]).await?;    
+                        if !hb[0] {
+                            return Err(MSyscallError::BotNotOnGuild);
+                        }
+                        // Ensure guild is in server
+                    }
+                    Id::User(id) => {
+                        if !allow_self_event && user_id != id {
+                            return Err(MSyscallError::InvalidEvent { reason: "Cannot send events to users who are not yourself" });
+                        }
+                    }
+                }
+
+                let event = SimpleEvent::new_khronos_value(name, Some(user_id.to_string()), data);
+
+                Ok(MBotSyscallRet::KhronosValue { data: handler.worker_pool.dispatch_event(id, event).await? })
+            }
+            Self::AdminGetUncachedBotStatus {  } => {
                 if !ctx.is_secure() {
                     return Err(MSyscallError::ContextInsecure);
                 }
