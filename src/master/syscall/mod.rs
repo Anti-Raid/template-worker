@@ -22,6 +22,8 @@ use khronos_ext::mluau_ext::prelude::*;
 pub enum MSyscallContext {
     /// API context (anonymous/logged out)
     ApiAnon,
+    /// API 'getter' context
+    ApiAnonGetter,
     /// API context (login session/login token)
     ApiOauth(UserId),
     /// API context (api token)

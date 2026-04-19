@@ -4,6 +4,7 @@ use axum::{extract::{State, FromRequestParts, Json}, Router, response::IntoRespo
 use reqwest::StatusCode;
 use reqwest::header::AUTHORIZATION;
 use serenity::all::UserId;
+use crate::master::syscall::bot::MBotSyscall;
 use crate::master::syscall::{MSyscallArgs, MSyscallContext, MSyscallRet};
 use crate::master::syscall::{MSyscallError, MSyscallHandler, internal::auth as iauth};
 
@@ -103,6 +104,13 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
     router = router
         .route("/healthcheck", post(|| async { Json(()) }))
         .route("/msyscall", post(msyscall))
+        // GET apis for better caching etc.
+        .route("/commands", get(async |State(handler): State<MSyscallHandler>| {
+            handler.handle_syscall(MSyscallArgs::Bot { req: MBotSyscall::GetBotCommands {} }, MSyscallContext::ApiAnonGetter).await
+        }))
+        .route("/status", get(async |State(handler): State<MSyscallHandler>| {
+            handler.handle_syscall(MSyscallArgs::Bot { req: MBotSyscall::GetBotStatus {} }, MSyscallContext::ApiAnonGetter).await
+        }))
         .fallback(get(|| async {
             (
                 StatusCode::NOT_FOUND,
