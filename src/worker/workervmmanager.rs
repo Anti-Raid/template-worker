@@ -4,6 +4,7 @@ use khronos_runtime::primitives::syscall::RawSyscall;
 use khronos_runtime::rt::{KhronosRuntime, RuntimeCreateOpts};
 use serde::{Deserialize, Serialize};
 use serenity::all::{GuildId, UserId};
+use stratum_common::worker_id_for_tenant;
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::{collections::HashMap, rc::Rc};
@@ -74,10 +75,8 @@ impl Id {
     pub fn worker_id(&self, num_workers: usize) -> usize {
         match self {
             // This is safe as AntiRaid workers does not currently support 32 bit platforms
-            Id::Guild(guild_id) => (guild_id.get() >> 22) as usize % num_workers,
-            // TODO: Come up with a potentially better sharding formula for user IDs
-            // or just use 0 always (what discord does for DMs)
-            Id::User(user_id) => (user_id.get() >> 22) as usize % num_workers,
+            Id::Guild(guild_id) =>  worker_id_for_tenant(guild_id.get(), num_workers),
+            Id::User(user_id) => worker_id_for_tenant(user_id.get(), num_workers),
         }
     }
 }

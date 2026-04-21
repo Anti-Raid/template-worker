@@ -2,6 +2,7 @@ use crate::geese::objectstore::ObjectStore;
 use serde::{Deserialize, Serialize};
 use serenity::all::UserId;
 use std::fs::File;
+use std::path::PathBuf;
 use std::sync::LazyLock;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -121,6 +122,7 @@ pub struct Config {
     pub servers: Servers,
     pub object_storage: ObjectStorage,
     pub addrs: Addrs,
+    pub worker_path: PathBuf,
 
     #[serde(skip)]
     /// Setup by load() for statistics

@@ -3,6 +3,7 @@ use std::time::Duration;
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use tokio::process::Command;
 use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
+use crate::CONFIG;
 use crate::geese::tenantstate::TenantState;
 use crate::mesophyll::server::MesophyllServer;
 use crate::worker::workerdispatch::SimpleEvent;
@@ -63,19 +64,7 @@ impl WorkerProcessHandle {
 
             let sleep_duration = Duration::from_secs(3 * std::cmp::min(failed_attempts, 5));
 
-            // The path to the current executable
-            let current_exe = match std::env::current_exe() {
-                Ok(path) => path,
-                Err(e) => {
-                    log::error!("Failed to get current executable path: {}", e);
-                    failed_attempts += 1;
-                    consecutive_failures += 1;
-                    tokio::time::sleep(sleep_duration).await;
-                    continue;
-                }
-            };
-
-            let mut command = Command::new(current_exe);
+            let mut command = Command::new(&CONFIG.worker_path);
             
             command.arg("--worker-type");
             command.arg("processpoolworker");
