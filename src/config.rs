@@ -25,15 +25,10 @@ pub struct DiscordAuth {
 pub enum ObjectStorageType {
     #[serde(rename = "s3-like")]
     S3Like,
-    #[serde(rename = "local")]
-    Local,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct ObjectStorage {
-    #[serde(rename = "type")]
-    pub object_storage_type: ObjectStorageType,
-    pub base_path: String,
     pub endpoint: Option<String>,
     pub secure: Option<bool>,
     pub cdn_secure: Option<bool>,
@@ -44,43 +39,38 @@ pub struct ObjectStorage {
 
 impl ObjectStorage {
     pub fn build(&self) -> Result<ObjectStore, crate::Error> {
-        match self.object_storage_type {
-            ObjectStorageType::S3Like => {
-                let access_key = self.access_key.as_ref().ok_or("Missing access key")?;
-                let secret_key = self.secret_key.as_ref().ok_or("Missing secret key")?;
-                let endpoint = self.endpoint.as_ref().ok_or("Missing endpoint")?;
-                let cdn_endpoint = self.cdn_endpoint.as_ref().ok_or("Missing cdn_endpoint")?;
+        let access_key = self.access_key.as_ref().ok_or("Missing access key")?;
+        let secret_key = self.secret_key.as_ref().ok_or("Missing secret key")?;
+        let endpoint = self.endpoint.as_ref().ok_or("Missing endpoint")?;
+        let cdn_endpoint = self.cdn_endpoint.as_ref().ok_or("Missing cdn_endpoint")?;
 
-                let endpoint_url = format!(
-                    "{}://{}",
-                    if self.secure.unwrap_or(false) {
-                        "https"
-                    } else {
-                        "http"
-                    },
-                    endpoint
-                );
+        let endpoint_url = format!(
+            "{}://{}",
+            if self.secure.unwrap_or(false) {
+                "https"
+            } else {
+                "http"
+            },
+            endpoint
+        );
 
-                let cdn_endpoint_url = format!(
-                    "{}://{}",
-                    if self.cdn_secure.unwrap_or(false) {
-                        "https"
-                    } else {
-                        "http"
-                    },
-                    cdn_endpoint
-                );
+        let cdn_endpoint_url = format!(
+            "{}://{}",
+            if self.cdn_secure.unwrap_or(false) {
+                "https"
+            } else {
+                "http"
+            },
+            cdn_endpoint
+        );
 
-                ObjectStore::new_s3(
-                    "antiraid.rust".to_string(),
-                    endpoint_url,
-                    cdn_endpoint_url,
-                    access_key.to_string(),
-                    secret_key.to_string(),
-                )
-            }
-            ObjectStorageType::Local => Ok(ObjectStore::new_local(self.base_path.clone())),
-        }
+        ObjectStore::new_s3(
+            "antiraid.rust".to_string(),
+            endpoint_url,
+            cdn_endpoint_url,
+            access_key.to_string(),
+            secret_key.to_string(),
+        )
     }
 }
 

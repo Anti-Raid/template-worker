@@ -1,21 +1,18 @@
-use aws_sdk_s3::{primitives::ByteStream, types::{CompletedMultipartUpload, CompletedPart}};
+use aws_sdk_s3::primitives::ByteStream;
 use serenity::all::{GuildId, UserId};
 
 use crate::worker::workervmmanager::Id;
 
-const CHUNK_SIZE: usize = 5 * 1024 * 1024;
-const MULTIPART_MIN_SIZE: usize = 50 * 1024 * 1024;
+// 10mb max upload size (hard cap)
+//
+// in practice, workers have a 512kb upload limit (much smaller than hard cap)
+const UPLOAD_MAX_SUPPORTED_SIZE: usize = 10 * 1024 * 1024; 
 
-/// Simple abstraction around object storages
-pub enum ObjectStore {
-    S3 {
-        client: aws_sdk_s3::Client,
-        cdn_client: aws_sdk_s3::Client,
-        cdn_endpoint: String,
-    },
-    Local {
-        dir: String,
-    },
+/// Simple abstraction around s3-compatible object storages
+pub struct ObjectStore {
+    client: aws_sdk_s3::Client,
+    cdn_client: aws_sdk_s3::Client,
+    cdn_endpoint: String,
 }
 
 impl ObjectStore {
@@ -79,15 +76,11 @@ impl ObjectStore {
             )
         };
 
-        Ok(ObjectStore::S3 {
+        Ok(ObjectStore {
             client,
             cdn_client,
             cdn_endpoint,
         })
-    }
-
-    pub fn new_local(dir: String) -> Self {
-        ObjectStore::Local { dir }
     }
 }
 
@@ -196,44 +189,31 @@ impl ObjectStore {
     /// Returns if a file exists in the object store
     pub async fn get_object_metadata(&self, b: BucketWithKey<'_>) -> Result<Option<ListObjectsResponse>, crate::Error> {
         let key = b.key()?;
-        match self {
-            ObjectStore::S3 { client, .. } => {
-                let action = client.head_object().bucket(b.bucket()).key(&key);
 
-                match action.send().await {
-                    Ok(r) => Ok(Some(ListObjectsResponse {
-                        key,
-                        last_modified: match r.last_modified {
-                            Some(last_modified) => {
-                                chrono::DateTime::from_timestamp(last_modified.secs(), 0)
-                            }
-                            None => None,
-                        },
-                        size: r.content_length().unwrap_or(0),
-                        etag: r.e_tag().map(|etag| etag.to_string()),
-                    })),
-                    Err(e) => {
-                        let Some(e) = e.as_service_error() else {
-                            return Err(format!("Failed to list objects: {}", e).into());
-                        };
+        let action = self.client.head_object().bucket(b.bucket()).key(&key);
 
-                        if e.is_not_found() {
-                            Ok(None)
-                        } else {
-                            Err(format!("Failed to get object metadata: {}", e).into())
-                        }
+        match action.send().await {
+            Ok(r) => Ok(Some(ListObjectsResponse {
+                key,
+                last_modified: match r.last_modified {
+                    Some(last_modified) => {
+                        chrono::DateTime::from_timestamp(last_modified.secs(), 0)
                     }
+                    None => None,
+                },
+                size: r.content_length().unwrap_or(0),
+                etag: r.e_tag().map(|etag| etag.to_string()),
+            })),
+            Err(e) => {
+                let Some(e) = e.as_service_error() else {
+                    return Err(format!("Failed to list objects: {}", e).into());
+                };
+
+                if e.is_not_found() {
+                    Ok(None)
+                } else {
+                    Err(format!("Failed to get object metadata: {}", e).into())
                 }
-            }
-            ObjectStore::Local { dir } => {
-                let path = std::path::Path::new(dir).join(b.bucket()).join(b.key()?);
-                let meta = std::fs::metadata(&path)?;
-                Ok(Some(ListObjectsResponse {
-                    key: path.to_string_lossy().to_string(),
-                    size: meta.len() as i64,
-                    last_modified: Some(meta.modified().map(|x| x.into())?),
-                    etag: None
-                }))
             }
         }
     }
@@ -246,45 +226,30 @@ impl ObjectStore {
         b: BucketWithKey<'_>,
         duration: std::time::Duration,
     ) -> Result<String, crate::Error> {
-        match self {
-            ObjectStore::S3 {
-                cdn_client,
-                cdn_endpoint,
-                ..
-            } => {
-                let url = cdn_client
-                    .get_object()
-                    .bucket(b.bucket())
-                    .key(b.key()?)
-                    .presigned(aws_sdk_s3::presigning::PresigningConfig::expires_in(
-                        duration,
-                    )?)
-                    .await
-                    .map_err(|e| format!("failed to get presigned url: {e:?}"))?;
+        let url = self.cdn_client
+            .get_object()
+            .bucket(b.bucket())
+            .key(b.key()?)
+            .presigned(aws_sdk_s3::presigning::PresigningConfig::expires_in(
+                duration,
+            )?)
+            .await
+            .map_err(|e| format!("failed to get presigned url: {e:?}"))?;
 
-                let url = url.uri();
+        let url = url.uri();
 
-                /*
-                    if strings.HasPrefix(o.c.CdnEndpoint, "$DOCKER:") {
-                        p.Scheme = "http"
-                        p.Host = strings.TrimPrefix(o.c.CdnEndpoint, "$DOCKER:")
-                    }
-                */
-                let url = if cdn_endpoint.starts_with("$DOCKER:") {
-                    let mut parsed_url = reqwest::Url::parse(url)?;
-                    parsed_url.set_host(Some(cdn_endpoint.trim_start_matches("$DOCKER:")))?;
-                    parsed_url
-                        .set_scheme("http")
-                        .map_err(|_| "Failed to set new scheme")?;
-                    parsed_url.to_string()
-                } else {
-                    url.to_string()
-                };
+        let url = if self.cdn_endpoint.starts_with("$DOCKER:") {
+            let mut parsed_url = reqwest::Url::parse(url)?;
+            parsed_url.set_host(Some(self.cdn_endpoint.trim_start_matches("$DOCKER:")))?;
+            parsed_url
+                .set_scheme("http")
+                .map_err(|_| "Failed to set new scheme")?;
+            parsed_url.to_string()
+        } else {
+            url.to_string()
+        };
 
-                Ok(url)
-            }
-            ObjectStore::Local { dir } => Ok(format!("file://{}/{}/{}", dir, b.bucket(), b.key()?)),
-        }
+        Ok(url)
     }
 
     /// Lists all files in the object store with a given prefix
@@ -292,113 +257,64 @@ impl ObjectStore {
         &self,
         b: BucketWithPrefix<'_>
     ) -> Result<Vec<ListObjectsResponse>, crate::Error> {
-        match self {
-            ObjectStore::S3 { client, .. } => {
-                let mut continuation_token = None;
-                let mut resp = vec![];
+        let mut continuation_token = None;
+        let mut resp = vec![];
 
-                loop {
-                    let mut action = client.list_objects_v2().bucket(b.bucket()).prefix(b.prefix()?);
+        loop {
+            let mut action = self.client.list_objects_v2().bucket(b.bucket()).prefix(b.prefix()?);
 
-                    if let Some(continuation_token) = &continuation_token {
-                        action = action.continuation_token(continuation_token);
-                    }
+            if let Some(continuation_token) = &continuation_token {
+                action = action.continuation_token(continuation_token);
+            }
 
-                    let response = match action.send().await {
-                        Ok(response) => response,
-                        Err(e) => {
-                            let Some(e) = e.as_service_error() else {
-                                return Err(format!("Failed to list objects: {}", e).into());
-                            };
-
-                            return Err(format!("Failed to list objects: {}", e).into());
-                        }
+            let response = match action.send().await {
+                Ok(response) => response,
+                Err(e) => {
+                    let Some(e) = e.as_service_error() else {
+                        return Err(format!("Failed to list objects: {}", e).into());
                     };
 
-                    if let Some(contents) = response.contents {
-                        for object in contents {
-                            let Some(ref key) = object.key else {
-                                continue;
-                            };
-
-                            resp.push(ListObjectsResponse {
-                                key: key.to_string(),
-                                last_modified: match object.last_modified {
-                                    Some(last_modified) => {
-                                        chrono::DateTime::from_timestamp(last_modified.secs(), 0)
-                                    }
-                                    None => None,
-                                },
-                                size: object.size.unwrap_or(0),
-                                etag: object.e_tag().map(|etag| etag.to_string()),
-                            });
-                        }
-                    }
-
-                    if response.next_continuation_token.is_none() {
-                        break;
-                    }
-
-                    continuation_token = response.next_continuation_token;
+                    return Err(format!("Failed to list objects: {}", e).into());
                 }
+            };
 
-                Ok(resp)
-            }
-            ObjectStore::Local { dir } => {
-                let path = std::path::Path::new(dir).join(b.bucket()).join(b.prefix()?).to_path_buf();
+            if let Some(contents) = response.contents {
+                for object in contents {
+                    let Some(ref key) = object.key else {
+                        continue;
+                    };
 
-                let mut files = vec![];
-                for entry in std::fs::read_dir(path)
-                    .map_err(|e| format!("Failed to read directory: {}", e))?
-                {
-                    let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
-                    let path = entry.path();
-                    if path.is_file() {
-                        files.push(ListObjectsResponse {
-                            key: path
-                                .file_name()
-                                .ok_or("Failed to get file name")?
-                                .to_string_lossy()
-                                .to_string(),
-                            last_modified: Some(
-                                entry
-                                    .metadata()
-                                    .map_err(|e| format!("Failed to get metadata: {}", e))?
-                                    .modified()
-                                    .map_err(|e| format!("Failed to get modified time: {}", e))?
-                                    .into(),
-                            ),
-                            size: entry
-                                .metadata()
-                                .map_err(|e| format!("Failed to get metadata: {}", e))?
-                                .len()
-                                .try_into()
-                                .unwrap_or(0),
-                            etag: None,
-                        });
-                    }
+                    resp.push(ListObjectsResponse {
+                        key: key.to_string(),
+                        last_modified: match object.last_modified {
+                            Some(last_modified) => {
+                                chrono::DateTime::from_timestamp(last_modified.secs(), 0)
+                            }
+                            None => None,
+                        },
+                        size: object.size.unwrap_or(0),
+                        etag: object.e_tag().map(|etag| etag.to_string()),
+                    });
                 }
-
-                Ok(files)
             }
+
+            if response.next_continuation_token.is_none() {
+                break;
+            }
+
+            continuation_token = response.next_continuation_token;
         }
+
+        Ok(resp)
     }
 
     /// Downloads a file from the object store with a given key
     pub async fn download_file(&self, b: BucketWithKey<'_>) -> Result<Vec<u8>, crate::Error> {
-        match self {
-            ObjectStore::S3 { client, .. } => {
-                let resp = client.get_object().bucket(b.bucket()).key(b.key()?).send().await?;
+        let resp = self.client.get_object().bucket(b.bucket()).key(b.key()?).send().await?;
 
-                let body = resp.body.collect().await?;
+        let body = resp.body.collect().await?;
 
-                Ok(body.into_bytes().to_vec())
-            }
-            ObjectStore::Local { dir } => {
-                let path = std::path::Path::new(dir).join(b.bucket()).join(b.key()?);
-                Ok(std::fs::read(path).map_err(|e| format!("Failed to read object: {}", e))?)
-            }
-        }
+        Ok(body.to_vec())
     }
 
     /// Uploads a file to the object store with a given key
@@ -407,71 +323,23 @@ impl ObjectStore {
         b: BucketWithKey<'_>,
         data: Vec<u8>,
     ) -> Result<(), crate::Error> {
-        match self {
-            ObjectStore::S3 { client, .. } => {
-                let bucket = b.bucket();
-                let key = b.key()?;
-                if data.len() < MULTIPART_MIN_SIZE {
-                    client.put_object().bucket(bucket).key(&key).body(ByteStream::from(data)).send().await?;
-                    return Ok(());
-                }
-
-                let upload_id = client.create_multipart_upload().bucket(bucket).key(&key).send().await?
-                    .upload_id.ok_or("No upload ID")?;
-
-                let mut completed_parts = Vec::new();
-                for (i, chunk) in data.chunks(CHUNK_SIZE).enumerate() {
-                    let part_number = (i + 1) as i32;
-                    let resp = client.upload_part()
-                        .bucket(bucket).key(&key).upload_id(&upload_id)
-                        .part_number(part_number)
-                        .body(ByteStream::from(chunk.to_vec()))
-                        .send().await;
-
-                    match resp {
-                        Ok(r) => completed_parts.push(CompletedPart::builder().e_tag(r.e_tag.unwrap_or_default()).part_number(part_number).build()),
-                        Err(e) => {
-                            let _ = client.abort_multipart_upload().bucket(bucket).key(&key).upload_id(&upload_id).send().await;
-                            return Err(format!("Upload part failed: {}", e).into());
-                        }
-                    }
-                }
-
-                client.complete_multipart_upload()
-                    .bucket(bucket).key(&key).upload_id(upload_id)
-                    .multipart_upload(CompletedMultipartUpload::builder().set_parts(Some(completed_parts)).build())
-                    .send().await?;
-
-                    Ok(())
-            }
-            ObjectStore::Local { dir } => {
-                let path = std::path::Path::new(dir).join(b.bucket()).join(b.key()?);
-                std::fs::write(path, data).map_err(|e| format!("Failed to write object: {}", e))?;
-
-                Ok(())
-            }
+        if data.len() > UPLOAD_MAX_SUPPORTED_SIZE {
+            return Err("internal error: data size > UPLOAD_MAX_SUPPORTED_SIZE (hard cap)".into())
         }
+        let bucket = b.bucket();
+        let key = b.key()?;
+        self.client.put_object().bucket(bucket).key(&key).body(ByteStream::from(data)).send().await?;
+        return Ok(());
     }
 
     pub async fn delete(&self, b: BucketWithKey<'_>) -> Result<(), crate::Error> {
-        match self {
-            ObjectStore::S3 { client, .. } => {
-                client
-                    .delete_object()
-                    .bucket(b.bucket())
-                    .key(b.key()?)
-                    .send()
-                    .await?;
+        self.client
+        .delete_object()
+        .bucket(b.bucket())
+        .key(b.key()?)
+        .send()
+        .await?;
 
-                Ok(())
-            }
-            ObjectStore::Local { dir } => {
-                let path = std::path::Path::new(dir).join(b.bucket()).join(b.key()?);
-                std::fs::remove_file(path)
-                    .map_err(|e| format!("Failed to delete object: {}", e))?;
-
-                Ok(())
-            }
-        }
+        Ok(())
     }
 }
