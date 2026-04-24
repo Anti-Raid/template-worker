@@ -5,6 +5,7 @@ use khronos_runtime::core::datetime::DateTime as LuaDateTime;
 use rand::distr::{Alphanumeric, SampleString};
 
 use crate::geese::tenantstate::{DEFAULT_EVENTS, TenantState, TenantStateDb};
+use crate::worker::limits::KV_MAX_KEY_LENGTH;
 use crate::worker::workervmmanager::Id;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -255,6 +256,9 @@ impl StateDb {
                     }
             }
             StateOp::KvSet { key, scope, value } => {
+                if key.len() > KV_MAX_KEY_LENGTH {
+                    return Err(format!("key-value length exceeds {KV_MAX_KEY_LENGTH} chars").into())
+                }
                 let id = Alphanumeric.sample_string(&mut rand::rng(), 64);
                 sqlx::query(
                     "INSERT INTO tenant_kv (id, owner_id, owner_type, key, value, scope) VALUES ($1, $2, $3, $4, $5, $6)

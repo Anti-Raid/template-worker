@@ -1,11 +1,13 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
 use khronos_runtime::{primitives::blob::{BlobTaker, Blob}, core::datetime::{DateTime as LuaDateTime, TimeDelta as LuaTimeDelta}, rt::mluau::prelude::*};
-use crate::{geese::objectstore::{Bucket, BucketWithKey, BucketWithPrefix}, worker::{syscall::SyscallHandler, workervmmanager::Id}};
+use serde::{Deserialize, Serialize};
+use crate::{geese::objectstore::{Bucket, BucketWithKey, BucketWithPrefix, ObjectStore}, worker::{limits::{MAX_OBJ_STORAGE_BYTES, MAX_OBJ_STORAGE_PATH_LENGTH}, workervmmanager::Id}};
+
 
 /// The core underlying syscall
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum ObjectStorageCall {
     ListFileMetas {
         prefix: Option<String>
@@ -22,7 +24,7 @@ pub enum ObjectStorageCall {
     },
     UploadFile {
         key: String,
-        data: Vec<u8>
+        data: serde_bytes::ByteBuf
     },
     DeleteFile {
         key: String
@@ -61,7 +63,7 @@ impl FromLua for ObjectStorageCall {
             b"UploadFile" => {
                 let key = tab.get("key")?;
                 let data = tab.get::<BlobTaker>("data")?;
-                Ok(ObjectStorageCall::UploadFile { key, data: data.0 })
+                Ok(ObjectStorageCall::UploadFile { key, data: data.0.into() })
             }
             b"DeleteFile" => {
                 let key = tab.get("key")?;
@@ -78,6 +80,7 @@ impl FromLua for ObjectStorageCall {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum ObjectStorageResult {
     ObjectMetadata {
         objs: Vec<ObjectMetadata>
@@ -116,81 +119,7 @@ impl IntoLua for ObjectStorageResult {
     }
 }
 
-impl ObjectStorageCall {
-    pub(super) async fn exec(self, id: Id, handler: &SyscallHandler) -> Result<ObjectStorageResult, crate::Error> {
-        let bucket = Bucket::from_id(id);
-        match self {
-            Self::ListFileMetas { prefix } => {
-                handler.ratelimits.object_storage.check("ListFileMetas")?;
-                let objs = handler
-                .state
-                .object_store
-                .list_files(BucketWithPrefix::new(bucket, prefix.as_deref()))
-                .await?
-                .into_iter()
-                .map(|x| ObjectMetadata {
-                    key: x.key,
-                    last_modified: x.last_modified,
-                    size: x.size,
-                    etag: x.etag,
-                })
-                .collect::<Vec<_>>();
-
-                Ok(ObjectStorageResult::ObjectMetadata { objs })
-            }
-            Self::GetFileMeta { key } => {
-                handler.ratelimits.object_storage.check("GetFileMeta")?;
-                let mut objs = vec![];
-                let obj = handler.state.object_store.get_object_metadata(BucketWithKey::new(bucket, &key)).await?;
-                if let Some(obj) = obj {
-                    objs.push(ObjectMetadata {
-                        key: obj.key,
-                        last_modified: obj.last_modified,
-                        size: obj.size,
-                        etag: obj.etag,
-                    });
-                }
-
-                Ok(ObjectStorageResult::ObjectMetadata { objs })
-            }
-            Self::GetFileUrl { key, expiry } => {
-                handler.ratelimits.object_storage.check("GetFileUrl")?;
-                let url = handler.state.object_store.get_url(BucketWithKey::new(bucket, &key), expiry).await?;
-                Ok(ObjectStorageResult::FileUrl { url })
-            }
-            ObjectStorageCall::DownloadFile { key } => {
-                handler.ratelimits.object_storage.check("DownloadFile")?;
-                let data = handler.state.object_store.download_file(BucketWithKey::new(bucket, &key)).await?;
-                Ok(ObjectStorageResult::Blob { data })
-            }
-            ObjectStorageCall::UploadFile { key, data } => {
-                handler.ratelimits.object_storage.check("UploadFile")?;
-                if key.len() > handler.kv_constraints.max_object_storage_path_length {
-                    return Err("Path length too long".into());
-                }
-
-                if data.len() > handler.kv_constraints.max_object_storage_bytes {
-                    return Err("Data too large".into());
-                }
-
-                handler.state
-                .object_store
-                .upload_file(BucketWithKey::new(bucket, &key), data)
-                .await?;
-
-                Ok(ObjectStorageResult::Ack)
-            }
-            ObjectStorageCall::DeleteFile { key } => {
-                handler.ratelimits.object_storage.check("DeleteFile")?;
-                handler.state.object_store
-                .delete(BucketWithKey::new(bucket, &key))
-                .await?;
-                Ok(ObjectStorageResult::Ack)
-            }
-        }
-    }
-}
-
+#[derive(Serialize, Deserialize)]
 pub struct ObjectMetadata {
     pub key: String,
     pub last_modified: Option<DateTime<Utc>>,
@@ -207,5 +136,76 @@ impl IntoLua for ObjectMetadata {
         table.set("etag", self.etag)?;
         table.set_readonly(true);
         Ok(LuaValue::Table(table))
+    }
+}
+
+#[derive(Clone)]
+/// A simple wrapper around the object storage that provides luau object storage manipulation functionality
+pub struct ObjStorageOp {
+    client: Arc<ObjectStore>
+}
+
+impl ObjStorageOp {
+    pub fn new(client: Arc<ObjectStore>) -> Self {
+        Self { client }
+    }
+
+    pub async fn do_op(&self, id: Id, op: ObjectStorageCall) -> Result<ObjectStorageResult, crate::Error> {
+        let bucket = Bucket::from_id(id);
+        match op {
+            ObjectStorageCall::ListFileMetas { prefix } => {
+                let objs = self.client.list_files(BucketWithPrefix::new(bucket, prefix.as_deref()))
+                .await?
+                .into_iter()
+                .map(|x| ObjectMetadata {
+                    key: x.key,
+                    last_modified: x.last_modified,
+                    size: x.size,
+                    etag: x.etag,
+                })
+                .collect::<Vec<_>>();
+
+                Ok(ObjectStorageResult::ObjectMetadata { objs })
+            }
+            ObjectStorageCall::GetFileMeta { key } => {
+                let mut objs = vec![];
+                let obj = self.client.get_object_metadata(BucketWithKey::new(bucket, &key)).await?;
+                if let Some(obj) = obj {
+                    objs.push(ObjectMetadata {
+                        key: obj.key,
+                        last_modified: obj.last_modified,
+                        size: obj.size,
+                        etag: obj.etag,
+                    });
+                }
+
+                Ok(ObjectStorageResult::ObjectMetadata { objs })
+            }
+            ObjectStorageCall::GetFileUrl { key, expiry } => {
+                let url = self.client.get_url(BucketWithKey::new(bucket, &key), expiry).await?;
+                Ok(ObjectStorageResult::FileUrl { url })
+            }
+            ObjectStorageCall::DownloadFile { key } => {
+                let data = self.client.download_file(BucketWithKey::new(bucket, &key)).await?;
+                Ok(ObjectStorageResult::Blob { data })
+            }
+            ObjectStorageCall::UploadFile { key, data } => {
+                if key.len() > MAX_OBJ_STORAGE_PATH_LENGTH {
+                    return Err("Path length too long".into());
+                }
+
+                if data.len() > MAX_OBJ_STORAGE_BYTES {
+                    return Err("Data too large".into());
+                }
+
+                self.client.upload_file(BucketWithKey::new(bucket, &key), data.into_vec()).await?;
+
+                Ok(ObjectStorageResult::Ack)
+            }
+            ObjectStorageCall::DeleteFile { key } => {
+                self.client.delete(BucketWithKey::new(bucket, &key)).await?;
+                Ok(ObjectStorageResult::Ack)
+            }
+        }
     }
 }

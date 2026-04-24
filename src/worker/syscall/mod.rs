@@ -1,11 +1,10 @@
-mod objstorage;
 mod cdn;
 mod discord;
 mod meta;
 
 use std::sync::Arc;
 
-use crate::{geese::{state::{StateExecResult, StateOp}, tenantstate::TenantState}, worker::{limits::{LuaKVConstraints, Ratelimits}, syscall::{cdn::{CdnCall, CdnResult}, discord::ArDiscordProvider, meta::{MetaCall, MetaResult}, objstorage::{ObjectStorageCall, ObjectStorageResult}}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
+use crate::{geese::{objstoreop::{ObjStorageOp, ObjectStorageCall, ObjectStorageResult}, state::{StateExecResult, StateOp}, tenantstate::TenantState}, worker::{limits::Ratelimits, syscall::{cdn::{CdnCall, CdnResult}, discord::ArDiscordProvider, meta::{MetaCall, MetaResult}}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
 use dapi::context::DiscordContext;
 use khronos_runtime::{primitives::{lazy::Lazy, syscall::Syscall}, rt::mluau::prelude::*};
 use log::info;
@@ -142,16 +141,16 @@ impl IntoLua for SyscallRet {
 #[derive(Clone)]
 pub struct SyscallHandler {
     state: WorkerState,
+    obj_storage_op: ObjStorageOp,
     wts: WorkerTenantState,
-    kv_constraints: LuaKVConstraints,
     ratelimits: Arc<Ratelimits>,
     id: Id
 }
 
 impl SyscallHandler {
     /// Creates a new syscall handler
-    pub fn new(state: WorkerState, wts: WorkerTenantState, kv_constraints: LuaKVConstraints, ratelimits: Arc<Ratelimits>, id: Id) -> Self {
-        Self { state, wts, kv_constraints, ratelimits, id }
+    pub fn new(state: WorkerState, wts: WorkerTenantState, ratelimits: Arc<Ratelimits>, id: Id) -> Self {
+        Self { obj_storage_op: ObjStorageOp::new(state.object_store.clone()), state, wts, ratelimits, id }
     }
 
     /// Handles a syscall
@@ -170,7 +169,8 @@ impl SyscallHandler {
                 Ok(SyscallRet::State { res: res.results, new_tenant_state: res.new_tenant_state })
             }
             SyscallArgs::ObjectStorage { op } => {
-                let res = op.exec(self.id, self).await?;
+                self.ratelimits.object_storage.check("syscall")?;
+                let res = self.obj_storage_op.do_op(self.id, op).await?;
                 Ok(SyscallRet::ObjectStorage { res })
             }
             SyscallArgs::Cdn { op } => {

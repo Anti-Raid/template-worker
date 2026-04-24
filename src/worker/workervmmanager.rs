@@ -14,7 +14,7 @@ use crate::worker::limits::TEMPLATE_GIVE_TIME;
 use crate::worker::syscall::SyscallHandler;
 use crate::worker::workertenantstate::WorkerTenantState;
 
-use super::limits::{LuaKVConstraints, Ratelimits};
+use super::limits::Ratelimits;
 
 use super::workerstate::WorkerState;
 use super::limits::{MAX_TEMPLATE_MEMORY_USAGE, MAX_TEMPLATES_EXECUTION_TIME};
@@ -205,7 +205,6 @@ impl WorkerVmManager {
         let syscall_h = SyscallHandler::new(
             worker_state,
             wts,
-            LuaKVConstraints::default(),
             Ratelimits::new().map_err(|e| LuaError::external(e.to_string()))?.into(),
             id
         );

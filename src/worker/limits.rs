@@ -9,6 +9,11 @@ pub const MAX_VM_THREAD_STACK_SIZE: usize = 1024 * 1024 * 25; // 25MB maximum me
 pub const MAX_TEMPLATES_EXECUTION_TIME: Duration = Duration::from_secs(10); // 10 seconds maximum execution time before sched yield must happen
 pub const TEMPLATE_GIVE_TIME: Duration = Duration::from_secs(1); // 1 second maximum time to give to a template to finish execution following a yield
 
+pub const MAX_OBJ_STORAGE_PATH_LENGTH: usize = 2048;
+pub const MAX_OBJ_STORAGE_BYTES: usize = 512 * 1024; // 512kb max per object
+
+pub const KV_MAX_KEY_LENGTH: usize = 512;
+
 pub fn create_nonmax_u32(value: u32) -> Result<NonZeroU32, crate::Error> {
     Ok(NonZeroU32::new(value).ok_or("Value must be non-zero")?)
 }
@@ -214,30 +219,5 @@ impl Ratelimits {
             http: Ratelimits::new_http_rl()?,
             runtime: Ratelimits::new_runtime_rl()?,
         })
-    }
-}
-
-#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
-pub struct LuaKVConstraints {
-    /// Maximum length of a key
-    pub max_key_length: usize,
-    /// Maximum length of a value (in bytes)
-    pub max_value_bytes: usize,
-    /// Maximum length of a object storage path
-    pub max_object_storage_path_length: usize,
-    /// Maximum length of a object storage data
-    pub max_object_storage_bytes: usize,
-}
-
-impl Default for LuaKVConstraints {
-    fn default() -> Self {
-        LuaKVConstraints {
-            max_key_length: 512,
-            // 256kb max per value
-            max_value_bytes: 256 * 1024,
-            max_object_storage_path_length: 2048,
-            // 512kb max per value
-            max_object_storage_bytes: 512 * 1024,
-        }
     }
 }

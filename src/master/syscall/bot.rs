@@ -4,7 +4,7 @@ use dapi::types::CreateCommand;
 use khronos_runtime::{utils::khronos_value::KhronosValue};
 use serde::{Deserialize, Serialize};
 use serenity::all::{GuildId, UserId};
-use crate::{geese::{state::{StateExecResult, StateOp}, tenantstate::{ModFlags, TenantState}}, master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::bot::{BotStatus, ShardConn}}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id}};
+use crate::{geese::{objstoreop::{ObjectStorageCall, ObjectStorageResult}, state::{StateExecResult, StateOp}, tenantstate::{ModFlags, TenantState}}, master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::bot::{BotStatus, ShardConn}}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id}};
 use khronos_ext::mluau_ext::prelude::*;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -48,6 +48,8 @@ pub enum MBotSyscall {
     AdminSetTenantStateModFlags { id: Id, modflags: ModFlags },
     /// Admin API to run a set of state ops on a tenant (works in secure contexts only)
     AdminState { id: Id, ops: Vec<StateOp> },
+    /// Admin API to run an object storage op on a tenant (works in secure contexts only)
+    AdminObjectStorage { id: Id, call: ObjectStorageCall },
     /// Admin API to fetch tenant state for a tenant (works in secure contexts only)
     AdminFetchTenantState { id: Id }
 }
@@ -97,6 +99,11 @@ impl FromLua for MBotSyscall {
                 let ops = tab.get("ops")?;
                 Ok(Self::AdminState { id, ops })
             },
+            b"AdminObjectStorage" => {
+                let id = tab.get("id")?;
+                let call = tab.get("call")?;
+                Ok(Self::AdminObjectStorage { id, call })
+            },
             b"AdminFetchTenantState" => {
                 let id = tab.get("id")?;
                 Ok(Self::AdminFetchTenantState { id })
@@ -142,6 +149,10 @@ pub enum MBotSyscallRet {
         res: Vec<StateExecResult>,
         new_tenant_state: Option<TenantState>
     },
+    /// Object storage call response (admin only)
+    ObjectStorage {
+        res: ObjectStorageResult
+    },
     /// Tenant state response (admin only)
     TenantState {
         ts: TenantState
@@ -170,6 +181,12 @@ impl IntoLua for MBotSyscallRet {
                 table.set("op", "TenantState")?;
                 table.set("ts", ts)?;
                 Ok(LuaValue::Table(table))
+            }
+            Self::ObjectStorage { res } => {
+                let table = lua.create_table_with_capacity(0, 2)?;
+                table.set("op", "ObjectStorage")?;
+                table.set("res", res)?;
+                Ok(LuaValue::Table(table))  
             }
             _ => lua.to_value(&self) // hack to speed up dev
         }
@@ -331,6 +348,15 @@ impl MBotSyscall {
                 }
 
                 Ok(MBotSyscallRet::State { res: res.results, new_tenant_state: res.new_tenant_state })
+            }
+            Self::AdminObjectStorage { id, call } => {
+                if !ctx.is_secure() {
+                    return Err(MSyscallError::ContextInsecure);
+                }
+
+                let res = handler.objop.do_op(id, call).await?;
+
+                Ok(MBotSyscallRet::ObjectStorage { res })
             }
             Self::AdminFetchTenantState { id } => {
                 if !ctx.is_secure() {
