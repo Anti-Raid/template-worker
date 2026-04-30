@@ -25,6 +25,10 @@ pub enum StateOp {
         key: String,
         scope: String,
     },
+    KvSignUrl {
+        key: String,
+        scope: String,
+    },
     KvSet {
         key: String,
         scope: String,
@@ -108,6 +112,11 @@ impl FromLua for StateOp {
                 let scope = tab.get("scope")?;
                 Ok(Self::KvGetWithBlob { key, scope })
             },
+            b"KvSignUrl" => {
+                let key = tab.get("key")?;
+                let scope = tab.get("scope")?;
+                Ok(Self::KvSignUrl { key, scope })
+            },
             b"KvSet" => {
                 let key = tab.get("key")?;
                 let scope = tab.get("scope")?;
@@ -183,6 +192,8 @@ pub struct StateDb {
 }
 
 impl StateDb {
+    const KV_SIGN_URL_EXPIRATION_SECONDS: u64 = 5 * 60; // 5 minutes
+
     pub fn new(pool: sqlx::PgPool) -> Self {
         StateDb { pool: pool.clone(), tsdb: TenantStateDb::new(pool) }
     }
@@ -301,6 +312,10 @@ impl StateDb {
                     .await? {
                         KvLookupWithBlob::apply_one(state, rec);
                     }
+            }
+            StateOp::KvSignUrl { key, scope } => {
+                let vurl = crate::geese::urlsign::create_url(tid, &key, &scope, Self::KV_SIGN_URL_EXPIRATION_SECONDS)?;
+                state.results.push(StateExecResult::KvSignUrl { url: vurl, expiry: Self::KV_SIGN_URL_EXPIRATION_SECONDS });
             }
             StateOp::KvSet { key, scope, value, blob } => {
                 if key.len() > KV_MAX_KEY_LENGTH {
@@ -507,6 +522,10 @@ pub enum StateExecResult {
         l: KvLookup,
         blob: Option<serde_bytes::ByteBuf>
     },
+    KvSignUrl {
+        url: String,
+        expiry: u64
+    },
     GlobalKv {
         l: GlobalKv
     },
@@ -551,6 +570,11 @@ impl IntoLua for StateExecResult {
                 table.set("created_at", LuaDateTime::from_utc(l.created_at))?;
                 table.set("last_updated_at", LuaDateTime::from_utc(l.last_updated_at))?;
                 table.set("blob", blob.map(|blob| Blob { data: blob.into_vec() }))?;
+            }
+            Self::KvSignUrl { url, expiry } => {
+                table.set("op", "KvSignUrl")?;
+                table.set("url", url)?;
+                table.set("expiry", expiry)?;
             }
             Self::GlobalKv { l } => {
                 table.set("op", "GlobalKv")?;
