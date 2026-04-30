@@ -11,8 +11,6 @@ use std::fmt::{Display, Debug};
 use moka::future::Cache;
 use serde::{Deserialize, Serialize};
 use serenity::all::{GuildId, UserId};
-use crate::geese::objectstore::ObjectStore;
-use crate::geese::objstoreop::ObjStorageOp;
 use crate::geese::state::StateDb;
 use crate::geese::tenantstate::TenantStateDb;
 use crate::{geese::stratum::Stratum, master::{syscall::{auth::{AuthError, MAuthSyscall, MAuthSyscallRet}, bot::{MBotSyscall, MBotSyscallRet}, discord::{MDiscordSyscall, MDiscordSyscallRet}, gkv::{MGkvSyscall, MGkvSyscallRet}, types::bot::BotStatus}, workerpool::WorkerPool}};
@@ -48,6 +46,12 @@ impl MSyscallContext {
     #[inline(always)]
     pub const fn is_secure(self) -> bool {
         matches!(self, Self::ApiSecure(_) | Self::ShellAnon | Self::ShellWithUser(_))
+    }
+
+    /// Returns if the given context is an anonymous API getter
+    #[inline(always)]    
+    pub const fn is_anon_getter(self) -> bool {
+        matches!(self, Self::ApiAnonGetter)
     }
 
     /// Returns if the given context comes from an oauth authorization
@@ -224,7 +228,6 @@ pub struct MSyscallHandler {
     pub(super) status_cache: Cache<(), BotStatus>,
     pub(super) tsdb: TenantStateDb,
     pub(super) statedb: StateDb,
-    pub(super) objop: ObjStorageOp
 }
 
 impl MSyscallHandler {
@@ -235,7 +238,6 @@ impl MSyscallHandler {
         stratum: Stratum,
         reqwest: reqwest::Client,
         pool: sqlx::PgPool,
-        obj_storage: Arc<ObjectStore>
     ) -> Self {
         Self { 
             pool: pool.clone(), 
@@ -248,7 +250,6 @@ impl MSyscallHandler {
             status_cache: Cache::builder().time_to_live(Duration::from_secs(100)).build(),
             tsdb: TenantStateDb::new(pool.clone()),
             statedb: StateDb::new(pool),
-            objop: ObjStorageOp::new(obj_storage)
         }
     }
 

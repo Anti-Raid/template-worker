@@ -1,4 +1,3 @@
-use crate::geese::objectstore::ObjectStore;
 use serde::{Deserialize, Serialize};
 use serenity::all::UserId;
 use std::fs::File;
@@ -20,60 +19,6 @@ pub struct DiscordAuth {
     pub allowed_redirects: Vec<String>
 }
 
-// Object storage code
-#[derive(Serialize, Deserialize)]
-pub enum ObjectStorageType {
-    #[serde(rename = "s3-like")]
-    S3Like,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct ObjectStorage {
-    pub endpoint: Option<String>,
-    pub secure: Option<bool>,
-    pub cdn_secure: Option<bool>,
-    pub cdn_endpoint: Option<String>,
-    pub access_key: Option<String>,
-    pub secret_key: Option<String>,
-}
-
-impl ObjectStorage {
-    pub fn build(&self) -> Result<ObjectStore, crate::Error> {
-        let access_key = self.access_key.as_ref().ok_or("Missing access key")?;
-        let secret_key = self.secret_key.as_ref().ok_or("Missing secret key")?;
-        let endpoint = self.endpoint.as_ref().ok_or("Missing endpoint")?;
-        let cdn_endpoint = self.cdn_endpoint.as_ref().ok_or("Missing cdn_endpoint")?;
-
-        let endpoint_url = format!(
-            "{}://{}",
-            if self.secure.unwrap_or(false) {
-                "https"
-            } else {
-                "http"
-            },
-            endpoint
-        );
-
-        let cdn_endpoint_url = format!(
-            "{}://{}",
-            if self.cdn_secure.unwrap_or(false) {
-                "https"
-            } else {
-                "http"
-            },
-            cdn_endpoint
-        );
-
-        ObjectStore::new_s3(
-            "antiraid.rust".to_string(),
-            endpoint_url,
-            cdn_endpoint_url,
-            access_key.to_string(),
-            secret_key.to_string(),
-        )
-    }
-}
-
 #[derive(Serialize, Deserialize, Default)]
 pub struct Meta {
     pub postgres_url: String,
@@ -82,6 +27,7 @@ pub struct Meta {
     pub sandwich_http_api: String,
     pub default_error_channel: serenity::all::ChannelId,
     pub mesophyll_token: String,
+    pub blob_token: String,
     pub stratum_server: String,
     pub stratum_grpc_access_key: String
 }
@@ -110,7 +56,6 @@ pub struct Config {
     pub meta: Meta,
     pub sites: Sites,
     pub servers: Servers,
-    pub object_storage: ObjectStorage,
     pub addrs: Addrs,
     pub worker_path: PathBuf,
 

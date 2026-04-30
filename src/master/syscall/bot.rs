@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use dapi::types::CreateCommand;
-use khronos_runtime::{utils::khronos_value::KhronosValue};
+use khronos_runtime::{primitives::blob::Blob, utils::khronos_value::KhronosValue};
 use serde::{Deserialize, Serialize};
 use serenity::all::{GuildId, UserId};
-use crate::{geese::{objstoreop::{ObjectStorageCall, ObjectStorageResult}, state::{StateExecResult, StateOp}, tenantstate::{ModFlags, TenantState}}, master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::bot::{BotStatus, ShardConn}}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id}};
+use crate::{geese::{state::{StateExecResult, StateOp}, tenantstate::{ModFlags, TenantState}}, master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::bot::{BotStatus, ShardConn}}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id}};
 use khronos_ext::mluau_ext::prelude::*;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -24,6 +24,13 @@ pub enum MBotSyscall {
         name: String,
         /// Data to send
         data: KhronosValue
+    },
+    /// Verify a presigned URL and return the decoded payload
+    GetBlobData {
+        /// Payload from KvPresignKey
+        payload: String,
+        /// Signature from KvPresignKey
+        signature: String,
     },
     /// Dispatch an event to a worker process with some safety checks removed
     AdminRelaxedDispatchEvent {
@@ -48,8 +55,6 @@ pub enum MBotSyscall {
     AdminSetTenantStateModFlags { id: Id, modflags: ModFlags },
     /// Admin API to run a set of state ops on a tenant (works in secure contexts only)
     AdminState { id: Id, ops: Vec<StateOp> },
-    /// Admin API to run an object storage op on a tenant (works in secure contexts only)
-    AdminObjectStorage { id: Id, call: ObjectStorageCall },
     /// Admin API to fetch tenant state for a tenant (works in secure contexts only)
     AdminFetchTenantState { id: Id }
 }
@@ -75,6 +80,11 @@ impl FromLua for MBotSyscall {
                 let data = tab.get("data")?;
                 Ok(Self::DispatchEvent { id, name, data })
             },
+            b"GetBlobData" => {
+                let payload = tab.get("payload")?;
+                let signature = tab.get("signature")?;
+                Ok(Self::GetBlobData { payload, signature })
+            },
             b"AdminRelaxedDispatchEvent" => {
                 let id = tab.get("id")?;
                 let name = tab.get("name")?;
@@ -98,11 +108,6 @@ impl FromLua for MBotSyscall {
                 let id = tab.get("id")?;
                 let ops = tab.get("ops")?;
                 Ok(Self::AdminState { id, ops })
-            },
-            b"AdminObjectStorage" => {
-                let id = tab.get("id")?;
-                let call = tab.get("call")?;
-                Ok(Self::AdminObjectStorage { id, call })
             },
             b"AdminFetchTenantState" => {
                 let id = tab.get("id")?;
@@ -149,13 +154,13 @@ pub enum MBotSyscallRet {
         res: Vec<StateExecResult>,
         new_tenant_state: Option<TenantState>
     },
-    /// Object storage call response (admin only)
-    ObjectStorage {
-        res: ObjectStorageResult
-    },
     /// Tenant state response (admin only)
     TenantState {
         ts: TenantState
+    },
+    BlobData {
+        data: Vec<u8>,
+        filename: String,
     },
     Ack,
 }
@@ -182,11 +187,12 @@ impl IntoLua for MBotSyscallRet {
                 table.set("ts", ts)?;
                 Ok(LuaValue::Table(table))
             }
-            Self::ObjectStorage { res } => {
+            Self::BlobData { data, filename } => {
                 let table = lua.create_table_with_capacity(0, 2)?;
-                table.set("op", "ObjectStorage")?;
-                table.set("res", res)?;
-                Ok(LuaValue::Table(table))  
+                table.set("op", "BlobData")?;
+                table.set("data", Blob { data })?;
+                table.set("filename", filename)?;
+                Ok(LuaValue::Table(table))
             }
             _ => lua.to_value(&self) // hack to speed up dev
         }
@@ -209,6 +215,10 @@ impl MBotSyscall {
             Self::GetBotStatus {  } => {
                 let status = handler.status_cache.try_get_with::<_, crate::Error>((), async move {
                     let raw_stats = handler.stratum.get_status().await?;
+                    let uptime = chrono::Utc::now()
+                        .signed_duration_since(crate::CONFIG.start_time)
+                        .num_seconds()
+                        .max(0) as u64;
 
                     let stats = BotStatus {
                         shard_conns: raw_stats.shards.into_iter().map(|shard| {
@@ -219,6 +229,7 @@ impl MBotSyscall {
                         }).collect(),
                         total_guilds: raw_stats.guild_count,
                         total_users: raw_stats.user_count,
+                        uptime
                     };
 
                     Ok(stats)
@@ -251,6 +262,16 @@ impl MBotSyscall {
 
                 Ok(MBotSyscallRet::KhronosValue { data: handler.worker_pool.dispatch_event(id, event).await? })
             }
+            Self::GetBlobData { payload, signature } => {
+                if !ctx.is_anon_getter() && !ctx.is_secure() {
+                    return Err(MSyscallError::ContextInsecure);
+                }
+                // Verify the provided URL, then fetch blob
+                let verified = crate::geese::urlsign::verify_url(&payload, &signature).map_err(|e| MSyscallError::Unauthorized { reason: e.message() })?;
+                let (data, filename) = handler.statedb.fetch_blob(verified).await?
+                .ok_or(MSyscallError::EntityNotFound { reason: "Blob not found" })?;
+                Ok(MBotSyscallRet::BlobData { data, filename })
+            },
             Self::AdminRelaxedDispatchEvent { id, name, data, allow_non_web_event_names, allow_self_event, mock_id } => {
                 if !ctx.is_secure() {
                     return Err(MSyscallError::ContextInsecure);
@@ -291,6 +312,10 @@ impl MBotSyscall {
                 }
 
                 let raw_stats = handler.stratum.get_status().await?;
+                let uptime = chrono::Utc::now()
+                    .signed_duration_since(crate::CONFIG.start_time)
+                    .num_seconds()
+                    .max(0) as u64;
 
                 let status = BotStatus {
                     shard_conns: raw_stats.shards.into_iter().map(|shard| {
@@ -301,6 +326,7 @@ impl MBotSyscall {
                     }).collect(),
                     total_guilds: raw_stats.guild_count,
                     total_users: raw_stats.user_count,
+                    uptime
                 };
 
                 Ok(MBotSyscallRet::BotStatus { status })
@@ -348,15 +374,6 @@ impl MBotSyscall {
                 }
 
                 Ok(MBotSyscallRet::State { res: res.results, new_tenant_state: res.new_tenant_state })
-            }
-            Self::AdminObjectStorage { id, call } => {
-                if !ctx.is_secure() {
-                    return Err(MSyscallError::ContextInsecure);
-                }
-
-                let res = handler.objop.do_op(id, call).await?;
-
-                Ok(MBotSyscallRet::ObjectStorage { res })
             }
             Self::AdminFetchTenantState { id } => {
                 if !ctx.is_secure() {

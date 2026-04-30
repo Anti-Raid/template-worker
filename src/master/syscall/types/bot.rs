@@ -20,4 +20,6 @@ pub struct BotStatus {
     pub total_guilds: u64,
     /// The total number of users
     pub total_users: u64,
+    /// The current uptime of the bot process in seconds
+    pub uptime: u64,
 }

@@ -4,7 +4,7 @@ mod meta;
 
 use std::sync::Arc;
 
-use crate::{geese::{objstoreop::{ObjStorageOp, ObjectStorageCall, ObjectStorageResult}, state::{StateExecResult, StateOp}, tenantstate::TenantState}, worker::{limits::Ratelimits, syscall::{cdn::{CdnCall, CdnResult}, discord::ArDiscordProvider, meta::{MetaCall, MetaResult}}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
+use crate::{geese::{state::{StateExecResult, StateOp}, tenantstate::TenantState}, worker::{limits::Ratelimits, syscall::{cdn::{CdnCall, CdnResult}, discord::ArDiscordProvider, meta::{MetaCall, MetaResult}}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
 use dapi::context::DiscordContext;
 use khronos_runtime::{primitives::{lazy::Lazy, syscall::Syscall}, rt::mluau::prelude::*};
 use log::info;
@@ -15,9 +15,6 @@ pub enum SyscallArgs {
     State {
         // Set of state ops to perform, all ops here are guaranteed to be atomically handled
         ops: Vec<StateOp>
-    },
-    ObjectStorage {
-        op: ObjectStorageCall
     },
     Cdn {
         op: CdnCall
@@ -45,10 +42,6 @@ impl FromLua for SyscallArgs {
             b"State" => {
                 let ops = tab.get("ops")?;
                 Ok(Self::State { ops })
-            },
-            b"ObjectStorage" => {
-                let op = tab.get("req")?;
-                Ok(Self::ObjectStorage { op })
             },
             b"Cdn" => {
                 let op = tab.get("req")?;
@@ -78,9 +71,6 @@ pub enum SyscallRet {
         res: Vec<StateExecResult>,
         new_tenant_state: Option<TenantState>
     },
-    ObjectStorage {
-        res: ObjectStorageResult
-    },
     Cdn {
         res: CdnResult
     },
@@ -102,10 +92,6 @@ impl IntoLua for SyscallRet {
                 table.set("op", "State")?;
                 table.set("res", res)?;
                 table.set("new_tenant_state", new_tenant_state)?;
-            }
-            Self::ObjectStorage { res } => {
-                table.set("op", "ObjectStorage")?;
-                table.set("res", res)?;
             }
             Self::Cdn { res } => {
                 table.set("op", "Cdn")?;
@@ -141,7 +127,6 @@ impl IntoLua for SyscallRet {
 #[derive(Clone)]
 pub struct SyscallHandler {
     state: WorkerState,
-    obj_storage_op: ObjStorageOp,
     wts: WorkerTenantState,
     ratelimits: Arc<Ratelimits>,
     id: Id
@@ -150,7 +135,7 @@ pub struct SyscallHandler {
 impl SyscallHandler {
     /// Creates a new syscall handler
     pub fn new(state: WorkerState, wts: WorkerTenantState, ratelimits: Arc<Ratelimits>, id: Id) -> Self {
-        Self { obj_storage_op: ObjStorageOp::new(state.object_store.clone()), state, wts, ratelimits, id }
+        Self { state, wts, ratelimits, id }
     }
 
     /// Handles a syscall
@@ -167,11 +152,6 @@ impl SyscallHandler {
                     self.wts.reload_for_tenant(self.id, ts).map_err(|e| e.to_string())?;
                 }
                 Ok(SyscallRet::State { res: res.results, new_tenant_state: res.new_tenant_state })
-            }
-            SyscallArgs::ObjectStorage { op } => {
-                self.ratelimits.object_storage.check("syscall")?;
-                let res = self.obj_storage_op.do_op(self.id, op).await?;
-                Ok(SyscallRet::ObjectStorage { res })
             }
             SyscallArgs::Cdn { op } => {
                 let res = op.exec(self.id, self).await?;

@@ -1,6 +1,5 @@
 use log::debug;
 use tokio::sync::watch;
-use tw::config::CONFIG;
 use tw::mesophyll::client::MesophyllClient;
 use tw::setup_discord;
 use tw::worker::workerstate::WorkerState;
@@ -68,13 +67,6 @@ async fn main_impl(args: CmdArgs) {
         .build()
         .expect("Could not initialize reqwest client");
 
-    let object_storage = Arc::new(
-        CONFIG
-            .object_storage
-            .build()
-            .expect("Could not initialize object store"),
-    );
-
     let (http, stratum, current_user) = setup_discord().await;
 
     let (meso_client, meso_client_stream) = MesophyllClient::new(worker_id)
@@ -83,7 +75,6 @@ async fn main_impl(args: CmdArgs) {
 
     let worker_state = WorkerState::new(
         http.clone(),
-        object_storage.clone(),
         Arc::new(current_user.clone()),
         Arc::new(meso_client.clone()),
         stratum.clone(),

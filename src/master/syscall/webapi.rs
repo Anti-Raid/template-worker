@@ -1,10 +1,10 @@
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{extract::{State, FromRequestParts, Json}, Router, response::IntoResponse};
-use reqwest::StatusCode;
+use reqwest::{StatusCode, header};
 use reqwest::header::AUTHORIZATION;
 use serenity::all::UserId;
-use crate::master::syscall::bot::MBotSyscall;
+use crate::master::syscall::bot::{MBotSyscall, MBotSyscallRet};
 use crate::master::syscall::{MSyscallArgs, MSyscallContext, MSyscallRet};
 use crate::master::syscall::{MSyscallError, MSyscallHandler, internal::auth as iauth};
 
@@ -99,6 +99,42 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
         Ok(resp)
     }
 
+    pub(super) async fn get_presigned(
+        State(handler): State<MSyscallHandler>,
+        axum::extract::Path((payload, signature)): axum::extract::Path<(String, String)>
+    ) -> impl IntoResponse {
+        enum Resp {
+            Err(MSyscallError),
+            Data { data: Vec<u8>, filename: String }
+        }
+        impl IntoResponse for Resp {
+            fn into_response(self) -> Response {
+                match self {
+                    Resp::Err(e) => (StatusCode::BAD_REQUEST, Json(e)).into_response(),
+                    Resp::Data { data, filename } => {
+                        let resp = Response::builder()
+                            .header(header::CONTENT_TYPE, "application/octet-stream")
+                            .header(header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", filename))
+                            .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
+                            .header(header::CONTENT_LENGTH, data.len())
+                            .body(axum::body::Body::from(data));
+
+                        let Ok(resp) = resp else {
+                            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to build response").into_response();
+                        };  
+
+                        resp.into_response()
+                    }
+                }
+            }
+        }
+        match handler.handle_syscall(MSyscallArgs::Bot { req: MBotSyscall::GetBlobData { payload, signature } }, MSyscallContext::ApiAnonGetter).await {
+            Ok(MSyscallRet::Bot { data: MBotSyscallRet::BlobData { data, filename } }) => Resp::Data { data, filename },
+            Ok(_) => Resp::Err(MSyscallError::EntityNotFound { reason: "Failed to get blob back from server" }),
+            Err(e) => Resp::Err(e)
+        }
+    }
+
     let mut router = Router::new();
 
     router = router
@@ -111,6 +147,7 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
         .route("/status", get(async |State(handler): State<MSyscallHandler>| {
             handler.handle_syscall(MSyscallArgs::Bot { req: MBotSyscall::GetBotStatus {} }, MSyscallContext::ApiAnonGetter).await
         }))
+        .route("/blobs/:payload/:signature", get(get_presigned))
         .fallback(get(|| async {
             (
                 StatusCode::NOT_FOUND,

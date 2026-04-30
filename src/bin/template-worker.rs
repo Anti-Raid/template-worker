@@ -66,13 +66,6 @@ async fn main_impl(args: CmdArgs) {
         .build()
         .expect("Could not initialize reqwest client");
 
-    let object_storage = Arc::new(
-        CONFIG
-            .object_storage
-            .build()
-            .expect("Could not initialize object store"),
-    );
-
     let (_, stratum, current_user) = setup_discord().await;
 
     // Ask stratum for its worker count
@@ -108,7 +101,6 @@ async fn main_impl(args: CmdArgs) {
         stratum,
         reqwest,
         pg_pool,
-        object_storage
     );
 
     mesophyll_server.set_msyscall_handler(msyscall_handler.clone()).unwrap();

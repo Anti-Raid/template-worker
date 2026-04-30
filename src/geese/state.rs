@@ -1,11 +1,13 @@
 use chrono::{DateTime, Utc};
+use khronos_runtime::primitives::blob::{Blob, BlobTaker};
 use khronos_runtime::{primitives::opaque::Opaque, rt::mlua::prelude::*};
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use khronos_runtime::core::datetime::DateTime as LuaDateTime;
 use rand::distr::{Alphanumeric, SampleString};
 
 use crate::geese::tenantstate::{DEFAULT_EVENTS, TenantState, TenantStateDb};
-use crate::worker::limits::KV_MAX_KEY_LENGTH;
+use crate::geese::urlsign::VerifiedUrl;
+use crate::worker::limits::{KV_MAX_KEY_LENGTH, MAX_OBJ_STORAGE_BYTES};
 use crate::worker::workervmmanager::Id;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -17,12 +19,17 @@ pub enum StateOp {
     },
     KvGet {
         key: String,
-        scope: String
+        scope: String,
+    },
+    KvGetWithBlob {
+        key: String,
+        scope: String,
     },
     KvSet {
         key: String,
         scope: String,
-        value: KhronosValue
+        value: KhronosValue,
+        blob: Option<serde_bytes::ByteBuf>, // optional blob data
     },
     KvDelete {
         key: String,
@@ -96,11 +103,17 @@ impl FromLua for StateOp {
                 let scope = tab.get("scope")?;
                 Ok(Self::KvGet { key, scope })
             },
+            b"KvGetWithBlob" => {
+                let key = tab.get("key")?;
+                let scope = tab.get("scope")?;
+                Ok(Self::KvGetWithBlob { key, scope })
+            },
             b"KvSet" => {
                 let key = tab.get("key")?;
                 let scope = tab.get("scope")?;
                 let value = tab.get("value")?;
-                Ok(Self::KvSet { key, scope, value })
+                let blob = tab.get::<Option<BlobTaker>>("blob")?;
+                Ok(Self::KvSet { key, scope, value, blob: blob.map(|d| d.0.into()) })
             },
             b"KvDelete" => {
                 let key = tab.get("key")?;
@@ -172,6 +185,27 @@ pub struct StateDb {
 impl StateDb {
     pub fn new(pool: sqlx::PgPool) -> Self {
         StateDb { pool: pool.clone(), tsdb: TenantStateDb::new(pool) }
+    }
+    
+    /// Fetch data on a presigned URL
+    pub async fn fetch_blob(&self, vurl: VerifiedUrl) -> Result<Option<(Vec<u8>, String)>, crate::Error> {
+        #[derive(sqlx::FromRow)]
+        struct Rec {
+            blob: Option<Vec<u8>>
+        }
+        let rec = sqlx::query_as::<_, Rec>(
+            "SELECT blob FROM tenant_kv WHERE owner_id = $1 AND owner_type = $2 AND key = $3 AND scope = $4",
+        )
+        .bind(vurl.id.tenant_id())
+        .bind(vurl.id.tenant_type())
+        .bind(&vurl.key)
+        .bind(vurl.scope)
+        .fetch_optional(&self.pool)
+        .await?;
+        match rec {
+            Some(rec) => Ok(rec.blob.map(|b| (b, vurl.key))),
+            None => Ok(None)
+        }
     }
 
     /// Perform execution of an op
@@ -255,14 +289,32 @@ impl StateDb {
                         KvLookup::apply_one(state, rec);
                     }
             }
-            StateOp::KvSet { key, scope, value } => {
+            StateOp::KvGetWithBlob { key, scope } => {
+                if let Some(rec) = sqlx::query_as(
+                    "SELECT key, value, blob, scope, created_at, last_updated_at FROM tenant_kv WHERE owner_id = $1 AND owner_type = $2 AND key = $3 AND scope = $4",
+                    )
+                    .bind(tid.tenant_id())
+                    .bind(tid.tenant_type())
+                    .bind(&key)
+                    .bind(scope)
+                    .fetch_optional(executor)
+                    .await? {
+                        KvLookupWithBlob::apply_one(state, rec);
+                    }
+            }
+            StateOp::KvSet { key, scope, value, blob } => {
                 if key.len() > KV_MAX_KEY_LENGTH {
                     return Err(format!("key-value length exceeds {KV_MAX_KEY_LENGTH} chars").into())
                 }
+                if let Some(blob) = &blob {
+                    if blob.len() > MAX_OBJ_STORAGE_BYTES {
+                        return Err(format!("blob size exceeds {MAX_OBJ_STORAGE_BYTES} bytes").into())
+                    }
+                }
                 let id = Alphanumeric.sample_string(&mut rand::rng(), 64);
                 sqlx::query(
-                    "INSERT INTO tenant_kv (id, owner_id, owner_type, key, value, scope) VALUES ($1, $2, $3, $4, $5, $6)
-                    ON CONFLICT (owner_id, owner_type, key, scope) DO UPDATE SET value = EXCLUDED.value, last_updated_at = NOW()",
+                    "INSERT INTO tenant_kv (id, owner_id, owner_type, key, value, scope, blob) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    ON CONFLICT (owner_id, owner_type, key, scope) DO UPDATE SET value = EXCLUDED.value, blob = EXCLUDED.blob, last_updated_at = NOW()",
                 )
                 .bind(&id)
                 .bind(tid.tenant_id())
@@ -270,6 +322,7 @@ impl StateDb {
                 .bind(key)
                 .bind(serde_json::to_value(value)?)
                 .bind(scope)
+                .bind(blob.map(|b| b.into_vec()))
                 .execute(executor)
                 .await?;
             }
@@ -450,6 +503,10 @@ pub enum StateExecResult {
     Kv {
         l: KvLookup
     },
+    KvWithBlob {
+        l: KvLookup,
+        blob: Option<serde_bytes::ByteBuf>
+    },
     GlobalKv {
         l: GlobalKv
     },
@@ -485,6 +542,15 @@ impl IntoLua for StateExecResult {
                 table.set("value", l.value)?;
                 table.set("created_at", LuaDateTime::from_utc(l.created_at))?;
                 table.set("last_updated_at", LuaDateTime::from_utc(l.last_updated_at))?;
+            }
+            Self::KvWithBlob { l, blob } => {
+                table.set("op", "KvWithBlob")?;
+                table.set("key", l.key)?;
+                table.set("scope", l.scope)?;
+                table.set("value", l.value)?;
+                table.set("created_at", LuaDateTime::from_utc(l.created_at))?;
+                table.set("last_updated_at", LuaDateTime::from_utc(l.last_updated_at))?;
+                table.set("blob", blob.map(|blob| Blob { data: blob.into_vec() }))?;
             }
             Self::GlobalKv { l } => {
                 table.set("op", "GlobalKv")?;
@@ -538,6 +604,19 @@ pub struct KvLookup {
 impl IntoStateExecResult for KvLookup {
     fn into_result(self) -> StateExecResult {
         StateExecResult::Kv { l: self }
+    }
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct KvLookupWithBlob {
+    #[sqlx(flatten)]
+    lookup: KvLookup,
+    blob: Option<Vec<u8>>,
+}
+
+impl IntoStateExecResult for KvLookupWithBlob {
+    fn into_result(self) -> StateExecResult {
+        StateExecResult::KvWithBlob { l: self.lookup, blob: self.blob.map(|x| x.into()) }
     }
 }
 

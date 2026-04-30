@@ -9,6 +9,7 @@ mod tenantstate_add_eventrefs;
 mod kv_scope_unnest;
 mod user_oauth_v2;
 mod tenant_state_drop_flags;
+mod tenant_kv_add_bytea;
 
 use futures::future::BoxFuture;
 use log::info;
@@ -20,10 +21,8 @@ pub struct Migration {
     pub up: fn(sqlx::Pool<sqlx::Postgres>) -> BoxFuture<'static, Result<(), crate::Error>>,
 }
 
-pub const MIGRATIONS: [Migration; 11] = [
-    // This relies on kv_generic not being applied yet so order matters
-    //
-    // Do not change this list without verifying order
+pub const MIGRATIONS: [Migration; 12] = [
+    // Do not change order of migrations without verifying dependencies
     khronosvalue_v2::MIGRATION,
     kv_generic::MIGRATION,
     tenantstate::MIGRATION,
@@ -34,7 +33,8 @@ pub const MIGRATIONS: [Migration; 11] = [
     kv_scope_unnest::MIGRATION,
     tenantstate_add_eventrefs::MIGRATION,
     user_oauth_v2::MIGRATION,
-    tenant_state_drop_flags::MIGRATION
+    tenant_state_drop_flags::MIGRATION,
+    tenant_kv_add_bytea::MIGRATION,
 ];
 
 pub async fn apply_migrations(pool: sqlx::PgPool) -> Result<(), crate::Error> {

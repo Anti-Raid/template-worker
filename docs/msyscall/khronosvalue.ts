@@ -18,7 +18,7 @@ pub enum KhronosValue {
 }
  */
 
-type RawKhronosValue = {
+export type RawKhronosValue = {
     Text: string;
 } | {
     Integer: number;
