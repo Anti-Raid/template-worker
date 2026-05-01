@@ -8,8 +8,8 @@ pub static MIGRATION: Migration = Migration {
             let mut tx = pool.begin().await?;
 
             let stmts = [
-                "ALTER TABLE tenant_state ADD COLUMN blob BYTEA",
-                "ALTER TABLE tenant_state 
+                "ALTER TABLE tenant_kv ADD COLUMN blob BYTEA",
+                "ALTER TABLE tenant_kv 
                 ADD CONSTRAINT enforce_max_blob_size 
                 CHECK (octet_length(blob) <= 524288)"
             ];
