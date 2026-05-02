@@ -1,63 +1,170 @@
 use khronos_runtime::utils::khronos_value::KhronosValue;
+use tokio::time::sleep;
 
 use crate::geese::tenantstate::TenantState;
-use crate::master::workerprocesshandle::WorkerProcessHandle;
+use crate::master::workerprocesshandle::{ExpBackoff, WorkerProcessHandle};
 use crate::mesophyll::server::MesophyllServer;
 use crate::worker::workerdispatch::SimpleEvent;
 use crate::worker::workervmmanager::Id;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use parking_lot::{Mutex, RwLock};
+use tokio::sync::{mpsc, oneshot};
 
+#[derive(Clone)]
 /// A WorkerPool stores a pool of workers in which servers are evenly distributed via
-/// the Discord Id sharding formula:
-#[allow(dead_code)]
+/// the Discord Id sharding formula
 pub struct WorkerPool {
-    /// The workers in the pool
-    workers: Vec<WorkerProcessHandle>,
+    /// Pool size
+    pool_size: usize,
+
+    /// The fast-read collection of worker handles in the pool
+    workers: Arc<RwLock<Vec<WorkerProcessHandle>>>,
+    
+    /// The kill switches, held by the pool so the pool can trigger clean shutdowns
+    kill_switches: Arc<Mutex<Vec<Option<oneshot::Sender<()>>>>>,
+    
+    /// The underlying mesophyll server thats used for communication between master->worker
+    mesophyll: MesophyllServer,
+
+    /// Whether the worker pool is in the process of shutting down. 
+    is_shutting_down: Arc<AtomicBool>
 }
 
 impl WorkerPool {
-    /// Creates a new WorkerPool with the given cache data and worker state
-    pub fn new(num_threads: usize, worker_debug: bool, server: &MesophyllServer) -> Result<Self, crate::Error> {
-        let mut workers = Vec::with_capacity(num_threads);
-
-        for id in 0..num_threads {
-            let thread = WorkerProcessHandle::new(id, worker_debug, server.clone())?;
-            workers.push(thread);
+    /// Initializes the worker process pool and starts the supervisor task.
+    /// 
+    /// The supervisor task monitors the worker processes for unexpected exits and respawns them, 
+    /// and also listens for shutdown signals to gracefully kill the workers.
+    pub fn new(pool_size: usize, worker_debug: bool, mesophyll: MesophyllServer) -> Self {
+        let mut workers = Vec::with_capacity(pool_size);
+        let mut kill_switches = Vec::with_capacity(pool_size);
+        let mut backoffs = Vec::with_capacity(pool_size);
+        let is_shutting_down = Arc::new(AtomicBool::new(false));
+        for _ in 0..pool_size {
+            backoffs.push(ExpBackoff::new());
         }
 
-        Ok(WorkerPool {
-            workers,
-        })
-    }
+        // Each worker process takes the worker_ctrl_tx side of the channel, and the supervisor takes the worker_ctrl_rx side
+        // to ensure that the supervisor is notified when a worker process exits for whatever reason
+        let (worker_ctrl_tx, worker_ctrl_rx) = mpsc::channel(pool_size);
 
-    /// Returns a reference to the WorkerThread in the pool for a given tenant ID
-    pub fn get_worker_for(&self, id: Id) -> &WorkerProcessHandle {
-        &self.workers[id.worker_id(self.workers.len())]
-    }
-}
+        for id in 0..pool_size {
+            let handle = WorkerProcessHandle::new(id, worker_debug, backoffs[id].clone());
+            let (kill_tx, kill_rx) = oneshot::channel();
 
-impl WorkerPool {
-    pub async fn kill(&self) -> Result<(), crate::Error> {
-        for worker in &self.workers {
-            worker.kill().await?;
+            workers.push(handle.clone());
+            kill_switches.push(Some(kill_tx));
+
+            // Background task to run the worker process and notify the supervisor on exit
+            let worker_ctrl_tx_ref = worker_ctrl_tx.clone();
+            tokio::spawn(async move {
+                handle.run(kill_rx).await;
+                let _ = worker_ctrl_tx_ref.send(id).await;
+            });
         }
+
+        let pool = Self {
+            pool_size,
+            workers: Arc::new(RwLock::new(workers)),
+            kill_switches: Arc::new(Mutex::new(kill_switches)),
+            mesophyll,
+            is_shutting_down: is_shutting_down.clone()
+        };
+
+        let workers_ref = pool.workers.clone();
+        let kill_switches_ref = pool.kill_switches.clone();
+        
+        tokio::spawn(async move {
+            Self::supervisor(
+                workers_ref, 
+                kill_switches_ref, 
+                worker_ctrl_rx, 
+                worker_ctrl_tx, 
+                backoffs,
+                is_shutting_down,
+                worker_debug,
+            ).await;
+        });
+
+        pool
+    }
+
+    /// The supervisor loop. See `new` for details.
+    async fn supervisor(
+        workers: Arc<RwLock<Vec<WorkerProcessHandle>>>, 
+        kill_switches: Arc<Mutex<Vec<Option<oneshot::Sender<()>>>>>,
+        mut worker_ctrl_rx: mpsc::Receiver<usize>,
+        worker_ctrl_tx: mpsc::Sender<usize>, 
+        backoffs: Vec<ExpBackoff>, // held permamently to track backoffs now
+        is_shutting_down: Arc<AtomicBool>,
+        debug: bool
+    ) {
+        while let Some(dead_id) = worker_ctrl_rx.recv().await {
+            if is_shutting_down.load(Ordering::Relaxed) {
+                break;
+            }
+
+            log::error!("Worker {} died. Trying to restart...", dead_id);
+                
+            let new_handle = WorkerProcessHandle::new(dead_id, debug, backoffs[dead_id].clone());
+            let (new_kill_tx, new_kill_rx) = oneshot::channel();
+
+            // Update the worker handle in the pool
+            {
+                let mut write_guard = workers.write();
+                write_guard[dead_id] = new_handle.clone();
+            }
+
+            // Swap the kill switch 
+            {
+                let mut kills_guard = kill_switches.lock();
+                kills_guard[dead_id] = Some(new_kill_tx);
+            }
+
+            // Background task to run the worker process and notify the supervisor on exit
+            let worker_ctrl_tx_ref = worker_ctrl_tx.clone();
+            tokio::spawn(async move {
+                new_handle.run(new_kill_rx).await;
+                let _ = worker_ctrl_tx_ref.send(dead_id).await;
+            });
+        }
+    }
+
+    /// Explicitly kills all workers with open kill switches
+    pub async fn shutdown_all(&self) -> Result<(), crate::Error> {
+        self.is_shutting_down.store(true, Ordering::SeqCst);
+        let mut kills_guard = self.kill_switches.lock();
+        for kill_opt in kills_guard.iter_mut() {
+            if let Some(tx) = kill_opt.take() {
+                let _ = tx.send(());
+            }
+        }
+
+        sleep(std::time::Duration::from_secs(5)).await; // wait for workers to shut down. TODO: make this more robust by tracking worker shutdowns in the supervisor loop
+
         Ok(())
     }
 
     pub async fn dispatch_event(&self, id: Id, event: SimpleEvent) -> Result<KhronosValue, crate::Error> {
-        self.get_worker_for(id).dispatch_event(id, event).await
+        let worker_id = id.worker_id(self.pool_size);
+        let r = self.mesophyll.get_connection(worker_id)
+            .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", worker_id))?;
+        r.dispatch_event(id, event).await
     }
 
     pub async fn drop_tenant(&self, id: Id) -> Result<(), crate::Error> {
-        self.get_worker_for(id).drop_tenant(id).await
+        let worker_id = id.worker_id(self.pool_size);
+        let r = self.mesophyll.get_connection(worker_id)
+            .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", worker_id))?;
+        r.drop_tenant(id).await
     }
 
     pub async fn update_tenant_state(&self, id: Id, ts: TenantState) -> Result<(), crate::Error> {
-        self.get_worker_for(id).update_tenant_state(id, ts).await
-    }
-
-    #[allow(dead_code)]
-    pub fn len(&self) -> usize {
-        self.workers.len()
+        let worker_id = id.worker_id(self.pool_size);
+        let r = self.mesophyll.get_connection(worker_id)
+            .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", worker_id))?;
+        r.update_tenant_state(id, ts).await
     }
 }
 

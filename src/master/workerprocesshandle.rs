@@ -1,151 +1,165 @@
-use std::time::Duration;
+use std::{sync::{Arc, RwLock}, time::{Duration, Instant}};
 
-use khronos_runtime::utils::khronos_value::KhronosValue;
-use tokio::process::Command;
-use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
+use tokio::{process::Command, time::sleep};
+use tokio::sync::oneshot;
 use crate::CONFIG;
-use crate::geese::tenantstate::TenantState;
-use crate::mesophyll::server::MesophyllServer;
-use crate::worker::workerdispatch::SimpleEvent;
-use crate::worker::workervmmanager::Id;
+use std::sync::atomic::{AtomicU32, Ordering};
 
-/// A WorkerProcessHandle is a handle to a worker process from the master process
-/// that stores the process handle and provides methods to interact with the worker process.
+/// Simple exponential backoff struct for worker restarts. 
+/// 
+/// Not super important to be perfect as this is just to stop the worker pool from thrashing 
+/// if there is a persistent error causing workers to immediately exit on spawn.
 #[derive(Clone)]
-pub struct WorkerProcessHandle {
-    /// Mesophyll server handle to communicate with the worker process
-    mesophyll_server: MesophyllServer,
-
-    /// The id of the worker process, used for routing
-    id: usize,
-    
-    /// Whether to enable print
-    worker_debug: bool,
-
-    /// Kill message channel
-    kill_msg_tx: UnboundedSender<()>,
+pub struct ExpBackoff {
+    current: Arc<AtomicU32>,
 }
 
-#[allow(unused)]
-impl WorkerProcessHandle {
-    const MAX_CONSECUTIVE_FAILURES_BEFORE_CRASH: usize = 10;
+impl ExpBackoff {
+    const INITIAL: u32 = 0;
+    const STEP: u32 = 1000; // 1 second
+    const MAX: u32 = 10_000; // 10 seconds
 
-    /// Creates a new WorkerProcessHandle given the worker ID and a mesophyll server
-    pub fn new(id: usize, worker_debug: bool, mesophyll_server: MesophyllServer) -> Result<Self, crate::Error> {
-        let (kill_msg_tx, mut kill_msg_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
-        let wps = Self {
-            mesophyll_server,
-            id,
-            worker_debug,
-            kill_msg_tx
-        };
-
-        let wps_ref = wps.clone();
-        tokio::task::spawn(async move { wps_ref.run(kill_msg_rx).await });
-
-        Ok(wps)
-    }
-
-    /// Runs the worker process server, spawning a new worker process and handling messages
-    /// from the master process.
-    async fn run(&self, mut kill_msg_rx: UnboundedReceiver<()>) {
-        let mut failed_attempts = 0;
-        let mut consecutive_failures = 0;
-
-        loop {
-            if consecutive_failures >= Self::MAX_CONSECUTIVE_FAILURES_BEFORE_CRASH {
-                log::error!("Worker process with ID: {} has failed {} times in a row, crashing", self.id, consecutive_failures);
-
-                // Abort the master process
-                // TODO: Handle this more gracefully in the future
-                std::thread::sleep(Duration::from_secs(1));
-                std::process::abort(); 
-            }
-
-            let sleep_duration = Duration::from_secs(3 * std::cmp::min(failed_attempts, 5));
-
-            let mut command = Command::new(&CONFIG.worker_path);
-            
-            command.arg("--worker-type");
-            command.arg("processpoolworker");
-            command.arg("--worker-id");
-            command.arg(self.id.to_string());
-
-            if self.worker_debug {
-                command.arg("--worker-debug");
-            }
-
-            command.kill_on_drop(true);
-
-            let mut child = match command.spawn() {
-                Ok(process) => {
-                    process
-                },
-                Err(e) => {
-                    log::error!("Failed to spawn worker process: {}", e);
-                    failed_attempts += 1;
-                    consecutive_failures += 1;
-                    tokio::time::sleep(sleep_duration).await;
-                    continue;
-                }
-            };
-            log::info!("Spawned worker process with ID: {} and pid {:?}", self.id, child.id());
-
-            failed_attempts = 0; // Reset failed attempts on successful start
-            consecutive_failures = 0; // Reset consecutive failures on successful start
-
-            tokio::select! {
-                resp = child.wait() => {
-                    match resp {
-                        Ok(status) => {
-                            log::warn!("Worker process with ID: {} exited with status: {}", self.id, status);
-                        },
-                        Err(e) => {
-                            log::error!("Failed to wait for worker process with ID: {}: {}", self.id, e);
-                        }
-                    }
-                }
-                _ = kill_msg_rx.recv() => {
-                    log::info!("Received kill message for worker process with ID: {}, terminating process", self.id);
-                    if let Err(e) = child.kill().await {
-                        log::error!("Failed to kill worker process with ID: {}: {}", self.id, e);
-                    } else {
-                        log::info!("Successfully killed worker process with ID: {}", self.id);
-                    }
-                    return;
-                }
-            }
+    pub fn new() -> Self {
+        Self {
+            current: Arc::new(AtomicU32::new(Self::INITIAL)),
         }
     }
+
+    /// Resets the backoff to the initial value
+    pub fn reset(&self) {
+        self.current.store(Self::INITIAL, Ordering::Relaxed);
+    }
+
+    /// Returns the current backoff value and updates it for the next call
+    pub fn next_backoff(&self) -> u32 {
+        let current = self.current.load(Ordering::Relaxed);
+        
+        let next = if current == 0 {
+            Self::STEP
+        } else {
+            (current * 3).min(Self::MAX)
+        };     
+           
+        self.current.store(next, Ordering::Relaxed);
+        current    }
+}
+
+
+#[derive(Clone, Debug)]
+pub enum WorkerProcessStatus {
+    Starting,
+    Ready, // Only state at which the worker process can accept events
+    Errored { err: Arc<std::io::Error>, on_spawn: bool },
+    Exited { status: Option<std::process::ExitStatus> },
+}
+
+#[derive(Clone)]
+struct StatusHolder(Arc<RwLock<WorkerProcessStatus>>);
+impl StatusHolder {
+    fn new() -> Self {
+        Self(Arc::new(RwLock::new(WorkerProcessStatus::Starting)))
+    }
+
+    // Sets the status of the worker process
+    fn set(&self, status: WorkerProcessStatus) {
+        let mut s = self.0.write().unwrap();
+        *s = status;
+    }
+
+    // Gets the status of the worker process
+    fn get(&self) -> WorkerProcessStatus {
+        let s = self.0.read().unwrap();
+        s.clone()
+    }
+}
+
+/// A lightweight, clonable handle to monitor and kill the worker
+#[derive(Clone)]
+pub struct WorkerProcessHandle {
+    id: usize,
+    worker_debug: bool,
+    status: StatusHolder,
+    backoff: ExpBackoff,
 }
 
 impl WorkerProcessHandle {
-    #[allow(dead_code)]
+    /// Creates a new WorkerProcessHandle with the given ID and worker_debug flag
+    pub fn new(id: usize, worker_debug: bool, backoff: ExpBackoff) -> Self {
+        Self {
+            id,
+            worker_debug,
+            status: StatusHolder::new(),
+            backoff
+        }
+    }
+
+    /// Returns the ID of the worker process
     pub fn id(&self) -> usize {
         self.id
     }
 
-    pub async fn kill(&self) -> Result<(), crate::Error> {
-        self.kill_msg_tx.send(())
-        .map_err(|e| format!("Failed to send kill message to worker process with ID: {}: {}", self.id, e).into())
+    /// Returns the current status of the worker process
+    pub fn status(&self) -> WorkerProcessStatus {
+        self.status.get()
     }
 
-    pub async fn dispatch_event(&self, id: Id, event: SimpleEvent) -> Result<KhronosValue, crate::Error> {
-        let r = self.mesophyll_server.get_connection(self.id)
-            .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", self.id))?;
-        r.dispatch_event(id, event).await
-    }
-    
-    pub async fn drop_tenant(&self, id: Id) -> Result<(), crate::Error> {
-        let r = self.mesophyll_server.get_connection(self.id)
-            .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", self.id))?;
-        r.drop_tenant(id).await
-    }
+    /// Spawns the worker process and monitors it for exit or kill signals
+    /// 
+    /// Stores the status of the worker process in the `status`. Does not auto-restart
+    /// (thats the responsibility of the caller i.e. the WorkerPool) 
+    pub async fn run(&self, kill_signal: oneshot::Receiver<()>) {
+        let delay_ms = self.backoff.next_backoff();
+        if delay_ms > 0 {
+            log::warn!("Crash loop detected! Worker {} backing off for {}ms", self.id, delay_ms);
+            sleep(Duration::from_millis(delay_ms as u64)).await;
+        }
 
-    pub async fn update_tenant_state(&self, id: Id, ts: TenantState) -> Result<(), crate::Error> {
-        let r = self.mesophyll_server.get_connection(self.id)
-            .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", self.id))?;
-        r.update_tenant_state(id, ts).await
+        let mut command = Command::new(&CONFIG.worker_path);
+        command.arg(self.id.to_string());
+        if self.worker_debug {
+            command.env("WORKER_DEBUG", "true");
+        }
+
+        command.kill_on_drop(true);
+
+        let start_time = Instant::now();
+
+        // spawn process
+        let mut child = match command.spawn() {
+            Ok(proc) => {
+                self.status.set(WorkerProcessStatus::Ready);
+                proc
+            }
+            Err(e) => {
+                self.status.set(WorkerProcessStatus::Errored { err: e.into(), on_spawn: true });
+                return;
+            }
+        };
+
+        // Wait for the process to exit
+        tokio::select! {
+            resp = child.wait() => {
+                match resp {
+                    Ok(status) => self.status.set(WorkerProcessStatus::Exited { status: Some(status) }),
+                    Err(e) => self.status.set(WorkerProcessStatus::Errored { err: e.into(), on_spawn: false }),
+                }
+            }
+            Ok(_) = kill_signal => {
+                log::info!("Received kill message for worker process with ID: {}, terminating process", self.id);
+                match child.kill().await {
+                    Ok(_) => self.status.set(WorkerProcessStatus::Exited { status: None }),
+                    Err(e) => self.status.set(WorkerProcessStatus::Errored { err: e.into(), on_spawn: false }),
+                }
+                return; // Return early after killing the process to avoid resetting backoff on intentional kill
+            }
+        }
+
+        // If the process lived for more than 5 seconds before dying, it wasn't a crash loop. 
+        // Reset the backoff so the next restart is instant.
+        if start_time.elapsed().as_secs() > 5 {
+            log::info!("Worker {} was healthy before exiting. Resetting backoff.", self.id);
+            self.backoff.reset();
+        }
     }
 }
 

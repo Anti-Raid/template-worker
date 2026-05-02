@@ -1,15 +1,24 @@
 use tw::master::register;
 use tw::setup_discord;
-use clap::Parser;
 use log::info;
 use std::io::Write;
 
 /// Command line arguments
-#[derive(Parser, Debug, Clone)]
+#[derive(Debug, Clone)]
 struct CmdArgs {
     /// How many tokio threads to use
-    #[clap(long, default_value = "3")]
     pub tokio_threads: usize,
+}
+
+impl CmdArgs {
+    const TOKIO_THREADS: usize = 3;
+    pub fn parse() -> Self {
+        let tokio_threads = std::env::var("TOKIO_THREADS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(Self::TOKIO_THREADS);
+        Self { tokio_threads }
+    }
 }
 
 /// Simple main function that initializes the tokio runtime and then calls the main (async) implementation

@@ -4,24 +4,46 @@ use tw::mesophyll::client::MesophyllClient;
 use tw::setup_discord;
 use tw::worker::workerstate::WorkerState;
 use tw::worker::workerthread::WorkerThread;
-use clap::Parser;
 use std::io::Write;
+use std::process::exit;
 use std::sync::Arc;
 
 /// Command line arguments
-#[derive(Parser, Debug, Clone)]
+#[derive(Debug, Clone)]
 struct CmdArgs {
     /// Enables debug logging for luau in workers
-    #[clap(long, default_value_t = false)]
     pub worker_debug: bool,
 
     /// The worker ID to use
-    #[clap(long)]
     pub worker_id: usize,
 
     /// How many tokio threads to use for the workers main loop (note that each worker still uses a single WorkerThread for the actual luau vm's)
-    #[clap(long, default_value = "3")]
-    pub tokio_threads_worker: usize,
+    pub tokio_threads: usize,
+}
+
+impl CmdArgs {
+    const TOKIO_THREADS: usize = 3;
+    const WORKER_DEBUG: bool = false;
+    pub fn parse() -> Self {
+        let args = std::env::args().collect::<Vec<_>>();
+        if args.len() > 1 && (args.contains(&"--help".to_string()) || args.contains(&"-h".to_string())) {
+            eprintln!("Usage: template-worker [worker_id]");
+            exit(1);
+        }
+        let worker_id = args.get(1)
+        .expect("Worker ID must be provided as the first argument")
+        .parse().expect("Worker ID must be a valid number");
+
+        let tokio_threads = std::env::var("TOKIO_THREADS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(Self::TOKIO_THREADS);
+        let worker_debug = std::env::var("WORKER_DEBUG")
+            .ok()
+            .and_then(|s| Some(s.to_lowercase() == "true" || s == "1"))
+            .unwrap_or(Self::WORKER_DEBUG);
+        Self { tokio_threads, worker_debug, worker_id }
+    }
 }
 
 /// Simple main function that initializes the tokio runtime and then calls the main (async) implementation
@@ -29,7 +51,7 @@ fn main() {
     let args = CmdArgs::parse();
 
     let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(args.tokio_threads_worker)
+        .worker_threads(args.tokio_threads)
         .enable_all()
         .build()
         .expect("Failed to create tokio runtime");

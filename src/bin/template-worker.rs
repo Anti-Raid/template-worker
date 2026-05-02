@@ -2,7 +2,6 @@ use tw::config::CONFIG;
 use tw::master::syscall::MSyscallHandler;
 use tw::master::workerpool::WorkerPool;
 use tw::setup_discord;
-use clap::Parser;
 use log::{debug, info};
 use sqlx::postgres::PgPoolOptions;
 use std::io::Write;
@@ -10,19 +9,37 @@ use std::sync::Arc;
 use tokio::signal::unix::{signal, SignalKind};
 
 /// Command line arguments
-#[derive(Parser, Debug, Clone)]
+#[derive(Debug, Clone)]
 struct CmdArgs {
     /// Max connections that should be made to the database
-    #[clap(long, default_value = "7")]
     pub max_db_connections: u32,
 
     /// Enables debug logging for luau in workers
-    #[clap(long, default_value_t = false)]
     pub worker_debug: bool,
 
     /// How many tokio threads to use for the master
-    #[clap(long, default_value = "10")]
-    pub tokio_threads_master: usize,
+    pub tokio_threads: usize,
+}
+
+impl CmdArgs {
+    const MAX_DB_CONNECTIONS: u32 = 7;
+    const TOKIO_THREADS: usize = 10;
+    const WORKER_DEBUG: bool = false;
+    pub fn parse() -> Self {
+        let max_db_connections = std::env::var("MAX_DB_CONNECTIONS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(Self::MAX_DB_CONNECTIONS);
+        let tokio_threads = std::env::var("TOKIO_THREADS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(Self::TOKIO_THREADS);
+        let worker_debug = std::env::var("WORKER_DEBUG")
+            .ok()
+            .and_then(|s| Some(s.to_lowercase() == "true" || s == "1"))
+            .unwrap_or(Self::WORKER_DEBUG);
+        Self { max_db_connections, tokio_threads, worker_debug }
+    }
 }
 
 /// Simple main function that initializes the tokio runtime and then calls the main (async) implementation
@@ -30,7 +47,7 @@ fn main() {
     let args = CmdArgs::parse();
 
     let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(args.tokio_threads_master)
+        .worker_threads(args.tokio_threads)
         .enable_all()
         .build()
         .expect("Failed to create tokio runtime");
@@ -90,8 +107,7 @@ async fn main_impl(args: CmdArgs) {
     .expect("Failed to create Mesophyll server");
 
     let worker_pool = Arc::new(
-        WorkerPool::new(worker_count, args.worker_debug, &mesophyll_server)
-        .expect("Failed to create worker process pool"),
+        WorkerPool::new(worker_count, args.worker_debug, mesophyll_server.clone())
     );
     
     // Start msyscall server
@@ -123,12 +139,12 @@ async fn main_impl(args: CmdArgs) {
         _ = sigint.recv() => {
             // Kill the worker pool
             info!("Received SIGINT, shutting down worker pool");
-            worker_pool.kill().await.expect("Failed to kill worker pool");
+            worker_pool.shutdown_all().await.expect("Failed to kill worker pool");
         }
         _ = sigterm.recv() => {
             // Kill the worker pool
             info!("Received SIGTERM, shutting down worker pool");
-            worker_pool.kill().await.expect("Failed to kill worker pool");
+            worker_pool.shutdown_all().await.expect("Failed to kill worker pool");
         }
     }
 }

@@ -1,19 +1,32 @@
 use tw::config::CONFIG;
 use tw::migrations::apply_migrations;
-use clap::Parser;
 use sqlx::postgres::PgPoolOptions;
 use std::io::Write;
 
 /// Command line arguments
-#[derive(Parser, Debug, Clone)]
+#[derive(Debug, Clone)]
 struct CmdArgs {
     /// Max connections that should be made to the database
-    #[clap(long, default_value = "7")]
     pub max_db_connections: u32,
 
     /// How many tokio threads to use
-    #[clap(long, default_value = "10")]
     pub tokio_threads: usize,
+}
+
+impl CmdArgs {
+    const MAX_DB_CONNECTIONS: u32 = 7;
+    const TOKIO_THREADS: usize = 10;
+    pub fn parse() -> Self {
+        let max_db_connections = std::env::var("MAX_DB_CONNECTIONS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(Self::MAX_DB_CONNECTIONS);
+        let tokio_threads = std::env::var("TOKIO_THREADS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(Self::TOKIO_THREADS);
+        Self { max_db_connections, tokio_threads }
+    }
 }
 
 /// Simple main function that initializes the tokio runtime and then calls the main (async) implementation

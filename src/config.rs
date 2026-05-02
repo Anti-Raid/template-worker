@@ -24,7 +24,6 @@ pub struct Meta {
     pub postgres_url: String,
     pub proxy: String,
     pub support_server_invite: String,
-    pub sandwich_http_api: String,
     pub default_error_channel: serenity::all::ChannelId,
     pub mesophyll_token: String,
     pub blob_token: String,
@@ -72,7 +71,7 @@ impl Config {
         match file {
             Ok(file) => {
                 // Parse config.yaml
-                let mut cfg: Config = serde_yaml::from_reader(file)?;
+                let mut cfg: Config = serde_saphyr::from_reader(file)?;
 
                 cfg.start_time = chrono::Utc::now();
 

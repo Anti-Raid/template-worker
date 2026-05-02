@@ -147,7 +147,7 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
         .route("/status", get(async |State(handler): State<MSyscallHandler>| {
             handler.handle_syscall(MSyscallArgs::Bot { req: MBotSyscall::GetBotStatus {} }, MSyscallContext::ApiAnonGetter).await
         }))
-        .route("/blobs/:payload/:signature", get(get_presigned))
+        .route("/blobs/{payload}/{signature}", get(get_presigned))
         .fallback(get(|| async {
             (
                 StatusCode::NOT_FOUND,
