@@ -3,7 +3,8 @@ import { KhronosValue } from '../khronosvalue'
 export type StateOp = 
   | { op: "KvFind"; query: string; scope: string }
   | { op: "KvGet"; key: string; scope: string }
-  | { op: "KvSet"; key: string; scope: string; value: KhronosValue }
+  | { op: "KvGetWithBlob"; key: string; scope: string }
+  | { op: "KvSet"; key: string; scope: string; value: KhronosValue, blob?: number[] }
   | { op: "KvDelete"; key: string; scope: string }
   | { op: "GlobalKvFind"; query: string; scope: string }
   | { op: "GlobalKvGet"; key: string; version: number; scope: string }
@@ -39,6 +40,7 @@ export interface GlobalKv {
 
 export type StateExecResult = 
   | { op: "Kv"; l: KvLookup }
+  | { op: "KvWithBlob"; l: KvLookup; blob?: number[] }
   | { op: "GlobalKv"; l: GlobalKv }
   | { op: "GlobalKvData"; data: KhronosValue }
   | { op: "GlobalKvDataOpaque"; data: KhronosValue };

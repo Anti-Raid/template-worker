@@ -2,7 +2,7 @@ use crate::migrations::Migration;
 
 pub static MIGRATION: Migration = Migration {
     id: "tenantstate_add_eventrefs",
-    description: "Add tenant_state_",
+    description: "Move event refs to separate table to enable storing systems that have subscribed to each event",
     up: |pool| {
         Box::pin(async move {
             let mut tx = pool.begin().await?;

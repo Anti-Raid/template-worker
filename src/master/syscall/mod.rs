@@ -110,19 +110,19 @@ impl FromLua for MSyscallArgs {
         let typ: LuaString = tab.get("op")?;
         match typ.as_bytes().as_ref() {
             b"Bot" => {
-                let req = tab.get("data")?;
+                let req = tab.get("req")?;
                 Ok(Self::Bot { req })
             },
             b"Discord" => {
-                let req = tab.get("data")?;
+                let req = tab.get("req")?;
                 Ok(Self::Discord { req })
             },
             b"Auth" => {
-                let req = tab.get("data")?;
+                let req = tab.get("req")?;
                 Ok(Self::Auth { req })
             },
             b"Gkv" => {
-                let req = tab.get("data")?;
+                let req = tab.get("req")?;
                 Ok(Self::Gkv { req })
             },
             _ => {

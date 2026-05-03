@@ -8,12 +8,12 @@ use crate::master::mainthread::{run_in_thread, RunInThreadFn};
 #[derive(Embed, Debug)]
 #[folder = "$CARGO_MANIFEST_DIR/luau/twshell"]
 #[prefix = ""]
-pub struct TwShell;
+struct TwShell;
 
 #[derive(Embed, Debug)]
 #[folder = "$CARGO_MANIFEST_DIR/luau/twshell/_luaurcvfs"]
 #[prefix = ""]
-pub struct LuaurcVfs;
+struct LuaurcVfs;
 
 
 type ShellInputValue = Result<Option<String>, String>;

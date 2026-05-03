@@ -27,9 +27,9 @@ pub enum MBotSyscall {
     },
     /// Verify a presigned URL and return the decoded payload
     GetBlobData {
-        /// Payload from KvPresignKey
+        /// Payload 
         payload: String,
-        /// Signature from KvPresignKey
+        /// Signature 
         signature: String,
     },
     /// Dispatch an event to a worker process with some safety checks removed

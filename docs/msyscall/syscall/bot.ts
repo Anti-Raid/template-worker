@@ -2,7 +2,6 @@ import { RawKhronosValue } from '../khronosvalue'
 import { BotStatus, BotConfig } from '../types/bot'
 import { Id } from '../types/common'
 import { StateOp, StateExecResult, TenantState } from '../types/state'
-import { ObjectStorageCall, ObjectStorageResult } from '../types/objstore'
 
 export type MBotSyscall = 
   | { 
@@ -27,7 +26,14 @@ export type MBotSyscall =
       /** Data to send along with the event */
       data: RawKhronosValue 
     }
-  | { 
+  | {
+      /** Verify a presigned URL and return the decoded payload */
+      op: "GetBlobData";
+      /** Payload */
+      payload: String;
+      /** Signature */
+      signature: String;
+  } | { 
       /** Dispatch an event to a worker process with some safety checks removed (Secure only) */
       op: "AdminRelaxedDispatchEvent"; 
       /** Tenant ID to dispatch the event to */
@@ -68,14 +74,6 @@ export type MBotSyscall =
       id: Id; 
       /** The list of state operations to perform */
       ops: StateOp[] 
-    }
-  | { 
-      /** Admin API to run an object storage op on a tenant (Secure only) */
-      op: "AdminObjectStorage"; 
-      /** The ID of the tenant */
-      id: Id; 
-      /** The object storage call details */
-      call: ObjectStorageCall 
     }
   | { 
       /** Admin API to fetch tenant state for a tenant (Secure only) */
@@ -122,18 +120,17 @@ export type MBotSyscallRet =
       new_tenant_state?: TenantState | null 
     }
   | { 
-      /** Object storage operation result (Admin only) */
-      op: "ObjectStorage"; 
-      /** The result of the object storage operation */
-      res: ObjectStorageResult 
-    }
-  | { 
       /** Tenant state response (Admin only) */
       op: "TenantState"; 
       /** The requested tenant state */
       ts: TenantState 
     }
-  | { 
+  | {
+      /** Decoded payload from a presigned URL */
+      op: "BlobData";
+      /** The decoded payload data */
+      data: RawKhronosValue;
+    } | { 
       /** Generic success acknowledgement */
       op: "Ack" 
     };

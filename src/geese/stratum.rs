@@ -68,7 +68,7 @@ impl Stratum {
         bot_id: UserId,
         evt: pb::DiscordEvent,
     ) -> Result<(), crate::Error> {
-        log::info!("Event: {}, gid: {}, target_user: {}, payload: {}", evt.event_name, evt.guild_id, evt.target_user, evt.payload);
+        log::trace!("Event: {}, gid: {}, target_user: {}, payload: {}", evt.event_name, evt.guild_id, evt.target_user, evt.payload);
         
         let id = if evt.guild_id != 0 && evt.guild_id != u64::MAX {
             Id::Guild(GuildId::new(evt.guild_id))
