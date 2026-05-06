@@ -22,7 +22,7 @@ use rust_embed::Embed;
 
 use crate::{master::mainthread::{RunInThreadFn, run_in_thread}, worker::builtins::TemplatingTypes};
 
-pub const RUST_MIGRATIONS: [Migration; 12] = [
+pub const RUST_MIGRATIONS: [Migration; 11] = [
     // Do not change order of migrations without verifying dependencies
     khronosvalue_v2::MIGRATION,
     kv_generic::MIGRATION,
@@ -31,11 +31,15 @@ pub const RUST_MIGRATIONS: [Migration; 12] = [
     drop_tenant_kv_expires_at::MIGRATION,
     tenantstate_data_to_flags::MIGRATION,
     tenantstate_add_modflags::MIGRATION,
-    kv_scope_unnest::MIGRATION,
     tenantstate_add_eventrefs::MIGRATION,
     user_oauth_v2::MIGRATION,
     tenant_state_drop_flags::MIGRATION,
     tenant_kv_add_bytea::MIGRATION,
+];
+
+pub const POST_LUAU_RUST_MIGRATIONS: [Migration; 1] = [
+    // Migrations that need to be applied after all Luau migrations have finished
+    kv_scope_unnest::MIGRATION,
 ];
 
 #[derive(Embed, Debug)]
@@ -116,15 +120,20 @@ enum MigrationType {
 /// Computes the list of migrations to apply, including both hardcoded Rust migrations and Luau migrations embedded in the binary
 fn migrations() -> Result<Vec<MigrationType>, crate::Error> {
     let mut base_migrations = Vec::new();
-    // Add luau migrations from MigrationsFolder
-    for entry in MigrationsFolder::iter() {
-        base_migrations.push(MigrationType::Luau(entry));
-    }
 
     for migration in RUST_MIGRATIONS {
         base_migrations.push(MigrationType::Rust(migration));
     }
-    
+
+    // Add luau migrations from MigrationsFolder after all base rust once have finished
+    for entry in MigrationsFolder::iter() {
+        base_migrations.push(MigrationType::Luau(entry));
+    }
+
+    for migration in POST_LUAU_RUST_MIGRATIONS {
+        base_migrations.push(MigrationType::Rust(migration));
+    }
+
     Ok(base_migrations)
 }
 
