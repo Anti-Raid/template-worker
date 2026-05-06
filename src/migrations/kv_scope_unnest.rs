@@ -34,13 +34,10 @@ pub static MIGRATION: Migration = Migration {
                 if row.scopes.is_empty() {
                     panic!("No scopes found for {row:?}!");
                 }
-                let scope = row.scopes.iter().find(|elem| {
-                    elem.chars().any(|c| !c.is_numeric())
-                });
-
-                let Some(scope) = scope else {
-                    panic!("No non-numeric scopes found for {row:?}!");
-                };
+                if row.scopes.len() > 1 {
+                    panic!("Multiple scopes found for {row:?}!");
+                }
+                let scope = row.scopes[0].clone();
 
                 sqlx::query("UPDATE tenant_kv SET scopes_2 = $1 WHERE owner_id = $2 and owner_type = $3 and key = $4")
                 .bind(scope)

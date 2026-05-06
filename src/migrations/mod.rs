@@ -115,11 +115,14 @@ enum MigrationType {
 
 /// Computes the list of migrations to apply, including both hardcoded Rust migrations and Luau migrations embedded in the binary
 fn migrations() -> Result<Vec<MigrationType>, crate::Error> {
-    let mut base_migrations = RUST_MIGRATIONS.into_iter().map(MigrationType::Rust).collect::<Vec<_>>();
-
+    let mut base_migrations = Vec::new();
     // Add luau migrations from MigrationsFolder
     for entry in MigrationsFolder::iter() {
         base_migrations.push(MigrationType::Luau(entry));
+    }
+
+    for migration in RUST_MIGRATIONS {
+        base_migrations.push(MigrationType::Rust(migration));
     }
     
     Ok(base_migrations)
