@@ -7,9 +7,10 @@ use rand::distr::{Alphanumeric, SampleString};
 
 use crate::geese::tenantstate::{DEFAULT_EVENTS, TenantState, TenantStateDb};
 use crate::geese::urlsign::VerifiedUrl;
-use crate::worker::limits::{KV_MAX_KEY_LENGTH, MAX_OBJ_STORAGE_BYTES};
+use crate::worker::limits::{KV_MAX_KEY_LENGTH, KV_SIGN_URL_EXPIRATION_SECONDS, MAX_OBJ_STORAGE_BYTES};
 use crate::worker::workervmmanager::Id;
 
+/// StateOp main op enum that is accessible to luau
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "op")]
 pub enum StateOp {
@@ -75,6 +76,63 @@ pub enum StateOp {
     UnsubscribeEvent {
         event: String,
         system: String,
+    }
+}
+
+/// Faststate (Worker local state optimization)
+/// 
+/// Some 'State' ops currently do not use the database or any external resources calls *yet*, but they still require a round trip to the/a master server to be executed.
+/// 
+/// If every State op in a State syscall is faststate-eligible, then the entire syscall can be executed in the worker without needing to round trip to the master at all, 
+/// which can significantly reduce latency for those calls.
+/// 
+/// Helps with backwards compatibility as State ops can be freely added and then faststate-optimized and removed from faststate as desired w/o breaking API compatibility
+pub enum FastStateReq {
+    KvSignUrl {
+        key: String,
+        scope: String,
+    }
+}
+
+impl FastStateReq {
+    /// Returns true if the given StateOp is eligible for faststate optimization (i.e. can be executed in the worker without a round trip to the master)
+    fn is_faststate_eligible(op: &StateOp) -> bool {
+        matches!(op, StateOp::KvSignUrl { .. })
+    }
+
+    /// Converts a Vec<StateOp> into a FastStateReq if all ops are eligible, otherwise returns None
+    pub fn from_ops(ops: Vec<StateOp>) -> Result<Vec<Self>, Vec<StateOp>> {
+        // Ensure all ops are eligible first
+        if ops.iter().any(|x| !Self::is_faststate_eligible(x)) {
+            return Err(ops);
+        }
+
+        let mut faststate_req = Vec::with_capacity(ops.len());
+        for op in ops {
+            match op {
+                StateOp::KvSignUrl { key, scope } => {
+                    faststate_req.push(Self::KvSignUrl { key, scope });
+                }
+                _ => unreachable!() // we already checked eligibility above
+            }
+        }
+
+        Ok(faststate_req)
+    }
+
+    /// Executes the faststate request and returns the results
+    pub async fn execute(ops: Vec<FastStateReq>, tid: Id) -> Result<Vec<StateExecResult>, crate::Error> {
+        let mut results = Vec::with_capacity(ops.len());
+        for op in ops {
+            match op {
+                Self::KvSignUrl { key, scope } => {
+                    let vurl = crate::geese::urlsign::create_url(tid, &key, &scope, KV_SIGN_URL_EXPIRATION_SECONDS)?;
+                    results.push(StateExecResult::KvSignUrl { url: vurl, expiry: KV_SIGN_URL_EXPIRATION_SECONDS });
+                }
+            }
+        }
+
+        Ok(results)
     }
 }
 
@@ -192,8 +250,6 @@ pub struct StateDb {
 }
 
 impl StateDb {
-    const KV_SIGN_URL_EXPIRATION_SECONDS: u64 = 5 * 60; // 5 minutes
-
     pub fn new(pool: sqlx::PgPool) -> Self {
         StateDb { pool: pool.clone(), tsdb: TenantStateDb::new(pool) }
     }
@@ -314,8 +370,8 @@ impl StateDb {
                     }
             }
             StateOp::KvSignUrl { key, scope } => {
-                let vurl = crate::geese::urlsign::create_url(tid, &key, &scope, Self::KV_SIGN_URL_EXPIRATION_SECONDS)?;
-                state.results.push(StateExecResult::KvSignUrl { url: vurl, expiry: Self::KV_SIGN_URL_EXPIRATION_SECONDS });
+                let vurl = crate::geese::urlsign::create_url(tid, &key, &scope, KV_SIGN_URL_EXPIRATION_SECONDS)?;
+                state.results.push(StateExecResult::KvSignUrl { url: vurl, expiry: KV_SIGN_URL_EXPIRATION_SECONDS });
             }
             StateOp::KvSet { key, scope, value, blob } => {
                 if key.len() > KV_MAX_KEY_LENGTH {

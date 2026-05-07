@@ -4,7 +4,7 @@ mod meta;
 
 use std::sync::Arc;
 
-use crate::{geese::{state::{StateExecResult, StateOp}, tenantstate::TenantState}, worker::{limits::Ratelimits, syscall::{cdn::{CdnCall, CdnResult}, discord::ArDiscordProvider, meta::{MetaCall, MetaResult}}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
+use crate::{geese::{state::{FastStateReq, StateExecResult, StateOp}, tenantstate::TenantState}, worker::{limits::Ratelimits, syscall::{cdn::{CdnCall, CdnResult}, discord::ArDiscordProvider, meta::{MetaCall, MetaResult}}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
 use dapi::context::DiscordContext;
 use khronos_runtime::{primitives::{lazy::Lazy, syscall::Syscall}, rt::mluau::prelude::*};
 use log::info;
@@ -147,11 +147,21 @@ impl SyscallHandler {
         match args {
             SyscallArgs::State { ops } => {
                 self.ratelimits.object_storage.check("syscall")?;
-                let res = self.state.mesophyll_client.exec_state_op(self.id, ops).await?;
-                if let Some(ref ts) = res.new_tenant_state {
-                    self.wts.reload_for_tenant(self.id, ts).map_err(|e| e.to_string())?;
+                match FastStateReq::from_ops(ops) {
+                    Ok(freq) => {
+                        // faststate compatible, execute with faststate req and avoid mesophyll client call
+                        let results = FastStateReq::execute(freq, self.id).await?;
+                        Ok(SyscallRet::State { res: results, new_tenant_state: None })
+                    },
+                    Err(ops) => {
+                        // non-faststate compatible, do normal mesophyll client call
+                        let res = self.state.mesophyll_client.exec_state_op(self.id, ops).await?;
+                        if let Some(ref ts) = res.new_tenant_state {
+                            self.wts.reload_for_tenant(self.id, ts).map_err(|e| e.to_string())?;
+                        }
+                        Ok(SyscallRet::State { res: res.results, new_tenant_state: res.new_tenant_state })
+                    }
                 }
-                Ok(SyscallRet::State { res: res.results, new_tenant_state: res.new_tenant_state })
             }
             SyscallArgs::Cdn { op } => {
                 let res = op.exec(self.id, self).await?;
