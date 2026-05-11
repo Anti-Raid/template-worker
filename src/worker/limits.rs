@@ -13,6 +13,7 @@ pub const MAX_OBJ_STORAGE_PATH_LENGTH: usize = 2048;
 pub const MAX_OBJ_STORAGE_BYTES: usize = 512 * 1024; // 512kb max per object
 
 pub const KV_MAX_KEY_LENGTH: usize = 512;
+pub const KV_SIGN_URL_EXPIRATION_SECONDS: u64 = 5 * 60; // 5 minutes
 
 pub fn create_nonmax_u32(value: u32) -> Result<NonZeroU32, crate::Error> {
     Ok(NonZeroU32::new(value).ok_or("Value must be non-zero")?)
