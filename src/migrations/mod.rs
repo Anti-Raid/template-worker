@@ -22,8 +22,9 @@ use rust_embed::Embed;
 
 use crate::{master::mainthread::{RunInThreadFn, run_in_thread}, worker::builtins::TemplatingTypes};
 
-pub const RUST_MIGRATIONS: [Migration; 12] = [
-    // Do not change order of migrations without verifying dependencies
+// Rust migrations that must run before the luau migrations in `luau/twshell/migrations/`.
+// Do not change order without verifying dependencies.
+pub const RUST_MIGRATIONS_BEFORE_LUAU: [Migration; 11] = [
     khronosvalue_v2::MIGRATION,
     kv_generic::MIGRATION,
     tenantstate::MIGRATION,
@@ -31,11 +32,17 @@ pub const RUST_MIGRATIONS: [Migration; 12] = [
     drop_tenant_kv_expires_at::MIGRATION,
     tenantstate_data_to_flags::MIGRATION,
     tenantstate_add_modflags::MIGRATION,
-    kv_scope_unnest::MIGRATION,
     tenantstate_add_eventrefs::MIGRATION,
     user_oauth_v2::MIGRATION,
     tenant_state_drop_flags::MIGRATION,
     tenant_kv_add_bytea::MIGRATION,
+];
+
+// Rust migrations that must run after the luau migrations.
+// kv_scope_unnest collapses scopes[] -> scope, which loses the userid that
+// stings.luau needs to read from the per-row scopes array.
+pub const RUST_MIGRATIONS_AFTER_LUAU: [Migration; 1] = [
+    kv_scope_unnest::MIGRATION,
 ];
 
 #[derive(Embed, Debug)]
@@ -115,13 +122,18 @@ enum MigrationType {
 
 /// Computes the list of migrations to apply, including both hardcoded Rust migrations and Luau migrations embedded in the binary
 fn migrations() -> Result<Vec<MigrationType>, crate::Error> {
-    let mut base_migrations = RUST_MIGRATIONS.into_iter().map(MigrationType::Rust).collect::<Vec<_>>();
+    let mut base_migrations = RUST_MIGRATIONS_BEFORE_LUAU.into_iter().map(MigrationType::Rust).collect::<Vec<_>>();
 
     // Add luau migrations from MigrationsFolder
     for entry in MigrationsFolder::iter() {
         base_migrations.push(MigrationType::Luau(entry));
     }
-    
+
+    // Rust migrations that depend on luau migrations having already run
+    for mig in RUST_MIGRATIONS_AFTER_LUAU.iter() {
+        base_migrations.push(MigrationType::Rust(*mig));
+    }
+
     Ok(base_migrations)
 }
 
