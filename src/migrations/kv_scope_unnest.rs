@@ -9,13 +9,11 @@ pub static MIGRATION: Migration = Migration {
 
             let stmts = [
                 "ALTER TABLE tenant_kv ADD COLUMN scopes_2 TEXT;",
-                "ALTER TABLE tenant_kv DROP CONSTRAINT kv_unique_entry;"
+                "ALTER TABLE tenant_kv DROP CONSTRAINT kv_unique_entry;",
             ];
 
             for stmt in stmts.iter() {
-                sqlx::query(stmt)
-                    .execute(&mut *tx)
-                    .await?;
+                sqlx::query(stmt).execute(&mut *tx).await?;
             }
 
             #[derive(sqlx::FromRow, Debug)]
@@ -23,10 +21,12 @@ pub static MIGRATION: Migration = Migration {
                 owner_id: String,
                 owner_type: String,
                 key: String,
-                scopes: Vec<String>
+                scopes: Vec<String>,
             }
 
-            let rows = sqlx::query_as::<_, TenantKv>("SELECT owner_id, owner_type, key, scopes FROM tenant_kv")
+            let rows = sqlx::query_as::<_, TenantKv>(
+                "SELECT owner_id, owner_type, key, scopes FROM tenant_kv",
+            )
             .fetch_all(&mut *tx)
             .await?;
 
@@ -34,10 +34,14 @@ pub static MIGRATION: Migration = Migration {
                 if row.scopes.is_empty() {
                     panic!("No scopes found for {row:?}!");
                 }
-                if row.scopes.len() > 1 {
-                    panic!("Multiple scopes found for {row:?}!");
-                }
-                let scope = row.scopes[0].clone();
+                let scope = row
+                    .scopes
+                    .iter()
+                    .find(|elem| elem.chars().any(|c| !c.is_numeric()));
+
+                let Some(scope) = scope else {
+                    panic!("No non-numeric scopes found for {row:?}!");
+                };
 
                 sqlx::query("UPDATE tenant_kv SET scopes_2 = $1 WHERE owner_id = $2 and owner_type = $3 and key = $4")
                 .bind(scope)
@@ -56,9 +60,7 @@ pub static MIGRATION: Migration = Migration {
             ];
 
             for stmt in stmts.iter() {
-                sqlx::query(stmt)
-                    .execute(&mut *tx)
-                    .await?;
+                sqlx::query(stmt).execute(&mut *tx).await?;
             }
 
             tx.commit().await?;
