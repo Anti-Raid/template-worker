@@ -18,6 +18,7 @@ enum WorkerThreadMessage {
         id: Id,
         tx: OneShotSender<Result<(), crate::Error>>,
     },
+    /// Requests the worker to update the tenant state to the new tenant state
     UpdateTenantState {
         id: Id,
         ts: TenantState,
