@@ -3,8 +3,7 @@ use serenity::all::UserId;
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::LazyLock;
-
-type Error = Box<dyn std::error::Error + Send + Sync>;
+use crate::Error;
 
 /// Global config object
 pub static CONFIG: LazyLock<Config> =

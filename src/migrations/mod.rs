@@ -24,25 +24,20 @@ use crate::{master::mainthread::{RunInThreadFn, run_in_thread}, worker::builtins
 
 // Rust migrations that must run before the luau migrations in `luau/twshell/migrations/`.
 // Do not change order without verifying dependencies.
-pub const RUST_MIGRATIONS_BEFORE_LUAU: [Migration; 11] = [
-    khronosvalue_v2::MIGRATION,
-    kv_generic::MIGRATION,
-    tenantstate::MIGRATION,
-    cleanup_v8::MIGRATION,
-    drop_tenant_kv_expires_at::MIGRATION,
-    tenantstate_data_to_flags::MIGRATION,
-    tenantstate_add_modflags::MIGRATION,
-    tenantstate_add_eventrefs::MIGRATION,
-    user_oauth_v2::MIGRATION,
-    tenant_state_drop_flags::MIGRATION,
-    tenant_kv_add_bytea::MIGRATION,
-];
-
-// Rust migrations that must run after the luau migrations.
-// kv_scope_unnest collapses scopes[] -> scope, which loses the userid that
-// stings.luau needs to read from the per-row scopes array.
-pub const RUST_MIGRATIONS_AFTER_LUAU: [Migration; 1] = [
-    kv_scope_unnest::MIGRATION,
+const MIGRATIONS: [MigrationType; 13] = [
+    MigrationType::Rust(khronosvalue_v2::MIGRATION),
+    MigrationType::Rust(kv_generic::MIGRATION),
+    MigrationType::Rust(tenantstate::MIGRATION),
+    MigrationType::Rust(cleanup_v8::MIGRATION),
+    MigrationType::Rust(drop_tenant_kv_expires_at::MIGRATION),
+    MigrationType::Rust(tenantstate_data_to_flags::MIGRATION),
+    MigrationType::Rust(tenantstate_add_modflags::MIGRATION),
+    MigrationType::Rust(tenantstate_add_eventrefs::MIGRATION),
+    MigrationType::Rust(user_oauth_v2::MIGRATION),
+    MigrationType::Rust(tenant_state_drop_flags::MIGRATION),
+    MigrationType::Rust(tenant_kv_add_bytea::MIGRATION),
+    MigrationType::Luau(Cow::Borrowed("stings.luau")),
+    MigrationType::Rust(kv_scope_unnest::MIGRATION)
 ];
 
 #[derive(Embed, Debug)]
@@ -120,23 +115,6 @@ enum MigrationType {
     Luau(Cow<'static, str>)
 }
 
-/// Computes the list of migrations to apply, including both hardcoded Rust migrations and Luau migrations embedded in the binary
-fn migrations() -> Result<Vec<MigrationType>, crate::Error> {
-    let mut base_migrations = RUST_MIGRATIONS_BEFORE_LUAU.into_iter().map(MigrationType::Rust).collect::<Vec<_>>();
-
-    // Add luau migrations from MigrationsFolder
-    for entry in MigrationsFolder::iter() {
-        base_migrations.push(MigrationType::Luau(entry));
-    }
-
-    // Rust migrations that depend on luau migrations having already run
-    for mig in RUST_MIGRATIONS_AFTER_LUAU.iter() {
-        base_migrations.push(MigrationType::Rust(*mig));
-    }
-
-    Ok(base_migrations)
-}
-
 /// Note: this function may leak memory if there are Luau migrations, due to the way we convert the migration names to &'static str. 
 /// 
 /// This is generally acceptable since migrations are only applied once within the dedicated migration binary
@@ -152,8 +130,6 @@ pub async fn apply_migrations(pool: sqlx::PgPool) -> Result<(), crate::Error> {
     )
     .execute(&pool)
     .await?;
-
-    let migrations = migrations()?;
 
     /// Check if migration has already been applied
     async fn check_migration_applied(pool: &sqlx::PgPool, migration_id: &str) -> Result<bool, crate::Error> {
@@ -179,7 +155,7 @@ pub async fn apply_migrations(pool: sqlx::PgPool) -> Result<(), crate::Error> {
         Ok(())
     }
 
-    for migration in migrations {
+    for migration in MIGRATIONS {
         match migration {
             MigrationType::Rust(migration) => {
                 // Check if migration has already been applied
