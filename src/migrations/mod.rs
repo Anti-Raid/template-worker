@@ -10,6 +10,7 @@ mod kv_scope_unnest;
 mod user_oauth_v2;
 mod tenant_state_drop_flags;
 mod tenant_kv_add_bytea;
+mod migrate_backups;
 
 use std::borrow::Cow;
 
@@ -24,7 +25,7 @@ use crate::{master::mainthread::{RunInThreadFn, run_in_thread}, worker::builtins
 
 // Rust migrations that must run before the luau migrations in `luau/twshell/migrations/`.
 // Do not change order without verifying dependencies.
-const MIGRATIONS: [MigrationType; 13] = [
+const MIGRATIONS: [MigrationType; 14] = [
     MigrationType::Rust(khronosvalue_v2::MIGRATION),
     MigrationType::Rust(kv_generic::MIGRATION),
     MigrationType::Rust(tenantstate::MIGRATION),
@@ -37,7 +38,8 @@ const MIGRATIONS: [MigrationType; 13] = [
     MigrationType::Rust(tenant_state_drop_flags::MIGRATION),
     MigrationType::Rust(tenant_kv_add_bytea::MIGRATION),
     MigrationType::Luau(Cow::Borrowed("stings.luau")),
-    MigrationType::Rust(kv_scope_unnest::MIGRATION)
+    MigrationType::Rust(kv_scope_unnest::MIGRATION),
+    MigrationType::Rust(migrate_backups::MIGRATION)
 ];
 
 #[derive(Embed, Debug)]
