@@ -170,6 +170,6 @@ impl IntoLua for TenantState {
 }
 
 // DEFAULT_EVENTS is handled by WorkerDispatch directly
-pub static DEFAULT_EVENTS: [&str; 4] = [
-    "INTERACTION_CREATE", "WebGetSettings", "WebExecuteSetting", "$UpdateTenantState"
+pub static DEFAULT_EVENTS: [&str; 3] = [
+    "INTERACTION_CREATE", "WebSettings", "$UpdateTenantState"
 ];
