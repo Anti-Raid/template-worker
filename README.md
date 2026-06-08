@@ -1,18 +1,10 @@
 # template-worker
-Process that handles dispatching templates and runs expiry tasks as needed
 
-## Public API Documentation Notes
-
-- All types used by the HTTP API must be in ``src/api/types.rs``. They must also be annotated with `#[derive(utoipa::ToSchema)]` to ensure they are documented in the OpenAPI spec.
+Main bot process that handles dispatching templates (and basically all of AntiRaid)
 
 ## Components
 
-- ``api``: Contains the HTTP API server and related types.
-- ``mesophyll``: Contains Mesophyll, which is the main (currently Websocket-based) communication layer between the master template-worker process and the worker processes.
-- ``fauxpas``: Contains Fauxpas, which will provide the staff-related mock API.
-- ``worker``: Contains the worker pool and worker implementations (process and the more primitive thread based workers that back them).
-- ``geese``: Contains core storage and data input systems such as Sandwich (Gateway) and ObjectStore client code. Named after the Canadian Goose/Geese.
-
-## Fauxpas Shell
-
-template-worker includes a shell that can be used to execute Lua code. Note that while this does not yet provide access to the full worker environment, it is useful for moderation purposes and will/may be expanded in the future.
+- ``master``: Contains master process specific code (such as `msyscall` which is the main API for external users to communicate with the rest of AntiRaid).
+- ``mesophyll``: Contains Mesophyll, which is the main (currently gRPC-based) communication layer between the master process and all the child worker processes that actually handle templates.
+- ``worker``: Contains the worker specific code (such as Luau VM management code, event dispatch, tenant state tracking code and `wsyscall` for Luau->Worker communication)
+- ``geese``: Contains systems that are common to both master and worker such as stratum (gateway) client code, and state management code. Named after the Canadian Goose/Geese.
