@@ -49,7 +49,6 @@ tokio-stream = "0.1"
 stratum_client = { git = "https://github.com/anti-raid/stratum" }
 stratum_common = { git = "https://github.com/anti-raid/stratum" }
 bitflags = "2.11.0"
-serde_bytes = "0.11.19"
 
 # blob
 hmac = "0.13.0"
