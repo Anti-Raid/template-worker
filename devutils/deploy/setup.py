@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Sets up non-docker config"""
+"""
+Sets up non-docker config
+
+TODO: Update/fix for latest tw
+"""
 import os
 import secrets
 import base64
@@ -242,36 +246,6 @@ managers:
 print(f"Saving {sandwich_filename}")
 with open(f"{args.output_path}/{sandwich_filename}", "w") as f:
     f.write(SANDWICH_YAML)
-
-# Finally seaweed
-if args.docker:
-    os.mkdir("deploy/docker/seaweed") if not os.path.exists("deploy/docker/seaweed") else None
-
-s3_json = {
-  "identities":  [
-    {
-      "name":  "antiraid",
-      "credentials":  [
-        {
-          "accessKey":  s3_access_key,
-          "secretKey":  s3_secret_key
-        }
-      ],
-      "actions":  [
-        "Read",
-        "Write",
-        "List",
-        "Tagging",
-        "Admin"
-      ],
-    },
-  ],
-  "accounts":  []
-}
-
-print(f"Saving {s3_json_filename}")
-with open(s3_json_filename, "w") as f:
-    json.dump(s3_json, f, indent=4)
 
 if args.docker:
     print("Done! Now run `docker compose up` to start the containers.")

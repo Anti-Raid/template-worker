@@ -7,7 +7,8 @@ use crate::master::syscall::{MSyscallError, MSyscallHandler, types::auth::UserSe
 /// The response from checking web auth
 /// 
 /// This enum can be used to control API access
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum AuthResponse {
     Success {
         user_id: UserId,
