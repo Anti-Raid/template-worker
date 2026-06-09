@@ -114,7 +114,7 @@ fn from_v1(v: KhronosValue) -> KhronosValueV2 {
         },
         KhronosValue::Float(f) => KhronosValueV2::Float(f),
         KhronosValue::Boolean(b) => KhronosValueV2::Boolean(b),
-        KhronosValue::Buffer(b) => KhronosValueV2::Buffer(b.0),
+        KhronosValue::Buffer(_) => panic!("Storing buffers in KhronosValue's (db etc) must now be done using blob API"),
         KhronosValue::Vector(v) => KhronosValueV2::Vector(v),
         KhronosValue::Map(m) => {
             let mut arr = Vec::new();

@@ -190,7 +190,7 @@ impl IntoLua for MBotSyscallRet {
             Self::BlobData { data, filename } => {
                 let table = lua.create_table_with_capacity(0, 2)?;
                 table.set("op", "BlobData")?;
-                table.set("data", Blob { data })?;
+                table.set("data", Blob { data: data.into() })?;
                 table.set("filename", filename)?;
                 Ok(LuaValue::Table(table))
             }

@@ -81,12 +81,11 @@ async def migrate():
             keyid = row["id"]
             owner_id = row["owner_id"]
             filename = row["value"]["filename"]
-            created_by = row["value"]["created_by"]
             resp = s3_client.get_object(Bucket="antiraid.guilds", Key=f"{owner_id}/{filename}")
             blob = resp["Body"].read() # Note to self: if this fails, 
             if len(blob) > MAX_BLOB_SIZE:
                 raise RuntimeError(f"{filename} (Size: {len(blob)} bytes exceeds limit)")
-            await conn.execute("UPDATE tenant_kv SET blob = $2, value = $3, key = $4 WHERE id = $1", keyid, blob, {"createdby": created_by}, filename)
+            await conn.execute("UPDATE tenant_kv SET blob = $2, value = $3, key = $4 WHERE id = $1", keyid, blob, {"Map": [[{"Text": "createdby"}, "Null"]]}, filename)
 
 if __name__ == "__main__":
     asyncio.run(migrate())

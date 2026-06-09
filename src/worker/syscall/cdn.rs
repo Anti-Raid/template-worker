@@ -56,7 +56,7 @@ impl IntoLua for CdnResult {
         match self {
             Self::Blob { data } => {
                 table.set("op", "Blob")?;
-                table.set("data", Blob { data: data.to_vec() })?;
+                table.set("data", Blob { data: data.into() })?;
             },
             Self::Buffer { data } => {
                 table.set("op", "Buffer")?;

@@ -34,7 +34,7 @@ pub enum StateOp {
         key: String,
         scope: String,
         value: KhronosValue,
-        blob: Option<serde_bytes::ByteBuf>, // optional blob data
+        blob: Option<bytes::Bytes>, // optional blob data
     },
     KvDelete {
         key: String,
@@ -393,7 +393,7 @@ impl StateDb {
                 .bind(key)
                 .bind(serde_json::to_value(value)?)
                 .bind(scope)
-                .bind(blob.map(|b| b.into_vec()))
+                .bind(blob.as_ref().map(|b| b.as_ref()))
                 .execute(executor)
                 .await?;
             }
@@ -576,7 +576,7 @@ pub enum StateExecResult {
     },
     KvWithBlob {
         l: KvLookup,
-        blob: Option<serde_bytes::ByteBuf>
+        blob: Option<bytes::Bytes>
     },
     KvSignUrl {
         url: String,
@@ -625,7 +625,7 @@ impl IntoLua for StateExecResult {
                 table.set("value", l.value)?;
                 table.set("created_at", LuaDateTime::from_utc(l.created_at))?;
                 table.set("last_updated_at", LuaDateTime::from_utc(l.last_updated_at))?;
-                table.set("blob", blob.map(|blob| Blob { data: blob.into_vec() }))?;
+                table.set("blob", blob.map(|blob| Blob { data: blob }))?;
             }
             Self::KvSignUrl { url, expiry } => {
                 table.set("op", "KvSignUrl")?;
