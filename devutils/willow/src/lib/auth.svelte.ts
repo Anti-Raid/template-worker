@@ -57,7 +57,9 @@ class Auth {
 		if(ret.ok) return true // we successfully performed an authorized op
 		let err = ret.unwrapErr()
 		console.log(err, err.op)
-		return err.op != "Unauthorized"
+		if (err.op == "Unauthorized") return false // not unauthorized
+		if (err.op == "Generic" && err.message.includes("Failed to fetch")) return false
+		return true
 	}
 
 	async getBotConfig() {

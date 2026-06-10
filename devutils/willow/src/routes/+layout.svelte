@@ -122,6 +122,30 @@
 			}} class="mb-4">
 				Logout
 			</Button>
+<div class="flex items-center gap-4 p-4 border rounded-lg bg-gray-50 mb-4">
+				{#if auth.session.user.avatar}
+					<img 
+						src={`https://cdn.discordapp.com/avatars/${auth.session.user.id}/${auth.session.user.avatar}.png`} 
+						alt={auth.session.user.username} 
+						class="w-12 h-12 rounded-full shadow-sm"
+					/>
+				{:else}
+					<div class="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-lg">
+						{auth.session.user.username.substring(0, 1).toUpperCase()}
+					</div>
+				{/if}
+				<div class="flex-1 min-w-0">
+					<div class="flex items-baseline gap-2">
+						<span class="font-bold text-gray-900 truncate">
+							{auth.session.user.global_name ?? auth.session.user.username}
+						</span>
+						{#if auth.session.user.global_name}
+							<span class="text-sm text-gray-500 truncate">@{auth.session.user.username}</span>
+						{/if}
+					</div>
+					<p class="text-xs text-gray-400 font-mono truncate">{auth.session.user.id}</p>
+				</div>
+			</div>
 			<Button onclick={async () => {
 				let isAuthorized = await auth.checkAuth()
 				checkAuthStatus = isAuthorized
