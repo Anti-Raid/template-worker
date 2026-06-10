@@ -12,6 +12,7 @@
 	const login = async () => {
 		loginState = "GetBotConfig"
 		let bcfg = await auth.getBotConfig()
+		loginState = "WaitForUserOauth"
 		let loginUrl = `https://discord.com/api/oauth2/authorize?client_id=${bcfg.client_id}&scope=identify%20guilds&redirect_uri=${window.location.origin}/authorize&response_type=code`
 		const popup = window.open(loginUrl, "Oauth2 Login", "popup")
 		if (!popup) {
@@ -41,6 +42,10 @@
 
             window.addEventListener("message", messageListener);
         });
+
+		if(authData == null) {
+			throw new Error("User cancelled login request?")
+		}
 
 		loginState = `GotCode(${authData})`
 

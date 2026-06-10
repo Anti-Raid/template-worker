@@ -74,6 +74,7 @@ impl MDiscordSyscall {
                 if !ctx.is_oauth() {
                     return Err(MSyscallError::ContextRequiresOauth); // disable for now to avoid abuse
                 }
+                handler.limit(&ctx, "GetUserGuilds")?;
                 let mut guilds_cache = None;
                 if !refresh {
                     // Check for guilds cache
@@ -85,6 +86,11 @@ impl MDiscordSyscall {
                     if let Some(cached_guilds_data) = cached_guilds.try_get::<Option<serde_json::Value>, _>(0)? {
                         guilds_cache = Some(serde_json::from_value::<Vec<DashboardGuild>>(cached_guilds_data)?);
                     }
+                }
+
+                // Extra bucket limit for refresh ops
+                if guilds_cache.is_none() {
+                    handler.sub_limit(&ctx, "GetUserGuilds__Refresh")?;
                 }
 
                 let guilds = match guilds_cache {

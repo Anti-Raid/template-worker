@@ -16,7 +16,18 @@ impl IntoResponse for MSyscallRet {
 
 impl IntoResponse for MSyscallError {
     fn into_response(self) -> Response {
-        (StatusCode::BAD_REQUEST, Json(self)).into_response()
+        match self {
+            MSyscallError::Ratelimited { retry_after, .. } => {
+                (
+                    StatusCode::TOO_MANY_REQUESTS, 
+                    [
+                        ("Retry-After", retry_after.to_string()),
+                    ],
+                    Json(self)
+                ).into_response()
+            },
+            _ => (StatusCode::BAD_REQUEST, Json(self)).into_response()
+        }
     }
 }
 
@@ -154,7 +165,7 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
                 "Use /msyscall for msyscall (insecure) and /msyscall/secure for msyscall (secure, staff-only)"
             )
         }))
-        .layer(tower_http::cors::CorsLayer::very_permissive())
+        .layer(tower_http::cors::CorsLayer::very_permissive().expose_headers([header::RETRY_AFTER]))
         .layer(axum::middleware::from_fn(logger));
 
     let router: Router<()> = router.with_state(handler);

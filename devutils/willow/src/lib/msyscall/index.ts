@@ -77,6 +77,18 @@ export const msyscall = async (instanceUrl: string, auth: string | undefined, ca
             body: JSON.stringify(call)
         })
         if(!resp.ok) {
+            if (resp.status === 429) {
+                let retryAfter = resp.headers.get("Retry-After")
+                if(retryAfter) {
+                    let secs = parseFloat(retryAfter)
+                    if(!isNaN(secs)) {
+                        console.error("Ratelimited, waiting...")
+                        await new Promise((resolve) => setTimeout(resolve, secs * 1000));
+                        return await msyscall(instanceUrl, auth, call)
+                    }
+                }
+            }
+
             const json = await resp.json()
             return new Result({ok: false, res: json})
         }
@@ -123,5 +135,7 @@ export const errorString = (err: MSyscallError): string => {
             return `Unauthorized: ${err.reason}`;
         case "EntityNotFound":
             return `Not found: ${err.reason}`;
+        case "Ratelimited":
+            return `Ratelimited on bucket ${err.bucket}, requesting bucket of ${err.req_bucket} for ${err.retry_after} seconds`
     }
 }

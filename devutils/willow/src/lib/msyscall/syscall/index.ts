@@ -120,4 +120,12 @@ export type MSyscallError =
       op: "EntityNotFound"; 
       /** The reason or description of the missing entity */
       reason: string 
-    };
+    }
+  | {
+    /** Ratelimited */
+    op: "Ratelimited";
+    /** Number of seconds the user must wait before retrying */
+    retry_after: number;
+    bucket: string;
+    req_bucket: string;
+  };
