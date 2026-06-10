@@ -49,7 +49,13 @@
 		if(!sess.user) throw new Error("CreateLoginSession did not return a user as it is required to!")
 		auth.session = {session: sess.session, token: sess.token, user: sess.user}
 		auth.save()
+
+		// wipe existing error states
+		checkAuthStatus = null
+		loginError = ""
 	}
+
+	let checkAuthStatus: boolean | null = $state(null);
 </script>
 
 <svelte:head>
@@ -105,12 +111,24 @@
 					/>
 				</div>
 			</div>
-			<Button onclick={async () => {
+			<Button onclick={() => {
 				auth.session = null
 				auth.save()
 			}} class="mb-4">
 				Logout
 			</Button>
+			<Button onclick={async () => {
+				let isAuthorized = await auth.checkAuth()
+				checkAuthStatus = isAuthorized
+			}} class="mb-4">
+				Check Auth
+			</Button>
+
+			{#if checkAuthStatus}
+				<p class="text-green-400">Session valid!</p>
+			{:else if checkAuthStatus != null}
+				<p class="text-red-400">Session invalid! Logout and login?</p>
+			{/if}
 		{/if}
 	</div>
 

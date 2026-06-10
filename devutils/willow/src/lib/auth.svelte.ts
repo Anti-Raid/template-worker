@@ -16,7 +16,10 @@ const tryGetSession = (): Session | null => {
 	if(!browser) return null
 	try {
 		let sess = localStorage.getItem('session')
-		if(sess) return JSON.parse(sess)
+		if(sess) {
+			let session: Session = JSON.parse(sess)
+			return session
+		}
 		return null
 	} catch {
 		return null
@@ -24,8 +27,8 @@ const tryGetSession = (): Session | null => {
 }
 
 class Auth {
-	session = $state(tryGetSession());
 	instanceUrl = $state(browser ? localStorage.getItem('instance_url') ?? defaultInstanceUrl : defaultInstanceUrl);
+	session = $state(tryGetSession());
 	token = $derived(this.session?.token ?? null)
 
 	save() {
@@ -47,6 +50,16 @@ class Auth {
 		return await msyscall(this.instanceUrl, this.token ?? undefined, call)
 	}
 
+	async checkAuth(): Promise<boolean> {
+		// technically a hack but until msyscall gets an API for this
+		if(!this.token) return false
+		let ret = (await this.msyscall({op: "Auth", req: {op: "GetUserSessions"}}))
+		if(ret.ok) return true // we successfully performed an authorized op
+		let err = ret.unwrapErr()
+		console.log(err, err.op)
+		return err.op != "Unauthorized"
+	}
+
 	async getBotConfig() {
 		let ret = (await this.msyscall({op: "Bot", req: {op: "GetBotConfig"}})).stringifyAndThrow(errorString)
 		if(!(ret.op == "Bot" && ret.data.op == "BotConfig")) throw new Error("msyscall did not return a botconfig")
@@ -56,6 +69,12 @@ class Auth {
 	async createLoginSession(code: string, redirectUri: string) {
 		let ret = (await this.msyscall({op: "Auth", req: {op: "CreateLoginSession", code, redirect_uri: redirectUri}})).stringifyAndThrow(errorString)
 		if(!(ret.op == "Auth" && ret.data.op == "CreatedSession")) throw new Error("msyscall did not return a session")
+		return ret.data
+	}
+
+	async getUserGuilds(refresh: boolean) {
+		let ret = (await this.msyscall({op: "Discord", req: {op: "GetUserGuilds", refresh }})).stringifyAndThrow(errorString)
+		if(!(ret.op == "Discord" && ret.data.op == "UserGuilds")) throw new Error("msyscall did not return user guilds")
 		return ret.data
 	}
 }
