@@ -1,9 +1,12 @@
+use std::time::Duration;
+
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{extract::{State, FromRequestParts, Json}, Router, response::IntoResponse};
 use reqwest::{StatusCode, header};
 use reqwest::header::AUTHORIZATION;
 use serenity::all::UserId;
+use tower_http::cors::MaxAge;
 use crate::master::syscall::bot::{MBotSyscall, MBotSyscallRet};
 use crate::master::syscall::{MSyscallArgs, MSyscallContext, MSyscallRet};
 use crate::master::syscall::{MSyscallError, MSyscallHandler, internal::auth as iauth};
@@ -165,7 +168,11 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
                 "Use /msyscall for msyscall (insecure) and /msyscall/secure for msyscall (secure, staff-only)"
             )
         }))
-        .layer(tower_http::cors::CorsLayer::very_permissive().expose_headers([header::RETRY_AFTER]))
+        .layer(
+            tower_http::cors::CorsLayer::very_permissive()
+            .expose_headers([header::RETRY_AFTER])
+            .max_age(MaxAge::exact(Duration::from_secs(86400)))
+        )
         .layer(axum::middleware::from_fn(logger));
 
     let router: Router<()> = router.with_state(handler);
