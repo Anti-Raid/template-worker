@@ -31,6 +31,10 @@ export interface CollapsibleBlock {
     entries: Component[]
 }
 
+const COMPONENT_TYPES = [
+    "TextBlock", "Section", "FormSet", "Collapsible"
+] as const
+
 /** A base component */
 export type Component = {
     /** A raw text block */
@@ -130,6 +134,11 @@ export type FormElement = {
     send_form: boolean, 
 }
 
+const RAW_FORM_ELEMENT_TYPES = [
+    "TextBlock", "Text", "Text.User", "Array.Text", "Number", "Select.Text",
+    "Toggle.Checkbox", "Toggle.Slider", "Button.Action"
+] as const
+
 // raw form element from luau
 type RawFormElement = {
     type: "TextBlock",
@@ -208,6 +217,17 @@ export type Page = {
     formdata: Record<string, FormData[]>,
 }
 
+const _isOneOf = <T extends string>(value: string, allowedList: readonly T[]): value is T =>{
+  return (allowedList as readonly string[]).includes(value);
+}
+
+const assertOneOf = <T extends string>(value: string, allowedList: readonly T[]): T => {
+  if (_isOneOf(value, allowedList)) {
+    return value;
+  }
+  throw new Error(`Invalid value: "${value}". Expected one of: ${allowedList.join(', ')}`);
+}
+
 const getTypeName = (value: RawKhronosValue): string => {
     if (typeof value === "string") return value
     return Object.keys(value)[0] || "Unknown"
@@ -248,7 +268,7 @@ export const toDispatchResults = (value: RawKhronosValue): DispatchResult[] => {
     for(const result of l) {
         const resultMap = assertMap(result)
         const id = assertString(mapGet(resultMap, "id"), "id")
-        const type = assertString(mapGet(resultMap, "type"), "type")
+        const type = assertOneOf(assertString(mapGet(resultMap, "type"), "type"), ["ok", "err"])
         const value = mapGet(resultMap, "value")
         if(type === "ok") {
             results.push({ id, type, value })
@@ -264,10 +284,37 @@ export const toDispatchResults = (value: RawKhronosValue): DispatchResult[] => {
  * Given the event response (DispatchResult.value for type="ok"), parse the setting
  */
 export const dispatchResultToSetting = (value: RawKhronosValue) => {
-    const expandComponent = (map: Map<string, RawKhronosValue>) => {
-        const type = assertString(mapGet(map, "type"), "type") // get type field in component
+    const expandCollapsibleBlock = (map: Map<string, RawKhronosValue>): CollapsibleBlock => {
+        const id = assertString(mapGet(map, "id"), "id")
+        const label = assertString(mapGet(map, "label"), "label")
+        const entries = assertList(mapGet(map, "entries"), "entries").map((entry, idx) => {
+            return expandComponent(assertMap(entry, `component map at idx ${idx} for collapsible block with id ${id}`)) // recursively expand the entry into more components
+        })
+        return { id, label, entries }
+    }
+
+    const expandComponent = (map: Map<string, RawKhronosValue>): Component => {
+        const type = assertOneOf(assertString(mapGet(map, "type"), "type"), COMPONENT_TYPES)
         switch (type) {
             case "TextBlock":
+                const style = assertOneOf(assertString(mapGet(map, "style"), "style"), ["Header", "Paragraph"])
+                const text = assertString(mapGet(map, "text"), "text")
+                return { type: "TextBlock", style, text }
+            case "Section":
+                const sid = assertString(mapGet(map, "id"), "id")
+                const stitle = assertString(mapGet(map, "title"), "title")
+                const sdesc = assertString(mapGet(map, "description"), "description")
+                const sentries = assertList(mapGet(map, "entries"), "entries").map((entry, idx) => {
+                    return expandComponent(assertMap(entry, `component map at idx ${idx} for section with id ${sid}`)) // recursively expand the entry into more components
+                })
+                return { type: "Section", id: sid, title: stitle, description: sdesc, entries: sentries }
+            case "Collapsible":
+                const ccols = assertList(mapGet(map, "collapsibles"), "collapsibles").map((entry, idx) => {
+                    return expandCollapsibleBlock(assertMap(entry, `collapsible map at idx ${idx} for section with id ${idx}`)) // recursively expand the entry into more collapsibles
+                })
+                return { type: "Collapsible", collapsibles: ccols }
+            default:
+                throw new Error(`Unsupported component type "${type}"`)
         }
     }
 }
