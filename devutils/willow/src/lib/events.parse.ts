@@ -287,7 +287,7 @@ const mapGetOpt = (map: Map<string, RawKhronosValue>, prop: string): RawKhronosV
  * Given a value from a event, returns the DispatchResult created by Luau
  */
 export const toDispatchResults = (value: RawKhronosValue): DispatchResult[] => {
-    const l = assertList(value)
+    const l = assertList(value, "list of DispatchResult's")
     const results: DispatchResult[] = []
     for(const result of l) {
         const resultMap = assertMap(result)
@@ -426,7 +426,7 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
             case "FormSet":
                 const fsid = assertString(mapGet(map, "id"), "id")
                 let formdatas = formDataMap.get(fsid)
-                if(!formdatas) throw new Error(`Associated form data for FormSet \`${fsid}\` not found`)
+                if(!formdatas) return []
                 const fsreorderable = assertBoolean(mapGet(map, "reorderable"), "reorderable")
                 const baseForm = assertList(mapGet(map, "form"), "form").map((formListElem, idx) => {
                     return expandRawFormElement(assertMap(formListElem, `FormElement at idx ${idx} of FormSet \`${fsid}\``))

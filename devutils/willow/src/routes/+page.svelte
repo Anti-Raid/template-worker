@@ -4,9 +4,12 @@
 	import { Button, Toggle, Checkbox, ErrorBox } from '$lib';
     import TextBox from '$lib/TextBox.svelte';
     import KhronosValue from '$lib/KhronosValue.svelte';
+    import { encode } from '$lib/msyscall/khronosvalue';
+    import { toDispatchResults, type Component, dispatchResultToSetting } from '$lib/events.parse';
 
 	let fetchingUserGuilds = $state(false)
 	let dispatchingGuildEvent = $state(false)
+	let fetchingSettings = $state(false)
 	let _statefileInput: HTMLInputElement;
 
 	let filteredGuilds = $derived.by(() => {
@@ -193,7 +196,7 @@
 		<h2 class="text-lg font-semibold mb-2">Dispatch Event</h2>
 		<TextBox id="evtname" bind:value={mps.state.dispatchEvent.event} label="Event Name" placeholder="Event Name"/>
 		<KhronosValue id="evtvalue" bind:value={mps.state.dispatchEvent.data}/>
-		<Button onclick={async () => {
+		<Button disabled={dispatchingGuildEvent} onclick={async () => {
 			if(!mps.state.selectedGuild) return
 			dispatchingGuildEvent = true
 			try {
@@ -204,11 +207,45 @@
 			} finally {
 				dispatchingGuildEvent = false
 			}
-		}}>Dispatch</Button>
+		}}>{dispatchingGuildEvent ? "Dispatching" : "Dispatch"}</Button>
 		{#if typeof mps.state.dispatchEvent.fetched == "string"}
 			<ErrorBox error={mps.state.dispatchEvent.fetched} />
 		{:else if mps.state.dispatchEvent.fetched?.data}
 			<KhronosValue id="evtvalue" value={mps.state.dispatchEvent.fetched.data} disabled />
+		{/if}
+	</div>
+
+	<div class="p-4 border rounded-lg mb-4 flex flex-col gap-2">
+		<h2 class="text-lg font-semibold mb-2">Settings Fetch</h2>
+		<Button disabled={fetchingSettings} onclick={async () => {
+			if(!mps.state.selectedGuild) return
+			fetchingSettings = true
+			try {
+				let data = await auth.dispatchEvent({type: "Guild", id: mps.state.selectedGuild.id}, "WebSettings", encode({
+					type: "fetch_page",
+				}))
+				let ders = toDispatchResults(data)
+				let settingsForTmpls: Record<string, Component[] | string> = {}
+				for(const der of ders) {
+					if(der.type == "err") {
+						settingsForTmpls[der.id] = der.value?.toString() || "Unknown error"
+					} else {
+						settingsForTmpls[der.id] = dispatchResultToSetting(der.value)
+					}
+				}
+				mps.state.fetchedSettings = { comps: settingsForTmpls }
+			} catch (err) {
+				mps.state.fetchedSettings = err ? err.toString() : "Unknown error"
+			} finally {
+				fetchingSettings = false
+			}
+		}}>{fetchingSettings ? "Fetching Settings" : "Fetch All Settings"}</Button>
+		{#if typeof mps.state.fetchedSettings == "string"}
+			<ErrorBox error={mps.state.fetchedSettings} />
+		{:else if mps.state.fetchedSettings}
+			<code class="block p-2 bg-gray-200 rounded break-all text-xs font-mono whitespace-pre-wrap">
+				{JSON.stringify(mps.state.fetchedSettings.comps, null, 4)}
+			</code>
 		{/if}
 	</div>
 {/if}

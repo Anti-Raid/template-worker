@@ -1,13 +1,16 @@
 import { browser } from "$app/environment";
+import type { Component } from "./events.parse";
 import type { RawKhronosValue } from "./msyscall/khronosvalue";
 import type { DashboardGuild, DashboardGuildData } from "./msyscall/types/discord";
 
+// note for future developers: | string -> error case
 export interface State {
     refresh: boolean,
     showOnlyPresent: boolean,
     selectedGuild: DashboardGuild | null,
     fetchedUserGuilds: DashboardGuildData | string | null,
-    dispatchEvent: { event: string, data: RawKhronosValue, fetched?: {data: RawKhronosValue} | string }
+    dispatchEvent: { event: string, data: RawKhronosValue, fetched?: {data: RawKhronosValue} | string },
+    fetchedSettings: { comps: Record<string, Component[] | string> } | string | null
 }
 
 const defaultState: State = {
@@ -15,7 +18,8 @@ const defaultState: State = {
     showOnlyPresent: false,
     selectedGuild: null,
     fetchedUserGuilds: null,
-    dispatchEvent: { event: "", data: "Null"}
+    dispatchEvent: { event: "", data: "Null"},
+    fetchedSettings: null
     
 }
 export const stateKey = "mainpagestate.willowv1"
