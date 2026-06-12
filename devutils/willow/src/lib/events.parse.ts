@@ -18,7 +18,7 @@ export type Event = {
     type: "form_action",
     action_button_id: string, 
     form_id: string, 
-    form_data?: Record<string, any>
+    form_data?: Record<string, RawKhronosValue>
 } | {
     type: "fetch_page",
 }
@@ -110,7 +110,7 @@ export type FormElement = {
     description?: string,
     disabled?: boolean,
     choices: {label: string, value: string}[],
-    value: number
+    value: string
 } | {
     type: "Toggle.Checkbox",
     id: string,
@@ -206,7 +206,7 @@ export type FormData = {
     /**form title*/
     title: string,
     /*form data*/
-    data: Record<string, any>,
+    data: Map<string, RawKhronosValue>,
 }
 
 export type Page = {
@@ -214,7 +214,7 @@ export type Page = {
     /** form datas to expand every FormSet into
 
     for every FormSet, the frontend will expand the given data into the FormSet internally */
-    formdata: Record<string, FormData[]>,
+    formdata: Map<string, FormData[]>,
 }
 
 const _isOneOf = <T extends string>(value: string, allowedList: readonly T[]): value is T =>{
@@ -233,9 +233,27 @@ const getTypeName = (value: RawKhronosValue): string => {
     return Object.keys(value)[0] || "Unknown"
 }
 
+const assertOptional = <T>(value: RawKhronosValue | undefined, fn: (value: RawKhronosValue, ty?: string) => T, ty: string = "optional"): T | undefined => {
+    if (value === undefined || value === "Null") return undefined
+    if(ty) return fn(value, ty)
+    else return fn(value)
+}
+
 const assertString = (value: RawKhronosValue, ty: string = "string"): string => {
     if (value === "Null" || !("Text" in value)) throw new Error(`Got ${getTypeName(value)} when ${ty} expected`)
     return value.Text
+}
+
+const assertNumber = (value: RawKhronosValue, ty: string = "number"): number => {
+    if (value === "Null") throw new Error(`Got ${getTypeName(value)} when ${ty} expected`)
+    if("Float" in value) return value.Float
+    else if("Integer" in value) return value.Integer
+    throw new Error(`Got ${getTypeName(value)} when ${ty} expected`)
+}
+
+const assertBoolean = (value: RawKhronosValue, ty: string = "boolean"): boolean => {
+    if (value === "Null" || !("Boolean" in value)) throw new Error(`Got ${getTypeName(value)} when ${ty} expected`)
+    return value.Boolean
 }
 
 const assertList = (value: RawKhronosValue, ty: string = "list"): RawKhronosValue[] => {
@@ -256,6 +274,12 @@ const assertMap = (value: RawKhronosValue, ty = "Map with string keys"): Map<str
 const mapGet = (map: Map<string, RawKhronosValue>, prop: string, inprop: string = "map"): RawKhronosValue => {
     let p = map.get(prop)
     if(!p) throw new Error(`\`${prop}\` not found in ${inprop}`)
+    return p
+}
+
+const mapGetOpt = (map: Map<string, RawKhronosValue>, prop: string): RawKhronosValue | undefined => {
+    let p = map.get(prop)
+    if(!p || p === "Null") return undefined
     return p
 }
 
@@ -283,38 +307,142 @@ export const toDispatchResults = (value: RawKhronosValue): DispatchResult[] => {
 /**
  * Given the event response (DispatchResult.value for type="ok"), parse the setting
  */
-export const dispatchResultToSetting = (value: RawKhronosValue) => {
+export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => {
+    const page = assertMap(value, "Page")
+
+    // Extract out formdata first
+    const rawFormDataMap = assertMap(mapGet(page, "formdata"), "Page#formdata")
+    const formDataMap: Map<string, FormData[]> = new Map()
+    for(const [key, formVals] of rawFormDataMap) {
+        formDataMap.set(key, assertList(formVals).map((fv, idx) => {
+           const map = assertMap(fv, `FormData map at idx ${idx} of Page#formdata`)
+           const id = assertString(mapGet(map, "id"), "id")
+           const title = assertString(mapGet(map, "title"), "title")
+           const data = assertMap(mapGet(map, "data"), "data")
+           return {id, title, data}
+        }))
+    }
+
     const expandCollapsibleBlock = (map: Map<string, RawKhronosValue>): CollapsibleBlock => {
         const id = assertString(mapGet(map, "id"), "id")
         const label = assertString(mapGet(map, "label"), "label")
-        const entries = assertList(mapGet(map, "entries"), "entries").map((entry, idx) => {
+        const entries = assertList(mapGet(map, "entries"), "entries").flatMap((entry, idx) => {
             return expandComponent(assertMap(entry, `component map at idx ${idx} for collapsible block with id ${id}`)) // recursively expand the entry into more components
         })
         return { id, label, entries }
     }
 
-    const expandComponent = (map: Map<string, RawKhronosValue>): Component => {
+    const expandRawFormElement = (map: Map<string, RawKhronosValue>): RawFormElement => {
+        const type = assertOneOf(assertString(mapGet(map, "type"), "type"), RAW_FORM_ELEMENT_TYPES)
+        switch (type) {
+            case "TextBlock":
+                const style = assertOneOf(assertString(mapGet(map, "style"), "style"), ["Header", "Paragraph"])
+                const text = assertString(mapGet(map, "text"), "text")
+                return { type, style, text }
+            case "Text":
+            case "Text.User":
+            case "Number": // all of these share the same base type (for now)
+               const tid = assertString(mapGet(map, "id"), "id")
+               const tlabel = assertString(mapGet(map, "label"), "label")
+               const tdesc = assertOptional(mapGetOpt(map, "description"), assertString)
+               const tph = assertOptional(mapGetOpt(map, "placeholder"), assertString)
+               const tdisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
+               return { type, id: tid, label: tlabel, description: tdesc, placeholder: tph, disabled: tdisabled }
+            case "Array.Text":
+                const astyle = assertOneOf(assertString(mapGet(map, "style"), "style"), ["Normal", "Kittycat"])
+                const aid = assertString(mapGet(map, "id"), "id")
+                const alabel = assertString(mapGet(map, "label"), "label")
+                const adesc = assertOptional(mapGetOpt(map, "description"), assertString)
+                const adisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
+                return { type, id: aid, style: astyle, label: alabel, description: adesc, disabled: adisabled }
+            case "Select.Text":
+                const sid = assertString(mapGet(map, "id"), "id")
+                const slabel = assertString(mapGet(map, "label"), "label")
+                const sdesc = assertOptional(mapGetOpt(map, "description"), assertString)
+                const sdisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
+                const schoices = assertList(mapGet(map, "choices"), "choices").map((entry, idx) => {
+                    const cmap = assertMap(entry, `choices map at idx ${idx} for Select.Text with id ${idx} [${sid}]`) // expand the entry into choices
+                    const clabel = assertString(mapGet(cmap, "label"), "label")
+                    const cvalue = assertString(mapGet(cmap, "value"), "value")
+                    return { label: clabel, value: cvalue }
+                })
+                return { type, id: sid, label: slabel, description: sdesc, disabled: sdisabled, choices: schoices }
+            case "Toggle.Checkbox":
+            case "Toggle.Slider":
+               const bid = assertString(mapGet(map, "id"), "id")
+               const blabel = assertString(mapGet(map, "label"), "label")
+               const bdesc = assertOptional(mapGetOpt(map, "description"), assertString)
+               const bdisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
+               return { type, id: bid, label: blabel, description: bdesc, disabled: bdisabled }
+            case "Button.Action":
+                const abid = assertString(mapGet(map, "id"), "id")
+                const abtext = assertString(mapGet(map, "text"), "text")
+                const abstyle = assertOneOf(assertString(mapGet(map, "style"), "style"), ["Primary", "Secondary", "Danger"])
+                const absendform = assertBoolean(mapGet(map, "send_form"), "send_form")
+                return { type, id: abid, text: abtext, style: abstyle, send_form: absendform }
+        }
+    }
+
+    // may or may not clone underlying data
+    const injectFormDataIntoRawFormElement = (rawel: RawFormElement, formdata: FormData): FormElement => {
+        switch (rawel.type) {
+            case "TextBlock":
+            case "Button.Action":
+                return rawel  // action buttons and text blocks dont need formdata values injected
+            case "Text":
+            case "Text.User":
+            case "Select.Text":
+                return { ...rawel, value: assertString(mapGet(formdata.data, rawel.id)) }
+            case "Number":
+                return { ...rawel, value: assertNumber(mapGet(formdata.data, rawel.id)) }
+            case "Toggle.Checkbox":
+            case "Toggle.Slider":
+                return { ...rawel, value: assertBoolean(mapGet(formdata.data, rawel.id)) }
+            case "Array.Text":
+                return { ...rawel, value: assertList(mapGet(formdata.data, rawel.id)).map(v => assertString(v, "string in string array")) }
+        }
+    }
+
+    const expandComponent = (map: Map<string, RawKhronosValue>): Component[] => {
         const type = assertOneOf(assertString(mapGet(map, "type"), "type"), COMPONENT_TYPES)
         switch (type) {
             case "TextBlock":
                 const style = assertOneOf(assertString(mapGet(map, "style"), "style"), ["Header", "Paragraph"])
                 const text = assertString(mapGet(map, "text"), "text")
-                return { type: "TextBlock", style, text }
+                return [{ type: "TextBlock", style, text }]
             case "Section":
                 const sid = assertString(mapGet(map, "id"), "id")
                 const stitle = assertString(mapGet(map, "title"), "title")
                 const sdesc = assertString(mapGet(map, "description"), "description")
-                const sentries = assertList(mapGet(map, "entries"), "entries").map((entry, idx) => {
+                const sentries = assertList(mapGet(map, "entries"), "entries").flatMap((entry, idx) => {
                     return expandComponent(assertMap(entry, `component map at idx ${idx} for section with id ${sid}`)) // recursively expand the entry into more components
                 })
-                return { type: "Section", id: sid, title: stitle, description: sdesc, entries: sentries }
+                return [{ type: "Section", id: sid, title: stitle, description: sdesc, entries: sentries }]
             case "Collapsible":
                 const ccols = assertList(mapGet(map, "collapsibles"), "collapsibles").map((entry, idx) => {
                     return expandCollapsibleBlock(assertMap(entry, `collapsible map at idx ${idx} for section with id ${idx}`)) // recursively expand the entry into more collapsibles
                 })
-                return { type: "Collapsible", collapsibles: ccols }
-            default:
-                throw new Error(`Unsupported component type "${type}"`)
+                return [{ type: "Collapsible", collapsibles: ccols }]
+            case "FormSet":
+                const fsid = assertString(mapGet(map, "id"), "id")
+                let formdatas = formDataMap.get(fsid)
+                if(!formdatas) throw new Error(`Associated form data for FormSet \`${fsid}\` not found`)
+                const fsreorderable = assertBoolean(mapGet(map, "reorderable"), "reorderable")
+                const baseForm = assertList(mapGet(map, "form"), "form").map((formListElem, idx) => {
+                    return expandRawFormElement(assertMap(formListElem, `FormElement at idx ${idx} of FormSet \`${fsid}\``))
+                })
+                const forms: Component[] = []
+                for(const form of formdatas) {
+                    forms.push({type: "#Willow.Form", id: fsid, form_id: form.id, title: form.title, reorderable: fsreorderable, form: baseForm.map(x => injectFormDataIntoRawFormElement(x, form)) })
+                }
+                return forms
         }
     }
+
+    // extract components out
+    const comps = assertList(mapGet(page, "components"), "Page#components").flatMap((x, idx) => {
+        return expandComponent(assertMap(x, `Component at idx ${idx} of Page#components`))
+    })
+
+    return comps
 }
