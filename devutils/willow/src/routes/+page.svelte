@@ -2,6 +2,8 @@
 	import { auth } from '$lib/auth.svelte';
 	import { mps, stateKey } from '$lib/mainpagestate.svelte';
 	import { Button, Toggle, Checkbox, ErrorBox } from '$lib';
+    import TextBox from '$lib/TextBox.svelte';
+    import KhronosValue from '$lib/KhronosValue.svelte';
 
 	let fetchingUserGuilds = $state(false)
 	let _statefileInput: HTMLInputElement;
@@ -184,5 +186,11 @@
 			</div>
 		</div>
 		<Button onclick={() => { mps.state.selectedGuild = null}}>Deselect</Button>
+	</div>
+
+	<div class="p-4 border rounded-lg mb-4 flex flex-col gap-2">
+		<h2 class="text-lg font-semibold mb-2">Dispatch Event</h2>
+		<TextBox id="evtname" bind:value={mps.state.dispatchEvent.event} label="Event Name" placeholder="Event Name"/>
+		<KhronosValue id="evtvalue" bind:value={mps.state.dispatchEvent.data}/>
 	</div>
 {/if}

@@ -1,18 +1,22 @@
 import { browser } from "$app/environment";
+import type { RawKhronosValue } from "./msyscall/khronosvalue";
 import type { DashboardGuild, DashboardGuildData } from "./msyscall/types/discord";
 
 export interface State {
     refresh: boolean,
     showOnlyPresent: boolean,
     selectedGuild: DashboardGuild | null,
-    fetchedUserGuilds: DashboardGuildData | string | null
+    fetchedUserGuilds: DashboardGuildData | string | null,
+    dispatchEvent: { event: string, data: RawKhronosValue }
 }
 
 const defaultState: State = {
     refresh: false,
     showOnlyPresent: false,
     selectedGuild: null,
-    fetchedUserGuilds: null
+    fetchedUserGuilds: null,
+    dispatchEvent: { event: "", data: { Null: null }}
+    
 }
 export const stateKey = "mainpagestate.willowv1"
 
