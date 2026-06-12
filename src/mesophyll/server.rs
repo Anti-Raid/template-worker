@@ -130,7 +130,7 @@ impl pb::WtmMessageResponse {
 
 #[derive(Clone)]
 pub struct MesophyllServer {
-    conns: Arc<DashMap<usize, MesophyllServerConn>>,
+    conns: Arc<DashMap<usize, Arc<MesophyllServerConn>>>,
     tenant_state_db: TenantStateDb,
     state_db: StateDb,
     num_workers: usize,
@@ -166,7 +166,7 @@ impl MesophyllServer {
         Ok(())
     }
 
-    pub fn get_connection(&self, worker_id: usize) -> Option<MesophyllServerConn> {
+    pub fn get_connection(&self, worker_id: usize) -> Option<Arc<MesophyllServerConn>> {
         self.conns.get(&worker_id).map(|r| r.value().clone())
     }
 
@@ -198,7 +198,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
 
         // Create a new connection for this worker
         let (tx, rx) = mpsc::unbounded_channel();
-        let conn = MesophyllServerConn::new(wk.worker_id, tx);
+        let conn = Arc::new(MesophyllServerConn::new(wk.worker_id, tx));
         self.conns.insert(wk.worker_id_usize()?, conn.clone());
 
         tokio::spawn(async move {

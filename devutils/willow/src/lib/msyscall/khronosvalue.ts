@@ -22,9 +22,8 @@ export type RawKhronosValue = {
     TimeZone: string; // Time zone identifier
 } | {
     MemoryVfs: Record<string, string>;
-} | {
-    Null: null;
-}
+} | "Null"
+
 
 export class MemoryVfs {
     public map: Record<string, string>;
@@ -88,6 +87,7 @@ export const decode = (data: RawKhronosValue, depth?: number): KhronosValue => {
     if ((depth || 0) > 100) {
         return null; // Prevent excessive recursion
     }
+    if (data == "Null") return null
     if ('Text' in data) {
         return data.Text;
     } else if ('Integer' in data) {
@@ -118,8 +118,6 @@ export const decode = (data: RawKhronosValue, depth?: number): KhronosValue => {
         return new TimeZone(data.TimeZone);
     } else if ('MemoryVfs' in data) {
         return new MemoryVfs(data.MemoryVfs);
-    } else if ('Null' in data) {
-        return null;
     } else {
         throw new Error('Unknown KhronosValue type');
     }
@@ -147,7 +145,7 @@ export type EncodableKhronosValue =
  */
 export const encode = (value: EncodableKhronosValue): RawKhronosValue => {
     if (value === null || value === undefined) {
-        return { Null: null };
+        return "Null";
     } else if (typeof value === 'string') {
         return { Text: value };
     } else if (typeof value === 'number') {

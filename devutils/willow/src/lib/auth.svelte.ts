@@ -1,7 +1,9 @@
 import { browser } from '$app/environment';
 import { errorString, msyscall, Result } from './msyscall';
+import type { RawKhronosValue } from './msyscall/khronosvalue';
 import type { MSyscallArgs, MSyscallError, MSyscallRet } from './msyscall/syscall';
 import type { UserSession } from './msyscall/types/auth';
+import type { Id } from './msyscall/types/common';
 import type { PartialUser } from './msyscall/types/discord';
 
 const defaultInstanceUrl = "http://localhost:60000"
@@ -78,6 +80,12 @@ class Auth {
 		let ret = (await this.msyscall({op: "Discord", req: {op: "GetUserGuilds", refresh }})).stringifyAndThrow(errorString)
 		if(!(ret.op == "Discord" && ret.data.op == "UserGuilds")) throw new Error("msyscall did not return user guilds")
 		return ret.data
+	}
+
+	async dispatchEvent(id: Id, name: string, data: RawKhronosValue) {
+		let ret = (await this.msyscall({op: "Bot", req: {op: "DispatchEvent", id, name, data }})).stringifyAndThrow(errorString)
+		if(!(ret.op == "Bot" && ret.data.op == "KhronosValue")) throw new Error("msyscall did not return a khronos value")
+		return ret.data.data
 	}
 }
 

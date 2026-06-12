@@ -7,7 +7,7 @@ export interface State {
     showOnlyPresent: boolean,
     selectedGuild: DashboardGuild | null,
     fetchedUserGuilds: DashboardGuildData | string | null,
-    dispatchEvent: { event: string, data: RawKhronosValue }
+    dispatchEvent: { event: string, data: RawKhronosValue, fetched?: {data: RawKhronosValue} | string }
 }
 
 const defaultState: State = {
@@ -15,7 +15,7 @@ const defaultState: State = {
     showOnlyPresent: false,
     selectedGuild: null,
     fetchedUserGuilds: null,
-    dispatchEvent: { event: "", data: { Null: null }}
+    dispatchEvent: { event: "", data: "Null"}
     
 }
 export const stateKey = "mainpagestate.willowv1"

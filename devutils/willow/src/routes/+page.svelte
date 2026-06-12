@@ -6,6 +6,7 @@
     import KhronosValue from '$lib/KhronosValue.svelte';
 
 	let fetchingUserGuilds = $state(false)
+	let dispatchingGuildEvent = $state(false)
 	let _statefileInput: HTMLInputElement;
 
 	let filteredGuilds = $derived.by(() => {
@@ -192,5 +193,22 @@
 		<h2 class="text-lg font-semibold mb-2">Dispatch Event</h2>
 		<TextBox id="evtname" bind:value={mps.state.dispatchEvent.event} label="Event Name" placeholder="Event Name"/>
 		<KhronosValue id="evtvalue" bind:value={mps.state.dispatchEvent.data}/>
+		<Button onclick={async () => {
+			if(!mps.state.selectedGuild) return
+			dispatchingGuildEvent = true
+			try {
+				let data = await auth.dispatchEvent({type: "Guild", id: mps.state.selectedGuild.id}, mps.state.dispatchEvent.event, mps.state.dispatchEvent.data)
+				mps.state.dispatchEvent.fetched = {data}
+			} catch (err) {
+				mps.state.dispatchEvent.fetched = err ? err.toString() : "Unknown error"
+			} finally {
+				dispatchingGuildEvent = false
+			}
+		}}>Dispatch</Button>
+		{#if typeof mps.state.dispatchEvent.fetched == "string"}
+			<ErrorBox error={mps.state.dispatchEvent.fetched} />
+		{:else if mps.state.dispatchEvent.fetched?.data}
+			<KhronosValue id="evtvalue" value={mps.state.dispatchEvent.fetched.data} disabled />
+		{/if}
 	</div>
 {/if}
