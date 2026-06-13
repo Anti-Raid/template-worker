@@ -308,6 +308,8 @@ export const toDispatchResults = (value: RawKhronosValue): DispatchResult[] => {
  * Given the event response (DispatchResult.value for type="ok"), parse the setting
  */
 export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => {
+    const MAX_DEPTH: number = 10;
+    
     const page = assertMap(value, "Page")
 
     // Extract out formdata first
@@ -323,11 +325,12 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
         }))
     }
 
-    const expandCollapsibleBlock = (map: Map<string, RawKhronosValue>): CollapsibleBlock => {
+    const expandCollapsibleBlock = (map: Map<string, RawKhronosValue>, depth: number): CollapsibleBlock => {
+        if(depth > MAX_DEPTH) throw new Error(`Spec violation: above max depth of ${MAX_DEPTH} in expandCollapsibleBlock`)
         const id = assertString(mapGet(map, "id"), "id")
         const label = assertString(mapGet(map, "label"), "label")
         const entries = assertList(mapGet(map, "entries"), "entries").flatMap((entry, idx) => {
-            return expandComponent(assertMap(entry, `component map at idx ${idx} for collapsible block with id ${id}`)) // recursively expand the entry into more components
+            return expandComponent(assertMap(entry, `component map at idx ${idx} for collapsible block with id ${id}`), depth+1) // recursively expand the entry into more components
         })
         return { id, label, entries }
     }
@@ -403,7 +406,8 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
         }
     }
 
-    const expandComponent = (map: Map<string, RawKhronosValue>): Component[] => {
+    const expandComponent = (map: Map<string, RawKhronosValue>, depth: number): Component[] => {
+        if(depth > MAX_DEPTH) throw new Error(`Spec violation: above max depth of ${MAX_DEPTH} in expandComponent`)
         const type = assertOneOf(assertString(mapGet(map, "type"), "type"), COMPONENT_TYPES)
         switch (type) {
             case "TextBlock":
@@ -415,12 +419,12 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
                 const stitle = assertString(mapGet(map, "title"), "title")
                 const sdesc = assertString(mapGet(map, "description"), "description")
                 const sentries = assertList(mapGet(map, "entries"), "entries").flatMap((entry, idx) => {
-                    return expandComponent(assertMap(entry, `component map at idx ${idx} for section with id ${sid}`)) // recursively expand the entry into more components
+                    return expandComponent(assertMap(entry, `component map at idx ${idx} for section with id ${sid}`), depth+1) // recursively expand the entry into more components
                 })
                 return [{ type: "Section", id: sid, title: stitle, description: sdesc, entries: sentries }]
             case "Collapsible":
                 const ccols = assertList(mapGet(map, "collapsibles"), "collapsibles").map((entry, idx) => {
-                    return expandCollapsibleBlock(assertMap(entry, `collapsible map at idx ${idx} for section with id ${idx}`)) // recursively expand the entry into more collapsibles
+                    return expandCollapsibleBlock(assertMap(entry, `collapsible map at idx ${idx} for section with id ${idx}`), depth+1) // recursively expand the entry into more collapsibles
                 })
                 return [{ type: "Collapsible", collapsibles: ccols }]
             case "FormSet":
@@ -441,7 +445,7 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
 
     // extract components out
     const comps = assertList(mapGet(page, "components"), "Page#components").flatMap((x, idx) => {
-        return expandComponent(assertMap(x, `Component at idx ${idx} of Page#components`))
+        return expandComponent(assertMap(x, `Component at idx ${idx} of Page#components`), 0)
     })
 
     return comps
