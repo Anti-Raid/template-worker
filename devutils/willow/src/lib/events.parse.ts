@@ -11,7 +11,7 @@ export type DispatchResult = {
 }
 
 export type Event = {
-    type: "collapsible_reorder", 
+    type: "formset_reorder", 
     id: string,
     list: string[]
 } | {

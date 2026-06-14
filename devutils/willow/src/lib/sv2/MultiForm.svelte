@@ -42,10 +42,17 @@
 		formOrder = next;
 	}
 
-	const saveOrder = () => {
+	const saveOrder = async () => {
 		isReordering = false;
-		// Final state is already in formOrder
-		console.log(`Reorder committed for ${id}:`, formOrder);
+        if(!formOrder) throw new Error("No form order found")
+		const sve: Event = {
+            type: "formset_reorder",
+            id,
+            list: formOrder
+        }
+
+        if (!mps.state.selectedGuild) throw new Error("Guild not selected")
+        await auth.dispatchEvent({type: "Guild", id: mps.state.selectedGuild.id}, "WebSettings", encode(sve))
 	}
 
 	const cancelReordering = () => {
@@ -81,7 +88,14 @@
 				<Button onclick={cancelReordering}>
 					Cancel
 				</Button>
-				<Button onclick={saveOrder}>
+				<Button onclick={async () => {
+                    try {
+                        await saveOrder()
+                    } catch (err) {
+                        formOrder = null // reset order back to previous
+                        alert(err?.toString() || "Unknown error sending action")
+                    }
+                }}>
 					Save Order
 				</Button>
 			{/if}
