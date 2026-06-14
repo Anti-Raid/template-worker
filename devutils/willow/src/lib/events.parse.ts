@@ -29,7 +29,7 @@ const COMPONENT_TYPES = [
 ] as const
 
 const DISPLAY_ELEMENT_TYPES = [
-    "Header", "Paragraph"
+    "Header", "Paragraph", "Error"
 ] as const
 
 export type DisplayElement = {
@@ -40,6 +40,10 @@ export type DisplayElement = {
     /** a paragraph */
     type: "Paragraph",
     text: string
+} | {
+    /** an error */
+    type: "Error",
+    error: string
 }
 
 /** A base component */
@@ -337,6 +341,9 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
             case "Paragraph":
                 const text = assertString(mapGet(map, "text"), "text")
                 return { type, text }
+            case "Error":
+                const error = assertString(mapGet(map, "error"), "error")
+                return { type, error }
         }
     }
 

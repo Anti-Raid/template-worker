@@ -1,11 +1,12 @@
 <script lang="ts">
-	import type { Event, Form, FormElement } from '../events.parse';
+	import type { Event, Form } from '../events.parse';
 	import FormElementComp from './FormElement.svelte';
 	import Button from '$lib/Button.svelte';
     import { auth } from '$lib/auth.svelte';
     import { mps } from '$lib/mainpagestate.svelte';
     import { encode } from '$lib/msyscall/khronosvalue';
     import DisplayElement from './DisplayElement.svelte';
+    import FormInner from './FormInner.svelte';
 
 	let { id, reorderable, forms }: {
 		id: string, 
@@ -147,24 +148,7 @@
 				</header>
 
 				<div class="flex flex-col gap-5 {isReordering ? 'pointer-events-none opacity-40' : ''} transition-all">
-					{#each form.form as f, i}
-                        <!--Special cases for DisplayElement and Button.Action types-->
-                        {#if f.type == "DisplayElement"}
-                            <DisplayElement el={f.element} />
-                        {:else if f.type == "Button.Action"}
-                            <Button onclick={async () => {
-                                try {
-                                    await submit(f.id, f.send_form, form)
-                                } catch (err) {
-                                    alert(err?.toString() || "Unknown error sending action")
-                                }
-                            }}>
-                                {f.text} ({f.style})
-                            </Button>
-                        {:else}
-						    <FormElementComp bind:el={form.form[i]} />
-                        {/if}
-					{/each}
+					<FormInner form={form} formsetid={id} />
 				</div>
 			</section>
 		{/each}

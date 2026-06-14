@@ -7,4 +7,6 @@
 
 {#if el.type == "Text"}
     <TextBox id={el.id} label={el.label} description={el.description} placeholder={el.placeholder} bind:value={el.value} readonly={el.disabled} />
+{:else if el.type == "Button.Action" || el.type == "DisplayElement"}
+    <p>unreachable</p> <!-- Handled by outer MultiForm.svelte -->
 {/if}
