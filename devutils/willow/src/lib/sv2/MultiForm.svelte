@@ -5,6 +5,7 @@
     import { auth } from '$lib/auth.svelte';
     import { mps } from '$lib/mainpagestate.svelte';
     import { encode } from '$lib/msyscall/khronosvalue';
+    import DisplayElement from './DisplayElement.svelte';
 
 	let { id, reorderable, forms }: {
 		id: string, 
@@ -67,7 +68,7 @@
             formset_id: id,
             action_button_id: abid,
             form_data: sendform ? Object.fromEntries(
-                form.form.filter(x => x.type != "TextBlock" && x.type != "Button.Action").map(x => [x.id, x.value])
+                form.form.filter(x => x.type != "DisplayElement" && x.type != "Button.Action").map(x => [x.id, x.value])
             ) : undefined
         }
 
@@ -147,7 +148,10 @@
 
 				<div class="flex flex-col gap-5 {isReordering ? 'pointer-events-none opacity-40' : ''} transition-all">
 					{#each form.form as f, i}
-                        {#if f.type == "Button.Action"}
+                        <!--Special cases for DisplayElement and Button.Action types-->
+                        {#if f.type == "DisplayElement"}
+                            <DisplayElement el={f.element} />
+                        {:else if f.type == "Button.Action"}
                             <Button onclick={async () => {
                                 try {
                                     await submit(f.id, f.send_form, form)

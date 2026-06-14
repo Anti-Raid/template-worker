@@ -24,24 +24,29 @@ export type Event = {
     type: "fetch_page",
 }
 
-/** A collapsible block that opens up to a list of components when clicked */
-export interface CollapsibleBlock {
-    id: string,
-    label: string,
-    /** the components that form the collapsible block */
-    entries: Component[]
-}
-
 const COMPONENT_TYPES = [
-    "TextBlock", "Section", "FormSet", "Collapsible"
+    "Section", "FormSet", "DisplayElement"
 ] as const
+
+const DISPLAY_ELEMENT_TYPES = [
+    "Header", "Paragraph"
+] as const
+
+export type DisplayElement = {
+    /** a header */
+    type: "Header",
+    text: string
+} | {
+    /** a paragraph */
+    type: "Paragraph",
+    text: string
+}
 
 /** A base component */
 export type Component = {
     /** A raw text block */
-    type: "TextBlock",
-    style: "Header" | "Paragraph",
-    text: string
+    type: "DisplayElement",
+    element: DisplayElement
 } | {
     /** A section block */
     type: "Section",
@@ -58,10 +63,6 @@ export type Component = {
     reorderable: boolean,
     /** Form elements */
     forms: Form[],
-} | {
-    /* A collapsible set of blocks that open up to a set of inner components when clicked */
-    type: "Collapsible",
-    collapsibles: CollapsibleBlock[],
 }
 
 export type Form = {
@@ -74,9 +75,8 @@ export type Form = {
 }
 
 export type FormElement = {
-    type: "TextBlock",
-    style: "Header" | "Paragraph",
-    text: string
+    type: "DisplayElement",
+    element: DisplayElement
 } | {
     type: "Text",
     id: string,
@@ -141,15 +141,14 @@ export type FormElement = {
 }
 
 const RAW_FORM_ELEMENT_TYPES = [
-    "TextBlock", "Text", "Text.User", "Array.Text", "Number", "Select.Text",
+    "DisplayElement", "Text", "Text.User", "Array.Text", "Number", "Select.Text",
     "Toggle.Checkbox", "Toggle.Slider", "Button.Action"
 ] as const
 
 // raw form element from luau
 type RawFormElement = {
-    type: "TextBlock",
-    style: "Header" | "Paragraph",
-    text: string
+    type: "DisplayElement",
+    element: DisplayElement
 } | {
     type: "Text",
     id: string,
@@ -331,23 +330,22 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
         }))
     }
 
-    const expandCollapsibleBlock = (map: Map<string, RawKhronosValue>, depth: number): CollapsibleBlock => {
-        if(depth > MAX_DEPTH) throw new Error(`Spec violation: above max depth of ${MAX_DEPTH} in expandCollapsibleBlock`)
-        const id = assertString(mapGet(map, "id"), "id")
-        const label = assertString(mapGet(map, "label"), "label")
-        const entries = assertList(mapGet(map, "entries"), "entries").flatMap((entry, idx) => {
-            return expandComponent(assertMap(entry, `component map at idx ${idx} for collapsible block with id ${id}`), depth+1) // recursively expand the entry into more components
-        })
-        return { id, label, entries }
+    const expandDisplayElement = (map: Map<string, RawKhronosValue>): DisplayElement => {
+        const type = assertOneOf(assertString(mapGet(map, "type"), "type"), DISPLAY_ELEMENT_TYPES)
+        switch (type) {
+            case "Header":
+            case "Paragraph":
+                const text = assertString(mapGet(map, "text"), "text")
+                return { type, text }
+        }
     }
 
     const expandRawFormElement = (map: Map<string, RawKhronosValue>): RawFormElement => {
         const type = assertOneOf(assertString(mapGet(map, "type"), "type"), RAW_FORM_ELEMENT_TYPES)
         switch (type) {
-            case "TextBlock":
-                const style = assertOneOf(assertString(mapGet(map, "style"), "style"), ["Header", "Paragraph"])
-                const text = assertString(mapGet(map, "text"), "text")
-                return { type, style, text }
+            case "DisplayElement":
+                const delem = expandDisplayElement(assertMap(mapGet(map, "element"), "element"))
+                return { type, element: delem }
             case "Text":
             case "Text.User":
             case "Number": // all of these share the same base type (for now)
@@ -395,9 +393,9 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
     // may or may not clone underlying data
     const injectFormDataIntoRawFormElement = (rawel: RawFormElement, formdata: FormData): FormElement => {
         switch (rawel.type) {
-            case "TextBlock":
+            case "DisplayElement":
             case "Button.Action":
-                return rawel  // action buttons and text blocks dont need formdata values injected
+                return rawel  // action buttons and display elements dont need formdata values injected
             case "Text":
             case "Text.User":
             case "Select.Text":
@@ -416,10 +414,9 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
         if(depth > MAX_DEPTH) throw new Error(`Spec violation: above max depth of ${MAX_DEPTH} in expandComponent`)
         const type = assertOneOf(assertString(mapGet(map, "type"), "type"), COMPONENT_TYPES)
         switch (type) {
-            case "TextBlock":
-                const style = assertOneOf(assertString(mapGet(map, "style"), "style"), ["Header", "Paragraph"])
-                const text = assertString(mapGet(map, "text"), "text")
-                return [{ type: "TextBlock", style, text }]
+            case "DisplayElement":
+                const delem = expandDisplayElement(assertMap(mapGet(map, "element"), "element"))
+                return [{ type, element: delem }]
             case "Section":
                 const sid = assertString(mapGet(map, "id"), "id")
                 const stitle = assertString(mapGet(map, "title"), "title")
@@ -428,11 +425,6 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
                     return expandComponent(assertMap(entry, `component map at idx ${idx} for section with id ${sid}`), depth+1) // recursively expand the entry into more components
                 })
                 return [{ type: "Section", id: sid, title: stitle, description: sdesc, entries: sentries }]
-            case "Collapsible":
-                const ccols = assertList(mapGet(map, "collapsibles"), "collapsibles").map((entry, idx) => {
-                    return expandCollapsibleBlock(assertMap(entry, `collapsible map at idx ${idx} for section with id ${idx}`), depth+1) // recursively expand the entry into more collapsibles
-                })
-                return [{ type: "Collapsible", collapsibles: ccols }]
             case "FormSet":
                 const fsid = assertString(mapGet(map, "id"), "id")
                 let formdatas = formDataMap.get(fsid)
