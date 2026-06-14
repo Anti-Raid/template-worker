@@ -1,10 +1,13 @@
 <script lang="ts">
-  let { id, value = $bindable(), placeholder = "", label = "", type = "text", readonly = false } = $props();
+  let { id, description="", value = $bindable(), placeholder = "", label = "", type = "text", readonly = false } = $props();
 </script>
 
 <div class="flex flex-col gap-2 mb-4">
   {#if label}
     <label for={id} class="text-sm font-medium text-gray-700">{label}</label>
+  {/if}
+  {#if description}
+    <p class="text-sm font-medium text-gray-300">{description}</p>
   {/if}
   <input 
     id={id}

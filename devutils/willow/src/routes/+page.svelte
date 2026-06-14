@@ -6,6 +6,7 @@
     import KhronosValue from '$lib/KhronosValue.svelte';
     import { encode } from '$lib/msyscall/khronosvalue';
     import { toDispatchResults, type Component, dispatchResultToSetting } from '$lib/events.parse';
+    import SV2 from '$lib/sv2/SV2.svelte';
 
 	let fetchingUserGuilds = $state(false)
 	let dispatchingGuildEvent = $state(false)
@@ -225,15 +226,20 @@
 					type: "fetch_page",
 				}))
 				let ders = toDispatchResults(data)
-				let settingsForTmpls: Record<string, Component[] | string> = {}
+				let settingsForTmpls: [string, Component[]][] = []
+				let errors: [string, string][] = []
 				for(const der of ders) {
 					if(der.type == "err") {
-						settingsForTmpls[der.id] = der.value?.toString() || "Unknown error"
+						errors.push([der.id, der.value?.toString() || "Unknown error"])
 					} else {
-						settingsForTmpls[der.id] = dispatchResultToSetting(der.value)
+						try {
+							settingsForTmpls.push([der.id, dispatchResultToSetting(der.value)])
+						} catch (err) {
+							errors.push([der.id, err?.toString() || "Unknown error when parsing to setting"])
+						}
 					}
 				}
-				mps.state.fetchedSettings = { comps: settingsForTmpls }
+				mps.state.fetchedSettings = { comps: settingsForTmpls, errors }
 			} catch (err) {
 				mps.state.fetchedSettings = err ? err.toString() : "Unknown error"
 			} finally {
@@ -246,6 +252,16 @@
 			<code class="block p-2 bg-gray-200 rounded break-all text-xs font-mono whitespace-pre-wrap">
 				{JSON.stringify(mps.state.fetchedSettings.comps, null, 4)}
 			</code>
+
+			{#each mps.state.fetchedSettings.errors as [tmplId, err]}
+				<h3 class="text-md font-semibold mb-2 text-red-500">Template '{tmplId}'</h3>
+				<ErrorBox error={err} />
+			{/each}
+
+			{#each mps.state.fetchedSettings.comps as [tmplId, comps], idx}
+				<h3 class="text-md font-semibold mb-2">Template '{tmplId}'</h3>
+				<SV2 comps={comps} />
+			{/each}
 		{/if}
 	</div>
 {/if}

@@ -10,7 +10,7 @@ export interface State {
     selectedGuild: DashboardGuild | null,
     fetchedUserGuilds: DashboardGuildData | string | null,
     dispatchEvent: { event: string, data: RawKhronosValue, fetched?: {data: RawKhronosValue} | string },
-    fetchedSettings: { comps: Record<string, Component[] | string> } | string | null
+    fetchedSettings: { comps: [string, Component[]][], errors: [string, string][] } | string | null
 }
 
 const defaultState: State = {

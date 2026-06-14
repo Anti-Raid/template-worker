@@ -17,8 +17,9 @@ export type Event = {
 } | {
     type: "form_action",
     action_button_id: string, 
+    formset_id: string,
     form_id: string, 
-    form_data?: Record<string, RawKhronosValue>
+    form_data?: Record<string, any>
 } | {
     type: "fetch_page",
 }
@@ -49,22 +50,27 @@ export type Component = {
     description: string,
     entries: Component[]
 } | {
-    /* A single form (with injected values) expanded from a FormSet in luau */
-    type: "#Willow.Form",
+    /* A set of forms (with injected values) expanded from a FormSet in luau */
+    type: "#Willow.MultiForm",
     /** formset id */
     id: string, 
+    /** if set, a reorder event will be sent with the new list of ids */
+    reorderable: boolean,
+    /** Form elements */
+    forms: Form[],
+} | {
+    /* A collapsible set of blocks that open up to a set of inner components when clicked */
+    type: "Collapsible",
+    collapsibles: CollapsibleBlock[],
+}
+
+export type Form = {
     /* form id */
     form_id: string,
     /** form title */
     title: string,
     /** form elements */
     form: FormElement[],
-    /** if set, a reorder event will be sent with the new list of ids */
-    reorderable: boolean
-} | {
-    /* A collapsible set of blocks that open up to a set of inner components when clicked */
-    type: "Collapsible",
-    collapsibles: CollapsibleBlock[],
 }
 
 export type FormElement = {
@@ -435,11 +441,11 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
                 const baseForm = assertList(mapGet(map, "form"), "form").map((formListElem, idx) => {
                     return expandRawFormElement(assertMap(formListElem, `FormElement at idx ${idx} of FormSet \`${fsid}\``))
                 })
-                const forms: Component[] = []
+                const forms: Form[] = []
                 for(const form of formdatas) {
-                    forms.push({type: "#Willow.Form", id: fsid, form_id: form.id, title: form.title, reorderable: fsreorderable, form: baseForm.map(x => injectFormDataIntoRawFormElement(x, form)) })
+                    forms.push({form_id: form.id, title: form.title, form: baseForm.map(x => injectFormDataIntoRawFormElement(x, form)) })
                 }
-                return forms
+                return [{ type: "#Willow.MultiForm", id: fsid, forms, reorderable: fsreorderable }]
         }
     }
 

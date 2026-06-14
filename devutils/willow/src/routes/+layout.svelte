@@ -71,7 +71,7 @@
 	<h1 class="text-2xl font-bold"><a href="/">willow</a></h1>
 </header>
 
-<main class="p-4 max-w-2xl mx-auto">
+<main class="p-4 max-w-6xl mx-auto">
 	<div class="mb-8 flex flex-col gap-2">
 		{#if !auth.session}
 			<div class="flex items-end gap-2">
