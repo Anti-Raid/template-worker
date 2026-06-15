@@ -1,4 +1,4 @@
-import type { RawKhronosValue } from '../khronosvalue'
+import type { CKhronosValue, RawKhronosValue } from '../khronosvalue'
 import type { BotStatus } from '../types/bot'
 import type { Id } from '../types/common'
 import type { StateOp, StateExecResult, TenantState } from '../types/state'
@@ -25,6 +25,16 @@ export type MBotSyscall =
       name: string; 
       /** Data to send along with the event */
       data: RawKhronosValue 
+    }
+  | { 
+      /** Dispatch an event to a worker process (compressed) */
+      op: "DispatchCEvent"; 
+      /** Tenant ID to dispatch the event to */
+      id: Id; 
+      /** Name of the event. Must start with 'Web' for non-admins */
+      name: string; 
+      /** Data to send along with the event */
+      data: CKhronosValue 
     }
   | {
       /** Verify a presigned URL and return the decoded payload */
@@ -111,6 +121,12 @@ export type MBotSyscallRet =
       /** The returned data */
       data: RawKhronosValue 
     }
+  | {
+      /** Response containing a (compressed) Khronos value */
+      op: "CKhronosValue"; 
+      /** The returned data */
+      data: CKhronosValue 
+  } 
   | { 
       /** State execution results (Admin only) */
       op: "State"; 

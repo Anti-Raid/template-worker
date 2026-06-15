@@ -1,6 +1,6 @@
 import { browser } from '$app/environment';
 import { errorString, msyscall, Result } from './msyscall';
-import type { RawKhronosValue } from './msyscall/khronosvalue';
+import { dexpand, expand, type RawKhronosValue } from './msyscall/khronosvalue';
 import type { MSyscallArgs, MSyscallError, MSyscallRet } from './msyscall/syscall';
 import type { UserSession } from './msyscall/types/auth';
 import type { Id } from './msyscall/types/common';
@@ -82,10 +82,10 @@ class Auth {
 		return ret.data
 	}
 
-	async dispatchEvent(id: Id, name: string, data: RawKhronosValue) {
-		let ret = (await this.msyscall({op: "Bot", req: {op: "DispatchEvent", id, name, data }})).stringifyAndThrow(errorString)
-		if(!(ret.op == "Bot" && ret.data.op == "KhronosValue")) throw new Error("msyscall did not return a khronos value")
-		return ret.data.data
+	async dispatchEvent(id: Id, name: string, data: RawKhronosValue, compressed: boolean = true) {
+		let ret = (await this.msyscall({op: "Bot", req: compressed ? {op: "DispatchCEvent", id, name, data: dexpand(data)} : {op: "DispatchEvent", id, name, data }})).stringifyAndThrow(errorString)
+		if(!(ret.op == "Bot" && (ret.data.op == "KhronosValue" || ret.data.op == "CKhronosValue"))) throw new Error("msyscall did not return a khronos value")
+		return ret.data.op == "CKhronosValue" ? expand(ret.data.data) : ret.data.data
 	}
 }
 

@@ -62,7 +62,7 @@ impl WorkerDispatch {
 
         if !tenant_state.events.contains_key(name) && !DEFAULT_EVENTS.contains(&name) {
             // Event not registered for this tenant, skip
-            return Ok(KhronosValue::Null);
+            return Ok(KhronosValue::Null(()));
         }
 
         let vm_data = self.vm_manager.get_vm_for(id, &self.worker_state, &self.tenant_state)

@@ -18,7 +18,7 @@ const defaultState: State = {
     showOnlyPresent: false,
     selectedGuild: null,
     fetchedUserGuilds: null,
-    dispatchEvent: { event: "", data: "Null"},
+    dispatchEvent: { event: "", data: {Nil: null}},
     fetchedSettings: null
     
 }

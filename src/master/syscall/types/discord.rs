@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use serenity::all::{GenericChannelId, Permissions, RoleId};
-use khronos_ext::mluau_ext::prelude::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DashboardGuild {
@@ -79,15 +78,4 @@ pub struct PartialUser {
     pub global_name: Option<String>,
     /// The avatar hash of the user
     pub avatar: Option<String>,
-}
-
-impl IntoLua for PartialUser {
-    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
-        let table = lua.create_table_with_capacity(0, 4)?;
-        table.set("id", self.id)?;
-        table.set("username", self.username)?;
-        table.set("global_name", self.global_name)?;
-        table.set("avatar", self.avatar)?;
-        Ok(LuaValue::Table(table))
-    }
 }

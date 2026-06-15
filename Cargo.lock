@@ -726,7 +726,7 @@ dependencies = [
 [[package]]
 name = "dapi"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#e46b82070bc90eca9cb184a77bc9d16e92cb2970"
+source = "git+https://github.com/anti-raid/khronos#da75b64e7d146b2bf9469a289a56b45fa3fb5723"
 dependencies = [
  "async-trait",
  "bitflags 2.13.0",
@@ -1292,9 +1292,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.4.14"
+version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "171fefbc92fe4a4de27e0698d6a5b392d6a0e333506bc49133760b3bcf948733"
+checksum = "6cb093c84e8bd9b188d4c4a8cb6579fc016968d14c99882163cd3ff402a4f155"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -1780,7 +1780,7 @@ dependencies = [
 [[package]]
 name = "khronos_ext"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#e46b82070bc90eca9cb184a77bc9d16e92cb2970"
+source = "git+https://github.com/anti-raid/khronos#da75b64e7d146b2bf9469a289a56b45fa3fb5723"
 dependencies = [
  "chrono",
  "khronos_runtime",
@@ -1795,7 +1795,7 @@ dependencies = [
 [[package]]
 name = "khronos_runtime"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#e46b82070bc90eca9cb184a77bc9d16e92cb2970"
+source = "git+https://github.com/anti-raid/khronos#da75b64e7d146b2bf9469a289a56b45fa3fb5723"
 dependencies = [
  "aes-gcm",
  "argon2",

@@ -1,5 +1,4 @@
 use chrono::Utc;
-use khronos_ext::mluau_ext::prelude::*;
 use serde::{Deserialize, Serialize};
 use serenity::all::UserId;
 use crate::master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, internal::auth as iauth, types::auth::UserSession};
@@ -22,47 +21,6 @@ pub enum MAuthSyscall {
     DeleteSession { session_id: String }
 }
 
-impl FromLua for MAuthSyscall {
-    fn from_lua(value: LuaValue, _lua: &Lua) -> LuaResult<Self> {
-        let LuaValue::Table(tab) = value else {
-            return Err(LuaError::FromLuaConversionError {
-                from: value.type_name(),
-                to: "SyscallArgs".to_string(),
-                message: Some("expected a table".to_string()),
-            })
-        };
-
-        let typ: LuaString = tab.get("op")?;
-        match typ.as_bytes().as_ref() {
-            b"CreateLoginSession" => {
-                let code = tab.get("code")?;
-                let redirect_uri = tab.get("redirect_uri")?;
-                let code_verifier = tab.get("code_verifier")?;
-                Ok(Self::CreateLoginSession { code, redirect_uri, code_verifier })
-            },
-            b"CreateApiSession" => {
-                let name = tab.get("name")?;
-                let expiry = tab.get("expiry")?;
-                Ok(Self::CreateApiSession { name, expiry })
-            },
-            b"GetUserSessions" => {
-                Ok(Self::GetUserSessions {})
-            },
-            b"DeleteSession" => {
-                let session_id = tab.get("session_id")?;
-                Ok(Self::DeleteSession { session_id })
-            },
-            _ => {
-                Err(LuaError::FromLuaConversionError {
-                    from: "table",
-                    to: "MAuthSyscall".to_string(),
-                    message: Some("invalid op provided".to_string()),
-                })
-            }
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "op")]
 pub enum MAuthSyscallRet {
@@ -79,28 +37,6 @@ pub enum MAuthSyscallRet {
         sessions: Vec<UserSession>
     },
     Ack
-}
-
-impl IntoLua for MAuthSyscallRet {
-    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
-        let table = lua.create_table_with_capacity(0, 5)?;
-        match self {
-            Self::CreatedSession { session, token, user } => {
-                table.set("op", "Session")?;
-                table.set("session", session)?;
-                table.set("token", token)?;
-                table.set("user", user)?;
-            }
-            Self::UserSessions { sessions } => {
-                table.set("op", "UserSessions")?;
-                table.set("sessions", sessions)?;
-            }
-            Self::Ack => {
-                table.set("op", "Ack")?;
-            }
-        }
-        Ok(LuaValue::Table(table))
-    }
 }
 
 #[derive(Serialize, Debug)]

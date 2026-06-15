@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
 use dapi::types::CreateCommand;
-use khronos_runtime::{primitives::blob::Blob, utils::khronos_value::KhronosValue};
+use khronos_runtime::{utils::khronos_value::{CKhronosValue, KhronosValue}};
 use serde::{Deserialize, Serialize};
 use serenity::all::{GuildId, UserId};
 use crate::{geese::{state::{StateExecResult, StateOp}, tenantstate::{ModFlags, TenantState}}, master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::bot::{BotStatus, ShardConn}}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id}};
-use khronos_ext::mluau_ext::prelude::*;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "op")]
@@ -24,6 +23,15 @@ pub enum MBotSyscall {
         name: String,
         /// Data to send
         data: KhronosValue
+    },
+    /// Dispatch an event (with compressed khronos value) as data to a worker process
+    DispatchCEvent {
+        /// Tenant ID to dispatch the event to
+        id: Id,
+        /// Name of the event
+        name: String,
+        /// Data to send
+        data: CKhronosValue
     },
     /// Verify a presigned URL and return the decoded payload
     GetBlobData {
@@ -59,71 +67,6 @@ pub enum MBotSyscall {
     AdminFetchTenantState { id: Id }
 }
 
-impl FromLua for MBotSyscall {
-    fn from_lua(value: LuaValue, _lua: &Lua) -> LuaResult<Self> {
-        let LuaValue::Table(tab) = value else {
-            return Err(LuaError::FromLuaConversionError {
-                from: value.type_name(),
-                to: "MBotSyscall".to_string(),
-                message: Some("expected a table".to_string()),
-            })
-        };
-
-        let typ: LuaString = tab.get("op")?;
-        match typ.as_bytes().as_ref() {
-            b"GetBotCommands" => Ok(Self::GetBotCommands {}),
-            b"GetBotConfig" => Ok(Self::GetBotConfig {}),
-            b"GetBotStatus" => Ok(Self::GetBotStatus {}),
-            b"DispatchEvent" => {
-                let id = tab.get("id")?;
-                let name = tab.get("name")?;
-                let data = tab.get("data")?;
-                Ok(Self::DispatchEvent { id, name, data })
-            },
-            b"GetBlobData" => {
-                let payload = tab.get("payload")?;
-                let signature = tab.get("signature")?;
-                Ok(Self::GetBlobData { payload, signature })
-            },
-            b"AdminRelaxedDispatchEvent" => {
-                let id = tab.get("id")?;
-                let name = tab.get("name")?;
-                let data = tab.get("data")?;
-                let allow_non_web_event_names = tab.get("allow_non_web_event_names")?;
-                let allow_self_event = tab.get("allow_self_event")?;
-                let mock_id = tab.get("mock_id")?;
-                Ok(Self::AdminRelaxedDispatchEvent { id, name, data, allow_non_web_event_names, allow_self_event, mock_id })
-            },
-            b"AdminGetUncachedBotStatus" => Ok(Self::AdminGetUncachedBotStatus {}),
-            b"AdminDropTenant" => {
-                let id = tab.get("id")?;
-                Ok(Self::AdminDropTenant { id })
-            },
-            b"AdminSetTenantStateModFlags" => {
-                let id = tab.get("id")?;
-                let modflags = tab.get("modflags")?;
-                Ok(Self::AdminSetTenantStateModFlags { id, modflags: ModFlags::from_bits_retain(modflags) })
-            },
-            b"AdminState" => {
-                let id = tab.get("id")?;
-                let ops = tab.get("ops")?;
-                Ok(Self::AdminState { id, ops })
-            },
-            b"AdminFetchTenantState" => {
-                let id = tab.get("id")?;
-                Ok(Self::AdminFetchTenantState { id })
-            },
-            _ => {
-                Err(LuaError::FromLuaConversionError {
-                    from: "table",
-                    to: "MBotSyscall".to_string(),
-                    message: Some("invalid op provided".to_string()),
-                })
-            }
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "op")]
 pub enum MBotSyscallRet {
@@ -149,6 +92,10 @@ pub enum MBotSyscallRet {
     KhronosValue {
         data: KhronosValue
     },
+    /// (Compressed) Khronos value response
+    CKhronosValue {
+        data: CKhronosValue
+    },
     /// State exec response (admin only)
     State {
         res: Vec<StateExecResult>,
@@ -163,40 +110,6 @@ pub enum MBotSyscallRet {
         filename: String,
     },
     Ack,
-}
-
-impl IntoLua for MBotSyscallRet {
-    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
-        match self {
-            Self::KhronosValue { data } => {
-                let table = lua.create_table_with_capacity(0, 2)?;
-                table.set("op", "KhronosValue")?;
-                table.set("data", data)?;
-                Ok(LuaValue::Table(table))
-            }
-            Self::State { res, new_tenant_state } => {
-                let table = lua.create_table_with_capacity(0, 2)?;
-                table.set("op", "State")?;
-                table.set("res", res)?;
-                table.set("new_tenant_state", new_tenant_state)?;
-                Ok(LuaValue::Table(table))
-            },
-            Self::TenantState { ts } => {
-                let table = lua.create_table_with_capacity(0, 2)?;
-                table.set("op", "TenantState")?;
-                table.set("ts", ts)?;
-                Ok(LuaValue::Table(table))
-            }
-            Self::BlobData { data, filename } => {
-                let table = lua.create_table_with_capacity(0, 2)?;
-                table.set("op", "BlobData")?;
-                table.set("data", Blob { data: data.into() })?;
-                table.set("filename", filename)?;
-                Ok(LuaValue::Table(table))
-            }
-            _ => lua.to_value(&self) // hack to speed up dev
-        }
-    }
 }
 
 impl MBotSyscall {
@@ -261,6 +174,31 @@ impl MBotSyscall {
                 let event = SimpleEvent::new_khronos_value(name, Some(user_id.to_string()), data);
 
                 Ok(MBotSyscallRet::KhronosValue { data: handler.worker_pool.dispatch_event(id, event).await? })
+            }
+            Self::DispatchCEvent { id, name, data } => {
+                if !name.starts_with("Web") {
+                    return Err(MSyscallError::InvalidEvent { reason: "Event name must start with Web"});
+                }
+                let user_id = ctx.into_user_id()?;
+                match id {
+                    Id::Guild(id) => {
+                        // Ensure the bot is in the guild
+                        let hb = handler.has_bot(&[id]).await?;    
+                        if !hb[0] {
+                            return Err(MSyscallError::BotNotOnGuild);
+                        }
+                        // Ensure guild is in server
+                    }
+                    Id::User(id) => {
+                        if user_id != id {
+                            return Err(MSyscallError::InvalidEvent { reason: "Cannot send events to users who are not yourself" });
+                        }
+                    }
+                }
+
+                let event = SimpleEvent::new_khronos_value(name, Some(user_id.to_string()), data.0);
+
+                Ok(MBotSyscallRet::CKhronosValue { data: CKhronosValue(handler.worker_pool.dispatch_event(id, event).await?) })
             }
             Self::GetBlobData { payload, signature } => {
                 if !ctx.is_anon_getter() && !ctx.is_secure() {

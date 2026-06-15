@@ -90,20 +90,19 @@ export type FormElement = {
     disabled?: boolean,
     value: string
 } | {
-    type: "Text.User",
-    id: string,
-    label: string,
-    description?: string,
-    placeholder?: string,
-    disabled?: boolean,
-    value: string
-} | {
     type: "Array.Text",
-    style: "Normal" | "Kittycat",
     id: string,
     label: string,
     description?: string,
     disabled?: boolean,
+    value: string[]
+} | {
+    type: "Select.Array.Text",
+    id: string,
+    label: string,
+    description?: string,
+    disabled?: boolean,
+    choices: {label: string, value: string}[],
     value: string[]
 } | {
     type: "Number",
@@ -145,7 +144,7 @@ export type FormElement = {
 }
 
 const RAW_FORM_ELEMENT_TYPES = [
-    "DisplayElement", "Text", "Text.User", "Array.Text", "Number", "Select.Text",
+    "DisplayElement", "Text", "Array.Text", "Select.Array.Text", "Number", "Select.Text",
     "Toggle.Checkbox", "Toggle.Slider", "Button.Action"
 ] as const
 
@@ -161,19 +160,18 @@ type RawFormElement = {
     placeholder?: string,
     disabled?: boolean,
 } | {
-    type: "Text.User",
+    type: "Array.Text",
     id: string,
     label: string,
     description?: string,
-    placeholder?: string,
     disabled?: boolean,
 } | {
-    type: "Array.Text",
-    style: "Normal" | "Kittycat",
+    type: "Select.Array.Text",
     id: string,
     label: string,
     description?: string,
     disabled?: boolean,
+    choices: {label: string, value: string}[],
 } | {
     type: "Number",
     id: string,
@@ -363,7 +361,6 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
                 const delem = expandDisplayElement(assertMap(mapGet(map, "element"), "element"))
                 return { type, element: delem }
             case "Text":
-            case "Text.User":
             case "Number": // all of these share the same base type (for now)
                const tid = assertString(mapGet(map, "id"), "id")
                const tlabel = assertString(mapGet(map, "label"), "label")
@@ -372,12 +369,23 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
                const tdisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
                return { type, id: tid, label: tlabel, description: tdesc, placeholder: tph, disabled: tdisabled }
             case "Array.Text":
-                const astyle = assertOneOf(assertString(mapGet(map, "style"), "style"), ["Normal", "Kittycat"])
                 const aid = assertString(mapGet(map, "id"), "id")
                 const alabel = assertString(mapGet(map, "label"), "label")
                 const adesc = assertOptional(mapGetOpt(map, "description"), assertString)
                 const adisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
-                return { type, id: aid, style: astyle, label: alabel, description: adesc, disabled: adisabled }
+                return { type, id: aid, label: alabel, description: adesc, disabled: adisabled }
+            case "Select.Array.Text":
+                const said = assertString(mapGet(map, "id"), "id")
+                const salabel = assertString(mapGet(map, "label"), "label")
+                const sadesc = assertOptional(mapGetOpt(map, "description"), assertString)
+                const sadisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
+                const sachoices = assertList(mapGet(map, "choices"), "choices").map((entry, idx) => {
+                    const cmap = assertMap(entry, `choices map at idx ${idx} for Select.Array.Text with id ${idx} [${sid}]`) // expand the entry into choices
+                    const clabel = assertString(mapGet(cmap, "label"), "label")
+                    const cvalue = assertString(mapGet(cmap, "value"), "value")
+                    return { label: clabel, value: cvalue }
+                })
+                return { type, id: said, label: salabel, description: sadesc, disabled: sadisabled, choices: sachoices }
             case "Select.Text":
                 const sid = assertString(mapGet(map, "id"), "id")
                 const slabel = assertString(mapGet(map, "label"), "label")
@@ -413,7 +421,6 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
             case "Button.Action":
                 return rawel  // action buttons and display elements dont need formdata values injected
             case "Text":
-            case "Text.User":
             case "Select.Text":
                 return { ...rawel, value: assertString(mapGet(formdata.data, rawel.id)) }
             case "Number":
@@ -422,6 +429,7 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
             case "Toggle.Slider":
                 return { ...rawel, value: assertBoolean(mapGet(formdata.data, rawel.id)) }
             case "Array.Text":
+            case "Select.Array.Text":
                 return { ...rawel, value: assertList(mapGet(formdata.data, rawel.id)).map(v => assertString(v, "string in string array")) }
         }
     }

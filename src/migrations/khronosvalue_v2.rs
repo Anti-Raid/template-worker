@@ -131,7 +131,7 @@ fn from_v1(v: KhronosValue) -> KhronosValueV2 {
         KhronosValue::Timestamptz(t) => KhronosValueV2::Timestamptz(t),
         KhronosValue::Interval(i) => KhronosValueV2::Interval(i),
         KhronosValue::TimeZone(t) => KhronosValueV2::TimeZone(t),
-        KhronosValue::Null => KhronosValueV2::Null,
+        KhronosValue::Null => KhronosValueV2::Null(()),
     }
 }
 

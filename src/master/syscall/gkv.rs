@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use crate::master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::gkv::PartialGlobalKv};
-use khronos_ext::mluau_ext::prelude::*;
 
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -24,12 +23,6 @@ pub enum MGkvSyscall {
     AdminSetGlobalKvReviewState { key: String, version: i32, scope: String, review_state: String}
 }
 
-impl FromLua for MGkvSyscall {
-    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
-        lua.from_value(value) // hack to speed up dev
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "op")]
 pub enum MGkvSyscallRet {
@@ -40,26 +33,6 @@ pub enum MGkvSyscallRet {
         gkv: PartialGlobalKv
     },
     Ack,
-}
-
-impl IntoLua for MGkvSyscallRet {
-    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
-        let table: LuaTable = lua.create_table_with_capacity(0, 2)?;
-        match self {
-            Self::GlobalKvList { gkvs } => {
-                table.set("op", "GlobalKvList")?;
-                table.set("gkvs", gkvs)?;
-            }
-            Self::GlobalKv { gkv } => {
-                table.set("op", "GlobalKv")?;
-                table.set("gkv", gkv)?;
-            }
-            Self::Ack => {
-                table.set("op", "Ack")?;
-            }
-        }
-        Ok(LuaValue::Table(table))
-    }
 }
 
 impl MGkvSyscall {
