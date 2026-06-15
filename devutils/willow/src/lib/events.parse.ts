@@ -243,36 +243,45 @@ const getTypeName = (value: RawKhronosValue): string => {
 }
 
 const assertOptional = <T>(value: RawKhronosValue | undefined, fn: (value: RawKhronosValue, ty?: string) => T, ty: string = "optional"): T | undefined => {
-    if (value === undefined || value === "Null") return undefined
+    if (value === undefined || "Nil" in value || "Null" in value) return undefined
     if(ty) return fn(value, ty)
     else return fn(value)
 }
 
 const assertString = (value: RawKhronosValue, ty: string = "string"): string => {
-    if (value === "Null" || !("Text" in value)) throw new Error(`Got ${getTypeName(value)} when ${ty} expected`)
+    if (!("Text" in value)) throw new Error(`Got ${getTypeName(value)} when ${ty} expected`)
     return value.Text
 }
 
 const assertNumber = (value: RawKhronosValue, ty: string = "number"): number => {
-    if (value === "Null") throw new Error(`Got ${getTypeName(value)} when ${ty} expected`)
     if("Float" in value) return value.Float
     else if("Integer" in value) return value.Integer
     throw new Error(`Got ${getTypeName(value)} when ${ty} expected`)
 }
 
 const assertBoolean = (value: RawKhronosValue, ty: string = "boolean"): boolean => {
-    if (value === "Null" || !("Boolean" in value)) throw new Error(`Got ${getTypeName(value)} when ${ty} expected`)
+    if (!("Boolean" in value)) throw new Error(`Got ${getTypeName(value)} when ${ty} expected`)
     return value.Boolean
 }
 
 const assertList = (value: RawKhronosValue, ty: string = "list"): RawKhronosValue[] => {
-    if (value === "Null" || !("List" in value)) throw new Error(`Got ${getTypeName(value)} when ${ty} expected`)
+    if (!("List" in value)) throw new Error(`Got ${getTypeName(value)} when ${ty} expected`)
     return value.List
 }
 
 const assertMap = (value: RawKhronosValue, ty = "Map with string keys"): Map<string, RawKhronosValue> => {
-    if (value === "Null" || !("Map" in value)) throw new Error(`Got ${getTypeName(value)} when ${ty} expected`)
+    if (!("Map" in value || "StrMap" in value)) throw new Error(`Got ${getTypeName(value)} when ${ty} expected`)
     let mp: Map<string, RawKhronosValue> = new Map()
+
+    // handle strmap
+    if("StrMap" in value) {
+        for(const [key, val] of Object.entries(value.StrMap)) {
+            mp.set(key, val)
+        }
+        return mp
+    }
+
+    // Map
     for(const [key, val] of value.Map) {
         let k = assertString(key, "Map with string keys")
         mp.set(k, val)
@@ -288,7 +297,7 @@ const mapGet = (map: Map<string, RawKhronosValue>, prop: string, inprop: string 
 
 const mapGetOpt = (map: Map<string, RawKhronosValue>, prop: string): RawKhronosValue | undefined => {
     let p = map.get(prop)
-    if(!p || p === "Null") return undefined
+    if(!p || "Nil" in p || "Null" in p) return undefined
     return p
 }
 

@@ -17,7 +17,7 @@
 	}: { id: string, value: RawKhronosValue; label?: string; depth?: number, inline?: boolean, disabled?: boolean } = $props();
 
 	const types = [
-		'Text', 'Integer', 'Int64', 'Float', 'Boolean', 'Vector', 'Map', 'List', 'Timestamptz', 'Interval', 'TimeZone', 'MemoryVfs', 'Null',
+		'Text', 'Integer', 'Int64', 'Float', 'Boolean', 'Vector', 'Map', 'List', 'Timestamptz', 'Interval', 'TimeZone', 'MemoryVfs', 'Null', "Nil"
 	];
 </script>
 
@@ -27,7 +27,7 @@
 			<span class="text-xs font-black text-gray-400 uppercase tracking-tighter min-w-16">{label}</span>
 		{/if}
 		<div class="w-36">
-			<Select {disabled} id="{id}-typeselect" label="Select type" value={value == "Null" ? "Null" : Object.keys(value)[0]} onchange={(currentType) => {
+			<Select {disabled} id="{id}-typeselect" label="Select type" value={Object.keys(value)[0]} onchange={(currentType) => {
                 if(currentType === Object.keys(value)[0]) return
                 console.log(currentType, value)
                 switch (currentType) {
@@ -43,14 +43,15 @@
                     case 'Interval': value = { Interval: [0, 0] }; break;
                     case 'TimeZone': value = { TimeZone: 'UTC' }; break;
                     case 'MemoryVfs': value = { MemoryVfs: {} }; break;
-                    case 'Null': value = "Null"; break;
+                    case 'Null': value = { Null: null }; break;
+					case 'Nil': value = { Nil: null }; break;
                 }
             }} options={types} placeholder="" />
 		</div>
 	</div>
 
 	<div class="contents">
-		{#if value == 'Null'}
+		{#if 'Null' in value || 'Nil' in value}
 			<!--intentionally empty-->
 		{:else if 'Text' in value}
 			<TextBox id={id} bind:value={value.Text} placeholder="String..." readonly={disabled} />
@@ -84,14 +85,14 @@
 						<Self id={`${id}-le${i}`} bind:value={value.List[i]} label={`#${i}`} depth={depth + 1} {disabled} />
 						{#if !disabled}
 							<button onclick={() => {
-								if(value != "Null" && 'List' in value) value.List = value.List.filter((_, idx: number) => idx !== i)
+								if('List' in value) value.List = value.List.filter((_, idx: number) => idx !== i)
 							}} class="absolute top-2 right-2 p-1 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
 						{/if}
 					</div>
 				{/each}
 				{#if !disabled}
 					<Button onclick={() => {
-						if(value != "Null" && 'List' in value) value.List = [...value.List, "Null"]
+						if('List' in value) value.List = [...value.List, {Nil: null}]
 					}}>+ Add Item</Button>
 				{/if}
 			</div>
@@ -103,14 +104,14 @@
 						<Self id={`${id}-me${i}`} bind:value={value.Map[i][1]} label="Val" depth={depth + 1} inline {disabled} />
 						{#if !disabled}
 							<button onclick={() => {
-								if(value != "Null" && 'Map' in value) value.Map = value.Map.filter((_: any, idx: number) => idx !== i)
+								if('Map' in value) value.Map = value.Map.filter((_: any, idx: number) => idx !== i)
 							}} class="absolute top-2 right-2 p-1 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
 						{/if}
 					</div>
 				{/each}
 				{#if !disabled}
 					<Button onclick={() => {
-						if(value != "Null" && 'Map' in value) value.Map = [...value.Map, [{ Text: '' }, "Null"]]
+						if('Map' in value) value.Map = [...value.Map, [{ Text: '' },  {Nil: null}]]
 					}}>+ Add Entry</Button>
 				{/if}
 			</div>
@@ -122,14 +123,14 @@
 						<div class="flex-1"><TextBox id={`vfs-v-${key}`} bind:value={value.MemoryVfs[key]} label="Content" readonly={disabled} /></div>
 						{#if !disabled}
 							<button onclick={() => {
-								if(value != "Null" && 'MemoryVfs' in value) delete value.MemoryVfs[key]
+								if('MemoryVfs' in value) delete value.MemoryVfs[key]
 							}} class="mt-8 p-1 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
 						{/if}
 					</div>
 				{/each}
 				{#if !disabled}
 					<Button onclick={() => {
-						if(value != "Null" && 'MemoryVfs' in value) {
+						if('MemoryVfs' in value) {
 							let key = prompt("Path?")
 							if(key) value.MemoryVfs[key] = ""
 						}
