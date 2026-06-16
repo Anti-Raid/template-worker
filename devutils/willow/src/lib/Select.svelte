@@ -7,9 +7,10 @@
     onchange,
     options = [] as Option[], 
     label = "", 
+    description="",
     disabled = false,
     placeholder = "Select an option..."
-  }: { id: string, value: string, onchange: (s: string) => void, options: Option[], label: string, disabled?: boolean, placeholder: string | undefined} = $props();
+  }: { id: string, value: string, onchange: (s: string) => void, options: Option[], label: string, description?: string, disabled?: boolean, placeholder: string | undefined} = $props();
 
   let processedOptions = $derived(options.map(opt => {
     if (typeof opt === 'string') {
@@ -22,6 +23,9 @@
 <div class="flex flex-col gap-2 mb-4">
   {#if label}
     <label for={id} class="text-sm font-medium text-gray-700">{label}</label>
+  {/if}
+  {#if description}
+    <p class="text-sm font-medium text-gray-300">{description}</p>
   {/if}
   <select
     {id}

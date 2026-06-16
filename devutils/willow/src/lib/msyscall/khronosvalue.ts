@@ -240,9 +240,8 @@ export type CKhronosValue = | string
   | null // Nil
   | boolean // Boolean
   | CKhronosValue[] // List
+  | number // Integer/Float
   // tagged
-  | { I: number } // Integer
-  | { F: number } // Float
   | { I64: string } // Int64 (BigInt in js)
   | { N: null } // Null
   | { "#SM": Record<string, CKhronosValue> }  // StrMap
@@ -250,7 +249,7 @@ export type CKhronosValue = | string
   | { Vec: [number, number, number] }     // Vector 
   | { TS: string }                        // Timestamptz 
   | { TZ: string }                        // TimeZone 
-  | { Interval: [number, number]; }       // Interval [seconds, nanoseconds]
+  | { IV: [number, number]; }       // Interval [seconds, nanoseconds]
   | { MVfs: Record<string, string> };     // MemoryVfs
 
 export const expand = (comp: CKhronosValue): RawKhronosValue => {
@@ -258,8 +257,13 @@ export const expand = (comp: CKhronosValue): RawKhronosValue => {
     else if (typeof comp === "string") return {Text: comp}
     else if (typeof comp === "boolean") return {Boolean: comp}
     else if (Array.isArray(comp)) return {List: comp.map(expand)}
-    else if ('I' in comp) return {Integer: comp.I}
-    else if ('F' in comp) return {Float: comp.F}
+    else if (typeof comp === "number") {
+        if (Number.isInteger(comp)) {
+            return { Integer: comp };
+        } else {
+            return { Float: comp };
+        }
+    }
     else if ('I64' in comp) return {Int64: comp.I64}
     else if ('N' in comp) return {Null: null}
     else if ('#SM' in comp) return {StrMap: Object.fromEntries(Object.entries(comp["#SM"]).map(([k, v]) => [k, expand(v)]))}
@@ -267,7 +271,7 @@ export const expand = (comp: CKhronosValue): RawKhronosValue => {
     else if ('Vec' in comp) return {Vector: comp.Vec}
     else if ('TS' in comp) return {Timestamptz: comp.TS}
     else if ('TZ' in comp) return {TimeZone: comp.TZ}
-    else if ('Interval' in comp) return {Interval: comp.Interval}
+    else if ('IV' in comp) return {Interval: comp.IV}
     else if ('MVfs' in comp) return {MemoryVfs: comp.MVfs}
     else throw new Error('Unknown CKhronosValue type in expand()');
 }
@@ -280,8 +284,8 @@ export const dexpand = (comp: RawKhronosValue): CKhronosValue => {
     if ('Text' in comp) return comp.Text
     else if ('Boolean' in comp) return comp.Boolean
     else if ('List' in comp) return comp.List.map(dexpand)
-    else if ('Integer' in comp) return {I: comp.Integer}
-    else if ('Float' in comp) return {F: comp.Float}
+    else if ('Integer' in comp) return comp.Integer
+    else if ('Float' in comp) return comp.Float
     else if ('Int64' in comp) return {I64: comp.Int64}
     else if ('Null' in comp) return {N: null}
     else if ('Nil' in comp) return null
@@ -290,7 +294,7 @@ export const dexpand = (comp: RawKhronosValue): CKhronosValue => {
     else if ('Vector' in comp) return {Vec: comp.Vector}
     else if ('Timestamptz' in comp) return {TS: comp.Timestamptz}
     else if ('TimeZone' in comp) return {TZ: comp.TimeZone}
-    else if ('Interval' in comp) return {Interval: comp.Interval}
+    else if ('Interval' in comp) return {IV: comp.Interval}
     else if ('MemoryVfs' in comp) return {MVfs: comp.MemoryVfs}
     else throw new Error('Unknown RawKhronosValue type in dexpand()');
 }

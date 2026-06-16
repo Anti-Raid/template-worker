@@ -1,5 +1,5 @@
 <script lang="ts">
-  let { id, description="", value = $bindable(), placeholder = "", label = "", type = "text", readonly = false } = $props();
+  let { id, description="", value = $bindable(""), placeholder = "", label = "", type = "text", readonly = false } = $props();
 </script>
 
 <div class="flex flex-col gap-2 mb-4">

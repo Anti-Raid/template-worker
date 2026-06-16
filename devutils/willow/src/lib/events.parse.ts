@@ -78,6 +78,65 @@ export type Form = {
     form: FormElement[],
 }
 
+const RAW_FORM_ELEMENT_TYPES = [
+    "DisplayElement", "Text", "Array.Text", "Array.Select.Text", "Number", "Select.Text",
+    "Boolean", "Button.Action"
+] as const
+
+// raw form element from luau
+type RawFormElement = {
+    type: "DisplayElement",
+    element: DisplayElement
+} | {
+    type: "Text",
+    id: string,
+    label: string,
+    description?: string,
+    placeholder?: string,
+    disabled?: boolean,
+} | {
+    type: "Array.Text",
+    id: string,
+    label: string,
+    description?: string,
+    disabled?: boolean,
+} | {
+    type: "Array.Select.Text",
+    id: string,
+    label: string,
+    description?: string,
+    disabled?: boolean,
+    choices: {label: string, value: string}[],
+} | {
+    type: "Number",
+    id: string,
+    label: string,
+    description?: string,
+    placeholder?: string,
+    disabled?: boolean,
+} | {
+    type: "Select.Text",
+    id: string,
+    label: string,
+    description?: string,
+    disabled?: boolean,
+    placeholder?: string,
+    choices: {label: string, value: string}[],
+} | {
+    type: "Boolean",
+    id: string,
+    label: string,
+    description?: string,
+    disabled?: boolean,
+} | {
+    type: "Button.Action",
+    id: string,
+    text: string,
+    style: "Primary" | "Secondary" | "Danger",
+    /** if set to true, will send the entire form state  */
+    send_form: boolean, 
+}
+
 export type FormElement = {
     type: "DisplayElement",
     element: DisplayElement
@@ -97,7 +156,7 @@ export type FormElement = {
     disabled?: boolean,
     value: string[]
 } | {
-    type: "Select.Array.Text",
+    type: "Array.Select.Text",
     id: string,
     label: string,
     description?: string,
@@ -119,85 +178,15 @@ export type FormElement = {
     description?: string,
     disabled?: boolean,
     choices: {label: string, value: string}[],
+    placeholder?: string,
     value: string
 } | {
-    type: "Toggle.Checkbox",
+    type: "Boolean",
     id: string,
     label: string,
     description?: string,
     disabled?: boolean,
     value: boolean
-} | {
-    type: "Toggle.Slider",
-    id: string,
-    label: string,
-    description?: string,
-    disabled?: boolean,
-    value: boolean
-} | {
-    type: "Button.Action",
-    id: string,
-    text: string,
-    style: "Primary" | "Secondary" | "Danger",
-    /** if set to true, will send the entire form state  */
-    send_form: boolean, 
-}
-
-const RAW_FORM_ELEMENT_TYPES = [
-    "DisplayElement", "Text", "Array.Text", "Select.Array.Text", "Number", "Select.Text",
-    "Toggle.Checkbox", "Toggle.Slider", "Button.Action"
-] as const
-
-// raw form element from luau
-type RawFormElement = {
-    type: "DisplayElement",
-    element: DisplayElement
-} | {
-    type: "Text",
-    id: string,
-    label: string,
-    description?: string,
-    placeholder?: string,
-    disabled?: boolean,
-} | {
-    type: "Array.Text",
-    id: string,
-    label: string,
-    description?: string,
-    disabled?: boolean,
-} | {
-    type: "Select.Array.Text",
-    id: string,
-    label: string,
-    description?: string,
-    disabled?: boolean,
-    choices: {label: string, value: string}[],
-} | {
-    type: "Number",
-    id: string,
-    label: string,
-    description?: string,
-    placeholder?: string,
-    disabled?: boolean,
-} | {
-    type: "Select.Text",
-    id: string,
-    label: string,
-    description?: string,
-    disabled?: boolean,
-    choices: {label: string, value: string}[],
-} | {
-    type: "Toggle.Checkbox",
-    id: string,
-    label: string,
-    description?: string,
-    disabled?: boolean,
-} | {
-    type: "Toggle.Slider",
-    id: string,
-    label: string,
-    description?: string,
-    disabled?: boolean,
 } | {
     type: "Button.Action",
     id: string,
@@ -374,7 +363,7 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
                 const adesc = assertOptional(mapGetOpt(map, "description"), assertString)
                 const adisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
                 return { type, id: aid, label: alabel, description: adesc, disabled: adisabled }
-            case "Select.Array.Text":
+            case "Array.Select.Text":
                 const said = assertString(mapGet(map, "id"), "id")
                 const salabel = assertString(mapGet(map, "label"), "label")
                 const sadesc = assertOptional(mapGetOpt(map, "description"), assertString)
@@ -389,6 +378,7 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
             case "Select.Text":
                 const sid = assertString(mapGet(map, "id"), "id")
                 const slabel = assertString(mapGet(map, "label"), "label")
+                const sph = assertOptional(mapGetOpt(map, "placeholder"), assertString)
                 const sdesc = assertOptional(mapGetOpt(map, "description"), assertString)
                 const sdisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
                 const schoices = assertList(mapGet(map, "choices"), "choices").map((entry, idx) => {
@@ -397,9 +387,8 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
                     const cvalue = assertString(mapGet(cmap, "value"), "value")
                     return { label: clabel, value: cvalue }
                 })
-                return { type, id: sid, label: slabel, description: sdesc, disabled: sdisabled, choices: schoices }
-            case "Toggle.Checkbox":
-            case "Toggle.Slider":
+                return { type, id: sid, label: slabel, description: sdesc, placeholder: sph, disabled: sdisabled, choices: schoices }
+            case "Boolean":
                const bid = assertString(mapGet(map, "id"), "id")
                const blabel = assertString(mapGet(map, "label"), "label")
                const bdesc = assertOptional(mapGetOpt(map, "description"), assertString)
@@ -425,11 +414,10 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
                 return { ...rawel, value: assertString(mapGet(formdata.data, rawel.id)) }
             case "Number":
                 return { ...rawel, value: assertNumber(mapGet(formdata.data, rawel.id)) }
-            case "Toggle.Checkbox":
-            case "Toggle.Slider":
+            case "Boolean":
                 return { ...rawel, value: assertBoolean(mapGet(formdata.data, rawel.id)) }
             case "Array.Text":
-            case "Select.Array.Text":
+            case "Array.Select.Text":
                 return { ...rawel, value: assertList(mapGet(formdata.data, rawel.id)).map(v => assertString(v, "string in string array")) }
         }
     }

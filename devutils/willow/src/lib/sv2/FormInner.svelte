@@ -8,7 +8,7 @@
     import DisplayElement from './DisplayElement.svelte';
     import ErrorBox from '$lib/ErrorBox.svelte';
 
-	let { form = $bindable(), formsetid }: {
+	let { form, formsetid }: {
 		form: Form,
         formsetid: string
 	} = $props();
