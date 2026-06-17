@@ -260,7 +260,7 @@
 
 			{#each mps.state.fetchedSettings.comps as [tmplId, comps], idx}
 				<h3 class="text-md font-semibold mb-2">Template '{tmplId}'</h3>
-				<SV2 comps={comps} />
+				<SV2 template={tmplId} comps={comps} />
 			{/each}
 		{/if}
 	</div>

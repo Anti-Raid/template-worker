@@ -120,7 +120,7 @@ pub enum MSyscallRet {
 #[serde(tag = "op")]
 pub enum MSyscallError {
     /// Generic error response
-    Generic(String),
+    Generic { message: String },
     /// Invalid event name/data
     InvalidEvent { reason: &'static str },
     /// Context is too insecure to perform this operation
@@ -149,7 +149,7 @@ pub enum MSyscallError {
 
 impl<T: Debug + Display + 'static> From<T> for MSyscallError {
     fn from(value: T) -> Self {
-        Self::Generic(value.to_string())
+        Self::Generic { message: value.to_string() }
     }
 }
 

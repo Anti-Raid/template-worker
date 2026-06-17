@@ -4,7 +4,7 @@
     import Form from './MultiForm.svelte';
 	import SV2 from "./SV2.svelte"
 
-	let { comps }: { comps: Component[] } = $props();
+	let { template, comps }: { template: string, comps: Component[] } = $props();
 </script>
 
 {#each comps as comp}
@@ -17,10 +17,10 @@
 					<span class="text-lg font-semibold">{comp.title} ({comp.id})</span>
 					<p class="mb-2">{comp.description}</p>
 				</summary>
-				<SV2 comps={comp.entries}/>
+				<SV2 template={template} comps={comp.entries}/>
 			</details>
 		</section>
 	{:else if comp.type == "#Willow.MultiForm"}
-		<Form id={comp.id} forms={comp.forms} reorderable={comp.reorderable} />
+		<Form template={template} id={comp.id} forms={comp.forms} reorderable={comp.reorderable} actions={comp.actions} />
 	{/if}
 {/each}

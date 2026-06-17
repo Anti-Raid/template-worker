@@ -6,12 +6,13 @@
     import TextBox from '$lib/TextBox.svelte';
     import Toggle from '$lib/Toggle.svelte';
     import type { FormElement } from '../events.parse';
+    import DisplayElement from './DisplayElement.svelte';
 
 	let { el = $bindable() }: { el: FormElement } = $props();
 </script>
 
-{#if el.type == "Button.Action" || el.type == "DisplayElement"}
-    <p>unreachable</p> <!-- Handled by outer MultiForm.svelte -->
+{#if el.type == "DisplayElement"}
+    <DisplayElement el={el.element} />
 {:else if el.type == "Text"}
     <TextBox id={el.id} label={el.label} description={el.description} placeholder={el.placeholder || "Enter some text here!"} bind:value={el.value} readonly={el.disabled} />
 {:else if el.type == "Number"}

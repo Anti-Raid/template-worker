@@ -1,15 +1,17 @@
 <script lang="ts">
-	import type { Event, Form } from '../events.parse';
+	import type { Event, Form, FormAction } from '../events.parse';
 	import Button from '$lib/Button.svelte';
     import { auth } from '$lib/auth.svelte';
     import { mps } from '$lib/mainpagestate.svelte';
     import { encode } from '$lib/msyscall/khronosvalue';
     import FormInner from './FormInner.svelte';
 
-	let { id, reorderable, forms }: {
+	let { template, id, reorderable, forms, actions }: {
+		template: string,
 		id: string, 
 		reorderable: boolean
 		forms: Form[],
+		actions: FormAction[]
 	} = $props();
 
 	let formOrder = $state<string[] | null>(null);
@@ -47,6 +49,7 @@
         if(!formOrder) throw new Error("No form order found")
 		const sve: Event = {
             type: "formset_reorder",
+			__tloop_template_id: template,
             id,
             list: formOrder
         }
@@ -131,7 +134,7 @@
 				</header>
 
 				<div class="flex flex-col gap-5 {isReordering ? 'pointer-events-none opacity-40' : ''} transition-all">
-					<FormInner form={form} formsetid={id} />
+					<FormInner template={template} form={form} formsetid={id} actions={actions}/>
 				</div>
 			</section>
 		{/each}

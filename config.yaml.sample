@@ -23,7 +23,6 @@ meta:
   postgres_url: postgres:///antiraid # Postgres URL
   proxy: http://localhost:3221 # Proxy URL
   support_server_invite: https://discord.gg/9BJWSrEBBJ
-  sandwich_http_api: http://localhost:29334
   default_error_channel: "1425929553930616833" # Change this
   mesophyll_token: "ENTER A RANDOM STRING HERE" # Mesophyll Token
   stratum_server: "127.0.0.1:12944"

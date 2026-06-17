@@ -12,10 +12,12 @@ export type DispatchResult = {
 
 export type Event = {
     type: "formset_reorder", 
+    __tloop_template_id: string, // the template id to dispatch to, used by tloop to selectively dispatch
     id: string,
     list: string[]
 } | {
     type: "form_action",
+    __tloop_template_id: string, // the template id to dispatch to, used by tloop to selectively dispatch
     action_button_id: string, 
     formset_id: string,
     form_id: string, 
@@ -67,6 +69,22 @@ export type Component = {
     reorderable: boolean,
     /** Form elements */
     forms: Form[],
+    /** Form actions */
+    actions: FormAction[]
+}
+
+const RAW_FORM_ACTION_TYPES = [
+    "Button.Event"
+] as const
+
+/** Form Actions */
+export type FormAction = {
+    type: "Button.Event",
+    id: string,
+    text: string,
+    style: "Primary" | "Secondary" | "Danger",
+    /**  if set to true, will send the entire form state */
+    send_form: boolean 
 }
 
 export type Form = {
@@ -80,7 +98,7 @@ export type Form = {
 
 const RAW_FORM_ELEMENT_TYPES = [
     "DisplayElement", "Text", "Array.Text", "Array.Select.Text", "Number", "Select.Text",
-    "Boolean", "Button.Action"
+    "Boolean"
 ] as const
 
 // raw form element from luau
@@ -128,13 +146,6 @@ type RawFormElement = {
     label: string,
     description?: string,
     disabled?: boolean,
-} | {
-    type: "Button.Action",
-    id: string,
-    text: string,
-    style: "Primary" | "Secondary" | "Danger",
-    /** if set to true, will send the entire form state  */
-    send_form: boolean, 
 }
 
 export type FormElement = {
@@ -187,13 +198,6 @@ export type FormElement = {
     description?: string,
     disabled?: boolean,
     value: boolean
-} | {
-    type: "Button.Action",
-    id: string,
-    text: string,
-    style: "Primary" | "Secondary" | "Danger",
-    /** if set to true, will send the entire form state  */
-    send_form: boolean, 
 }
 
 export type FormData = {
@@ -343,6 +347,18 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
         }
     }
 
+    const expandFormAction = (map: Map<string, RawKhronosValue>): FormAction => {
+        const type = assertOneOf(assertString(mapGet(map, "type"), "type"), RAW_FORM_ACTION_TYPES)
+        switch (type) {
+        case "Button.Event":
+            const ebid = assertString(mapGet(map, "id"), "id")
+            const ebtext = assertString(mapGet(map, "text"), "text")
+            const ebstyle = assertOneOf(assertString(mapGet(map, "style"), "style"), ["Primary", "Secondary", "Danger"])
+            const ebsendform = assertBoolean(mapGet(map, "send_form"), "send_form")
+            return { type, id: ebid, text: ebtext, style: ebstyle, send_form: ebsendform }
+        }
+    }
+
     const expandRawFormElement = (map: Map<string, RawKhronosValue>): RawFormElement => {
         const type = assertOneOf(assertString(mapGet(map, "type"), "type"), RAW_FORM_ELEMENT_TYPES)
         switch (type) {
@@ -394,12 +410,6 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
                const bdesc = assertOptional(mapGetOpt(map, "description"), assertString)
                const bdisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
                return { type, id: bid, label: blabel, description: bdesc, disabled: bdisabled }
-            case "Button.Action":
-                const abid = assertString(mapGet(map, "id"), "id")
-                const abtext = assertString(mapGet(map, "text"), "text")
-                const abstyle = assertOneOf(assertString(mapGet(map, "style"), "style"), ["Primary", "Secondary", "Danger"])
-                const absendform = assertBoolean(mapGet(map, "send_form"), "send_form")
-                return { type, id: abid, text: abtext, style: abstyle, send_form: absendform }
         }
     }
 
@@ -407,8 +417,7 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
     const injectFormDataIntoRawFormElement = (rawel: RawFormElement, formdata: FormData): FormElement => {
         switch (rawel.type) {
             case "DisplayElement":
-            case "Button.Action":
-                return rawel  // action buttons and display elements dont need formdata values injected
+                return rawel  // display elements dont need formdata values injected
             case "Text":
             case "Select.Text":
                 return { ...rawel, value: assertString(mapGet(formdata.data, rawel.id)) }
@@ -445,11 +454,14 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
                 const baseForm = assertList(mapGet(map, "form"), "form").map((formListElem, idx) => {
                     return expandRawFormElement(assertMap(formListElem, `FormElement at idx ${idx} of FormSet \`${fsid}\``))
                 })
+                const formActions = assertList(mapGet(map, "actions"), "actions").map((actionElem, idx) => {
+                    return expandFormAction(assertMap(actionElem, `FormAction at idx ${idx} of FormSet \`${fsid}\``))
+                })
                 const forms: Form[] = []
                 for(const form of formdatas) {
                     forms.push({form_id: form.id, title: form.title, form: baseForm.map(x => injectFormDataIntoRawFormElement(x, form)) })
                 }
-                return [{ type: "#Willow.MultiForm", id: fsid, forms, reorderable: fsreorderable }]
+                return [{ type: "#Willow.MultiForm", id: fsid, forms, reorderable: fsreorderable, actions: formActions }]
         }
     }
 
