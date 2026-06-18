@@ -226,42 +226,34 @@
 					type: "fetch_page",
 				}))
 				let ders = toDispatchResults(data)
-				let settingsForTmpls: Record<string, Page> = Object.create(null)
-				let errors: [string, string][] = []
+				let settingsForTmpls: Record<string, Page> = {}
+				let newerrs: [string, string][] = []
 				for(const der of ders) {
 					if(der.type == "err") {
-						errors.push([der.id, der.value?.toString() || "Unknown error"])
+						newerrs.push([der.id, der.value?.toString() || "Unknown error"])
 					} else {
 						try {
 							settingsForTmpls[der.id] = dispatchResultToSetting(der.value)
 						} catch (err) {
-							errors.push([der.id, err?.toString() || "Unknown error when parsing to setting"])
+							newerrs.push([der.id, err?.toString() || "Unknown error when parsing to setting"])
 						}
 					}
 				}
-				mps.state.fetchedSettings = { pages: settingsForTmpls, errors }
+				mps.state.settings = settingsForTmpls
+				mps.state.settingsErr = newerrs
 			} catch (err) {
-				mps.state.fetchedSettings = err ? err.toString() : "Unknown error"
+				mps.state.settingsErr = [["*", err ? err.toString() : "Unknown error"]]
 			} finally {
 				fetchingSettings = false
 			}
 		}}>{fetchingSettings ? "Fetching Settings" : "Fetch All Settings"}</Button>
-		{#if typeof mps.state.fetchedSettings == "string"}
-			<ErrorBox error={mps.state.fetchedSettings} />
-		{:else if mps.state.fetchedSettings}
-			<code class="block p-2 bg-gray-200 rounded break-all text-xs font-mono whitespace-pre-wrap">
-				{JSON.stringify(mps.state.fetchedSettings, null, 4)}
-			</code>
-
-			{#each mps.state.fetchedSettings.errors as [tmplId, err]}
-				<h3 class="text-md font-semibold mb-2 text-red-500">Template '{tmplId}'</h3>
-				<ErrorBox error={err} />
-			{/each}
-
-			{#each Object.entries(mps.state.fetchedSettings.pages ?? {}) as [tmplId, comps]}
-				<h3 class="text-md font-semibold mb-2">Template '{tmplId}'</h3>
-				<SV2 template={tmplId} comps={comps.components} bind:formdata={comps.formdata} />
-			{/each}
-		{/if}
+		{#each mps.state.settingsErr as [tmplId, err]}
+			<h3 class="text-md font-semibold mb-2 text-red-500">Template '{tmplId}'</h3>
+			<ErrorBox error={err} />
+		{/each}
+		{#each Object.entries(mps.state.settings ?? {}) as [tmplId, page]}
+			<h3 class="text-md font-semibold mb-2">Template '{tmplId}'</h3>
+			<SV2 template={tmplId} comps={page.components} />
+		{/each}
 	</div>
 {/if}

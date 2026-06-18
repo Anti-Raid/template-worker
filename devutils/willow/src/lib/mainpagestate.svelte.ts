@@ -10,7 +10,8 @@ export interface State {
     selectedGuild: DashboardGuild | null,
     fetchedUserGuilds: DashboardGuildData | string | null,
     dispatchEvent: { event: string, data: RawKhronosValue, fetched?: {data: RawKhronosValue} | string },
-    fetchedSettings: { pages: Record<string, Page>, errors: [string, string][] } | string | null
+    settings: Record<string, Page>,
+    settingsErr: [string, string][]
 }
 
 const defaultState: State = {
@@ -19,7 +20,8 @@ const defaultState: State = {
     selectedGuild: null,
     fetchedUserGuilds: null,
     dispatchEvent: { event: "", data: {Nil: null}},
-    fetchedSettings: null
+    settings: {},
+    settingsErr: []
     
 }
 export const stateKey = "mainpagestate.willowv1"

@@ -1,24 +1,31 @@
 <script lang="ts">
 	import { type Event, type FormElement, type FormAction } from '../events.parse';
-	import FormElementComp from './FormElement.svelte';
 	import Button from '$lib/Button.svelte';
     import { auth } from '$lib/auth.svelte';
     import { mps } from '$lib/mainpagestate.svelte';
     import { encode } from '$lib/msyscall/khronosvalue';
     import ErrorBox from '$lib/ErrorBox.svelte';
+    import DisplayElement from './DisplayElement.svelte';
+    import TextBox from '$lib/TextBox.svelte';
+    import Number from '$lib/Number.svelte';
+    import Select from '$lib/Select.svelte';
+    import MultiSelect from '$lib/MultiSelect.svelte';
+    import MultiTextBox from '$lib/MultiTextBox.svelte';
+    import Toggle from '$lib/Toggle.svelte';
 
-	let { template, form, formid, data = $bindable(), actions, formsetid }: {
+	let { template, form, formid, formidx, actions, formsetid }: {
         template: string,
 		formid: string,
-        data: Record<string, any>,
+        formidx: number,
         form: FormElement[],
         actions: FormAction[],
         formsetid: string
 	} = $props();
 
     let clickedBtns = $state<Record<number, string | null>>({})
-
-	const submit = async (abid: string, sendform: boolean) => {
+    let data = $derived(mps.state.settings[template].formdata[formsetid][formidx].data);
+	
+    const submit = async (abid: string, sendform: boolean) => {
 		const sve: Event = {
             type: "form_action",
             __tloop_template_id: template,
@@ -33,8 +40,25 @@
 	}
 </script>
 
-{#each form as f, i}
-    <FormElementComp el={f} bind:data={data} />
+{#each form as el}
+    {#if el.type == "DisplayElement"}
+        <DisplayElement el={el.element} />
+    {:else if el.type == "Text"}
+        <TextBox id={el.id} label={el.label} description={el.description} placeholder={el.placeholder || "Enter some text here!"} bind:value={data[el.id]} readonly={el.disabled} />
+    {:else if el.type == "Number"}
+        <Number id={el.id} label={el.label} description={el.description} placeholder={el.placeholder || "Enter a number here!"} bind:value={data[el.id]} readonly={el.disabled} />
+    {:else if el.type == "Select.Text"}
+        <Select id={el.id} label={el.label} description={el.description} placeholder={el.placeholder} value={data[el.id]} onchange={(v) => data[el.id] = v} options={el.choices} />
+    {:else if el.type == "Array.Select.Text"}
+        <MultiSelect id={el.id} label={el.label} description={el.description} bind:value={data[el.id]} options={el.choices} disabled={el.disabled} />
+    {:else if el.type == "Array.Text"}
+        <MultiTextBox id={el.id} label={el.label} description={el.description} bind:value={data[el.id]} disabled={el.disabled} />
+    {:else if el.type == "Boolean"}
+        <Toggle id={el.id} bind:checked={data[el.id]} label={el.label} disabled={el.disabled}/>
+        {#if el.description}
+            <p class="text-sm font-medium text-gray-300">{el.description}</p>
+        {/if}
+    {/if}
 {/each}
 
 {#each actions as a, i}

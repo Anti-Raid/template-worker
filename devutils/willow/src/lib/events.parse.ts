@@ -260,7 +260,7 @@ export const toDispatchResults = (value: RawKhronosValue): DispatchResult[] => {
 
 /** Helper method to unpack a RawFormData w/ set of settings v2 FormElements into a processed FormData */
 const settingsUnwrapRawFormData = (elements: FormElement[], formdata: RawFormData): FormData => {
-    const data: Record<string, any> = Object.create(null)
+    const data: Record<string, any> = {}
     for(const rawel of elements) {
         if(rawel.type === "DisplayElement") continue // display elements dont have form data
         const rawVal = mapGetOpt(formdata.data, rawel.id);
@@ -308,7 +308,7 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Page => {
     }
 
     // Create storage spot for processed formdatas
-    const formData: Record<string, FormData[]> = Object.create(null)
+    const formData: Record<string, FormData[]> = {}
 
     const expandDisplayElement = (map: Map<string, RawKhronosValue>): DisplayElement => {
         const type = assertOneOf(assertString(mapGet(map, "type"), "type"), DISPLAY_ELEMENT_TYPES)
