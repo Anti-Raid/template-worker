@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { toDispatchResults, type Event, type Form, type FormAction } from '../events.parse';
+	import { type Event, type FormElement, type FormAction } from '../events.parse';
 	import FormElementComp from './FormElement.svelte';
 	import Button from '$lib/Button.svelte';
     import { auth } from '$lib/auth.svelte';
@@ -7,25 +7,25 @@
     import { encode } from '$lib/msyscall/khronosvalue';
     import ErrorBox from '$lib/ErrorBox.svelte';
 
-	let { template, form, actions, formsetid }: {
+	let { template, form, formid, data = $bindable(), actions, formsetid }: {
         template: string,
-		form: Form,
-        actions: FormAction[]
+		formid: string,
+        data: Record<string, any>,
+        form: FormElement[],
+        actions: FormAction[],
         formsetid: string
 	} = $props();
 
     let clickedBtns = $state<Record<number, string | null>>({})
 
-	const submit = async (abid: string, sendform: boolean, form: Form) => {
+	const submit = async (abid: string, sendform: boolean) => {
 		const sve: Event = {
             type: "form_action",
             __tloop_template_id: template,
-            form_id: form.form_id,
+            form_id: formid,
             formset_id: formsetid,
             action_button_id: abid,
-            form_data: sendform ? Object.fromEntries(
-                form.form.filter(x => x.type != "DisplayElement").map(x => [x.id, x.value])
-            ) : undefined
+            form_data: sendform ? data : undefined
         }
 
         if (!mps.state.selectedGuild) throw new Error("Guild not selected")
@@ -33,15 +33,15 @@
 	}
 </script>
 
-{#each form.form as f, i}
-    <FormElementComp bind:el={form.form[i]} />
+{#each form as f, i}
+    <FormElementComp el={f} bind:data={data} />
 {/each}
 
 {#each actions as a, i}
     <Button disabled={clickedBtns[i] === null} onclick={async () => {
         clickedBtns[i] = null
         try {
-            await submit(a.id, a.send_form, form)
+            await submit(a.id, a.send_form)
             delete clickedBtns[i]
         } catch (err) {
             clickedBtns[i] = err?.toString() || "Unknown error sending action"

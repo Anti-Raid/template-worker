@@ -220,7 +220,7 @@ export const encode = (value: EncodableKhronosValue): RawKhronosValue => {
         } else {
             return { Map: genericMap };
         }
-    } else if (value !== null && typeof value === 'object' && value.constructor === Object) {
+    } else if (value !== null && typeof value === 'object') {
         // Fallback for simple objects
         const mapEntries: Record<string, RawKhronosValue> = {};
         for (const [key, val] of Object.entries(value)) {

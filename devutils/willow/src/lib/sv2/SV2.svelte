@@ -1,10 +1,10 @@
 <script lang="ts">
-    import type { Component } from '../events.parse';
+    import type { Component, FormData } from '../events.parse';
     import DisplayElement from './DisplayElement.svelte';
     import Form from './MultiForm.svelte';
 	import SV2 from "./SV2.svelte"
 
-	let { template, comps }: { template: string, comps: Component[] } = $props();
+	let { template, comps, formdata = $bindable() }: { template: string, comps: Component[], formdata: Record<string, FormData[]> } = $props();
 </script>
 
 {#each comps as comp}
@@ -17,10 +17,10 @@
 					<span class="text-lg font-semibold">{comp.title} ({comp.id})</span>
 					<p class="mb-2">{comp.description}</p>
 				</summary>
-				<SV2 template={template} comps={comp.entries}/>
+				<SV2 template={template} comps={comp.entries} bind:formdata={formdata} />
 			</details>
 		</section>
-	{:else if comp.type == "#Willow.MultiForm"}
-		<Form template={template} id={comp.id} forms={comp.forms} reorderable={comp.reorderable} actions={comp.actions} />
+	{:else if comp.type == "FormSet"}
+		<Form template={template} id={comp.id} forms={comp.forms} reorderable={comp.reorderable} actions={comp.actions} bind:formdata={formdata[comp.id]} />
 	{/if}
 {/each}

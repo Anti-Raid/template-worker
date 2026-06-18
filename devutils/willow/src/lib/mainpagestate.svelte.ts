@@ -1,5 +1,5 @@
 import { browser } from "$app/environment";
-import type { Component } from "./events.parse";
+import type { Page } from "./events.parse";
 import type { RawKhronosValue } from "./msyscall/khronosvalue";
 import type { DashboardGuild, DashboardGuildData } from "./msyscall/types/discord";
 
@@ -10,7 +10,7 @@ export interface State {
     selectedGuild: DashboardGuild | null,
     fetchedUserGuilds: DashboardGuildData | string | null,
     dispatchEvent: { event: string, data: RawKhronosValue, fetched?: {data: RawKhronosValue} | string },
-    fetchedSettings: { comps: [string, Component[]][], errors: [string, string][] } | string | null
+    fetchedSettings: { pages: Record<string, Page>, errors: [string, string][] } | string | null
 }
 
 const defaultState: State = {

@@ -61,14 +61,14 @@ export type Component = {
     description: string,
     entries: Component[]
 } | {
-    /* A set of forms (with injected values) expanded from a FormSet in luau */
-    type: "#Willow.MultiForm",
+    /* A set of forms */
+    type: "FormSet",
     /** formset id */
     id: string, 
     /** if set, a reorder event will be sent with the new list of ids */
     reorderable: boolean,
     /** Form elements */
-    forms: Form[],
+    forms: FormElement[],
     /** Form actions */
     actions: FormAction[]
 }
@@ -87,66 +87,10 @@ export type FormAction = {
     send_form: boolean 
 }
 
-export type Form = {
-    /* form id */
-    form_id: string,
-    /** form title */
-    title: string,
-    /** form elements */
-    form: FormElement[],
-}
-
-const RAW_FORM_ELEMENT_TYPES = [
+const FORM_ELEMENT_TYPES = [
     "DisplayElement", "Text", "Array.Text", "Array.Select.Text", "Number", "Select.Text",
     "Boolean"
 ] as const
-
-// raw form element from luau
-type RawFormElement = {
-    type: "DisplayElement",
-    element: DisplayElement
-} | {
-    type: "Text",
-    id: string,
-    label: string,
-    description?: string,
-    placeholder?: string,
-    disabled?: boolean,
-} | {
-    type: "Array.Text",
-    id: string,
-    label: string,
-    description?: string,
-    disabled?: boolean,
-} | {
-    type: "Array.Select.Text",
-    id: string,
-    label: string,
-    description?: string,
-    disabled?: boolean,
-    choices: {label: string, value: string}[],
-} | {
-    type: "Number",
-    id: string,
-    label: string,
-    description?: string,
-    placeholder?: string,
-    disabled?: boolean,
-} | {
-    type: "Select.Text",
-    id: string,
-    label: string,
-    description?: string,
-    disabled?: boolean,
-    placeholder?: string,
-    choices: {label: string, value: string}[],
-} | {
-    type: "Boolean",
-    id: string,
-    label: string,
-    description?: string,
-    disabled?: boolean,
-}
 
 export type FormElement = {
     type: "DisplayElement",
@@ -158,14 +102,12 @@ export type FormElement = {
     description?: string,
     placeholder?: string,
     disabled?: boolean,
-    value: string
 } | {
     type: "Array.Text",
     id: string,
     label: string,
     description?: string,
     disabled?: boolean,
-    value: string[]
 } | {
     type: "Array.Select.Text",
     id: string,
@@ -173,7 +115,6 @@ export type FormElement = {
     description?: string,
     disabled?: boolean,
     choices: {label: string, value: string}[],
-    value: string[]
 } | {
     type: "Number",
     id: string,
@@ -181,26 +122,33 @@ export type FormElement = {
     description?: string,
     placeholder?: string,
     disabled?: boolean,
-    value: number
 } | {
     type: "Select.Text",
     id: string,
     label: string,
     description?: string,
     disabled?: boolean,
-    choices: {label: string, value: string}[],
     placeholder?: string,
-    value: string
+    choices: {label: string, value: string}[],
 } | {
     type: "Boolean",
     id: string,
     label: string,
     description?: string,
     disabled?: boolean,
-    value: boolean
 }
 
 export type FormData = {
+    /*form id*/
+    id: string,
+    /**form title*/
+    title: string,
+    /*form data*/
+    data: Record<string, any>,
+}
+
+/** Unprocessed form data sent directly from the server */
+type RawFormData = {
     /*form id*/
     id: string,
     /**form title*/
@@ -211,10 +159,7 @@ export type FormData = {
 
 export type Page = {
     components: Component[],
-    /** form datas to expand every FormSet into
-
-    for every FormSet, the frontend will expand the given data into the FormSet internally */
-    formdata: Map<string, FormData[]>,
+    formdata: Record<string, FormData[]>,
 }
 
 const _isOneOf = <T extends string>(value: string, allowedList: readonly T[]): value is T =>{
@@ -313,19 +258,47 @@ export const toDispatchResults = (value: RawKhronosValue): DispatchResult[] => {
     return results
 }
 
+/** Helper method to unpack a RawFormData w/ set of settings v2 FormElements into a processed FormData */
+const settingsUnwrapRawFormData = (elements: FormElement[], formdata: RawFormData): FormData => {
+    const data: Record<string, any> = Object.create(null)
+    for(const rawel of elements) {
+        if(rawel.type === "DisplayElement") continue // display elements dont have form data
+        const rawVal = mapGetOpt(formdata.data, rawel.id);
+
+        switch (rawel.type) {
+            case "Text":
+            case "Select.Text":
+                data[rawel.id] = rawVal !== undefined ? assertString(rawVal) : ""
+                break
+            case "Number":
+                data[rawel.id] = rawVal !== undefined ? assertNumber(rawVal) : 0
+                break
+            case "Boolean":
+                data[rawel.id] = rawVal !== undefined ? assertBoolean(rawVal) : false
+                break
+            case "Array.Text":
+            case "Array.Select.Text":
+                data[rawel.id] = rawVal !== undefined ? assertList(rawVal).map(v => assertString(v, "string in string array")) : []
+                break
+        }
+    }
+
+    return { id: formdata.id, title: formdata.title, data }
+}
+
 /**
  * Given the event response (DispatchResult.value for type="ok"), parse the setting
  */
-export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => {
+export const dispatchResultToSetting = (value: RawKhronosValue): Page => {
     const MAX_DEPTH: number = 10;
     
     const page = assertMap(value, "Page")
 
     // Extract out formdata first
-    const rawFormDataMap = assertMap(mapGet(page, "formdata"), "Page#formdata")
-    const formDataMap: Map<string, FormData[]> = new Map()
-    for(const [key, formVals] of rawFormDataMap) {
-        formDataMap.set(key, assertList(formVals).map((fv, idx) => {
+    const rawFormDataObjMap = assertMap(mapGet(page, "formdata"), "Page#formdata")
+    const rawFormDataObj: Map<string, RawFormData[]> = new Map()
+    for(const [key, formVals] of rawFormDataObjMap) {
+        rawFormDataObj.set(key, assertList(formVals).map((fv, idx) => {
            const map = assertMap(fv, `FormData map at idx ${idx} of Page#formdata`)
            const id = assertString(mapGet(map, "id"), "id")
            const title = assertString(mapGet(map, "title"), "title")
@@ -333,6 +306,9 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
            return {id, title, data}
         }))
     }
+
+    // Create storage spot for processed formdatas
+    const formData: Record<string, FormData[]> = Object.create(null)
 
     const expandDisplayElement = (map: Map<string, RawKhronosValue>): DisplayElement => {
         const type = assertOneOf(assertString(mapGet(map, "type"), "type"), DISPLAY_ELEMENT_TYPES)
@@ -359,8 +335,8 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
         }
     }
 
-    const expandRawFormElement = (map: Map<string, RawKhronosValue>): RawFormElement => {
-        const type = assertOneOf(assertString(mapGet(map, "type"), "type"), RAW_FORM_ELEMENT_TYPES)
+    const expandRawFormElement = (map: Map<string, RawKhronosValue>): FormElement => {
+        const type = assertOneOf(assertString(mapGet(map, "type"), "type"), FORM_ELEMENT_TYPES)
         switch (type) {
             case "DisplayElement":
                 const delem = expandDisplayElement(assertMap(mapGet(map, "element"), "element"))
@@ -413,24 +389,6 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
         }
     }
 
-    // may or may not clone underlying data
-    const injectFormDataIntoRawFormElement = (rawel: RawFormElement, formdata: FormData): FormElement => {
-        switch (rawel.type) {
-            case "DisplayElement":
-                return rawel  // display elements dont need formdata values injected
-            case "Text":
-            case "Select.Text":
-                return { ...rawel, value: assertString(mapGet(formdata.data, rawel.id)) }
-            case "Number":
-                return { ...rawel, value: assertNumber(mapGet(formdata.data, rawel.id)) }
-            case "Boolean":
-                return { ...rawel, value: assertBoolean(mapGet(formdata.data, rawel.id)) }
-            case "Array.Text":
-            case "Array.Select.Text":
-                return { ...rawel, value: assertList(mapGet(formdata.data, rawel.id)).map(v => assertString(v, "string in string array")) }
-        }
-    }
-
     const expandComponent = (map: Map<string, RawKhronosValue>, depth: number): Component[] => {
         if(depth > MAX_DEPTH) throw new Error(`Spec violation: above max depth of ${MAX_DEPTH} in expandComponent`)
         const type = assertOneOf(assertString(mapGet(map, "type"), "type"), COMPONENT_TYPES)
@@ -448,8 +406,6 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
                 return [{ type: "Section", id: sid, title: stitle, description: sdesc, entries: sentries }]
             case "FormSet":
                 const fsid = assertString(mapGet(map, "id"), "id")
-                let formdatas = formDataMap.get(fsid)
-                if(!formdatas) return []
                 const fsreorderable = assertBoolean(mapGet(map, "reorderable"), "reorderable")
                 const baseForm = assertList(mapGet(map, "form"), "form").map((formListElem, idx) => {
                     return expandRawFormElement(assertMap(formListElem, `FormElement at idx ${idx} of FormSet \`${fsid}\``))
@@ -457,11 +413,15 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
                 const formActions = assertList(mapGet(map, "actions"), "actions").map((actionElem, idx) => {
                     return expandFormAction(assertMap(actionElem, `FormAction at idx ${idx} of FormSet \`${fsid}\``))
                 })
-                const forms: Form[] = []
-                for(const form of formdatas) {
-                    forms.push({form_id: form.id, title: form.title, form: baseForm.map(x => injectFormDataIntoRawFormElement(x, form)) })
+
+                // process raw form datas
+                const procforms: FormData[] = []
+                for(const form of rawFormDataObj.get(fsid) ?? []) {
+                    procforms.push(settingsUnwrapRawFormData(baseForm, form))
                 }
-                return [{ type: "#Willow.MultiForm", id: fsid, forms, reorderable: fsreorderable, actions: formActions }]
+                formData[fsid] = procforms
+
+                return [{ type: "FormSet", id: fsid, forms: baseForm, reorderable: fsreorderable, actions: formActions }]
         }
     }
 
@@ -470,5 +430,5 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Component[] => 
         return expandComponent(assertMap(x, `Component at idx ${idx} of Page#components`), 0)
     })
 
-    return comps
+    return { components: comps, formdata: formData }
 }

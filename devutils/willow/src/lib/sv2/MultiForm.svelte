@@ -1,36 +1,37 @@
 <script lang="ts">
-	import type { Event, Form, FormAction } from '../events.parse';
+	import type { Event, FormElement, FormAction, FormData } from '../events.parse';
 	import Button from '$lib/Button.svelte';
     import { auth } from '$lib/auth.svelte';
     import { mps } from '$lib/mainpagestate.svelte';
     import { encode } from '$lib/msyscall/khronosvalue';
     import FormInner from './FormInner.svelte';
 
-	let { template, id, reorderable, forms, actions }: {
+	let { template, id, reorderable, forms, formdata = $bindable(), actions }: {
 		template: string,
 		id: string, 
 		reorderable: boolean
-		forms: Form[],
-		actions: FormAction[]
+		forms: FormElement[],
+		actions: FormAction[],
+		formdata: FormData[]
 	} = $props();
 
 	let formOrder = $state<string[] | null>(null);
 	let isReordering = $state(false);
 
 	const sortedForms = $derived.by(() => {
-		if (!formOrder) return forms;
+		if (!formOrder) return formdata;
 		
 		// Map the order to actual form objects
-		const ordered = formOrder.map(fid => forms.find(f => f.form_id === fid)).filter(Boolean) as Form[];
+		const ordered = formOrder.map(fid => formdata.find(f => f.id === fid)).filter(Boolean) as FormData[];
 		// Include any forms that might have been added but aren't in the order list yet
-		const remaining = forms.filter(f => !formOrder!.includes(f.form_id));
+		const remaining = formdata.filter(f => !formOrder!.includes(f.id));
 		
 		return [...ordered, ...remaining];
 	});
 
 	function startReordering() {
 		// Initialize the order from the currently displayed sequence
-		formOrder = sortedForms.map(f => f.form_id);
+		formOrder = sortedForms.map(f => f.id);
 		isReordering = true;
 	}
 
@@ -91,10 +92,10 @@
 	{/if}
 
 	<div class="flex flex-col gap-4">
-		{#each sortedForms as form, i (form.form_id)}
+		{#each sortedForms as form, i (form.id)}
 			<section 
 				class="p-5 border rounded-3xl bg-white shadow-sm border-gray-200 animate-in fade-in slide-in-from-bottom-2 duration-300 relative group transition-all {isReordering ? 'ring-2 ring-blue-500/20 border-blue-500/50 scale-[0.99] translate-x-2' : ''}"
-				aria-labelledby="form-title-{form.form_id}"
+				aria-labelledby="form-title-{form.id}"
 			>
 				{#if isReordering}
 					<div class="absolute -left-10 top-1/2 -translate-y-1/2 flex flex-col gap-1.5 animate-in slide-in-from-right-2 duration-200">
@@ -119,10 +120,10 @@
 
 				<header class="flex items-center justify-between mb-6 border-b border-gray-50 pb-3">
 					<div class="flex flex-col gap-0.5">
-						<h3 id="form-title-{form.form_id}" class="text-sm font-black uppercase tracking-widest text-gray-400">
+						<h3 id="form-title-{form.id}" class="text-sm font-black uppercase tracking-widest text-gray-400">
 							{form.title || 'Untitled Form'}
 						</h3>
-						<code class="text-[10px] text-gray-400 font-mono">ID: {form.form_id}</code>
+						<code class="text-[10px] text-gray-400 font-mono">ID: {form.id}</code>
 					</div>
 					
 					{#if isReordering}
@@ -134,7 +135,7 @@
 				</header>
 
 				<div class="flex flex-col gap-5 {isReordering ? 'pointer-events-none opacity-40' : ''} transition-all">
-					<FormInner template={template} form={form} formsetid={id} actions={actions}/>
+					<FormInner template={template} form={forms} formid={form.id} bind:data={form.data} formsetid={id} actions={actions}/>
 				</div>
 			</section>
 		{/each}

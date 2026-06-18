@@ -5,7 +5,7 @@
     import TextBox from '$lib/TextBox.svelte';
     import KhronosValue from '$lib/KhronosValue.svelte';
     import { encode } from '$lib/msyscall/khronosvalue';
-    import { toDispatchResults, type Component, dispatchResultToSetting } from '$lib/events.parse';
+    import { toDispatchResults, type Component, dispatchResultToSetting, type Page } from '$lib/events.parse';
     import SV2 from '$lib/sv2/SV2.svelte';
 
 	let fetchingUserGuilds = $state(false)
@@ -226,20 +226,20 @@
 					type: "fetch_page",
 				}))
 				let ders = toDispatchResults(data)
-				let settingsForTmpls: [string, Component[]][] = []
+				let settingsForTmpls: Record<string, Page> = Object.create(null)
 				let errors: [string, string][] = []
 				for(const der of ders) {
 					if(der.type == "err") {
 						errors.push([der.id, der.value?.toString() || "Unknown error"])
 					} else {
 						try {
-							settingsForTmpls.push([der.id, dispatchResultToSetting(der.value)])
+							settingsForTmpls[der.id] = dispatchResultToSetting(der.value)
 						} catch (err) {
 							errors.push([der.id, err?.toString() || "Unknown error when parsing to setting"])
 						}
 					}
 				}
-				mps.state.fetchedSettings = { comps: settingsForTmpls, errors }
+				mps.state.fetchedSettings = { pages: settingsForTmpls, errors }
 			} catch (err) {
 				mps.state.fetchedSettings = err ? err.toString() : "Unknown error"
 			} finally {
@@ -250,7 +250,7 @@
 			<ErrorBox error={mps.state.fetchedSettings} />
 		{:else if mps.state.fetchedSettings}
 			<code class="block p-2 bg-gray-200 rounded break-all text-xs font-mono whitespace-pre-wrap">
-				{JSON.stringify(mps.state.fetchedSettings.comps, null, 4)}
+				{JSON.stringify(mps.state.fetchedSettings, null, 4)}
 			</code>
 
 			{#each mps.state.fetchedSettings.errors as [tmplId, err]}
@@ -258,9 +258,9 @@
 				<ErrorBox error={err} />
 			{/each}
 
-			{#each mps.state.fetchedSettings.comps as [tmplId, comps], idx}
+			{#each Object.entries(mps.state.fetchedSettings.pages ?? {}) as [tmplId, comps]}
 				<h3 class="text-md font-semibold mb-2">Template '{tmplId}'</h3>
-				<SV2 template={tmplId} comps={comps} />
+				<SV2 template={tmplId} comps={comps.components} bind:formdata={comps.formdata} />
 			{/each}
 		{/if}
 	</div>
