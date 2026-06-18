@@ -87,9 +87,21 @@ export type FormAction = {
     send_form: boolean 
 }
 
+const CHOICES_TYPES = [
+    "Fixed", "Channel", "Role"
+] as const
+
+export type Choices = {
+    type: "Fixed",
+    choices: {label: string, value: string}[]
+} | {
+    type: "Channel"
+} | {
+    type: "Role"
+}
+
 const FORM_ELEMENT_TYPES = [
-    "DisplayElement", "Text", "Array.Text", "Array.Select.Text", "Number", "Select.Text",
-    "Boolean"
+    "DisplayElement", "Text", "Array.Text", "Number", "Boolean"
 ] as const
 
 export type FormElement = {
@@ -102,19 +114,15 @@ export type FormElement = {
     description?: string,
     placeholder?: string,
     disabled?: boolean,
+    choices?: Choices
 } | {
     type: "Array.Text",
     id: string,
     label: string,
     description?: string,
     disabled?: boolean,
-} | {
-    type: "Array.Select.Text",
-    id: string,
-    label: string,
-    description?: string,
-    disabled?: boolean,
-    choices: {label: string, value: string}[],
+    placeholder?: string,
+    choices?: Choices
 } | {
     type: "Number",
     id: string,
@@ -122,14 +130,6 @@ export type FormElement = {
     description?: string,
     placeholder?: string,
     disabled?: boolean,
-} | {
-    type: "Select.Text",
-    id: string,
-    label: string,
-    description?: string,
-    disabled?: boolean,
-    placeholder?: string,
-    choices: {label: string, value: string}[],
 } | {
     type: "Boolean",
     id: string,
@@ -267,7 +267,6 @@ const settingsUnwrapRawFormData = (elements: FormElement[], formdata: RawFormDat
 
         switch (rawel.type) {
             case "Text":
-            case "Select.Text":
                 data[rawel.id] = rawVal !== undefined ? assertString(rawVal) : ""
                 break
             case "Number":
@@ -277,7 +276,6 @@ const settingsUnwrapRawFormData = (elements: FormElement[], formdata: RawFormDat
                 data[rawel.id] = rawVal !== undefined ? assertBoolean(rawVal) : false
                 break
             case "Array.Text":
-            case "Array.Select.Text":
                 data[rawel.id] = rawVal !== undefined ? assertList(rawVal).map(v => assertString(v, "string in string array")) : []
                 break
         }
@@ -335,6 +333,25 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Page => {
         }
     }
 
+    const expandChoices = (map: Map<string, RawKhronosValue> | undefined): Choices | undefined => {
+        if (!map) return undefined
+        const type = assertOneOf(assertString(mapGet(map, "type"), "type"), CHOICES_TYPES)
+        switch (type) {
+        case "Fixed":
+            const schoices = assertList(mapGet(map, "choices"), "choices").map((entry, idx) => {
+                const cmap = assertMap(entry, `choices map at idx ${idx} at ${idx}`) // expand the entry into choices
+                const clabel = assertString(mapGet(cmap, "label"), "label")
+                const cvalue = assertString(mapGet(cmap, "value"), "value")
+                return { label: clabel, value: cvalue }
+            })
+            return { type, choices: schoices }
+        case "Channel":
+            return { type }
+        case "Role":
+            return { type }
+        }
+    }
+
     const expandRawFormElement = (map: Map<string, RawKhronosValue>): FormElement => {
         const type = assertOneOf(assertString(mapGet(map, "type"), "type"), FORM_ELEMENT_TYPES)
         switch (type) {
@@ -342,44 +359,28 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Page => {
                 const delem = expandDisplayElement(assertMap(mapGet(map, "element"), "element"))
                 return { type, element: delem }
             case "Text":
-            case "Number": // all of these share the same base type (for now)
-               const tid = assertString(mapGet(map, "id"), "id")
-               const tlabel = assertString(mapGet(map, "label"), "label")
-               const tdesc = assertOptional(mapGetOpt(map, "description"), assertString)
-               const tph = assertOptional(mapGetOpt(map, "placeholder"), assertString)
-               const tdisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
-               return { type, id: tid, label: tlabel, description: tdesc, placeholder: tph, disabled: tdisabled }
+                const tid = assertString(mapGet(map, "id"), "id")
+                const tlabel = assertString(mapGet(map, "label"), "label")
+                const tdesc = assertOptional(mapGetOpt(map, "description"), assertString)
+                const tph = assertOptional(mapGetOpt(map, "placeholder"), assertString)
+                const tdisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
+                const nchoices = expandChoices(assertOptional(mapGetOpt(map, "choices"), assertMap))
+                return { type, id: tid, label: tlabel, description: tdesc, placeholder: tph, disabled: tdisabled, choices: nchoices }
+            case "Number":
+                const nid = assertString(mapGet(map, "id"), "id")
+                const nlabel = assertString(mapGet(map, "label"), "label")
+                const ndesc = assertOptional(mapGetOpt(map, "description"), assertString)
+                const nph = assertOptional(mapGetOpt(map, "placeholder"), assertString)
+                const ndisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
+                return { type, id: nid, label: nlabel, description: ndesc, placeholder: nph, disabled: ndisabled }
             case "Array.Text":
                 const aid = assertString(mapGet(map, "id"), "id")
                 const alabel = assertString(mapGet(map, "label"), "label")
                 const adesc = assertOptional(mapGetOpt(map, "description"), assertString)
                 const adisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
-                return { type, id: aid, label: alabel, description: adesc, disabled: adisabled }
-            case "Array.Select.Text":
-                const said = assertString(mapGet(map, "id"), "id")
-                const salabel = assertString(mapGet(map, "label"), "label")
-                const sadesc = assertOptional(mapGetOpt(map, "description"), assertString)
-                const sadisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
-                const sachoices = assertList(mapGet(map, "choices"), "choices").map((entry, idx) => {
-                    const cmap = assertMap(entry, `choices map at idx ${idx} for Select.Array.Text with id ${idx} [${sid}]`) // expand the entry into choices
-                    const clabel = assertString(mapGet(cmap, "label"), "label")
-                    const cvalue = assertString(mapGet(cmap, "value"), "value")
-                    return { label: clabel, value: cvalue }
-                })
-                return { type, id: said, label: salabel, description: sadesc, disabled: sadisabled, choices: sachoices }
-            case "Select.Text":
-                const sid = assertString(mapGet(map, "id"), "id")
-                const slabel = assertString(mapGet(map, "label"), "label")
-                const sph = assertOptional(mapGetOpt(map, "placeholder"), assertString)
-                const sdesc = assertOptional(mapGetOpt(map, "description"), assertString)
-                const sdisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
-                const schoices = assertList(mapGet(map, "choices"), "choices").map((entry, idx) => {
-                    const cmap = assertMap(entry, `choices map at idx ${idx} for Select.Text with id ${idx} [${sid}]`) // expand the entry into choices
-                    const clabel = assertString(mapGet(cmap, "label"), "label")
-                    const cvalue = assertString(mapGet(cmap, "value"), "value")
-                    return { label: clabel, value: cvalue }
-                })
-                return { type, id: sid, label: slabel, description: sdesc, placeholder: sph, disabled: sdisabled, choices: schoices }
+                const aph = assertOptional(mapGetOpt(map, "placeholder"), assertString)
+                const apchoices = expandChoices(assertOptional(mapGetOpt(map, "choices"), assertMap))
+                return { type, id: aid, label: alabel, description: adesc, placeholder: aph, disabled: adisabled, choices: apchoices }
             case "Boolean":
                const bid = assertString(mapGet(map, "id"), "id")
                const blabel = assertString(mapGet(map, "label"), "label")

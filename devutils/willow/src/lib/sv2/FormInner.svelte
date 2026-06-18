@@ -44,15 +44,19 @@
     {#if el.type == "DisplayElement"}
         <DisplayElement el={el.element} />
     {:else if el.type == "Text"}
-        <TextBox id={el.id} label={el.label} description={el.description} placeholder={el.placeholder || "Enter some text here!"} bind:value={data[el.id]} readonly={el.disabled} />
+        {#if el.choices?.type === "Fixed"}
+            <Select id={el.id} label={el.label} description={el.description} placeholder={el.placeholder} value={data[el.id]} onchange={(v) => data[el.id] = v} options={el.choices.choices} />
+        {:else}
+            <TextBox id={el.id} label={el.label} description={el.description} placeholder={el.placeholder || "Enter some text here!"} bind:value={data[el.id]} readonly={el.disabled} />
+        {/if}
     {:else if el.type == "Number"}
         <Number id={el.id} label={el.label} description={el.description} placeholder={el.placeholder || "Enter a number here!"} bind:value={data[el.id]} readonly={el.disabled} />
-    {:else if el.type == "Select.Text"}
-        <Select id={el.id} label={el.label} description={el.description} placeholder={el.placeholder} value={data[el.id]} onchange={(v) => data[el.id] = v} options={el.choices} />
-    {:else if el.type == "Array.Select.Text"}
-        <MultiSelect id={el.id} label={el.label} description={el.description} bind:value={data[el.id]} options={el.choices} disabled={el.disabled} />
     {:else if el.type == "Array.Text"}
-        <MultiTextBox id={el.id} label={el.label} description={el.description} bind:value={data[el.id]} disabled={el.disabled} />
+        {#if el.choices?.type === "Fixed"}
+            <MultiSelect id={el.id} label={el.label} description={el.description} placeholder={el.placeholder} bind:value={data[el.id]} options={el.choices.choices} disabled={el.disabled} />
+        {:else}
+            <MultiTextBox id={el.id} label={el.label} description={el.description} placeholder={el.placeholder} bind:value={data[el.id]} disabled={el.disabled} />
+        {/if}
     {:else if el.type == "Boolean"}
         <Toggle id={el.id} bind:checked={data[el.id]} label={el.label} disabled={el.disabled}/>
         {#if el.description}
