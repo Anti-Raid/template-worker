@@ -11,6 +11,9 @@
 	let fetchingUserGuilds = $state(false)
 	let dispatchingGuildEvent = $state(false)
 	let fetchingSettings = $state(false)
+	let fetchingGuildBaseInfo = $state(false)
+
+	let selectedGuildBaseInfo = $derived(mps.state.selectedGuild ? mps.state.baseGuildDatas[mps.state.selectedGuild.id] : undefined)
 	let _statefileInput: HTMLInputElement;
 
 	let filteredGuilds = $derived.by(() => {
@@ -191,6 +194,31 @@
 			</div>
 		</div>
 		<Button onclick={() => { mps.state.selectedGuild = null}}>Deselect</Button>
+	</div>
+
+	<div class="p-4 border rounded-lg mb-4 flex flex-col gap-2">
+		<h2 class="text-lg font-semibold">Base Guild Info</h2>
+		{#if selectedGuildBaseInfo}
+			<p class="text-green-400">Found!</p>
+			<p>{selectedGuildBaseInfo.roles.length} roles, {selectedGuildBaseInfo.channels.length} channels</p>
+		{:else}
+			<p class="text-red-400">Base guild info not fetched for this guild yet!</p>
+		{/if}
+		<Button disabled={fetchingGuildBaseInfo} onclick={async () => {
+			if(!mps.state.selectedGuild) return
+			fetchingGuildBaseInfo = true
+			try {
+				let data = await auth.getGuildInfo(mps.state.selectedGuild.id)
+				mps.state.baseGuildDatas[mps.state.selectedGuild.id] = data
+			} catch (err) {
+				mps.state.baseGuildDatasFetchErrors[mps.state.selectedGuild.id] = err ? err.toString() : "Unknown error"
+			} finally {
+				fetchingGuildBaseInfo = false
+			}
+		}}>{fetchingGuildBaseInfo ? "Fetching" : (selectedGuildBaseInfo ? "Refetch Guild Base Info" : "Fetch Guild Base Info")}</Button>
+		{#if mps.state.baseGuildDatasFetchErrors[mps.state.selectedGuild.id]}
+			<ErrorBox error={mps.state.baseGuildDatasFetchErrors[mps.state.selectedGuild.id]} />
+		{/if}
 	</div>
 
 	<div class="p-4 border rounded-lg mb-4 flex flex-col gap-2">

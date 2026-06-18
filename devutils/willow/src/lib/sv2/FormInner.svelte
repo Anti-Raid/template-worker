@@ -46,6 +46,10 @@
     {:else if el.type == "Text"}
         {#if el.choices?.type === "Fixed"}
             <Select id={el.id} label={el.label} description={el.description} placeholder={el.placeholder} value={data[el.id]} onchange={(v) => data[el.id] = v} options={el.choices.choices} />
+        {:else if el.choices?.type === "Role"}
+            <Select id={el.id} label={el.label} description={el.description} placeholder={el.placeholder} value={data[el.id]} onchange={(v) => data[el.id] = v} options={mps.roleChoices} />
+        {:else if el.choices?.type === "Channel"}
+            <Select id={el.id} label={el.label} description={el.description} placeholder={el.placeholder} value={data[el.id]} onchange={(v) => data[el.id] = v} options={mps.channelChoices} />
         {:else}
             <TextBox id={el.id} label={el.label} description={el.description} placeholder={el.placeholder || "Enter some text here!"} bind:value={data[el.id]} readonly={el.disabled} />
         {/if}
@@ -54,6 +58,10 @@
     {:else if el.type == "Array.Text"}
         {#if el.choices?.type === "Fixed"}
             <MultiSelect id={el.id} label={el.label} description={el.description} placeholder={el.placeholder} bind:value={data[el.id]} options={el.choices.choices} disabled={el.disabled} />
+        {:else if el.choices?.type === "Role"}
+            <MultiSelect id={el.id} label={el.label} description={el.description} placeholder={el.placeholder} bind:value={data[el.id]} options={mps.roleChoices} disabled={el.disabled} />
+        {:else if el.choices?.type === "Channel"}
+            <MultiSelect id={el.id} label={el.label} description={el.description} placeholder={el.placeholder} bind:value={data[el.id]} options={mps.channelChoices} disabled={el.disabled} />
         {:else}
             <MultiTextBox id={el.id} label={el.label} description={el.description} placeholder={el.placeholder} bind:value={data[el.id]} disabled={el.disabled} />
         {/if}

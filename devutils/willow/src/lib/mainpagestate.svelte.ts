@@ -1,7 +1,7 @@
 import { browser } from "$app/environment";
 import type { Page } from "./events.parse";
 import type { RawKhronosValue } from "./msyscall/khronosvalue";
-import type { DashboardGuild, DashboardGuildData } from "./msyscall/types/discord";
+import type { BaseGuildUserInfo, DashboardGuild, DashboardGuildData } from "./msyscall/types/discord";
 
 // note for future developers: | string -> error case
 export interface State {
@@ -9,9 +9,11 @@ export interface State {
     showOnlyPresent: boolean,
     selectedGuild: DashboardGuild | null,
     fetchedUserGuilds: DashboardGuildData | string | null,
+    baseGuildDatas: Record<string, BaseGuildUserInfo>,
+    baseGuildDatasFetchErrors: Record<string, string>,
     dispatchEvent: { event: string, data: RawKhronosValue, fetched?: {data: RawKhronosValue} | string },
     settings: Record<string, Page>,
-    settingsErr: [string, string][]
+    settingsErr: [string, string][],
 }
 
 const defaultState: State = {
@@ -19,6 +21,8 @@ const defaultState: State = {
     showOnlyPresent: false,
     selectedGuild: null,
     fetchedUserGuilds: null,
+    baseGuildDatas: {},
+    baseGuildDatasFetchErrors: {},
     dispatchEvent: { event: "", data: {Nil: null}},
     settings: {},
     settingsErr: []
@@ -43,6 +47,19 @@ const getState = (): State => {
 
 class MainPageState {
     state = $state(getState())
+    roleChoices = $derived.by<{label: string, value: string}[]>(() => {
+        if (!this.state.selectedGuild) return []
+        let gbi = mps.state.baseGuildDatas[this.state.selectedGuild.id]
+        if(!gbi) return []
+        return gbi.roles.map(x => {return {label: x.name, value: x.id}})
+    })
+    channelChoices = $derived.by<{label: string, value: string}[]>(() => {
+        if (!this.state.selectedGuild) return []
+        let gbi = mps.state.baseGuildDatas[this.state.selectedGuild.id]
+        if(!gbi) return []
+        // type 4 = GUILD_CATEGORY
+        return gbi.channels.filter(x => x.channel.type != 4).map(x => {return {label: x.channel.name, value: x.channel.id}})
+    })
 
     save() {
         localStorage.setItem(stateKey, JSON.stringify(this.state));

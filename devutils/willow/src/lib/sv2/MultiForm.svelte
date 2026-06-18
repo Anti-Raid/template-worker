@@ -63,7 +63,7 @@
 </script>
 
 <div class="flex flex-col gap-6 w-full">
-	{#if reorderable}
+	{#if reorderable && sortedForms.length > 0}
 		<div class="flex justify-end gap-2 px-1">
 			{#if !formOrder}
 				<Button onclick={startReordering}>
@@ -92,7 +92,7 @@
 		{#if formOrder}
 			{#each sortedForms as form, i (form.id)}
 				<section 
-					class="p-5 border rounded-3xl bg-white shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-300 relative group transition-all ring-2 ring-blue-500/20 border-blue-500/50 scale-[0.99] translate-x-2"
+					class="p-3 border rounded-3xl bg-white shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-300 relative group transition-all ring-2 ring-blue-500/20 border-blue-500/50 scale-[0.99] translate-x-2"
 					aria-labelledby="form-title-{form.id}"
 				>
 					<div class="absolute -left-10 top-1/2 -translate-y-1/2 flex flex-col gap-1.5 animate-in slide-in-from-right-2 duration-200">
@@ -114,7 +114,7 @@
 						</button>
 					</div>
 
-					<header class="flex items-center justify-between mb-6 border-b border-gray-50 pb-3">
+					<header class="flex items-center justify-between mb-6 border-b border-gray-50">
 						<div class="flex flex-col gap-0.5">
 							<h3 id="form-title-{form.id}" class="text-sm font-black uppercase tracking-widest text-gray-400">
 								{form.title || 'Untitled Form'}
@@ -130,19 +130,25 @@
 				</section>
 			{/each}
 		{:else}
+			{#if mps.state.settings[template].formdata[id].length == 0}
+				<h3 class="text-md text-red-400">
+					No Form Entries ({id})
+				</h3>
+			{/if}
+
 			{#each mps.state.settings[template].formdata[id] as form, i (form.id)}
 				<section 
-					class="p-5 border rounded-3xl bg-white shadow-sm border-gray-200 animate-in fade-in slide-in-from-bottom-2 duration-300 relative group transition-all"
+					class="p-3 border rounded-3xl bg-white shadow-sm border-gray-200 animate-in fade-in slide-in-from-bottom-2 duration-300 relative group transition-all"
 					aria-labelledby="form-title-{form.id}"
 				>
-					<header class="flex items-center justify-between mb-6 border-b border-gray-50 pb-3">
+					<header class="flex items-center justify-between mb-6 border-b border-gray-50">
 						<div class="flex flex-col gap-0.5">
 							<h3 id="form-title-{form.id}" class="text-sm font-black uppercase tracking-widest text-gray-400">
 								{form.title || 'Untitled Form'}
 							</h3>
 							<code class="text-[10px] text-gray-400 font-mono">ID: {form.id}</code>
 						</div>
-											</header>
+					</header>
 
 					<div class="flex flex-col gap-5 transition-all">
 						<FormInner template={template} form={forms} formid={form.id} formidx={i} formsetid={id} actions={actions}/>

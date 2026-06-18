@@ -87,6 +87,12 @@ class Auth {
 		if(!(ret.op == "Bot" && (ret.data.op == "KhronosValue" || ret.data.op == "CKhronosValue"))) throw new Error("msyscall did not return a khronos value")
 		return ret.data.op == "CKhronosValue" ? expand(ret.data.data) : ret.data.data
 	}
+
+	async getGuildInfo(guild_id: string) {
+		let ret = (await this.msyscall({op: "Discord", req: {op: "GetGuildInfo", guild_id }})).stringifyAndThrow(errorString)
+		if(!(ret.op == "Discord" && ret.data.op == "GuildInfo")) throw new Error("msyscall did not return guild info")
+		return ret.data.data
+	}
 }
 
 export const auth = new Auth();
