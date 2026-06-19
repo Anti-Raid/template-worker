@@ -1,13 +1,13 @@
-import { FormBranchEvaluator } from './sv2.brancheval'; // Update path as needed
+import { Anima } from './sv2.brancheval'; // Update path as needed
 import { describe, it, expect, beforeEach } from 'vitest';
 
 // Made with help of gemini cli
 describe('FormBranchEvaluator', () => {
-    let evaluator: FormBranchEvaluator;
+    let evaluator: Anima;
     let baseData: Record<string, any>;
 
     beforeEach(() => {
-        evaluator = new FormBranchEvaluator();
+        evaluator = new Anima();
         baseData = {
             port: 8080,
             protocol: "tcp",
@@ -20,8 +20,8 @@ describe('FormBranchEvaluator', () => {
 
     describe('Primitives & Symbols', () => {
         it('evaluates boolean primitives', () => {
-            expect(run("#t")).toBe(true);
-            expect(run("#f")).toBe(false);
+            expect(run(true)).toBe(true);
+            expect(run(false)).toBe(false);
         });
 
         it('evaluates numbers and raw arrays', () => {
@@ -63,12 +63,12 @@ describe('FormBranchEvaluator', () => {
 
         it('short-circuits AND statements', () => {
             // Should stop at #f and never evaluate the missing variable
-            expect(run(["and", "#t", "#f", "does_not_exist"])).toBe(false);
+            expect(run(["and", true, false, "does_not_exist"])).toBe(false);
         });
 
         it('short-circuits OR statements and returns actual truthy values', () => {
             // Should stop at port and return 8080, bypassing the crash!
-            expect(run(["or", "#f", "port", ["crash!"]])).toBe(8080);
+            expect(run(["or", false, "port", ["crash!"]])).toBe(8080);
         });
     });
 
@@ -128,7 +128,7 @@ describe('FormBranchEvaluator', () => {
                 ["define", "add", 
                     ["lambda", ["a", "b"], ["+", "a", "b"]]
                 ],
-                ["call", "add", 5, 7]
+                ["add", 5, 7]
             ];
             expect(run(ast)).toBe(12);
         });
@@ -141,7 +141,7 @@ describe('FormBranchEvaluator', () => {
                     ["lambda", ["y"], ["+", "x", "y"]] // Captures outer x
                 ],
                 ["define", "x", 999], // This shouldn't affect the created lambda's lexical scope if implemented strictly, but in standard mutable environments it might. Let's test standard behavior!
-                ["call", "make_adder", 5] 
+                ["make_adder", 5] 
             ];
             // Note: Since `define` overwrites the current scope dictionary, 
             // the closure will look up 'x' and find 999. This is correct JS/Scheme behavior!
@@ -157,11 +157,11 @@ describe('FormBranchEvaluator', () => {
                     ["lambda", ["n"], 
                         ["if", ["==", "n", 0],
                             "'survived!",
-                            ["call", "loop", ["-", "n", 1]] // Tail position!
+                            ["loop", ["-", "n", 1]] // Tail position!
                         ]
                     ]
                 ],
-                ["call", "loop", 15000]
+                ["loop", 15000]
             ];
             
             // If TCO fails, this line will throw an error and crash the test.
@@ -169,4 +169,12 @@ describe('FormBranchEvaluator', () => {
             expect(run(ast)).toBe("survived!");
         });
     });
+
+        it('simple eval', () => {
+            const ast = [ 
+                [ ["lambda", ["x"], ["lambda", ["y"], ["+", "x", "y"]]], 10 ], 
+                5 
+            ];
+            expect(run(ast)).toBe(15);
+        });
 });

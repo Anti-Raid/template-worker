@@ -26,7 +26,7 @@ class FormBranchEvaluatorScope {
     set(key: string, value: any) {
         this.#data[key] = value;
     }
-}
+} 
 
 class Closure {
     params: string[];
@@ -40,7 +40,41 @@ class Closure {
     }
 }
 
-export class FormBranchEvaluator {
+class JSClosureState {
+    vmexpr: any; // the current inst the vm is evaluating
+    vmscope: FormBranchEvaluatorScope;
+
+    constructor(vmexpr: any, vmscope: FormBranchEvaluatorScope) {
+        this.vmexpr = vmexpr
+        this.vmscope = vmscope
+    }
+}
+
+abstract class JSClosure {
+    /* The bound scope */
+    scope: FormBranchEvaluatorScope;
+    constructor(scope: FormBranchEvaluatorScope) {
+        this.scope = scope
+    }
+
+    // If the VM is to continue on executing (tailcalls to be evaluated on next vm loop), 
+    // then return [true, null], otherwise, return [false, val]
+    //
+    // As an example:
+    //
+    // class NativeEval extends JSClosure {
+    //      call(state: JSClosureState, callargs: any[]): [boolean, any] {
+    //          // We want the VM to evaluate whatever AST was passed in
+    //          state.vmexpr = callargs[0]; 
+    //    
+    //          // Return true to tell the VM: "I mutated the state, continue the loop!"
+    //          return [true, null]; 
+    //      } 
+    //  }
+    abstract call(state: JSClosureState, callargs: any[]): [boolean, any]
+}
+
+export class Anima {
     constructor() {
 
     }
@@ -61,8 +95,6 @@ export class FormBranchEvaluator {
         let scope = initialScope;
 
         while (true) {
-            if (expr === "#t") return true;
-            if (expr === "#f") return false;
             if (typeof expr === "string") {
                 if (expr.startsWith("'")) {
                     return expr.slice(1);
@@ -70,7 +102,7 @@ export class FormBranchEvaluator {
                     return scope.get(expr); // FIXED!
                 }
             }            
-            if (!Array.isArray(expr)) return expr; // If not an array, it evaluates to the expression itself
+            if (!Array.isArray(expr)) return expr; // If not an array (boolean etc), it evaluates to the expression itself
             if (expr.length === 0) return null; // An empty array evaluates to null
 
             const [operator, ...args] = expr;
@@ -115,25 +147,6 @@ export class FormBranchEvaluator {
 
                     return new Closure(args[0], args[1], scope)   
 
-                case "call":
-                    // ["call", ["get", "myFunc"], arg1, arg2]
-                    const proc = this.evaluate(args[0], scope);
-                    if (!(proc instanceof Closure)) {
-                        throw new Error(`Attempted to call a non-procedure`);
-                    }
-                    const callargs = args.slice(1).map(a => this.evaluate(a, scope));
-                    const callscope = proc.scope.nest();
-                    if (callargs.length < proc.params.length) {
-                        throw new Error(`Attempted to call a procedure taking ${proc.params.length} arguments with only ${callargs.length} arguments`);
-                    }
-                    proc.params.forEach((paramName: string, idx: number) => {
-                        callscope.set(paramName, callargs[idx]);
-                    });
-
-                    expr = proc.body;
-                    scope = callscope;
-                    continue;
-                                 
                 // Type checkers
                 case "type?": {
                     if(args.length != 1) {
@@ -149,6 +162,7 @@ export class FormBranchEvaluator {
                         case "undefined": return "null"
                         default: {
                             if(resolvedValue instanceof Closure) return "procedure"
+                            if(resolvedValue instanceof JSClosure) return "js-procedure"
                             return "unknown" // to allow consistency across all js engines/custom sv2 impls etc.
                         }
                     }
@@ -229,8 +243,45 @@ export class FormBranchEvaluator {
                 case "/": return this.evaluate(args[0], scope) / this.evaluate(args[1], scope);
                 case "%": return this.evaluate(args[0], scope) % this.evaluate(args[1], scope);
                 
-                default:
-                    throw new Error(`Unknown operator: ${operator}`);
+                default: {
+                    // Procedure call if unknown
+                    const proc = this.evaluate(operator, scope)
+                    
+                    // JS procedure call
+                    if (proc instanceof JSClosure) {
+                        const callargs = args.map(a => this.evaluate(a, scope));
+
+                        // directly call closure, we also pass expr+scope to the function through JSClosureState
+                        // to enable for JS functions to perform TCO optimization and view the currently executing
+                        // closures scope
+                        const vmstate = new JSClosureState(expr, scope)
+                        const [tcoCont, retVal] = proc.call(vmstate, callargs)
+                        if(tcoCont) {
+                            expr = vmstate.vmexpr
+                            scope = vmstate.vmscope
+                            continue
+                        }
+                        return retVal
+                    }
+
+                    // Anima procedure
+                    if (proc instanceof Closure) {
+                        const callargs = args.map(a => this.evaluate(a, scope));
+                        const callscope = proc.scope.nest();
+                        if (callargs.length != proc.params.length) {
+                            throw new Error(`Attempted to call a procedure taking ${proc.params.length} arguments with ${callargs.length} arguments`);
+                        }
+                        proc.params.forEach((paramName: string, idx: number) => {
+                            callscope.set(paramName, callargs[idx]);
+                        });
+
+                        // tail-call (optimization) with procedure body and newly bound callscope to avoid allocing new stack frame (similar to Scheme)
+                        expr = proc.body;
+                        scope = callscope;
+                        continue;
+                    }
+                    throw new Error(`Unknown operator or attempted to call a non-procedure: ${JSON.stringify(operator)}`);
+                }
             }
         }
     }
