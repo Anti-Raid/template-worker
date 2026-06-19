@@ -78,7 +78,7 @@ describe('Anima', () => {
             expect(run(["-", 10, 5])).toBe(5);
             expect(run(["*", 10, 5])).toBe(50);
             expect(run(["/", 10, 5])).toBe(2);
-            expect(run(["%", 10, 3])).toBe(1);
+            expect(run(["modulo", 10, 3])).toBe(1);
         });
 
         it('performs numeric comparisons', () => {

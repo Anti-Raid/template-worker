@@ -167,6 +167,10 @@ export class Anima {
                         throw new Error(`lambda must be in format ["lambda", [bind-args...], arg2] but only have ${argCount} arguments`)
                     }
 
+                    if(!Array.isArray(expr[1])) {
+                        throw new Error(`lambda parameters must be a list`);
+                    }
+
                     return new Closure(expr[1], expr[2], scope)   
 
                 // Type checkers
@@ -273,17 +277,51 @@ export class Anima {
                     continue;
                 }
 
+                // TODO: Verify arguments
                 case "==": return this.evalinner(expr[1], scope) === this.evalinner(expr[2], scope);
                 case "!=": return this.evalinner(expr[1], scope) !== this.evalinner(expr[2], scope);                                
                 case ">": return this.evalinner(expr[1], scope) > this.evalinner(expr[2], scope);
                 case "<": return this.evalinner(expr[1], scope) < this.evalinner(expr[2], scope);
                 case ">=": return this.evalinner(expr[1], scope) >= this.evalinner(expr[2], scope);
                 case "<=": return this.evalinner(expr[1], scope) <= this.evalinner(expr[2], scope);    
-                case "+": return this.evalinner(expr[1], scope) + this.evalinner(expr[2], scope);
-                case "-": return this.evalinner(expr[1], scope) - this.evalinner(expr[2], scope);
-                case "*": return this.evalinner(expr[1], scope) * this.evalinner(expr[2], scope);
-                case "/": return this.evalinner(expr[1], scope) / this.evalinner(expr[2], scope);
-                case "%": return this.evalinner(expr[1], scope) % this.evalinner(expr[2], scope);
+
+                // Intentionally not de-duplicated for performance purposes
+                case "+": {
+                    if (argCount < 2) throw new Error("+ requires at least 2 arguments");
+                    let sum = this.evalinner(expr[1], scope);
+                    for(let i = 1; i < argCount; i++) {
+                        sum += this.evalinner(expr[i+1], scope);
+                    }
+                    return sum;
+                }
+                case "-": {
+                    if (argCount < 2) throw new Error("- requires at least 2 arguments");
+                    let sub = this.evalinner(expr[1], scope);
+                    for(let i = 1; i < argCount; i++) {
+                        sub -= this.evalinner(expr[i+1], scope);
+                    }
+                    return sub;
+                }
+                case "*": {
+                    if (argCount < 2) throw new Error("* requires at least 2 arguments");
+                    let sum = this.evalinner(expr[1], scope);
+                    for(let i = 1; i < argCount; i++) {
+                        sum *= this.evalinner(expr[i+1], scope);
+                    }
+                    return sum;
+                }
+                case "/": {
+                    if (argCount < 2) throw new Error("/ requires at least 2 arguments");
+                    let sum = this.evalinner(expr[1], scope);
+                    for(let i = 1; i < argCount; i++) {
+                        sum /= this.evalinner(expr[i+1], scope);
+                    }
+                    return sum;
+                }
+                case "modulo": {
+                    if (argCount != 2) throw new Error("module requires 2 arguments");
+                    return this.evalinner(expr[1], scope) % this.evalinner(expr[2], scope);
+                }
                 
                 default: {
                     // Procedure call if unknown
@@ -481,18 +519,18 @@ export class ASP {
 
             // Lists
             if (token === '(' || token === '[') {
-                current++; // Skip the opening bracket
+                const expectedClose = token === '(' ? ')' : ']';
+                current++; 
                 const lst: any[] = [];
                 
-                // Keep walking recursively until we reach a closing bracket
-                while (tokens[current] !== ')' && tokens[current] !== ']') {
-                    if (current >= tokens.length) {
-                        throw new ASPParseError(`Unexpected end of input: Missing closing bracket for '${token}'`, current);
+                while (tokens[current] !== expectedClose) {
+                    if (current >= tokens.length || tokens[current] === ')' || tokens[current] === ']') {
+                        throw new ASPParseError(`Mismatched or missing closing bracket for '${token}'`, current);
                     }
                     lst.push(walk());
                 }
                 
-                current++; // Skip the closing bracket
+                current++; 
                 return lst;
             }
 
@@ -560,7 +598,7 @@ export class ASTStringifier {
                 
                 // Quoted list
                 if (Array.isArray(inner)) {
-                    return `'(${this.stringify(inner)})`;
+                    return `'${this.stringify(inner)}`;
                 }
                 
                 return JSON.stringify(inner);
