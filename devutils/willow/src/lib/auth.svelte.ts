@@ -93,6 +93,12 @@ class Auth {
 		if(!(ret.op == "Discord" && ret.data.op == "GuildInfo")) throw new Error("msyscall did not return guild info")
 		return ret.data.data
 	}
+
+	async searchGuildMembers(guild_id: string, name: string) {
+		let ret = (await this.msyscall({op: "Discord", req: {op: "SearchGuildMembers", guild_id, name }})).stringifyAndThrow(errorString)
+		if(!(ret.op == "Discord" && ret.data.op == "GuildMembers")) throw new Error("msyscall did not return guild info")
+		return ret.data.data
+	}
 }
 
 export const auth = new Auth();

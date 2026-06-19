@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { auth } from '$lib/auth.svelte';
 	import { Button, Checkbox, Toggle, MultiSelect, MultiTextBox } from '$lib';
+	import MemberSelectSingle from '$lib/sv2/MemberSelectSingle.svelte';
 
 	let checkboxValue = $state(false);
 	let toggleValue = $state(true);
@@ -49,7 +50,7 @@
 		description="Type a word/tag and press Enter to add it" 
 		bind:value={multiTextBoxValue} 
 	/>
-	<div class="text-sm text-gray-700 bg-gray-50 p-2 rounded border border-gray-200">
+	<div class="text-sm text-gray-700 bg-gray-50 p-2 rounded border border-gray-200 mb-2">
 		<strong>Tags list:</strong> {multiTextBoxValue.length > 0 ? multiTextBoxValue.join(', ') : 'None'}
 	</div>
 </div>

@@ -88,7 +88,7 @@ export type FormAction = {
 }
 
 const CHOICES_TYPES = [
-    "Fixed", "Channel", "Role"
+    "Fixed", "Channel", "Role", "Member"
 ] as const
 
 export type Choices = {
@@ -98,6 +98,8 @@ export type Choices = {
     type: "Channel"
 } | {
     type: "Role"
+} | {
+    type: "Member"
 }
 
 const FORM_ELEMENT_TYPES = [
@@ -346,8 +348,8 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Page => {
             })
             return { type, choices: schoices }
         case "Channel":
-            return { type }
         case "Role":
+        case "Member":
             return { type }
         }
     }

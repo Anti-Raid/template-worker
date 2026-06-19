@@ -7,6 +7,7 @@
     import ErrorBox from '$lib/ErrorBox.svelte';
     import DisplayElement from './DisplayElement.svelte';
     import TextBox from '$lib/TextBox.svelte';
+    import MemberSelectSingle from './MemberSelectSingle.svelte';
     import Number from '$lib/Number.svelte';
     import Select from '$lib/Select.svelte';
     import MultiSelect from '$lib/MultiSelect.svelte';
@@ -50,6 +51,8 @@
             <Select id={el.id} label={el.label} description={el.description} placeholder={el.placeholder} value={data[el.id]} onchange={(v) => data[el.id] = v} options={mps.roleChoices} />
         {:else if el.choices?.type === "Channel"}
             <Select id={el.id} label={el.label} description={el.description} placeholder={el.placeholder} value={data[el.id]} onchange={(v) => data[el.id] = v} options={mps.channelChoices} />
+        {:else if el.choices?.type === "Member"}
+            <MemberSelectSingle id={el.id} label={el.label} description={el.description} placeholder={el.placeholder} bind:value={data[el.id]} disabled={el.disabled} />
         {:else}
             <TextBox id={el.id} label={el.label} description={el.description} placeholder={el.placeholder || "Enter some text here!"} bind:value={data[el.id]} readonly={el.disabled} />
         {/if}
