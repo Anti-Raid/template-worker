@@ -97,11 +97,11 @@ export class Anima {
         return val !== false && val !== null && val !== undefined;
     }
 
-    private preparelistop(op: string, args: any[], scope: AnimaScope, minlen: number) {
-        if (args.length != 1) {
-            throw new Error(`${op} must be in format ["${op}", expr] but only have ${args.length} arguments`)
+    private preparelistop(op: string, expr: any[], scope: AnimaScope, minlen: number) {
+        if (expr.length != 2) {
+            throw new Error(`${op} must be in format ["${op}", expr] but only have ${expr.length-1} arguments`)
         }
-        const val = this.evalinner(args[0], scope)
+        const val = this.evalinner(expr[1], scope)
         if (!Array.isArray(val)) {
             throw new Error(`${op} expr must evaluate to a list`)
         } else if (val.length < minlen) {
@@ -126,55 +126,56 @@ export class Anima {
             }            
             if (!Array.isArray(expr)) return expr; // If not an array (boolean etc), it evaluates to the expression itself
             if (expr.length === 0) return []; // An empty array evaluates to []
-            
-            const [operator, ...args] = expr;
+
+            const operator = expr[0];
+            const argCount = expr.length-1
             switch (operator) {
                 case "get": 
-                    if(args.length != 1) {
-                        throw new Error(`get must be in format ["get", expr] but only have ${args.length} arguments`)
+                    if(argCount != 1) {
+                        throw new Error(`get must be in format ["get", expr] but have ${argCount} arguments`)
                     }
 
-                    return scope.get(args[0]);
+                    return scope.get(expr[1]);
 
                 case "define": {
-                    if(args.length != 2) {
-                        throw new Error(`define must be in format ["define", varname, arg] but only have ${args.length} arguments`)
+                    if(argCount != 2) {
+                        throw new Error(`define must be in format ["define", varname, arg] but have ${argCount} arguments`)
                     }
-                    if(typeof args[0] != "string") {
+                    if(typeof expr[1] != "string") {
                         throw new Error(`define: argument 1 must be a string`)
                     }
-                    const val = this.evalinner(args[1], scope);
-                    scope.set(args[0], val);
+                    const val = this.evalinner(expr[2], scope);
+                    scope.set(expr[1], val);
                     return val;
                 }
 
                 // Executes a sequence of expressions, last expr is tail-called
                 case "do":
-                    if(args.length == 0) {
-                        throw new Error(`do must be in format ["do", ...] but only have ${args.length} arguments`)
+                    if(argCount == 0) {
+                        throw new Error(`do must be in format ["do", ...] but have ${argCount} arguments`)
                     }
 
-                    for (let i = 0; i < args.length - 1; i++) {
-                        this.evalinner(args[i], scope);
+                    for (let i = 0; i < argCount - 1; i++) {
+                        this.evalinner(expr[i+1], scope);
                     }
 
-                    expr = args[args.length - 1];
+                    expr = expr[argCount];
                     continue;
 
                 case "lambda":
-                    if(args.length != 2) {
-                        throw new Error(`lambda must be in format ["lambda", [bind-args...], arg2] but only have ${args.length} arguments`)
+                    if(argCount != 2) {
+                        throw new Error(`lambda must be in format ["lambda", [bind-args...], arg2] but only have ${argCount} arguments`)
                     }
 
-                    return new Closure(args[0], args[1], scope)   
+                    return new Closure(expr[1], expr[2], scope)   
 
                 // Type checkers
                 case "type?": {
-                    if(args.length != 1) {
-                        throw new Error(`type? must be in format ["type?", expr] but only have ${args.length} arguments`)
+                    if(argCount != 1) {
+                        throw new Error(`type? must be in format ["type?", expr] but only have ${argCount} arguments`)
                     }
 
-                    const resolvedValue = this.evalinner(args[0], scope);
+                    const resolvedValue = this.evalinner(expr[1], scope);
                     if (resolvedValue === null) return "null";
                     switch(typeof resolvedValue) {
                         case "string": return "string"
@@ -191,94 +192,98 @@ export class Anima {
                 }
 
                 case "list":
-                    return args.map(arg => this.evalinner(arg, scope));
+                    const lst = new Array(argCount)
+                    for (let i = 0; i < argCount; i++) {
+                        lst[i] = this.evalinner(expr[i+1], scope);
+                    }
+
+                    return lst
                 case "car": {
-                    const val = this.preparelistop("car", args, scope, 1)
+                    const val = this.preparelistop("car", expr, scope, 1)
                     return val[0]
                 }
                 case "cdr": {
-                    const val = this.preparelistop("cdr", args, scope, 1)
+                    const val = this.preparelistop("cdr", expr, scope, 1)
                     return val.slice(1)
                 }
                 case "last": {
-                    const val = this.preparelistop("last", args, scope, 1);
+                    const val = this.preparelistop("last", expr, scope, 1);
                     return val[val.length - 1];
                 }
                 case "quote":
-                    if(args.length != 1) {
-                        throw new Error(`quote must be in format ["quote", expr] but have ${args.length} arguments`)
+                    if(argCount != 1) {
+                        throw new Error(`quote must be in format ["quote", expr] but have ${argCount} arguments`)
                     }
 
-                    return args[0];
+                    return expr[1];
 
                 case "length": {
-                    if(args.length != 1) {
-                        throw new Error(`length must be in format ["length", expr] but only have ${args.length} arguments`)
+                    if(argCount != 1) {
+                        throw new Error(`length must be in format ["length", expr] but only have ${argCount} arguments`)
                     }
 
-                    const target = this.evalinner(args[0], scope);
+                    const target = this.evalinner(expr[1], scope);
                     return Array.isArray(target) ? target.length : (typeof target === "string" ? target.length : 0);
                 }
 
                 case "contains": {
-                    if(args.length != 2) {
-                        throw new Error(`contains must be in format ["contains", expr, contains_expr] but only have ${args.length} arguments`)
+                    if(argCount != 2) {
+                        throw new Error(`contains must be in format ["contains", expr, contains_expr] but only have ${argCount} arguments`)
                     }
 
-                    const list = this.evalinner(args[0], scope);
-                    const item = this.evalinner(args[1], scope);
+                    const list = this.evalinner(expr[1], scope);
+                    const item = this.evalinner(expr[2], scope);
                     return Array.isArray(list) ? list.includes(item) : false;
                 }
         
                 // Control flow
                 case "if": {
-                    if(args.length != 3) {
-                        throw new Error(`if condition must be in format ["if", condition, true_expr, false_expr] but only have ${args.length} arguments`)
+                    if(argCount != 3) {
+                        throw new Error(`if condition must be in format ["if", condition, true_expr, false_expr] but only have ${argCount} arguments`)
                     }
 
-                    const cond = this.evalinner(args[0], scope); 
+                    const cond = this.evalinner(expr[1], scope); 
                     
                     // Branches are in tail position
-                    expr = this.isTruthy(cond) ? args[1] : args[2];
+                    expr = this.isTruthy(cond) ? expr[2] : expr[3];
                     continue;
                 }
 
                 // Logic (all logic short circuits)
-                case "==": return this.evalinner(args[0], scope) === this.evalinner(args[1], scope);
-                case "!=": return this.evalinner(args[0], scope) !== this.evalinner(args[1], scope);
                 case "and": { 
-                    if (args.length === 0) return true; 
-                    for (let i = 0; i < args.length - 1; i++) {
-                        const val = this.evalinner(args[i], scope)
+                    if (argCount === 0) return true; 
+                    for (let i = 0; i < argCount - 1; i++) {
+                        const val = this.evalinner(expr[i+1], scope)
                         if(!this.isTruthy(val)) return val
                     }
                         
                     // Last expression is in tail position
-                    expr = args[args.length - 1];
+                    expr = expr[argCount];
                     continue;
                 }
                 case "or": {
-                    if (args.length === 0) return false;
-                    for (let i = 0; i < args.length - 1; i++) {
-                        const val = this.evalinner(args[i], scope)
+                    if (argCount === 0) return false;
+                    for (let i = 0; i < argCount - 1; i++) {
+                        const val = this.evalinner(expr[i+1], scope)
                         if (this.isTruthy(val)) return val;
                     }
 
                     // Last expression is in tail position
-                    expr = args[args.length - 1];
+                    expr = expr[argCount];
                     continue;
                 }
-                                
-                // Math
-                case ">": return this.evalinner(args[0], scope) > this.evalinner(args[1], scope);
-                case "<": return this.evalinner(args[0], scope) < this.evalinner(args[1], scope);
-                case ">=": return this.evalinner(args[0], scope) >= this.evalinner(args[1], scope);
-                case "<=": return this.evalinner(args[0], scope) <= this.evalinner(args[1], scope);    
-                case "+": return this.evalinner(args[0], scope) + this.evalinner(args[1], scope);
-                case "-": return this.evalinner(args[0], scope) - this.evalinner(args[1], scope);
-                case "*": return this.evalinner(args[0], scope) * this.evalinner(args[1], scope);
-                case "/": return this.evalinner(args[0], scope) / this.evalinner(args[1], scope);
-                case "%": return this.evalinner(args[0], scope) % this.evalinner(args[1], scope);
+
+                case "==": return this.evalinner(expr[1], scope) === this.evalinner(expr[2], scope);
+                case "!=": return this.evalinner(expr[1], scope) !== this.evalinner(expr[2], scope);                                
+                case ">": return this.evalinner(expr[1], scope) > this.evalinner(expr[2], scope);
+                case "<": return this.evalinner(expr[1], scope) < this.evalinner(expr[2], scope);
+                case ">=": return this.evalinner(expr[1], scope) >= this.evalinner(expr[2], scope);
+                case "<=": return this.evalinner(expr[1], scope) <= this.evalinner(expr[2], scope);    
+                case "+": return this.evalinner(expr[1], scope) + this.evalinner(expr[2], scope);
+                case "-": return this.evalinner(expr[1], scope) - this.evalinner(expr[2], scope);
+                case "*": return this.evalinner(expr[1], scope) * this.evalinner(expr[2], scope);
+                case "/": return this.evalinner(expr[1], scope) / this.evalinner(expr[2], scope);
+                case "%": return this.evalinner(expr[1], scope) % this.evalinner(expr[2], scope);
                 
                 default: {
                     // Procedure call if unknown
@@ -286,7 +291,10 @@ export class Anima {
                     
                     // JS procedure call
                     if (proc instanceof JSClosure) {
-                        const callargs = args.map(a => this.evalinner(a, scope));
+                        const callargs = new Array(argCount)
+                        for (let i = 0; i < argCount; i++) {
+                            callargs[i] = this.evalinner(expr[i+1], scope);
+                        }
 
                         // directly call closure, we also pass expr+scope to the function through JSClosureState
                         // to enable for JS functions to perform TCO optimization and view the currently executing
@@ -303,14 +311,19 @@ export class Anima {
 
                     // Anima procedure
                     if (proc instanceof Closure) {
-                        const callargs = args.map(a => this.evalinner(a, scope));
+                        const callargs = new Array(argCount)
+                        for (let i = 0; i < argCount; i++) {
+                            callargs[i] = this.evalinner(expr[i+1], scope);
+                        }
                         const callscope = proc.scope.nest();
                         if (callargs.length != proc.params.length) {
                             throw new Error(`Attempted to call a procedure taking ${proc.params.length} arguments with ${callargs.length} arguments`);
                         }
-                        proc.params.forEach((paramName: string, idx: number) => {
-                            callscope.set(paramName, callargs[idx]);
-                        });
+                        
+                        // bind args
+                        for (let i = 0; i < proc.params.length; i++) {
+                            callscope.set(proc.params[i], callargs[i]);
+                        }
 
                         // tail-call (optimization) with procedure body and newly bound callscope to avoid allocing new stack frame (similar to Scheme)
                         expr = proc.body;
