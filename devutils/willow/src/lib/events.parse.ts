@@ -435,3 +435,4 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Page => {
 
     return { components: comps, formdata: formData }
 }
+
