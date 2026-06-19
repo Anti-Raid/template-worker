@@ -30,7 +30,7 @@ pub enum MSyscallContext {
     ApiOauth(UserId),
     /// API context (api token)
     ApiToken(UserId),
-    //// A 'secure' API context (w/ 2fa etc used)
+    //// A 'secure' API context (mesoproxy etc.)
     ApiSecure(UserId),
     /// The tw shell (anonymous)
     ShellAnon,
@@ -161,6 +161,7 @@ pub struct MSyscallHandler {
     pub(super) stratum: Stratum,
     pub(super) pool: sqlx::PgPool,
     pub(super) bot_has_guild_cache: Cache<GuildId, bool>,
+    pub(super) guild_members_cache: Cache<(GuildId, UserId), Option<serenity::all::Member>>,
     pub(super) oauth2_code_cache: Cache<String, ()>,
     pub(super) user_rl: Arc<Ratelimiter>,
     pub(super) status_cache: Cache<(), BotStatus>,
@@ -183,7 +184,8 @@ impl MSyscallHandler {
             reqwest,
             stratum,
             worker_pool,
-            bot_has_guild_cache: Cache::builder().time_to_live(Duration::from_secs(60)).build(),
+            bot_has_guild_cache: Cache::builder().time_to_idle(Duration::from_secs(60)).build(),
+            guild_members_cache: Cache::builder().time_to_idle(Duration::from_mins(5)).build(),
             oauth2_code_cache: Cache::builder().time_to_live(Duration::from_secs(60 * 10)).build(),
             user_rl: Self::user_limits().expect("Failed to build user limits").into(),
             status_cache: Cache::builder().time_to_live(Duration::from_secs(100)).build(),
@@ -194,39 +196,54 @@ impl MSyscallHandler {
 
     /// Helper method to return msyscall ratelimits
     fn user_limits() -> Result<Ratelimiter, crate::Error> {
-        // Create the global limit
-        let global_quota =
-            Ratelimiter::create_quota(NonZeroU32::new(10).unwrap(), Duration::from_secs(1))?;
-        let global1 = DefaultKeyedRateLimiter::keyed(global_quota);
-        let global = vec![global1];
+        fn new(limit_per: u32, limit_time: Duration) -> DefaultKeyedRateLimiter<UserId> {
+            let quota =
+                Ratelimiter::create_quota(NonZeroU32::new(limit_per).unwrap(), limit_time).expect("Failed to create quota");
+            let lim = DefaultKeyedRateLimiter::keyed(quota);
+            lim
+        }
 
-        // GetUserGuilds
-        let gug_quota1 =
-            Ratelimiter::create_quota(NonZeroU32::new(3).unwrap(), Duration::from_secs(5))?;
-        let gug_lim1 = DefaultKeyedRateLimiter::keyed(gug_quota1);
+        // Create the global limit
+        let global1 = new(10, Duration::from_secs(1));
+
+        // GetUserGuilds (with refresh)
+        let gug_refresh1 = new(3, Duration::from_secs(5));
+
+        // GetGuildInfo
+        let ggi1 = new(2, Duration::from_secs(5));
+
+        // SearchGuildMembers
+        let sgm1 = new(1, Duration::from_secs(4));
+        let sgm2 = new(5, Duration::from_mins(1));
 
         // Create the clock
         let clock = QuantaClock::default();
 
         Ok(Ratelimiter {
-            global,
+            global: vec![global1],
             per_bucket: indexmap::indexmap!(
-                "GetUserGuilds__Refresh" => vec![gug_lim1] as Vec<DefaultKeyedRateLimiter<UserId>>,
+                "GetUserGuilds__Refresh" => vec![gug_refresh1],
+                "GetGuildInfo" => vec![ggi1],
+                "SearchGuildMembers" => vec![sgm1, sgm2]
             ),
             clock,
         })
     }
 
-    /// Helper function to check if the bot is in a guild
+    /// Helper function to check if the bot is in a single guild
+    async fn has_bot_single(&self, guild: serenity::all::GuildId) -> Result<bool, MSyscallError> {
+        let hb = self.bot_has_guild_cache.try_get_with::<_, crate::Error>(guild, async move {
+            self.stratum.has_guild(guild).await
+        })
+        .await?;
+        Ok(hb)
+    }
+
+    /// Helper function to check if the bot is in a list of guilds
     async fn has_bot(&self, guilds: &[serenity::all::GuildId]) -> Result<Vec<bool>, MSyscallError> {
         if guilds.len() == 1 {
             let hb = self.bot_has_guild_cache.try_get_with::<_, crate::Error>(guilds[0], async move {
-                let guild_exists = self.stratum.has_guilds(guilds).await?;
-                if guild_exists.is_empty() {
-                    Err("internal error: guild_exists is empty when it shouldnt be".into())
-                } else {
-                    Ok(guild_exists[0])
-                }
+                self.stratum.has_guild(guilds[0]).await
             })
             .await?;
 
@@ -240,9 +257,24 @@ impl MSyscallHandler {
         Ok(guild_exists)
     }
 
+    /// Helper method to get user guild member with caching
+    async fn guild_member(&self, guild_id: serenity::all::GuildId, user_id: serenity::all::UserId) -> Result<Option<serenity::all::Member>, MSyscallError> {
+        let hb = self.guild_members_cache.try_get_with::<_, crate::Error>((guild_id, user_id), async move {
+            let mem_v = self.stratum.guild_member(guild_id, user_id).await?;
+            if let Some(mem_v) = mem_v {
+                let v = serde_json::from_value(mem_v)?;
+                Ok(Some(v))
+            } else {
+                Ok(None)
+            }
+        })
+        .await?;
+        Ok(hb)
+    }
+
     pub(super) fn limit(&self, ctx: &MSyscallContext, op: &'static str) -> Result<(), MSyscallError> {
         match ctx {
-            MSyscallContext::ApiOauth(u) => {
+            MSyscallContext::ApiOauth(u) | MSyscallContext::ApiToken(u) => {
                 self.user_rl.check(op, *u).map_err(|e| MSyscallError::Ratelimited {
                     retry_after: e.dur.as_secs_f32(),
                     bucket: e.bucket,

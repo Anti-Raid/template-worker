@@ -158,8 +158,8 @@ impl MBotSyscall {
                 match id {
                     Id::Guild(id) => {
                         // Ensure the bot is in the guild
-                        let hb = handler.has_bot(&[id]).await?;    
-                        if !hb[0] {
+                        let hb = handler.has_bot_single(id).await?;    
+                        if !hb {
                             return Err(MSyscallError::BotNotOnGuild);
                         }
                         // Ensure guild is in server

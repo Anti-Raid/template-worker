@@ -1,8 +1,14 @@
 use serde::{Deserialize, Serialize};
-use serenity::all::GuildId;
+use serenity::{all::GuildId, nonmax::NonMaxU16};
 use sqlx::Row;
 use crate::master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, internal::auth as iauth};
 use super::types::discord::*;
+
+/// While discord supports up to 1000, we limit to 20 for user experience purposes
+pub const SEARCH_GUILD_MEMBERS_LIMIT: NonMaxU16 = match NonMaxU16::new(20) {
+    Some(m) => m,
+    None => unreachable!(),
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "op")]
@@ -11,8 +17,14 @@ pub enum MDiscordSyscall {
     GetUserGuilds {
         refresh: bool,
     },
+    /// Get guild info
     GetGuildInfo {
         guild_id: GuildId
+    },
+    /// Find all guild members beginning with given username/nickname
+    SearchGuildMembers {
+        guild_id: GuildId,
+        name: String,
     }
 }
 
@@ -25,6 +37,9 @@ pub enum MDiscordSyscallRet {
     },
     GuildInfo {
         data: BaseGuildUserInfo
+    },
+    GuildMembers {
+        data: Vec<PartialMember>
     }
 }
 
@@ -33,9 +48,6 @@ impl MDiscordSyscall {
         let user_id = ctx.into_user_id()?;
         match self {
             Self::GetUserGuilds { refresh } => {
-                if !ctx.is_oauth() {
-                    return Err(MSyscallError::ContextRequiresOauth); // disable for now to avoid abuse
-                }
                 handler.limit(&ctx, "GetUserGuilds")?;
                 let mut guilds_cache = None;
                 if !refresh {
@@ -73,7 +85,7 @@ impl MDiscordSyscall {
 
                         #[derive(serde::Deserialize)]
                         pub struct OauthGuild {
-                            id: String,
+                            id: serenity::all::GuildId,
                             name: String,
                             icon: Option<String>,
                             permissions: String,
@@ -107,10 +119,7 @@ impl MDiscordSyscall {
                     }
                 };
 
-                let mut guild_ids = Vec::with_capacity(guilds.len());
-                for guild in guilds.iter() {
-                    guild_ids.push(guild.id.parse::<serenity::all::GuildId>()?);
-                }
+                let guild_ids = guilds.iter().map(|x| x.id).collect::<Vec<_>>();
 
                 let guilds_exist = handler.has_bot(&guild_ids).await?;
 
@@ -122,6 +131,8 @@ impl MDiscordSyscall {
                 })
             }
             Self::GetGuildInfo { guild_id } => {
+                handler.limit(&ctx, "GetGuildInfo")?;
+
                 let bot_id = handler.current_user.id;
                 let Some(guild_json) = handler.stratum.guild(guild_id).await? else {
                     return Err(MSyscallError::EntityNotFound { reason: "Failed to fetch guild data from stratum" });
@@ -130,21 +141,13 @@ impl MDiscordSyscall {
                 let guild = serde_json::from_value::<serenity::all::PartialGuild>(guild_json)?;
 
                 // Next fetch the member and bot_user
-                let Some(member_json) = handler.stratum.guild_member(guild_id, user_id).await? else {
-                    return Err(MSyscallError::EntityNotFound { reason: "Failed to find member info from stratum" });
+                let Some(member) = handler.guild_member(guild_id, user_id).await? else {
+                    return Err(MSyscallError::EntityNotFound { reason: "Failed to find current member info. If you recently joined the server, you may need to wait up to 10-15 minutes." });
                 };
 
-                let member = serde_json::from_value::<serenity::all::Member>(member_json)?;
-
-                let bot_user_json = match handler.stratum.guild_member(guild_id, bot_id).await?
-                {
-                    Some(member) => member,
-                    None => {
-                        return Err(MSyscallError::EntityNotFound { reason: "Failed to find bot user info" });
-                    }
+                let Some(bot_user) = handler.guild_member(guild_id, bot_id).await? else {
+                    return Err(MSyscallError::EntityNotFound { reason: "Failed to find bot user info" });
                 };
-
-                let bot_user = serde_json::from_value::<serenity::all::Member>(bot_user_json)?;
 
                 // Fetch the channels
                 let Some(channels_json) = handler.stratum.guild_channels(guild_id).await? else {
@@ -187,6 +190,18 @@ impl MDiscordSyscall {
                         channels: channels_with_permissions,
                     }
                 })
+            },
+            Self::SearchGuildMembers { guild_id, name } => {
+                handler.limit(&ctx, "SearchGuildMembers")?;
+
+                // SAFETY: Ensure user is in the server they are trying to search in
+                if handler.guild_member(guild_id, user_id).await?.is_none() {
+                    return Err(MSyscallError::Unauthorized { reason: "You are potentially not a member of this server! If you recently joined the server, you may need to wait up to 5 minutes." });
+                };
+
+                let sgm = handler.stratum.discord_http().search_guild_members(guild_id, &name, Some(SEARCH_GUILD_MEMBERS_LIMIT)).await?;
+                let mem_data = serde_json::from_value::<Vec<PartialMember>>(sgm)?;
+                Ok(MDiscordSyscallRet::GuildMembers { data: mem_data })
             }
         }
     }

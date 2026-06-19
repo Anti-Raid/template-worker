@@ -1,4 +1,4 @@
-import type { DashboardGuildData, BaseGuildUserInfo } from '../types/discord'
+import type { DashboardGuildData, BaseGuildUserInfo, PartialMember } from '../types/discord'
 
 export type MDiscordSyscall = 
   | { 
@@ -12,7 +12,15 @@ export type MDiscordSyscall =
       op: "GetGuildInfo"; 
       /** The ID of the guild to fetch information for */
       guild_id: string 
-    };
+    }
+  | {
+    /// Find all guild members beginning with given username/nickname
+    op: "SearchGuildMembers";
+    /** The ID of the guild to fetch information for */
+    guild_id: string;
+    /** username/nickname starts with? */
+    name: string
+  };
 
 export type MDiscordSyscallRet = 
   | { 
@@ -26,4 +34,8 @@ export type MDiscordSyscallRet =
       op: "GuildInfo"; 
       /** Detailed guild, member, and channel information */
       data: BaseGuildUserInfo 
-    };
+    }
+  | {
+    op: "GuildMembers";
+    data: PartialMember[]
+  };

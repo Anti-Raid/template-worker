@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use serenity::all::{GenericChannelId, GuildId, ResultJson, UserId};
-use stratum_client::{BulkIsResourceInCacheRequest, GetResourceRequest, StratumClient};
+use stratum_client::{BulkIsResourceInCacheRequest, GetResourceRequest, IsResourceInCacheRequest, StratumClient};
 use stratum_common::{GuildFetchOpts, pb};
 use tokio::sync::watch;
 
@@ -127,6 +127,17 @@ impl Stratum {
         self.client.get_parsed_resource_from_cache::<_>(GetResourceRequest::CurrentUser {}).await
     }
 
+    /// Given a guild ids, returns if the bot is in it
+    pub async fn has_guild(
+        &self,
+        guild: GuildId,
+    ) -> Result<bool, Error> {
+        let resp = self.client.is_resource_in_cache(IsResourceInCacheRequest::Guild {
+            guild_id: guild.get()
+        }).await?;
+        Ok(resp.cached)
+    }
+
     /// Given a list of guild ids, returns which ones the bot is in
     pub async fn has_guilds(
         &self,
@@ -213,5 +224,9 @@ impl Stratum {
         // Last resort: make the http call
         let res = self.http.get_channel(channel_id).await;
         Self::extract_from_discord(res)
+    }
+
+    pub(crate) fn discord_http(&self) -> &serenity::http::Http {
+        &self.http
     }
 }

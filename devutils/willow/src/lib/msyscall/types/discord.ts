@@ -70,3 +70,17 @@ export interface PartialUser {
   /** The avatar hash of the user */
   avatar?: string | null;
 }
+
+/** A partial guild member object */
+export interface PartialMember {
+  /** The partial user */
+  user: PartialUser,
+  /** User nickname */
+  nick?: string,
+  /** Guild avatar hash */
+  avatar?: string,
+  /** User roles */
+  roles: string[],
+  /** When the user joined the guild */
+  joined_at: string
+}

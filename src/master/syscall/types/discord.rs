@@ -3,7 +3,7 @@ use serenity::all::{GenericChannelId, Permissions, RoleId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DashboardGuild {
-    pub id: String,
+    pub id: serenity::all::GuildId,
     pub name: String,
     pub icon: Option<String>,
     pub permissions: String,
@@ -78,4 +78,19 @@ pub struct PartialUser {
     pub global_name: Option<String>,
     /// The avatar hash of the user
     pub avatar: Option<String>,
+}
+
+/// A partial guild member object
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PartialMember {
+    /// The partial user
+    pub user: PartialUser,
+    /// User nickname
+    pub nick: Option<String>,
+    /// Guild avatar hash
+    pub avatar: Option<String>,
+    /// User roles
+    pub roles: Vec<RoleId>,
+    /// When the user joined the guild
+    pub joined_at: chrono::DateTime<chrono::Utc>
 }
