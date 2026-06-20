@@ -50,7 +50,6 @@
                         const ast = getAST(el.cond);
                         const isVisible = branchEngine.isTruthy(branchEngine.evaluate(ast, data));
                         
-                        // If the branch is true, recursively flatten and push its children
                         if (isVisible) {
                             result.push(...flattenVisible(el.elems));
                         }
@@ -58,7 +57,6 @@
                         console.error(`Branch evaluation failed for cond: ${el.cond}`, error);
                     }
                 } else {
-                    // Standard elements get added to the flat list
                     result.push(el);
                 }
             }

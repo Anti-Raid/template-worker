@@ -23,29 +23,34 @@ class AnimaScope {
         return new AnimaScope(Object.create(null), this, this.state);
     }
 
-    get(key: string): any {
+    get(key: symbol): any {
+        const skey = Symbol.keyFor(key); 
+        if (!skey) throw new Error(`Internal error: could not find symbol for ${String(key)}`);
+
         let scope: AnimaScope | null = this
         while(scope) {
-            if (Object.prototype.hasOwnProperty.call(scope.#data, key)) {
-                return scope.#data[key];
+            if (Object.prototype.hasOwnProperty.call(scope.#data, skey)) {
+                return scope.#data[skey];
             }            
             scope = scope.#outer
         }
-        throw new MissingVarError(`Variable '${key}' is not defined in the current scope.`);
+        throw new MissingVarError(`Variable '${skey}' is not defined in the current scope.`);
     }
 
-    set(key: string, value: any) {
+    set(key: symbol, value: any) {
         if (this.#outer === null) throw new Error("Cannot set key on global scope")
-        this.#data[key] = value;
+        const skey = Symbol.keyFor(key); 
+        if (!skey) throw new Error(`Internal error: could not find symbol for ${String(key)}`);
+        this.#data[skey] = value;
     }
 } 
 
 class Closure {
-    params: string[];
+    params: symbol[];
     body: any;
     scope: AnimaScope;
 
-    constructor(params: string[], body: any, scope: AnimaScope) {
+    constructor(params: symbol[], body: any, scope: AnimaScope) {
         this.params = params
         this.body = body
         this.scope = scope
@@ -150,27 +155,17 @@ export class Anima {
                 throw new Error(`Execution Limits Exceeded: Script ran for more than ${this.maxSteps} cycles.`);
             }
 
-            if (typeof expr === "string") {
-                if (expr.startsWith("'")) {
-                    // equivalent to [quote stringhere]
-                    return expr.slice(1);
-                } else {
-                    return scope.get(expr);
-                }
-            }            
+            if (typeof expr === "string") return expr; // Strings evaluate to themselves
+            if (typeof expr === "symbol") {
+                return scope.get(expr);
+            }
+
             if (!Array.isArray(expr)) return expr; // If not an array (boolean etc), it evaluates to the expression itself
             if (expr.length === 0) return []; // An empty array evaluates to []
 
-            const operator = expr[0];
+            const operator = typeof expr[0] === "symbol" ? (Symbol.keyFor(expr[0]) || expr[0].toString()) : expr[0];
             const argCount = expr.length-1
             switch (operator) {
-                case "get": 
-                    if(argCount != 1) {
-                        throw new Error(`get must be in format ["get", expr] but have ${argCount} arguments`)
-                    }
-
-                    return scope.get(expr[1]);
-
                 case "define": {
                     if (this.disableDefine) {
                         throw new Error("define expressions are disabled in this context");
@@ -179,9 +174,10 @@ export class Anima {
                     if(argCount != 2) {
                         throw new Error(`define must be in format ["define", varname, arg] but have ${argCount} arguments`)
                     }
-                    if(typeof expr[1] != "string") {
-                        throw new Error(`define: argument 1 must be a string`)
+                    if(typeof expr[1] != "symbol") {
+                        throw new Error(`define: argument 1 must be a symbol`)
                     }
+
                     const val = this.evalinner(expr[2], scope);
                     scope.set(expr[1], val);
                     return val;
@@ -205,15 +201,25 @@ export class Anima {
                         throw new Error("lambda expressions are disabled in this context")
                     }
 
-                    if(argCount != 2) {
-                        throw new Error(`lambda must be in format ["lambda", [bind-args...], arg2] but only have ${argCount} arguments`)
+                    if(argCount < 2) {
+                        throw new Error(`lambda must be in format ["lambda", [bind-args...], body...] but only have ${argCount} arguments`)
                     }
 
                     if(!Array.isArray(expr[1])) {
                         throw new Error(`lambda parameters must be a list`);
                     }
 
-                    return new Closure(expr[1], expr[2], scope)   
+                    // Validate that every parameter is a symbol
+                    for(let i = 0; i < expr[1].length; i++) {
+                        if(typeof expr[1][i] !== "symbol") {
+                            throw new Error(`lambda parameter at index ${i} must be a symbol, but received ${typeof expr[1][i]}: ${String(expr[1][i])}`);
+                        }
+                    }
+
+                    // add in a do block if theres more than one op
+                    const bodyAST = argCount === 2 ? expr[2] : [Symbol.for("do"), ...expr.slice(2)];
+
+                    return new Closure(expr[1], bodyAST, scope)   
 
                 // Type checkers
                 case "type?": {
@@ -228,6 +234,7 @@ export class Anima {
                         case "number": return "number"
                         case "boolean": return "boolean"
                         case "undefined": return "null"
+                        case "symbol": return "symbol";
                         default: {
                             if(resolvedValue instanceof Closure) return "procedure"
                             if(resolvedValue instanceof JSClosure) return "procedure"
@@ -256,13 +263,14 @@ export class Anima {
                     const val = this.preparelistop("last", expr, scope, 1);
                     return val[val.length - 1];
                 }
-                case "quote":
+
+                case "quote": {
                     if(argCount != 1) {
                         throw new Error(`quote must be in format ["quote", expr] but have ${argCount} arguments`)
                     }
 
                     return expr[1];
-
+                }
                 case "length": {
                     if(argCount != 1) {
                         throw new Error(`length must be in format ["length", expr] but only have ${argCount} arguments`)
@@ -312,7 +320,7 @@ export class Anima {
                         
                         // Check if it's the 'else' fallback, or if the condition evaluates to truthy. if so, we have a match
                         // to tail-call on
-                        if (condition === "else" || this.isTruthy(this.evalinner(condition, scope))) {
+                        if (condition === Symbol.for("else") || this.isTruthy(this.evalinner(condition, scope))) {
                             tailExpr = resultExpr;
                             hasMatch = true;
                             break;
@@ -421,7 +429,7 @@ export class Anima {
                 
                 default: {
                     // Procedure call if unknown
-                    const proc = this.evalinner(operator, scope)
+                    const proc = this.evalinner(expr[0], scope)
                     
                     // JS procedure call
                     if (proc instanceof JSClosure) {
@@ -610,7 +618,7 @@ export class ASP {
             if (token === "'") {
                 current++; // Skip the quote
                 const nextExpr = walk(); // Parse the next expr after the quote
-                return ["quote", nextExpr];  // Wrap in quote builtin proc
+                return [Symbol.for("quote"), nextExpr];  // Wrap in quote builtin proc
             }
 
             // Lists
@@ -647,19 +655,19 @@ export class ASP {
             const num = Number(token);
             if (!Number.isNaN(num)) return num;
 
-            // Strings must be (un?)escaped and quote'd
+            // Strings must be (un?)escaped
             if (token.startsWith('"') && token.endsWith('"')) {
                 try {
                     // HACK: JSON.parse should parse this correctly
                     const string = JSON.parse(token); 
-                    return ["quote", string];
+                    return string;
                 } catch (e) {
                     throw new ASPParseError(`String parse failed (${e})`, current, token)
                 }
             }
 
             // Symbol
-            return token;
+            return Symbol.for(token);
         };
 
         const exprs = []
@@ -670,37 +678,36 @@ export class ASP {
         if (exprs.length == 1) return exprs[0]
 
         // Translate to do
-        return ["do", ...exprs];
+        return [Symbol.for("do"), ...exprs];
     }
 }
 
 export class ASTStringifier {
-    public static stringify(ast: any): string {
+    constructor() {}
+    public stringify(ast: any): string {
         // Booleans+null+number
         if (ast === null) return "null";
         if (typeof ast === "number" || typeof ast === "boolean") {
             return String(ast);
         }
 
-        // Symbol
+        // String
         if (typeof ast === "string") {
-            return ast;
+            return JSON.stringify(ast);
+        }
+
+        // Symbol
+        if (typeof ast === "symbol") {
+            return Symbol.keyFor(ast) || ast.toString();
         }
 
         // Lists
         if (Array.isArray(ast)) {
-            if (ast[0] === "quote" && ast.length === 2) {
-                const inner = ast[1];
-                
-                // Quoted list
-                if (Array.isArray(inner)) {
-                    return `'${this.stringify(inner)}`;
-                }
-                
-                return JSON.stringify(inner);
+            const lst = new Array(ast.length)
+            for(let i = 0; i < ast.length; i++) {
+                lst[i] = this.stringify(ast[i]);
             }
-
-            return `(${ast.map(ASTStringifier.stringify).join(" ")})`;
+            return `(${lst.join(" ")})`;
         }
 
         throw new Error(`Cannot stringify unknown AST node: ${JSON.stringify(ast)}`);
