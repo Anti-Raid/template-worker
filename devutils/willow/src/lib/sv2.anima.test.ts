@@ -162,7 +162,7 @@ describe('Anima', () => {
                 s("do"),
                 [s("define"), s("loop"), 
                     [s("lambda"), [s("n")], 
-                        [s("if"), [s("eqv?"), s("n"), 0],
+                        [s("if"), [s("="), s("n"), 0],
                             "survived!",
                             [s("loop"), [s("-"), s("n"), 1]]
                         ]

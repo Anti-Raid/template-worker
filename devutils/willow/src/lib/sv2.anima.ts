@@ -24,7 +24,7 @@ class AnimaScope {
     }
 
     get(key: symbol): any {
-        const skey = Symbol.keyFor(key); 
+        const skey = key.description // Symbol.keyFor(key); 
         if (!skey) throw new Error(`Internal error: could not find symbol for ${String(key)}`);
 
         let scope: AnimaScope | null = this
@@ -39,7 +39,7 @@ class AnimaScope {
 
     set(key: symbol, value: any) {
         if (this.#outer === null) throw new Error("Cannot set key on global scope")
-        const skey = Symbol.keyFor(key); 
+        const skey = key.description // Symbol.keyFor(key); 
         if (!skey) throw new Error(`Internal error: could not find symbol for ${String(key)}`);
         this.#data[skey] = value;
     }
@@ -90,6 +90,45 @@ abstract class JSClosure {
     //  }
     abstract call(state: JSClosureState, callargs: any[]): [boolean, any]
 }
+
+// Special Forms
+const OP_DEFINE = Symbol.for("define");
+const OP_DO     = Symbol.for("do");
+const OP_LAMBDA = Symbol.for("lambda");
+const OP_IF     = Symbol.for("if");
+const OP_COND   = Symbol.for("cond");
+const OP_ELSE   = Symbol.for("else");
+const OP_QUOTE  = Symbol.for("quote");
+
+// List Operations
+const OP_LIST     = Symbol.for("list");
+const OP_CAR      = Symbol.for("car");
+const OP_CDR      = Symbol.for("cdr");
+const OP_LAST     = Symbol.for("last");
+const OP_LENGTH   = Symbol.for("length");
+const OP_CONTAINS = Symbol.for("contains");
+
+// Logic & Type Checking
+const OP_AND      = Symbol.for("and");
+const OP_OR       = Symbol.for("or");
+const OP_NOT      = Symbol.for("not");
+const OP_TYPE     = Symbol.for("type?");
+const OP_EQ       = Symbol.for("=");
+const OP_EQ_PTR1  = Symbol.for("eq?");
+const OP_EQ_PTR2  = Symbol.for("eqv?");
+const OP_EQ_DEEP1 = Symbol.for("equal?");
+const OP_EQ_DEEP2 = Symbol.for("equals?");
+
+// Math & Comparisons
+const OP_LT     = Symbol.for("<");
+const OP_GT     = Symbol.for(">");
+const OP_LTE    = Symbol.for("<=");
+const OP_GTE    = Symbol.for(">=");
+const OP_ADD    = Symbol.for("+");
+const OP_SUB    = Symbol.for("-");
+const OP_MUL    = Symbol.for("*");
+const OP_DIV    = Symbol.for("/");
+const OP_MODULO = Symbol.for("modulo");
 
 export class Anima {
     disableLambda: boolean
@@ -163,10 +202,10 @@ export class Anima {
             if (!Array.isArray(expr)) return expr; // If not an array (boolean etc), it evaluates to the expression itself
             if (expr.length === 0) return []; // An empty array evaluates to []
 
-            const operator = typeof expr[0] === "symbol" ? (Symbol.keyFor(expr[0]) || expr[0].toString()) : expr[0];
+            const operator = expr[0];
             const argCount = expr.length-1
             switch (operator) {
-                case "define": {
+                case OP_DEFINE: {
                     if (this.disableDefine) {
                         throw new Error("define expressions are disabled in this context");
                     }
@@ -184,7 +223,7 @@ export class Anima {
                 }
 
                 // Executes a sequence of expressions, last expr is tail-called
-                case "do":
+                case OP_DO:
                     if(argCount == 0) {
                         throw new Error(`do must be in format ["do", ...] but have ${argCount} arguments`)
                     }
@@ -196,7 +235,7 @@ export class Anima {
                     expr = expr[argCount];
                     continue;
 
-                case "lambda":
+                case OP_LAMBDA:
                     if(this.disableLambda) {
                         throw new Error("lambda expressions are disabled in this context")
                     }
@@ -217,12 +256,12 @@ export class Anima {
                     }
 
                     // add in a do block if theres more than one op
-                    const bodyAST = argCount === 2 ? expr[2] : [Symbol.for("do"), ...expr.slice(2)];
+                    const bodyAST = argCount === 2 ? expr[2] : [OP_DO, ...expr.slice(2)];
 
                     return new Closure(expr[1], bodyAST, scope)   
 
                 // Type checkers
-                case "type?": {
+                case OP_TYPE: {
                     if(argCount != 1) {
                         throw new Error(`type? must be in format ["type?", expr] but only have ${argCount} arguments`)
                     }
@@ -244,34 +283,34 @@ export class Anima {
                     }
                 }
 
-                case "list":
+                case OP_LIST:
                     const lst = new Array(argCount)
                     for (let i = 0; i < argCount; i++) {
                         lst[i] = this.evalinner(expr[i+1], scope);
                     }
 
                     return lst
-                case "car": {
+                case OP_CAR: {
                     const val = this.preparelistop("car", expr, scope, 1)
                     return val[0]
                 }
-                case "cdr": {
+                case OP_CDR: {
                     const val = this.preparelistop("cdr", expr, scope, 1)
                     return val.slice(1)
                 }
-                case "last": {
+                case OP_LAST: {
                     const val = this.preparelistop("last", expr, scope, 1);
                     return val[val.length - 1];
                 }
 
-                case "quote": {
+                case OP_QUOTE: {
                     if(argCount != 1) {
                         throw new Error(`quote must be in format ["quote", expr] but have ${argCount} arguments`)
                     }
 
                     return expr[1];
                 }
-                case "length": {
+                case OP_LENGTH: {
                     if(argCount != 1) {
                         throw new Error(`length must be in format ["length", expr] but only have ${argCount} arguments`)
                     }
@@ -280,7 +319,7 @@ export class Anima {
                     return Array.isArray(target) ? target.length : (typeof target === "string" ? target.length : 0);
                 }
 
-                case "contains": {
+                case OP_CONTAINS: {
                     if(argCount != 2) {
                         throw new Error(`contains must be in format ["contains", expr, contains_expr] but only have ${argCount} arguments`)
                     }
@@ -291,7 +330,7 @@ export class Anima {
                 }
         
                 // Control flow
-                case "if": {
+                case OP_IF: {
                     if(argCount != 3) {
                         throw new Error(`if condition must be in format ["if", condition, true_expr, false_expr] but only have ${argCount} arguments`)
                     }
@@ -302,7 +341,7 @@ export class Anima {
                     expr = this.isTruthy(cond) ? expr[2] : expr[3];
                     continue;
                 }
-                case "cond": {
+                case OP_COND: {
                     if (argCount === 0) throw new Error("cond requires at least one clause");
                     
                     let tailExpr = null;
@@ -320,7 +359,7 @@ export class Anima {
                         
                         // Check if it's the 'else' fallback, or if the condition evaluates to truthy. if so, we have a match
                         // to tail-call on
-                        if (condition === Symbol.for("else") || this.isTruthy(this.evalinner(condition, scope))) {
+                        if (condition === OP_ELSE || this.isTruthy(this.evalinner(condition, scope))) {
                             tailExpr = resultExpr;
                             hasMatch = true;
                             break;
@@ -338,7 +377,7 @@ export class Anima {
                 }
 
                 // Logic (all logic short circuits)
-                case "and": { 
+                case OP_AND: { 
                     if (argCount === 0) return true; 
                     for (let i = 0; i < argCount - 1; i++) {
                         const val = this.evalinner(expr[i+1], scope)
@@ -349,7 +388,7 @@ export class Anima {
                     expr = expr[argCount];
                     continue;
                 }
-                case "or": {
+                case OP_OR: {
                     if (argCount === 0) return false;
                     for (let i = 0; i < argCount - 1; i++) {
                         const val = this.evalinner(expr[i+1], scope)
@@ -361,7 +400,7 @@ export class Anima {
                     continue;
                 }
 
-                case "=":
+                case OP_EQ:
                     if(argCount != 2) {
                         throw new Error(`= condition must be in format ["=", expr_a expr_b] but only have ${argCount} arguments`)
                     }
@@ -371,24 +410,24 @@ export class Anima {
                     let b = this.evalinner(expr[2], scope)
                     if (typeof b !== "number") throw new Error("= expr 2 returned a non-number")
                     return a === b
-                case "eq?":
-                case "eqv?": {
+                case OP_EQ_PTR1:
+                case OP_EQ_PTR2: {
                     if(argCount != 2) {
-                        throw new Error(`${operator} condition must be in format ["eqv?", expr_a expr_b] but only have ${argCount} arguments`)
+                        throw new Error(`${String(operator)} condition must be in format ["eqv?", expr_a expr_b] but only have ${argCount} arguments`)
                     }
 
                     return this.evalinner(expr[1], scope) === this.evalinner(expr[2], scope);
                 }
-                case "not": {
+                case OP_NOT: {
                     if(argCount != 1) {
                         throw new Error(`not condition must be in format ["not", expr] but only have ${argCount} arguments`)
                     }
 
                     return !this.isTruthy(this.evalinner(expr[1], scope))
                 }
-                case "equals?":
-                case "equal?": {
-                    if (argCount != 2) throw new Error(`${operator} requires exactly 2 arguments`);
+                case OP_EQ_DEEP1:
+                case OP_EQ_DEEP2: {
+                    if (argCount != 2) throw new Error(`${String(operator)} requires exactly 2 arguments`);
                     
                     const left = this.evalinner(expr[1], scope);
                     const right = this.evalinner(expr[2], scope);
@@ -397,32 +436,64 @@ export class Anima {
                 }
                 
                 // TODO: Verify arguments
-                case ">": return this.evalinner(expr[1], scope) > this.evalinner(expr[2], scope);
-                case "<": return this.evalinner(expr[1], scope) < this.evalinner(expr[2], scope);
-                case ">=": return this.evalinner(expr[1], scope) >= this.evalinner(expr[2], scope);
-                case "<=": return this.evalinner(expr[1], scope) <= this.evalinner(expr[2], scope);    
+                case OP_GT: return this.evalinner(expr[1], scope) > this.evalinner(expr[2], scope);
+                case OP_LT: return this.evalinner(expr[1], scope) < this.evalinner(expr[2], scope);
+                case OP_GTE: return this.evalinner(expr[1], scope) >= this.evalinner(expr[2], scope);
+                case OP_LTE: return this.evalinner(expr[1], scope) <= this.evalinner(expr[2], scope);    
 
-                case "+":
-                case "-":
-                case "*":
-                case "/": {
-                    if (argCount < 2) throw new Error(`${operator} requires at least 2 arguments`);
-                    
+                case OP_ADD: {
+                    if (argCount < 2) throw new Error("+ requires at least 2 arguments");
                     let result = this.evalinner(expr[1], scope);
-                    if (typeof result !== "number") throw new Error(`${operator} requires numbers`);
-
+                    if (typeof result !== "number") throw new Error("+ requires numbers");
+                    
                     for(let i = 1; i < argCount; i++) {
                         const next = this.evalinner(expr[i+1], scope);
-                        if (typeof next !== "number") throw new Error(`${operator} requires numbers`);
-                        
-                        if (operator === "+") result += next;
-                        else if (operator === "-") result -= next;
-                        else if (operator === "*") result *= next;
-                        else if (operator === "/") result /= next;
+                        if (typeof next !== "number") throw new Error("+ requires numbers");
+                        result += next; 
                     }
                     return result;
                 }
-                case "modulo": {
+                
+                case OP_SUB: {
+                    if (argCount < 2) throw new Error("- requires at least 2 arguments");
+                    let result = this.evalinner(expr[1], scope);
+                    if (typeof result !== "number") throw new Error("- requires numbers");
+                    
+                    for(let i = 1; i < argCount; i++) {
+                        const next = this.evalinner(expr[i+1], scope);
+                        if (typeof next !== "number") throw new Error("- requires numbers");
+                        result -= next;
+                    }
+                    return result;
+                }
+                
+                case OP_MUL: {
+                    if (argCount < 2) throw new Error("* requires at least 2 arguments");
+                    let result = this.evalinner(expr[1], scope);
+                    if (typeof result !== "number") throw new Error("* requires numbers");
+                    
+                    for(let i = 1; i < argCount; i++) {
+                        const next = this.evalinner(expr[i+1], scope);
+                        if (typeof next !== "number") throw new Error("* requires numbers");
+                        result *= next; 
+                    }
+                    return result;
+                }
+                
+                case OP_DIV: {
+                    if (argCount < 2) throw new Error("/ requires at least 2 arguments");
+                    let result = this.evalinner(expr[1], scope);
+                    if (typeof result !== "number") throw new Error("/ requires numbers");
+                    
+                    for(let i = 1; i < argCount; i++) {
+                        const next = this.evalinner(expr[i+1], scope);
+                        if (typeof next !== "number") throw new Error("/ requires numbers");
+                        result /= next; 
+                    }
+                    return result;
+                }
+                
+                case OP_MODULO: {
                     if (argCount != 2) throw new Error("module requires 2 arguments");
                     return this.evalinner(expr[1], scope) % this.evalinner(expr[2], scope);
                 }
@@ -618,7 +689,7 @@ export class ASP {
             if (token === "'") {
                 current++; // Skip the quote
                 const nextExpr = walk(); // Parse the next expr after the quote
-                return [Symbol.for("quote"), nextExpr];  // Wrap in quote builtin proc
+                return [OP_QUOTE, nextExpr];  // Wrap in quote builtin proc
             }
 
             // Lists
@@ -678,7 +749,7 @@ export class ASP {
         if (exprs.length == 1) return exprs[0]
 
         // Translate to do
-        return [Symbol.for("do"), ...exprs];
+        return [OP_DO, ...exprs];
     }
 }
 
@@ -698,7 +769,7 @@ export class ASTStringifier {
 
         // Symbol
         if (typeof ast === "symbol") {
-            return Symbol.keyFor(ast) || ast.toString();
+            return /*Symbol.keyFor(ast)*/ ast.description || ast.toString();
         }
 
         // Lists
