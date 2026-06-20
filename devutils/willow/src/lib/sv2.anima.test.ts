@@ -46,8 +46,8 @@ describe('Anima', () => {
 
     describe('Logic & Control Flow', () => {
         it('evaluates strict equality', () => {
-            expect(run(["==", "port", 8080])).toBe(true);
-            expect(run(["!=", "protocol", "'udp"])).toBe(true);
+            expect(run(["eqv?", "port", 8080])).toBe(true);
+            expect(run(["not", ["eqv?", "protocol", "'udp"]])).toBe(true);
         });
 
         it('evaluates if statements using strict truthiness', () => {
@@ -152,7 +152,7 @@ describe('Anima', () => {
                 "do",
                 ["define", "loop", 
                     ["lambda", ["n"], 
-                        ["if", ["==", "n", 0],
+                        ["if", ["eqv?", "n", 0],
                             ["quote", "survived!"],
                             ["loop", ["-", "n", 1]] // Tail position, so no new stack frame
                         ]
@@ -240,6 +240,81 @@ describe('Anima', () => {
             expect(run(ast)).toStrictEqual(ast);
         })
     })
+
+    describe('cond special form', () => {
+
+        it('Matches the first truthy condition', () => {
+            const ast = [
+                "cond",
+                [true, ["quote", "first"]],
+                [true, ["quote", "second"]]
+            ];
+            expect(run(ast)).toBe("first");
+        });
+
+        it('Skips falsey conditions and matches later ones', () => {
+            const ast = [
+                "cond",
+                [false, ["quote", "first"]],
+                [["=", 1, 2], ["quote", "second"]],
+                [[">", 5, 3], ["quote", "third"]]
+            ];
+            expect(run(ast)).toBe("third");
+        });
+
+        it('Falls back to the else clause if nothing matches', () => {
+            const ast = [
+                "cond",
+                [false, ["quote", "first"]],
+                [null, ["quote", "second"]],
+                ["else", ["quote", "fallback"]]
+            ];
+            expect(run(ast)).toBe("fallback");
+        });
+
+        it('Returns null if no conditions match and there is no else clause', () => {
+            const ast = [
+                "cond",
+                [false, ["quote", "first"]],
+                [["=", 1, 2], ["quote", "second"]]
+            ];
+            expect(run(ast)).toBeNull();
+        });
+
+        it('Throws an error if cond has zero clauses', () => {
+            const ast = ["cond"];
+            expect(() => run(ast)).toThrow("cond requires at least one clause");
+        });
+
+        it('Throws an error if a clause is malformed (not exactly 2 elements)', () => {
+            // e.g., (cond (true "a" "b"))
+            const ast = [
+                "cond",
+                [true, ["quote", "a"], ["quote", "b"]]
+            ];
+            expect(() => run(ast)).toThrow("cond clause must be a list of exactly 2 elements");
+        });
+
+        it('Ensure cond perfectly triggers Tail-Call Optimization (TCO)', () => {
+            const ast = [
+                "do",
+                ["define", "loop", 
+                    ["lambda", ["n"], 
+                        ["cond",
+                            [["<=", "n", 0], ["quote", "survived!"]],
+                            // Tail position, so no new stack frame
+                            ["else", ["loop", ["-", "n", 1]]] 
+                        ]
+                    ]
+                ],
+                ["loop", 15000]
+            ];
+            
+            // If TCO fails in the cond block, this will throw a Maximum Call Stack Size Exceeded error
+            expect(() => run(ast)).not.toThrow();
+            expect(run(ast)).toBe("survived!");
+        });
+    });
 });
 
 describe('Anima String Parser (ASP)', () => {

@@ -93,10 +93,30 @@ export class Anima {
         return this.evalinner(expr, executionScope);
     }
 
+    // Private method to return if a value is truthy or not
     private isTruthy(val: any): boolean {
         return val !== false && val !== null && val !== undefined;
+    }   
+
+    private isDeepEqual(a: any, b: any): boolean {
+        // If simple eqv? logic works, return true as no more work needed
+        if (a === b) return true;
+
+        // Lists
+        if (Array.isArray(a) && Array.isArray(b)) {
+            if (a.length !== b.length) return false;
+            
+            for (let i = 0; i < a.length; i++) {
+                if (!this.isDeepEqual(a[i], b[i])) return false;
+            }
+            return true;
+        }
+        
+        // Closures/other types
+        return false;
     }
 
+    // Private method to perform the common code for a list op
     private preparelistop(op: string, expr: any[], scope: AnimaScope, minlen: number) {
         if (expr.length != 2) {
             throw new Error(`${op} must be in format ["${op}", expr] but only have ${expr.length-1} arguments`)
@@ -188,7 +208,7 @@ export class Anima {
                         case "undefined": return "null"
                         default: {
                             if(resolvedValue instanceof Closure) return "procedure"
-                            if(resolvedValue instanceof JSClosure) return "js-procedure"
+                            if(resolvedValue instanceof JSClosure) return "procedure"
                             if(Array.isArray(resolvedValue)) return "list"
                             return "unknown" // to allow consistency across all js engines/custom sv2 impls etc.
                         }
@@ -252,6 +272,40 @@ export class Anima {
                     expr = this.isTruthy(cond) ? expr[2] : expr[3];
                     continue;
                 }
+                case "cond": {
+                    if (argCount === 0) throw new Error("cond requires at least one clause");
+                    
+                    let tailExpr = null;
+                    let hasMatch = false;
+
+                    for (let i = 0; i < argCount; i++) {
+                        const clause = expr[i + 1];
+                        
+                        if (!Array.isArray(clause) || clause.length !== 2) {
+                            throw new Error(`cond clause must be a list of exactly 2 elements: [condition, expr]`);
+                        }
+                        
+                        const condition = clause[0];
+                        const resultExpr = clause[1];
+                        
+                        // Check if it's the 'else' fallback, or if the condition evaluates to truthy. if so, we have a match
+                        // to tail-call on
+                        if (condition === "else" || this.isTruthy(this.evalinner(condition, scope))) {
+                            tailExpr = resultExpr;
+                            hasMatch = true;
+                            break;
+                        }
+                    }
+
+                    // If a branch matched, tail-call it
+                    if (hasMatch) {
+                        expr = tailExpr;
+                        continue; 
+                    }
+                    
+                    // If nothing matches (meaning none of the if clauses resolved nor did the 'else'), return null
+                    return null; 
+                }
 
                 // Logic (all logic short circuits)
                 case "and": { 
@@ -277,46 +331,66 @@ export class Anima {
                     continue;
                 }
 
+                case "=":
+                    if(argCount != 2) {
+                        throw new Error(`= condition must be in format ["=", expr_a expr_b] but only have ${argCount} arguments`)
+                    }
+
+                    let a = this.evalinner(expr[1], scope)
+                    if (typeof a !== "number") throw new Error("= expr 1 returned a non-number")
+                    let b = this.evalinner(expr[2], scope)
+                    if (typeof b !== "number") throw new Error("= expr 2 returned a non-number")
+                    return a === b
+                case "eq?":
+                case "eqv?": {
+                    if(argCount != 2) {
+                        throw new Error(`${operator} condition must be in format ["eqv?", expr_a expr_b] but only have ${argCount} arguments`)
+                    }
+
+                    return this.evalinner(expr[1], scope) === this.evalinner(expr[2], scope);
+                }
+                case "not": {
+                    if(argCount != 1) {
+                        throw new Error(`not condition must be in format ["not", expr] but only have ${argCount} arguments`)
+                    }
+
+                    return !this.isTruthy(this.evalinner(expr[1], scope))
+                }
+                case "equals?":
+                case "equal?": {
+                    if (argCount != 2) throw new Error(`${operator} requires exactly 2 arguments`);
+                    
+                    const left = this.evalinner(expr[1], scope);
+                    const right = this.evalinner(expr[2], scope);
+                    
+                    return this.isDeepEqual(left, right);
+                }
+                
                 // TODO: Verify arguments
-                case "==": return this.evalinner(expr[1], scope) === this.evalinner(expr[2], scope);
-                case "!=": return this.evalinner(expr[1], scope) !== this.evalinner(expr[2], scope);                                
                 case ">": return this.evalinner(expr[1], scope) > this.evalinner(expr[2], scope);
                 case "<": return this.evalinner(expr[1], scope) < this.evalinner(expr[2], scope);
                 case ">=": return this.evalinner(expr[1], scope) >= this.evalinner(expr[2], scope);
                 case "<=": return this.evalinner(expr[1], scope) <= this.evalinner(expr[2], scope);    
 
-                // Intentionally not de-duplicated for performance purposes
-                case "+": {
-                    if (argCount < 2) throw new Error("+ requires at least 2 arguments");
-                    let sum = this.evalinner(expr[1], scope);
-                    for(let i = 1; i < argCount; i++) {
-                        sum += this.evalinner(expr[i+1], scope);
-                    }
-                    return sum;
-                }
-                case "-": {
-                    if (argCount < 2) throw new Error("- requires at least 2 arguments");
-                    let sub = this.evalinner(expr[1], scope);
-                    for(let i = 1; i < argCount; i++) {
-                        sub -= this.evalinner(expr[i+1], scope);
-                    }
-                    return sub;
-                }
-                case "*": {
-                    if (argCount < 2) throw new Error("* requires at least 2 arguments");
-                    let sum = this.evalinner(expr[1], scope);
-                    for(let i = 1; i < argCount; i++) {
-                        sum *= this.evalinner(expr[i+1], scope);
-                    }
-                    return sum;
-                }
+                case "+":
+                case "-":
+                case "*":
                 case "/": {
-                    if (argCount < 2) throw new Error("/ requires at least 2 arguments");
-                    let sum = this.evalinner(expr[1], scope);
+                    if (argCount < 2) throw new Error(`${operator} requires at least 2 arguments`);
+                    
+                    let result = this.evalinner(expr[1], scope);
+                    if (typeof result !== "number") throw new Error(`${operator} requires numbers`);
+
                     for(let i = 1; i < argCount; i++) {
-                        sum /= this.evalinner(expr[i+1], scope);
+                        const next = this.evalinner(expr[i+1], scope);
+                        if (typeof next !== "number") throw new Error(`${operator} requires numbers`);
+                        
+                        if (operator === "+") result += next;
+                        else if (operator === "-") result -= next;
+                        else if (operator === "*") result *= next;
+                        else if (operator === "/") result /= next;
                     }
-                    return sum;
+                    return result;
                 }
                 case "modulo": {
                     if (argCount != 2) throw new Error("module requires 2 arguments");
