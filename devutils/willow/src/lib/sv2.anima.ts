@@ -9,14 +9,18 @@ class AnimaScope {
     #data: Record<string, any>; // from svelte $state etc
     #outer: AnimaScope | null;
 
-    constructor(data: Record<string, any>, outer: AnimaScope | null) {
+    /** gas/steps the vm has taken. Each vm eval loop takes 1 step, JS funcs can also increment steps etc as they desire */
+    state: {steps: number}; 
+
+    constructor(data: Record<string, any>, outer: AnimaScope | null, state: {steps: number}) {
         this.#data = data
         this.#outer = outer
+        this.state = state
     }
 
     nest(): AnimaScope {
         // Nested scopes don't need to be reactive
-        return new AnimaScope(Object.create(null), this);
+        return new AnimaScope(Object.create(null), this, this.state);
     }
 
     get(key: string): any {
@@ -83,18 +87,23 @@ abstract class JSClosure {
 }
 
 export class Anima {
-    constructor() {
-
+    disableLambda: boolean
+    disableDefine: boolean
+    maxSteps: number; // 0 to disable
+    constructor(opts?: {disableLambda?: boolean, disableDefine?: boolean, maxSteps?: number}) {
+        this.disableLambda = opts?.disableLambda || false
+        this.disableDefine = opts?.disableDefine || false
+        this.maxSteps = opts?.maxSteps || 0
     }
 
     public evaluate(expr: any, rawData: Record<string, any>): any {
-        const globalScope = new AnimaScope(rawData, null)
+        const globalScope = new AnimaScope(rawData, null, {steps: 0})
         const executionScope = globalScope.nest(); // Any "define" calls now write to this temporary scope
         return this.evalinner(expr, executionScope);
     }
 
-    // Private method to return if a value is truthy or not
-    private isTruthy(val: any): boolean {
+    /** Returns if a value is truthy or not */
+    isTruthy(val: any): boolean {
         return val !== false && val !== null && val !== undefined;
     }   
 
@@ -136,6 +145,11 @@ export class Anima {
         let scope = initialScope;
 
         while (true) {
+            scope.state.steps++;
+            if (this.maxSteps && scope.state.steps > this.maxSteps) {
+                throw new Error(`Execution Limits Exceeded: Script ran for more than ${this.maxSteps} cycles.`);
+            }
+
             if (typeof expr === "string") {
                 if (expr.startsWith("'")) {
                     // equivalent to [quote stringhere]
@@ -158,6 +172,10 @@ export class Anima {
                     return scope.get(expr[1]);
 
                 case "define": {
+                    if (this.disableDefine) {
+                        throw new Error("define expressions are disabled in this context");
+                    }
+
                     if(argCount != 2) {
                         throw new Error(`define must be in format ["define", varname, arg] but have ${argCount} arguments`)
                     }
@@ -183,6 +201,10 @@ export class Anima {
                     continue;
 
                 case "lambda":
+                    if(this.disableLambda) {
+                        throw new Error("lambda expressions are disabled in this context")
+                    }
+
                     if(argCount != 2) {
                         throw new Error(`lambda must be in format ["lambda", [bind-args...], arg2] but only have ${argCount} arguments`)
                     }

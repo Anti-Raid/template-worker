@@ -103,7 +103,7 @@ export type Choices = {
 }
 
 const FORM_ELEMENT_TYPES = [
-    "DisplayElement", "Text", "Array.Text", "Number", "Boolean"
+    "DisplayElement", "Text", "Array.Text", "Number", "Boolean", "Branch"
 ] as const
 
 export type FormElement = {
@@ -138,6 +138,11 @@ export type FormElement = {
     label: string,
     description?: string,
     disabled?: boolean,
+} | {
+    type: "Branch",
+    // anima s-expression
+    cond: string,
+    elems: FormElement[] // if Branch is true
 }
 
 export type FormData = {
@@ -263,25 +268,36 @@ export const toDispatchResults = (value: RawKhronosValue): DispatchResult[] => {
 /** Helper method to unpack a RawFormData w/ set of settings v2 FormElements into a processed FormData */
 const settingsUnwrapRawFormData = (elements: FormElement[], formdata: RawFormData): FormData => {
     const data: Record<string, any> = {}
-    for(const rawel of elements) {
-        if(rawel.type === "DisplayElement") continue // display elements dont have form data
-        const rawVal = mapGetOpt(formdata.data, rawel.id);
 
-        switch (rawel.type) {
-            case "Text":
-                data[rawel.id] = rawVal !== undefined ? assertString(rawVal) : ""
-                break
-            case "Number":
-                data[rawel.id] = rawVal !== undefined ? assertNumber(rawVal) : 0
-                break
-            case "Boolean":
-                data[rawel.id] = rawVal !== undefined ? assertBoolean(rawVal) : false
-                break
-            case "Array.Text":
-                data[rawel.id] = rawVal !== undefined ? assertList(rawVal).map(v => assertString(v, "string in string array")) : []
-                break
+    const processElements = (elems: FormElement[]) => {
+        for(const rawel of elems) {
+            if(rawel.type === "DisplayElement") continue // display elements dont have form data
+            if(rawel.type === "Branch") {
+                // Process all inner elements
+                processElements(rawel.elems);
+                continue;
+            }
+
+            const rawVal = mapGetOpt(formdata.data, rawel.id);
+
+            switch (rawel.type) {
+                case "Text":
+                    data[rawel.id] = rawVal !== undefined ? assertString(rawVal) : ""
+                    break
+                case "Number":
+                    data[rawel.id] = rawVal !== undefined ? assertNumber(rawVal) : 0
+                    break
+                case "Boolean":
+                    data[rawel.id] = rawVal !== undefined ? assertBoolean(rawVal) : false
+                    break
+                case "Array.Text":
+                    data[rawel.id] = rawVal !== undefined ? assertList(rawVal).map(v => assertString(v, "string in string array")) : []
+                    break
+            }
         }
     }
+
+    processElements(elements);
 
     return { id: formdata.id, title: formdata.title, data }
 }
@@ -354,7 +370,7 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Page => {
         }
     }
 
-    const expandRawFormElement = (map: Map<string, RawKhronosValue>): FormElement => {
+    const expandRawFormElement = (map: Map<string, RawKhronosValue>, usedIds: Set<string>): FormElement => {
         const type = assertOneOf(assertString(mapGet(map, "type"), "type"), FORM_ELEMENT_TYPES)
         switch (type) {
             case "DisplayElement":
@@ -362,6 +378,8 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Page => {
                 return { type, element: delem }
             case "Text":
                 const tid = assertString(mapGet(map, "id"), "id")
+                if (usedIds.has(tid)) throw new Error(`${tid} is already used somewhere in this FormSet`)
+                else usedIds.add(tid)
                 const tlabel = assertString(mapGet(map, "label"), "label")
                 const tdesc = assertOptional(mapGetOpt(map, "description"), assertString)
                 const tph = assertOptional(mapGetOpt(map, "placeholder"), assertString)
@@ -370,6 +388,8 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Page => {
                 return { type, id: tid, label: tlabel, description: tdesc, placeholder: tph, disabled: tdisabled, choices: nchoices }
             case "Number":
                 const nid = assertString(mapGet(map, "id"), "id")
+                if (usedIds.has(nid)) throw new Error(`${nid} is already used somewhere in this FormSet`)
+                else usedIds.add(nid)
                 const nlabel = assertString(mapGet(map, "label"), "label")
                 const ndesc = assertOptional(mapGetOpt(map, "description"), assertString)
                 const nph = assertOptional(mapGetOpt(map, "placeholder"), assertString)
@@ -377,6 +397,8 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Page => {
                 return { type, id: nid, label: nlabel, description: ndesc, placeholder: nph, disabled: ndisabled }
             case "Array.Text":
                 const aid = assertString(mapGet(map, "id"), "id")
+                if (usedIds.has(aid)) throw new Error(`${aid} is already used somewhere in this FormSet`)
+                else usedIds.add(aid)
                 const alabel = assertString(mapGet(map, "label"), "label")
                 const adesc = assertOptional(mapGetOpt(map, "description"), assertString)
                 const adisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
@@ -384,11 +406,19 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Page => {
                 const apchoices = expandChoices(assertOptional(mapGetOpt(map, "choices"), assertMap))
                 return { type, id: aid, label: alabel, description: adesc, placeholder: aph, disabled: adisabled, choices: apchoices }
             case "Boolean":
-               const bid = assertString(mapGet(map, "id"), "id")
-               const blabel = assertString(mapGet(map, "label"), "label")
-               const bdesc = assertOptional(mapGetOpt(map, "description"), assertString)
-               const bdisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
-               return { type, id: bid, label: blabel, description: bdesc, disabled: bdisabled }
+                const bid = assertString(mapGet(map, "id"), "id")
+                if (usedIds.has(bid)) throw new Error(`${bid} is already used somewhere in this FormSet`)
+                else usedIds.add(bid)
+                const blabel = assertString(mapGet(map, "label"), "label")
+                const bdesc = assertOptional(mapGetOpt(map, "description"), assertString)
+                const bdisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
+                return { type, id: bid, label: blabel, description: bdesc, disabled: bdisabled }
+            case "Branch":
+                const brcond = assertString(mapGet(map, "cond"), "cond")
+                const baseForm = assertList(mapGet(map, "elems"), "elems").map((formListElem, idx) => {
+                    return expandRawFormElement(assertMap(formListElem, `FormElement at idx ${idx} of FormSet.Branch`), usedIds)
+                })
+                return { type, cond: brcond, elems: baseForm }
         }
     }
 
@@ -410,8 +440,9 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Page => {
             case "FormSet":
                 const fsid = assertString(mapGet(map, "id"), "id")
                 const fsreorderable = assertBoolean(mapGet(map, "reorderable"), "reorderable")
+                const fsUsedIds = new Set<string>()
                 const baseForm = assertList(mapGet(map, "form"), "form").map((formListElem, idx) => {
-                    return expandRawFormElement(assertMap(formListElem, `FormElement at idx ${idx} of FormSet \`${fsid}\``))
+                    return expandRawFormElement(assertMap(formListElem, `FormElement at idx ${idx} of FormSet \`${fsid}\``), fsUsedIds)
                 })
                 const formActions = assertList(mapGet(map, "actions"), "actions").map((actionElem, idx) => {
                     return expandFormAction(assertMap(actionElem, `FormAction at idx ${idx} of FormSet \`${fsid}\``))

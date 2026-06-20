@@ -13,6 +13,7 @@
     import MultiSelect from '$lib/MultiSelect.svelte';
     import MultiTextBox from '$lib/MultiTextBox.svelte';
     import Toggle from '$lib/Toggle.svelte';
+    import { Anima, ASP } from '$lib/sv2.anima';
 
 	let { template, form, formid, formidx, actions, formsetid }: {
         template: string,
@@ -26,14 +27,77 @@
     let clickedBtns = $state<Record<number, string | null>>({})
     let data = $derived(mps.state.settings[template].formdata[formsetid][formidx].data);
 	
+    const branchEngine = new Anima({ 
+        disableLambda: true, 
+        disableDefine: true, 
+        maxSteps: 5000 
+    });
+
+    const astCache = new Map<string, any>();
+    const getAST = (cond: string) => {
+        if (!astCache.has(cond)) {
+            astCache.set(cond, new ASP(cond).parse());
+        }
+        return astCache.get(cond);
+    };
+    const visibleElements = $derived.by(() => {
+        const flattenVisible = (elems: FormElement[]): FormElement[] => {
+            const result: FormElement[] = [];
+            
+            for (const el of elems) {
+                if (el.type === "Branch") {
+                    try {
+                        const ast = getAST(el.cond);
+                        const isVisible = branchEngine.isTruthy(branchEngine.evaluate(ast, data));
+                        
+                        // If the branch is true, recursively flatten and push its children
+                        if (isVisible) {
+                            result.push(...flattenVisible(el.elems));
+                        }
+                    } catch (error) {
+                        console.error(`Branch evaluation failed for cond: ${el.cond}`, error);
+                    }
+                } else {
+                    // Standard elements get added to the flat list
+                    result.push(el);
+                }
+            }
+            return result;
+        };
+
+        return flattenVisible(form);
+    });
+
+    const gatherData = (rec: Record<string, any>, elems: FormElement[]) => {
+        const sourceData = mps.state.settings[template].formdata[formsetid][formidx].data;
+        for(const elem of elems) {
+            if (elem.type == "DisplayElement") continue
+            if (elem.type === "Branch") {
+                const ast = getAST(elem.cond)
+                const isVisible = branchEngine.isTruthy(branchEngine.evaluate(ast, sourceData));
+                if (isVisible) {
+                    gatherData(rec, elem.elems);
+                }
+                continue;
+            }
+            rec[elem.id] = sourceData[elem.id]
+        }
+    }
+
     const submit = async (abid: string, sendform: boolean) => {
+        // Gather data into formdata
+        const formdata = Object.create(null)
+        if (sendform) {
+            gatherData(formdata, form)
+        }
+
 		const sve: Event = {
             type: "form_action",
             __tloop_template_id: template,
             form_id: formid,
             formset_id: formsetid,
             action_button_id: abid,
-            form_data: sendform ? data : undefined
+            form_data: sendform ? formdata : undefined
         }
 
         if (!mps.state.selectedGuild) throw new Error("Guild not selected")
@@ -41,7 +105,7 @@
 	}
 </script>
 
-{#each form as el}
+{#each visibleElements as el}
     {#if el.type == "DisplayElement"}
         <DisplayElement el={el.element} />
     {:else if el.type == "Text"}
@@ -84,7 +148,6 @@
             delete clickedBtns[i]
         } catch (err) {
             clickedBtns[i] = err?.toString() || "Unknown error sending action"
-            alert(err?.toString() || "Unknown error sending action")
         }
     }}>
         {a.text} ({a.style})
