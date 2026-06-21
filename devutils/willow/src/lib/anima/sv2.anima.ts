@@ -1,3 +1,5 @@
+import { Cons } from "./list";
+
 export class MissingVarError extends Error {
     constructor(message: string) {
         super(message);
@@ -37,15 +39,16 @@ class AnimaScope {
         throw new MissingVarError(`Variable '${skey}' is not defined in the current scope.`);
     }
 
-    set(key: symbol, value: any) {
+    define(key: symbol, value: any) {
         if (this.#outer === null) throw new Error("Cannot set key on global scope")
         const skey = key.description // Symbol.keyFor(key); 
         if (!skey) throw new Error(`Internal error: could not find symbol for ${String(key)}`);
         this.#data[skey] = value;
     }
-} 
+}
 
-class Closure {
+/** JS Closure */
+export class Closure {
     params: symbol[];
     body: any;
     scope: AnimaScope;
@@ -68,10 +71,12 @@ const OP_QUOTE  = Symbol.for("quote");
 
 // List Operations
 const OP_LIST     = Symbol.for("list");
+const OP_CONS     = Symbol.for("cons")
 const OP_CAR      = Symbol.for("car");
 const OP_CDR      = Symbol.for("cdr");
 const OP_LAST     = Symbol.for("last");
 const OP_LENGTH   = Symbol.for("length");
+const OP_EMPTY    = Symbol.for("empty?")
 const OP_CONTAINS = Symbol.for("contains");
 
 // Logic & Type Checking
@@ -108,6 +113,7 @@ export const SPECIAL_FORMS = new Set([
     OP_DO
 ])
 
+/** A builtin method in anima */
 export class Builtin {
     cb: (vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => any
     constructor(cb: (vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => any) {
@@ -117,7 +123,7 @@ export class Builtin {
 
 const strictEqProc = new Builtin((vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => {
     if (argCount != 2) throw new Error(`${String(expr[0])} requires exactly 2 arguments`);
-    return vm.evalinner(expr[1], scope) === vm.evalinner(expr[2], scope);
+    return Object.is(vm.evalinner(expr[1], scope), vm.evalinner(expr[2], scope));
 });
 
 const deepEqProc = new Builtin((vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => {
@@ -188,37 +194,75 @@ export const BUILTIN_PROCS: Record<symbol, Builtin> = {
         }
         return lst;
     }),
+    [OP_CONS]: new Builtin((vm, argCount, expr, scope) => {
+        if (argCount != 2) throw new Error("cons requires 2 arguments [cons a d]");
+        const a = vm.evalinner(expr[1], scope);
+        const d = vm.evalinner(expr[2], scope);
+        return Cons.pair(a, d)
+    }),
     [OP_CAR]: new Builtin((vm, argCount, expr, scope) => {
         if (argCount != 1) throw new Error("car requires 1 argument");
         const val = vm.evalinner(expr[1], scope);
-        if (!Array.isArray(val)) throw new Error("car requires a list");
-        if (val.length < 1) throw new Error("car requires a non-empty list");
-        return val[0];
+        if (Array.isArray(val)) {
+            if (val.length < 1) throw new Error("car requires a non-empty list");
+            return val[0];
+        } else if (val instanceof Cons) {
+            return val.head;
+        } else if (val === null) {
+            throw new Error("car requires a non-empty list");
+        } else {
+            throw new Error("car requires a list");
+        }
     }),
     [OP_CDR]: new Builtin((vm, argCount, expr, scope) => {
         if (argCount != 1) throw new Error("cdr requires 1 argument");
         const val = vm.evalinner(expr[1], scope);
-        if (!Array.isArray(val)) throw new Error("cdr requires a list");
-        if (val.length < 1) throw new Error("cdr requires a non-empty list");
-        return val.slice(1);
+        if (Array.isArray(val)) {
+            if (val.length < 1) throw new Error("cdr requires a non-empty list");
+            return Cons.fromArray(val, 1)
+        } else if (val instanceof Cons) { 
+            return val.tail
+        } else if (val === null) {
+            throw new Error("car requires a non-empty list");
+        } else {
+            throw new Error("cdr requires a list");
+        }
     }),
     [OP_LAST]: new Builtin((vm, argCount, expr, scope) => {
         if (argCount != 1) throw new Error("last requires 1 argument");
         const val = vm.evalinner(expr[1], scope);
-        if (!Array.isArray(val)) throw new Error("last requires a list");
-        if (val.length < 1) throw new Error("last requires a non-empty list");
-        return val[val.length - 1];
+        if (Array.isArray(val)) {
+            if (val.length < 1) throw new Error("last requires a non-empty list");
+            return val[val.length - 1];
+        } else if (val instanceof Cons) {
+            let last = val.head
+            for(const v of val) {
+                last = v;
+            }
+            return last
+        } else if (val === null) {
+            throw new Error("last requires a non-empty list");
+        } else {
+            throw new Error("last requires a list");
+        }
     }),
     [OP_LENGTH]: new Builtin((vm, argCount, expr, scope) => {
         if (argCount != 1) throw new Error("length requires 1 argument");
         const target = vm.evalinner(expr[1], scope);
-        return Array.isArray(target) ? target.length : (typeof target === "string" ? target.length : 0);
+        if (target === null) return 0
+        return (Array.isArray(target) || target instanceof Cons) ? target.length : (typeof target === "string" ? target.length : 0);
+    }),
+    [OP_EMPTY]: new Builtin((vm, argCount, expr, scope) => {
+        if (argCount != 1) throw new Error("empty? requires 1 argument");
+        const target = vm.evalinner(expr[1], scope);
+        if (target === null) return true
+        return (Array.isArray(target) || target instanceof Cons) ? (target.length == 0) : (typeof target === "string" ? (target.length == 0) : false);
     }),
     [OP_CONTAINS]: new Builtin((vm, argCount, expr, scope) => {
         if (argCount != 2) throw new Error("contains requires 2 arguments");
         const list = vm.evalinner(expr[1], scope);
         const item = vm.evalinner(expr[2], scope);
-        return Array.isArray(list) ? list.includes(item) : false;
+        return (Array.isArray(list) || list instanceof Cons) ? list.includes(item) : false;
     }),
     [OP_NOT]: new Builtin((vm, argCount, expr, scope) => {
         if (argCount != 1) throw new Error("not requires 1 argument");
@@ -313,7 +357,7 @@ export const BUILTIN_PROCS: Record<symbol, Builtin> = {
         }
 
         const resolvedValue = vm.evalinner(expr[1], scope);
-        if (resolvedValue === null) return "null";
+        if (resolvedValue === null) return "list";
         switch(typeof resolvedValue) {
             case "string": return "string"
             case "number": return "number"
@@ -323,7 +367,7 @@ export const BUILTIN_PROCS: Record<symbol, Builtin> = {
             default: {
                 if (resolvedValue instanceof Builtin) return "procedure";
                 if(resolvedValue instanceof Closure) return "procedure"
-                if(Array.isArray(resolvedValue)) return "list"
+                if(Array.isArray(resolvedValue) || resolvedValue instanceof Cons) return "list"
                 return "unknown" // to allow consistency across all js engines/custom sv2 impls etc.
             }
         }
@@ -354,18 +398,56 @@ export class Anima {
     // @internal
     isDeepEqual(a: any, b: any): boolean {
         // If simple eqv? logic works, return true as no more work needed
-        if (a === b) return true;
+        if (Object.is(a, b)) return true;
 
         // Lists
-        if (Array.isArray(a) && Array.isArray(b)) {
-            if (a.length !== b.length) return false;
-            
-            for (let i = 0; i < a.length; i++) {
-                if (!this.isDeepEqual(a[i], b[i])) return false;
+        const aIsList = a instanceof Cons || Array.isArray(a);
+        const bIsList = b instanceof Cons || Array.isArray(b);
+
+        if (aIsList && bIsList) {
+            const len = a.length;
+            if (len !== b.length) return false;
+            if (len === 0) return true;
+
+            const aIsCons = a instanceof Cons;
+            const bIsCons = b instanceof Cons;
+
+            if (aIsCons && bIsCons) {
+                let currA = a as Cons;
+                let currB = b as Cons;
+                for (let i = 0; i < len; i++) {
+                    if (!this.isDeepEqual(currA.head, currB.head)) return false;
+                    currA = currA.tail as Cons;
+                    currB = currB.tail as Cons;
+                }
+                if (!this.isDeepEqual(currA, currB)) return false;
+            } else if (!aIsCons && !bIsCons) {
+                const arrA = a as any[];
+                const arrB = b as any[];
+                for (let i = 0; i < len; i++) {
+                    if (!this.isDeepEqual(arrA[i], arrB[i])) return false;
+                }
+            } else if (aIsCons && !bIsCons) {
+                let currA = a as Cons;
+                const arrB = b as any[];
+                for (let i = 0; i < len; i++) {
+                    if (!this.isDeepEqual(currA.head, arrB[i])) return false;
+                    currA = currA.tail as Cons;
+                }
+                if (currA !== null) return false;
+            } else { // !aIsCons && bIsCons
+                const arrA = a as any[];
+                let currB = b as Cons;
+                for (let i = 0; i < len; i++) {
+                    if (!this.isDeepEqual(arrA[i], currB.head)) return false;
+                    currB = currB.tail as Cons;
+                }
+                if (currB !== null) return false;
             }
+
             return true;
         }
-        
+    
         // Closures/other types
         return false;
     }
@@ -388,7 +470,7 @@ export class Anima {
             }
 
             if (!Array.isArray(expr)) return expr; // If not an array (boolean etc), it evaluates to the expression itself
-            if (expr.length === 0) return []; // An empty array evaluates to []
+            if (expr.length === 0) return null; // An empty array evaluates to null
 
             const operator = expr[0];
             const argCount = expr.length-1
@@ -398,22 +480,40 @@ export class Anima {
                         throw new Error("define expressions are disabled in this context");
                     }
 
-                    if(argCount != 2) {
-                        throw new Error(`define must be in format ["define", varname, arg] but have ${argCount} arguments`)
-                    }
-                    if(typeof expr[1] != "symbol") {
-                        throw new Error(`define: argument 1 must be a symbol`)
-                    }
-                    if (SPECIAL_FORMS.has(expr[1])) {
-                        throw new Error(`${String(expr[1])}: bad syntax`)
-                    }
-                    if (expr[1] in BUILTIN_PROCS) {
-                        throw new Error(`${String(expr[1])}: cannot shadow builtin procedure`)
+                    if(argCount < 2) {
+                        throw new Error(`define must be in format ["define" varname arg] or [define (func_name arg1 arg2... argN) body_expr...] but have ${argCount} arguments`)
                     }
 
-                    const val = this.evalinner(expr[2], scope);
-                    scope.set(expr[1], val);
-                    return val;
+                    // Normal define
+                    if(typeof expr[1] === "symbol") {
+                        if (SPECIAL_FORMS.has(expr[1])) {
+                            throw new Error(`${String(expr[1])}: bad syntax`)
+                        }
+                        if (expr[1] in BUILTIN_PROCS) {
+                            throw new Error(`${String(expr[1])}: cannot shadow builtin procedure`)
+                        }
+
+                        const val = this.evalinner(expr[2], scope);
+                        scope.define(expr[1], val);
+                        return val;
+                    } else if (Array.isArray(expr[1])) {
+                        // (define (func_name arg1 arg2) body_expr...)
+                        if (expr[1].length === 0) throw new Error("define: missing function name");
+                        const funcName = expr[1][0];
+                        const params = expr[1].slice(1);
+                        const body = expr.slice(2);
+                        expr = [OP_DEFINE, funcName, [OP_LAMBDA, params, ...body]];
+                        continue
+                    } else if (expr[1] instanceof Cons) {
+                        const funcName = expr[1].head;
+                        const params = expr[1].tail;
+                        if (!params) throw new Error("define: missing params");
+                        const body = expr.slice(2);
+                        expr = [OP_DEFINE, funcName, [OP_LAMBDA, params, ...body]];
+                        continue
+                    } else {
+                        throw new Error(`${String(expr[1])}: expr[1] not symbol or list syntax`)
+                    }
                 }
 
                 // Executes a sequence of expressions, last expr is tail-called
@@ -439,27 +539,35 @@ export class Anima {
                         throw new Error(`lambda must be in format ["lambda", [bind-args...], body...] but only have ${argCount} arguments`)
                     }
 
-                    if(!Array.isArray(expr[1])) {
+                    let elems;
+                    if (Array.isArray(expr[1])) {
+                        elems = expr[1]
+                    } else if (expr[1] instanceof Cons) {
+                        elems = []
+                        for (const p of expr[1]) {
+                            elems.push(p);
+                        }
+                    } else {
                         throw new Error(`lambda parameters must be a list`);
                     }
 
                     // Validate that every parameter is a symbol
-                    for(let i = 0; i < expr[1].length; i++) {
-                        if(typeof expr[1][i] !== "symbol") {
-                            throw new Error(`lambda parameter at index ${i} must be a symbol, but received ${typeof expr[1][i]}: ${String(expr[1][i])}`);
+                    for(let i = 0; i < elems.length; i++) {
+                        if(typeof elems[i] !== "symbol") {
+                            throw new Error(`lambda parameter at index ${i} must be a symbol, but received ${typeof elems[i]}: ${String(elems[i])}`);
                         }
-                        if (SPECIAL_FORMS.has(expr[1][i])) {
-                            throw new Error(`${String(expr[1][i])}: bad syntax`)
+                        if (SPECIAL_FORMS.has(elems[i])) {
+                            throw new Error(`${String(elems[i])}: bad syntax`)
                         }
-                        if (expr[1][i] in BUILTIN_PROCS) {
-                            throw new Error(`${String(expr[1][i])}: cannot shadow builtin procedure`)
+                        if (elems[i] in BUILTIN_PROCS) {
+                            throw new Error(`${String(elems[i])}: cannot shadow builtin procedure`)
                         }
                     }
 
                     // add in a do block if theres more than one op
                     const bodyAST = argCount === 2 ? expr[2] : [OP_DO, ...expr.slice(2)];
 
-                    return new Closure(expr[1], bodyAST, scope)   
+                    return new Closure(elems, bodyAST, scope)   
                 }
 
                 case OP_QUOTE: {
@@ -572,7 +680,7 @@ export class Anima {
                         
                         // bind args
                         for (let i = 0; i < proc.params.length; i++) {
-                            callscope.set(proc.params[i], callargs[i]);
+                            callscope.define(proc.params[i], callargs[i]);
                         }
 
                         // tail-call procedure body and newly bound callscope to avoid allocing new stack frame
@@ -758,8 +866,8 @@ export class ASP {
             current++; // consume current token
 
             // Booleans+null
-            if (token === 'true') return true;
-            if (token === 'false') return false;
+            if (token === '#t') return true;
+            if (token === '#f') return false;
             if (token === 'null') return null;
 
             // Numbers
@@ -798,8 +906,10 @@ export class ASTStringifier {
     public stringify(ast: any): string {
         // Booleans+null+number
         if (ast === null) return "null";
-        if (typeof ast === "number" || typeof ast === "boolean") {
+        if (typeof ast === "number") {
             return String(ast);
+        } else if (typeof ast === "boolean") {
+            return ast ? "#t" : "#f"
         }
 
         // String
@@ -820,6 +930,33 @@ export class ASTStringifier {
             }
             return `(${lst.join(" ")})`;
         }
+
+        // Cons
+        if (ast instanceof Cons) {
+            const parts: string[] = [];
+            let current: any = ast;
+
+            while (current !== null) {
+                if (current instanceof Cons) {
+                    parts.push(this.stringify(current.head));
+                    current = current.tail;
+                } else {
+                    // Improper list/pair
+                    parts.push(".");
+                    parts.push(this.stringify(current));
+                    break;
+                }
+            }
+            return `(${parts.join(" ")})`;
+        }
+
+        // Procs
+        if (ast instanceof Builtin || ast instanceof Closure) {
+            return `<procedure>`;
+        }
+
+        // Undefined
+        if (ast === undefined) return `<#void>`
 
         throw new Error(`Cannot stringify unknown AST node: ${JSON.stringify(ast)}`);
     }

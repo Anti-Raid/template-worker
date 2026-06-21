@@ -1,4 +1,5 @@
-import { Anima, ASP, ASPParseError, ASPTokenError, MissingVarError } from './sv2.anima'; // Update path as needed
+// Made w/ lots of help from gemini cli
+import { Anima, ASP, ASPParseError, ASPTokenError, ASTStringifier, MissingVarError } from './sv2.anima'; 
 import { describe, it, expect, beforeEach } from 'vitest';
 
 // Helper for brevity when writing manual ASTs
@@ -28,7 +29,7 @@ describe('Anima', () => {
 
         it('evaluates numbers and raw arrays', () => {
             expect(run(42)).toBe(42);
-            expect(run([])).toStrictEqual([]);
+            expect(run([])).toBe(null);
         });
 
         it('evaluates native Symbols as implicit variables', () => {
@@ -99,7 +100,7 @@ describe('Anima', () => {
         it('evaluates type? with JS Symbols', () => {
             expect(run([s("type?"), s("port")])).toBe("number");
             expect(run([s("type?"), s("protocol")])).toBe("string");
-            expect(run([s("type?"), s("user_role")])).toBe("null");
+            expect(run([s("type?"), s("user_role")])).toBe("list");
             
             // Verifying our new native Symbol logic!
             expect(run([s("type?"), [s("quote"), s("my_symbol")]])).toBe("symbol");
@@ -243,6 +244,74 @@ describe('Anima', () => {
             expect(run(ast)).toBeNull();
         });
     });
+
+    describe('Cons, Arrays & FFI Boundary', () => {
+        it('constructs a proper list and extracts values (car/cdr)', () => {
+            expect(run([s("car"), [s("cons"), 1, [s("cons"), 2, null]]])).toBe(1);
+            expect(run([s("car"), [s("cdr"), [s("cons"), 1, [s("cons"), 2, null]]]])).toBe(2);
+        });
+
+        it('supports improper lists perfectly', () => {
+            // (cons 1 2) -> an improper pair
+            const ast = [s("cons"), 1, 2];
+            
+            expect(run([s("car"), ast])).toBe(1);
+            expect(run([s("cdr"), ast])).toBe(2);
+            
+            // length of an improper list with 1 cons pair is 1
+            expect(run([s("length"), ast])).toBe(1);
+        });
+
+        it('triggers the O(1) Fast Path for raw JS arrays', () => {
+            // We use `quote` to generate a raw JS array in the AST
+            const rawArray = [s("quote"), [10, 20, 30]];
+            
+            // car natively peeks at [0]
+            expect(run([s("car"), rawArray])).toBe(10);
+            
+            // cdr natively wraps the array in a Cons view, letting us extract [1]
+            expect(run([s("car"), [s("cdr"), rawArray]])).toBe(20);
+            
+            // length reads the native .length property
+            expect(run([s("length"), rawArray])).toBe(3);
+        });
+
+        it('handles array-to-cons gatekeeping in cons', () => {
+            const ast = [s("cons"), 1, [s("quote"), [2, 3]]];
+            
+            expect(run([s("car"), ast])).toBe(1);
+            expect(run([s("car"), [s("cdr"), ast]])).toBe(2);
+            expect(run([s("length"), ast])).toBe(3); // 1 + the array length of 2
+        });
+
+        it('throws errors for empty lists', () => {
+            // car of null
+            expect(() => run([s("car"), null])).toThrow();
+            
+            // car of empty array
+            expect(() => run([s("car"), [s("quote"), []]])).toThrow();
+            
+            // cdr of empty array
+            expect(() => run([s("cdr"), [s("quote"), []]])).toThrow();
+        });
+
+        it('traverses hybrid structures with standard operators (last, contains)', () => {
+            const pureCons = [s("cons"), "a", [s("cons"), "b", null]];
+            const rawArray = [s("quote"), ["a", "b"]];
+
+            // OP_CONTAINS
+            expect(run([s("contains"), pureCons, "b"])).toBe(true);
+            expect(run([s("contains"), pureCons, "c"])).toBe(false);
+            expect(run([s("contains"), rawArray, "b"])).toBe(true);
+
+            // OP_LAST
+            expect(run([s("last"), pureCons])).toBe("b");
+            expect(run([s("last"), rawArray])).toBe("b");
+            
+            const improper = [s("cons"), "a", "b"];
+            expect(run([s("last"), improper])).toBe("b");
+        });
+    });
 });
 
 describe('Anima String Parser (ASP)', () => {
@@ -253,8 +322,8 @@ describe('Anima String Parser (ASP)', () => {
         });
 
         it('parses booleans and null', () => {
-            expect(new ASP("true").parse()).toBe(true);
-            expect(new ASP("false").parse()).toBe(false);
+            expect(new ASP("#t").parse()).toBe(true);
+            expect(new ASP("#f").parse()).toBe(false);
             expect(new ASP("null").parse()).toBe(null);
         });
 
@@ -341,6 +410,132 @@ describe('Anima String Parser (ASP)', () => {
 
         it('throws ASPParseError for trailing quote without expression', () => {
             expect(() => new ASP("'").parse()).toThrow(ASPParseError);
+        });
+    });
+});
+
+describe('ASTStringifier', () => {
+    const stringifier = new ASTStringifier();
+
+    const roundtrip = (input: string) => {
+        const ast = new ASP(input).parse();
+        return stringifier.stringify(ast);
+    };
+
+    describe('Primitives & Strings', () => {
+        it('round-trips numbers, booleans, and null', () => {
+            expect(roundtrip("42")).toBe("42");
+            expect(roundtrip("-3.14")).toBe("-3.14");
+            expect(roundtrip("true")).toBe("true");
+            expect(roundtrip("false")).toBe("false");
+            expect(roundtrip("null")).toBe("null");
+        });
+
+        it('round-trips symbols perfectly', () => {
+            expect(roundtrip("my-variable")).toBe("my-variable");
+            expect(roundtrip("+")).toBe("+");
+        });
+
+        it('round-trips strings (preserving the literal quotes)', () => {
+            expect(roundtrip('"hello"')).toBe('"hello"');
+            expect(roundtrip('"string with spaces"')).toBe('"string with spaces"');
+        });
+    });
+
+    describe('Lists & Trivia Normalization', () => {
+        it('round-trips standard lists', () => {
+            expect(roundtrip("(+ 1 2)")).toBe("(+ 1 2)");
+            expect(roundtrip("(define x 10)")).toBe("(define x 10)");
+        });
+
+        it('normalizes square brackets into standard parens', () => {
+            expect(roundtrip("[+ 1 2]")).toBe("(+ 1 2)");
+            expect(roundtrip("(if [> x 5] true false)")).toBe("(if (> x 5) true false)");
+        });
+
+        it('normalizes excess whitespace', () => {
+            const sloppyInput = "(  +    1      2   )";
+            expect(roundtrip(sloppyInput)).toBe("(+ 1 2)");
+        });
+
+        it('completely strips out comments', () => {
+            const inputWithComments = `
+                (define port 8080) ; this is the port
+            `;
+            expect(roundtrip(inputWithComments)).toBe("(define port 8080)");
+        });
+    });
+
+    describe('Syntactic Sugar & Implicit Wrappers', () => {
+        it('expands quotes into standard list form', () => {
+            expect(roundtrip("'x")).toBe("(quote x)");
+            expect(roundtrip("'(1 2 3)")).toBe("(quote (1 2 3))");
+        });
+
+        it('exposes implicit "do" for multiple expressions', () => {
+            const multiExpr = "(define x 1) (+ x 2)";
+            expect(roundtrip(multiExpr)).toBe("(do (define x 1) (+ x 2))");
+        });
+    });
+
+    describe('Deep Nesting', () => {
+        it('complex logic', () => {
+            const complexScript = "(define fib (lambda (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))";
+            expect(roundtrip(complexScript)).toBe(complexScript);
+        });
+    });
+});
+
+describe('Complex Tests', () => {
+    let evaluator: Anima;
+    let baseData: Record<string, any>;
+
+    beforeEach(() => {
+        evaluator = new Anima();
+        baseData = {};
+    });
+
+    const stringifier = new ASTStringifier();
+    const run = (expr: string) => {
+        const ast = new ASP(expr).parse();
+        return stringifier.stringify(evaluator.evaluate(ast, baseData));
+    };
+
+    describe('Complex tests', () => {
+        it('my-set?', () => {
+            expect(run(`
+(define my-set?
+  (lambda (a)
+    (define (in a rst) 
+      (cond 
+         [(empty? rst) #f]
+         [(equal? a (car rst)) #t]
+         [else (in a (cdr rst))]))
+
+    (cond 
+      [(empty? a) #t]
+      [else 
+        (if (in (car a) (cdr a)) #f (my-set? (cdr a)))])))
+
+(my-set? (list 1 2 3 4 5))`
+)).toBe("#t");
+
+            expect(run(`
+(define my-set?
+  (lambda (a)
+    (define (in a rst) 
+      (cond 
+         [(empty? rst) #f]
+         [(equal? a (car rst)) #t]
+         [else (in a (cdr rst))]))
+
+    (cond 
+      [(empty? a) #t]
+      [else 
+        (if (in (car a) (cdr a)) #f (my-set? (cdr a)))])))
+
+(my-set? (list 1 2 3 4 4))`
+)).toBe("#f");
         });
     });
 });
