@@ -133,56 +133,46 @@ const deepEqProc = new Builtin((vm: Anima, argCount: number, expr: any[], scope:
     return vm.isDeepEqual(left, right); 
 })
 
+const createMathOp = (operatorName: string, op: (a: number, b: number) => number) => {
+    return new Builtin((vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => {
+        if (argCount < 2) throw new Error(`${operatorName} requires at least 2 arguments`);
+        
+        let result = vm.evalinner(expr[1], scope);
+        if (typeof result !== "number") throw new Error(`${operatorName} requires numbers`);
+        
+        for (let i = 1; i < argCount; i++) {
+            const next = vm.evalinner(expr[i + 1], scope);
+            if (typeof next !== "number") throw new Error(`${operatorName} requires numbers`);
+            result = op(result, next);
+        }
+        return result;
+    });
+}
+
+const createCompareOp = (operatorName: string, op: (a: number, b: number) => boolean) => {
+    return new Builtin((vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => {
+        if (argCount < 2) throw new Error(`${operatorName} requires at least 2 arguments`);
+        
+        let prev = vm.evalinner(expr[1], scope);
+        if (typeof prev !== "number") throw new Error(`${operatorName} requires numbers`);
+        
+        for (let i = 1; i < argCount; i++) {
+            const next = vm.evalinner(expr[i + 1], scope);
+            if (typeof next !== "number") throw new Error(`${operatorName} requires numbers`);
+            
+            if (!op(prev, next)) return false;
+            prev = next;
+        }
+        return true;
+    });
+}
+
 /** Builtin procedures */
 export const BUILTIN_PROCS: Record<symbol, Builtin> = {
-    [OP_ADD]: new Builtin((vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => {
-        if (argCount < 2) throw new Error("+ requires at least 2 arguments");
-        let result = vm.evalinner(expr[1], scope);
-        if (typeof result !== "number") throw new Error("+ requires numbers");
-        
-        for(let i = 1; i < argCount; i++) {
-            const next = vm.evalinner(expr[i+1], scope);
-            if (typeof next !== "number") throw new Error("+ requires numbers");
-            result += next; 
-        }
-        return result;
-    }),
-    [OP_SUB]: new Builtin((vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => {
-        if (argCount < 2) throw new Error("- requires at least 2 arguments");
-        let result = vm.evalinner(expr[1], scope);
-        if (typeof result !== "number") throw new Error("- requires numbers");
-        
-        for(let i = 1; i < argCount; i++) {
-            const next = vm.evalinner(expr[i+1], scope);
-            if (typeof next !== "number") throw new Error("- requires numbers");
-            result -= next; 
-        }
-        return result;
-    }),
-    [OP_MUL]: new Builtin((vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => {
-        if (argCount < 2) throw new Error("* requires at least 2 arguments");
-        let result = vm.evalinner(expr[1], scope);
-        if (typeof result !== "number") throw new Error("* requires numbers");
-        
-        for(let i = 1; i < argCount; i++) {
-            const next = vm.evalinner(expr[i+1], scope);
-            if (typeof next !== "number") throw new Error("* requires numbers");
-            result *= next; 
-        }
-        return result;
-    }),
-    [OP_DIV]: new Builtin((vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => {
-        if (argCount < 2) throw new Error("/ requires at least 2 arguments");
-        let result = vm.evalinner(expr[1], scope);
-        if (typeof result !== "number") throw new Error("/ requires numbers");
-        
-        for(let i = 1; i < argCount; i++) {
-            const next = vm.evalinner(expr[i+1], scope);
-            if (typeof next !== "number") throw new Error("/ requires numbers");
-            result /= next; 
-        }
-        return result;
-    }),
+    [OP_ADD]: createMathOp("+", (a, b) => a + b),
+    [OP_SUB]: createMathOp("-", (a, b) => a - b),
+    [OP_MUL]: createMathOp("*", (a, b) => a * b),
+    [OP_DIV]: createMathOp("/", (a, b) => a / b),
     [OP_MODULO]: new Builtin((vm, argCount, expr, scope) => {
         if (argCount != 2) throw new Error("modulo requires 2 arguments");
         return vm.evalinner(expr[1], scope) % vm.evalinner(expr[2], scope);
@@ -268,85 +258,18 @@ export const BUILTIN_PROCS: Record<symbol, Builtin> = {
         if (argCount != 1) throw new Error("not requires 1 argument");
         return !vm.isTruthy(vm.evalinner(expr[1], scope));
     }),
-    [OP_EQ]: new Builtin((vm, argCount, expr, scope) => {
-        if (argCount < 2) throw new Error("= requires at least 2 arguments");
-        let prev = vm.evalinner(expr[1], scope);
-        if (typeof prev !== "number") throw new Error("= requires numbers");
-        
-        for (let i = 1; i < argCount; i++) {
-            const next = vm.evalinner(expr[i+1], scope);
-            if (typeof next !== "number") throw new Error("= requires numbers");
-            
-            if (prev !== next) return false;
-            prev = next;
-        }
-        return true;
-    }),    
     [OP_EQ_PTR1]: strictEqProc,
     [OP_EQ_PTR2]: strictEqProc,
     [OP_EQ_DEEP1]: deepEqProc,
     [OP_EQ_DEEP2]: deepEqProc,
 
     // comparison operators
-    [OP_GT]: new Builtin((vm, argCount, expr, scope) => {
-        if (argCount < 2) throw new Error("> requires at least 2 arguments");
-        let prev = vm.evalinner(expr[1], scope);
-        if (typeof prev !== "number") throw new Error("> requires numbers");
-        
-        for (let i = 1; i < argCount; i++) {
-            const next = vm.evalinner(expr[i+1], scope);
-            if (typeof next !== "number") throw new Error("> requires numbers");
-            
-            if (!(prev > next)) return false;
-            prev = next;
-        }
-        return true;
-    }),
-    
-    [OP_LT]: new Builtin((vm, argCount, expr, scope) => {
-        if (argCount < 2) throw new Error("< requires at least 2 arguments");
-        let prev = vm.evalinner(expr[1], scope);
-        if (typeof prev !== "number") throw new Error("< requires numbers");
-        
-        for (let i = 1; i < argCount; i++) {
-            const next = vm.evalinner(expr[i+1], scope);
-            if (typeof next !== "number") throw new Error("< requires numbers");
-            
-            if (!(prev < next)) return false;
-            prev = next;
-        }
-        return true;
-    }),
-    
-    [OP_GTE]: new Builtin((vm, argCount, expr, scope) => {
-        if (argCount < 2) throw new Error(">= requires at least 2 arguments");
-        let prev = vm.evalinner(expr[1], scope);
-        if (typeof prev !== "number") throw new Error(">= requires numbers");
-        
-        for (let i = 1; i < argCount; i++) {
-            const next = vm.evalinner(expr[i+1], scope);
-            if (typeof next !== "number") throw new Error(">= requires numbers");
-            
-            if (!(prev >= next)) return false;
-            prev = next;
-        }
-        return true;
-    }),
-    
-    [OP_LTE]: new Builtin((vm, argCount, expr, scope) => {
-        if (argCount < 2) throw new Error("<= requires at least 2 arguments");
-        let prev = vm.evalinner(expr[1], scope);
-        if (typeof prev !== "number") throw new Error("<= requires numbers");
-        
-        for (let i = 1; i < argCount; i++) {
-            const next = vm.evalinner(expr[i+1], scope);
-            if (typeof next !== "number") throw new Error("<= requires numbers");
-            
-            if (!(prev <= next)) return false;
-            prev = next;
-        }
-        return true;
-    }),
+    [OP_LT]:  createCompareOp("<",  (a, b) => a < b),
+    [OP_GT]:  createCompareOp(">",  (a, b) => a > b),
+    [OP_LTE]: createCompareOp("<=", (a, b) => a <= b),
+    [OP_GTE]: createCompareOp(">=", (a, b) => a >= b),
+    [OP_EQ]:  createCompareOp("=",  (a, b) => a === b),
+
     [OP_TYPE]: new Builtin((vm, argCount, expr, scope) => {
         if(argCount != 1) {
             throw new Error(`type? must be in format ["type?", expr] but only have ${argCount} arguments`)
