@@ -57,40 +57,6 @@ class Closure {
     }
 }
 
-class JSClosureState {
-    vmexpr: any; // the current inst the vm is evaluating
-    vmscope: AnimaScope;
-
-    constructor(vmexpr: any, vmscope: AnimaScope) {
-        this.vmexpr = vmexpr
-        this.vmscope = vmscope
-    }
-}
-
-abstract class JSClosure {
-    /* The bound scope */
-    scope: AnimaScope;
-    constructor(scope: AnimaScope) {
-        this.scope = scope
-    }
-
-    // If the VM is to continue on executing (tailcalls to be evaluated on next vm loop), 
-    // then return [true, null], otherwise, return [false, val]
-    //
-    // As an example:
-    //
-    // class NativeEval extends JSClosure {
-    //      call(state: JSClosureState, callargs: any[]): [boolean, any] {
-    //          // We want the VM to evaluate whatever AST was passed in
-    //          state.vmexpr = callargs[0]; 
-    //    
-    //          // Return true to tell the VM: "I mutated the state, continue the loop!"
-    //          return [true, null]; 
-    //      } 
-    //  }
-    abstract call(state: JSClosureState, callargs: any[]): [boolean, any]
-}
-
 // Special Forms
 const OP_DEFINE = Symbol.for("define");
 const OP_DO     = Symbol.for("do");
@@ -130,6 +96,240 @@ const OP_MUL    = Symbol.for("*");
 const OP_DIV    = Symbol.for("/");
 const OP_MODULO = Symbol.for("modulo");
 
+export const SPECIAL_FORMS = new Set([
+    OP_DEFINE, 
+    OP_QUOTE, 
+    OP_LAMBDA, 
+    OP_IF, 
+    OP_COND, 
+    OP_ELSE, 
+    OP_AND, 
+    OP_OR, 
+    OP_DO
+])
+
+export class Builtin {
+    cb: (vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => any
+    constructor(cb: (vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => any) {
+        this.cb = cb
+    }
+}
+
+const strictEqProc = new Builtin((vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => {
+    if (argCount != 2) throw new Error(`${String(expr[0])} requires exactly 2 arguments`);
+    return vm.evalinner(expr[1], scope) === vm.evalinner(expr[2], scope);
+});
+
+const deepEqProc = new Builtin((vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => {
+    if (argCount != 2) throw new Error(`${String(expr[0])} requires exactly 2 arguments`);
+    const left = vm.evalinner(expr[1], scope);
+    const right = vm.evalinner(expr[2], scope);
+    return vm.isDeepEqual(left, right); 
+})
+
+/** Builtin procedures */
+export const BUILTIN_PROCS: Record<symbol, Builtin> = {
+    [OP_ADD]: new Builtin((vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => {
+        if (argCount < 2) throw new Error("+ requires at least 2 arguments");
+        let result = vm.evalinner(expr[1], scope);
+        if (typeof result !== "number") throw new Error("+ requires numbers");
+        
+        for(let i = 1; i < argCount; i++) {
+            const next = vm.evalinner(expr[i+1], scope);
+            if (typeof next !== "number") throw new Error("+ requires numbers");
+            result += next; 
+        }
+        return result;
+    }),
+    [OP_SUB]: new Builtin((vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => {
+        if (argCount < 2) throw new Error("- requires at least 2 arguments");
+        let result = vm.evalinner(expr[1], scope);
+        if (typeof result !== "number") throw new Error("- requires numbers");
+        
+        for(let i = 1; i < argCount; i++) {
+            const next = vm.evalinner(expr[i+1], scope);
+            if (typeof next !== "number") throw new Error("- requires numbers");
+            result -= next; 
+        }
+        return result;
+    }),
+    [OP_MUL]: new Builtin((vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => {
+        if (argCount < 2) throw new Error("* requires at least 2 arguments");
+        let result = vm.evalinner(expr[1], scope);
+        if (typeof result !== "number") throw new Error("* requires numbers");
+        
+        for(let i = 1; i < argCount; i++) {
+            const next = vm.evalinner(expr[i+1], scope);
+            if (typeof next !== "number") throw new Error("* requires numbers");
+            result *= next; 
+        }
+        return result;
+    }),
+    [OP_DIV]: new Builtin((vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => {
+        if (argCount < 2) throw new Error("/ requires at least 2 arguments");
+        let result = vm.evalinner(expr[1], scope);
+        if (typeof result !== "number") throw new Error("/ requires numbers");
+        
+        for(let i = 1; i < argCount; i++) {
+            const next = vm.evalinner(expr[i+1], scope);
+            if (typeof next !== "number") throw new Error("/ requires numbers");
+            result /= next; 
+        }
+        return result;
+    }),
+    [OP_MODULO]: new Builtin((vm, argCount, expr, scope) => {
+        if (argCount != 2) throw new Error("modulo requires 2 arguments");
+        return vm.evalinner(expr[1], scope) % vm.evalinner(expr[2], scope);
+    }),
+    [OP_LIST]: new Builtin((vm, argCount, expr, scope) => {
+        const lst = new Array(argCount);
+        for (let i = 0; i < argCount; i++) {
+            lst[i] = vm.evalinner(expr[i+1], scope);
+        }
+        return lst;
+    }),
+    [OP_CAR]: new Builtin((vm, argCount, expr, scope) => {
+        if (argCount != 1) throw new Error("car requires 1 argument");
+        const val = vm.evalinner(expr[1], scope);
+        if (!Array.isArray(val)) throw new Error("car requires a list");
+        if (val.length < 1) throw new Error("car requires a non-empty list");
+        return val[0];
+    }),
+    [OP_CDR]: new Builtin((vm, argCount, expr, scope) => {
+        if (argCount != 1) throw new Error("cdr requires 1 argument");
+        const val = vm.evalinner(expr[1], scope);
+        if (!Array.isArray(val)) throw new Error("cdr requires a list");
+        if (val.length < 1) throw new Error("cdr requires a non-empty list");
+        return val.slice(1);
+    }),
+    [OP_LAST]: new Builtin((vm, argCount, expr, scope) => {
+        if (argCount != 1) throw new Error("last requires 1 argument");
+        const val = vm.evalinner(expr[1], scope);
+        if (!Array.isArray(val)) throw new Error("last requires a list");
+        if (val.length < 1) throw new Error("last requires a non-empty list");
+        return val[val.length - 1];
+    }),
+    [OP_LENGTH]: new Builtin((vm, argCount, expr, scope) => {
+        if (argCount != 1) throw new Error("length requires 1 argument");
+        const target = vm.evalinner(expr[1], scope);
+        return Array.isArray(target) ? target.length : (typeof target === "string" ? target.length : 0);
+    }),
+    [OP_CONTAINS]: new Builtin((vm, argCount, expr, scope) => {
+        if (argCount != 2) throw new Error("contains requires 2 arguments");
+        const list = vm.evalinner(expr[1], scope);
+        const item = vm.evalinner(expr[2], scope);
+        return Array.isArray(list) ? list.includes(item) : false;
+    }),
+    [OP_NOT]: new Builtin((vm, argCount, expr, scope) => {
+        if (argCount != 1) throw new Error("not requires 1 argument");
+        return !vm.isTruthy(vm.evalinner(expr[1], scope));
+    }),
+    [OP_EQ]: new Builtin((vm, argCount, expr, scope) => {
+        if (argCount < 2) throw new Error("= requires at least 2 arguments");
+        let prev = vm.evalinner(expr[1], scope);
+        if (typeof prev !== "number") throw new Error("= requires numbers");
+        
+        for (let i = 1; i < argCount; i++) {
+            const next = vm.evalinner(expr[i+1], scope);
+            if (typeof next !== "number") throw new Error("= requires numbers");
+            
+            if (prev !== next) return false;
+            prev = next;
+        }
+        return true;
+    }),    
+    [OP_EQ_PTR1]: strictEqProc,
+    [OP_EQ_PTR2]: strictEqProc,
+    [OP_EQ_DEEP1]: deepEqProc,
+    [OP_EQ_DEEP2]: deepEqProc,
+
+    // comparison operators
+    [OP_GT]: new Builtin((vm, argCount, expr, scope) => {
+        if (argCount < 2) throw new Error("> requires at least 2 arguments");
+        let prev = vm.evalinner(expr[1], scope);
+        if (typeof prev !== "number") throw new Error("> requires numbers");
+        
+        for (let i = 1; i < argCount; i++) {
+            const next = vm.evalinner(expr[i+1], scope);
+            if (typeof next !== "number") throw new Error("> requires numbers");
+            
+            if (!(prev > next)) return false;
+            prev = next;
+        }
+        return true;
+    }),
+    
+    [OP_LT]: new Builtin((vm, argCount, expr, scope) => {
+        if (argCount < 2) throw new Error("< requires at least 2 arguments");
+        let prev = vm.evalinner(expr[1], scope);
+        if (typeof prev !== "number") throw new Error("< requires numbers");
+        
+        for (let i = 1; i < argCount; i++) {
+            const next = vm.evalinner(expr[i+1], scope);
+            if (typeof next !== "number") throw new Error("< requires numbers");
+            
+            if (!(prev < next)) return false;
+            prev = next;
+        }
+        return true;
+    }),
+    
+    [OP_GTE]: new Builtin((vm, argCount, expr, scope) => {
+        if (argCount < 2) throw new Error(">= requires at least 2 arguments");
+        let prev = vm.evalinner(expr[1], scope);
+        if (typeof prev !== "number") throw new Error(">= requires numbers");
+        
+        for (let i = 1; i < argCount; i++) {
+            const next = vm.evalinner(expr[i+1], scope);
+            if (typeof next !== "number") throw new Error(">= requires numbers");
+            
+            if (!(prev >= next)) return false;
+            prev = next;
+        }
+        return true;
+    }),
+    
+    [OP_LTE]: new Builtin((vm, argCount, expr, scope) => {
+        if (argCount < 2) throw new Error("<= requires at least 2 arguments");
+        let prev = vm.evalinner(expr[1], scope);
+        if (typeof prev !== "number") throw new Error("<= requires numbers");
+        
+        for (let i = 1; i < argCount; i++) {
+            const next = vm.evalinner(expr[i+1], scope);
+            if (typeof next !== "number") throw new Error("<= requires numbers");
+            
+            if (!(prev <= next)) return false;
+            prev = next;
+        }
+        return true;
+    }),
+    [OP_TYPE]: new Builtin((vm, argCount, expr, scope) => {
+        if(argCount != 1) {
+            throw new Error(`type? must be in format ["type?", expr] but only have ${argCount} arguments`)
+        }
+
+        if (typeof expr[1] === "symbol" && SPECIAL_FORMS.has(expr[1])) {
+            throw new Error(`${String(expr[1])}: bad syntax`)
+        }
+
+        const resolvedValue = vm.evalinner(expr[1], scope);
+        if (resolvedValue === null) return "null";
+        switch(typeof resolvedValue) {
+            case "string": return "string"
+            case "number": return "number"
+            case "boolean": return "boolean"
+            case "undefined": return "null"
+            case "symbol": return "symbol";
+            default: {
+                if (resolvedValue instanceof Builtin) return "procedure";
+                if(resolvedValue instanceof Closure) return "procedure"
+                if(Array.isArray(resolvedValue)) return "list"
+                return "unknown" // to allow consistency across all js engines/custom sv2 impls etc.
+            }
+        }
+    }),
+}
+
 export class Anima {
     disableLambda: boolean
     disableDefine: boolean
@@ -151,7 +351,8 @@ export class Anima {
         return val !== false && val !== null && val !== undefined;
     }   
 
-    private isDeepEqual(a: any, b: any): boolean {
+    // @internal
+    isDeepEqual(a: any, b: any): boolean {
         // If simple eqv? logic works, return true as no more work needed
         if (a === b) return true;
 
@@ -169,22 +370,9 @@ export class Anima {
         return false;
     }
 
-    // Private method to perform the common code for a list op
-    private preparelistop(op: string, expr: any[], scope: AnimaScope, minlen: number) {
-        if (expr.length != 2) {
-            throw new Error(`${op} must be in format ["${op}", expr] but only have ${expr.length-1} arguments`)
-        }
-        const val = this.evalinner(expr[1], scope)
-        if (!Array.isArray(val)) {
-            throw new Error(`${op} expr must evaluate to a list`)
-        } else if (val.length < minlen) {
-            throw new Error(`${op} list has ${val.length} elements, but must have at least ${minlen} elements`)
-        }
-        return val
-    }
-
     // TCO stuff made with help of Gemini
-    private evalinner(initialExpr: any, initialScope: AnimaScope): any {
+    // @internal
+    evalinner(initialExpr: any, initialScope: AnimaScope): any {
         let expr = initialExpr;
         let scope = initialScope;
 
@@ -196,7 +384,7 @@ export class Anima {
 
             if (typeof expr === "string") return expr; // Strings evaluate to themselves
             if (typeof expr === "symbol") {
-                return scope.get(expr);
+                return BUILTIN_PROCS[expr] || scope.get(expr);
             }
 
             if (!Array.isArray(expr)) return expr; // If not an array (boolean etc), it evaluates to the expression itself
@@ -216,6 +404,12 @@ export class Anima {
                     if(typeof expr[1] != "symbol") {
                         throw new Error(`define: argument 1 must be a symbol`)
                     }
+                    if (SPECIAL_FORMS.has(expr[1])) {
+                        throw new Error(`${String(expr[1])}: bad syntax`)
+                    }
+                    if (expr[1] in BUILTIN_PROCS) {
+                        throw new Error(`${String(expr[1])}: cannot shadow builtin procedure`)
+                    }
 
                     const val = this.evalinner(expr[2], scope);
                     scope.set(expr[1], val);
@@ -223,7 +417,7 @@ export class Anima {
                 }
 
                 // Executes a sequence of expressions, last expr is tail-called
-                case OP_DO:
+                case OP_DO: {
                     if(argCount == 0) {
                         throw new Error(`do must be in format ["do", ...] but have ${argCount} arguments`)
                     }
@@ -234,8 +428,9 @@ export class Anima {
 
                     expr = expr[argCount];
                     continue;
+                }
 
-                case OP_LAMBDA:
+                case OP_LAMBDA: {
                     if(this.disableLambda) {
                         throw new Error("lambda expressions are disabled in this context")
                     }
@@ -253,54 +448,18 @@ export class Anima {
                         if(typeof expr[1][i] !== "symbol") {
                             throw new Error(`lambda parameter at index ${i} must be a symbol, but received ${typeof expr[1][i]}: ${String(expr[1][i])}`);
                         }
+                        if (SPECIAL_FORMS.has(expr[1][i])) {
+                            throw new Error(`${String(expr[1][i])}: bad syntax`)
+                        }
+                        if (expr[1][i] in BUILTIN_PROCS) {
+                            throw new Error(`${String(expr[1][i])}: cannot shadow builtin procedure`)
+                        }
                     }
 
                     // add in a do block if theres more than one op
                     const bodyAST = argCount === 2 ? expr[2] : [OP_DO, ...expr.slice(2)];
 
                     return new Closure(expr[1], bodyAST, scope)   
-
-                // Type checkers
-                case OP_TYPE: {
-                    if(argCount != 1) {
-                        throw new Error(`type? must be in format ["type?", expr] but only have ${argCount} arguments`)
-                    }
-
-                    const resolvedValue = this.evalinner(expr[1], scope);
-                    if (resolvedValue === null) return "null";
-                    switch(typeof resolvedValue) {
-                        case "string": return "string"
-                        case "number": return "number"
-                        case "boolean": return "boolean"
-                        case "undefined": return "null"
-                        case "symbol": return "symbol";
-                        default: {
-                            if(resolvedValue instanceof Closure) return "procedure"
-                            if(resolvedValue instanceof JSClosure) return "procedure"
-                            if(Array.isArray(resolvedValue)) return "list"
-                            return "unknown" // to allow consistency across all js engines/custom sv2 impls etc.
-                        }
-                    }
-                }
-
-                case OP_LIST:
-                    const lst = new Array(argCount)
-                    for (let i = 0; i < argCount; i++) {
-                        lst[i] = this.evalinner(expr[i+1], scope);
-                    }
-
-                    return lst
-                case OP_CAR: {
-                    const val = this.preparelistop("car", expr, scope, 1)
-                    return val[0]
-                }
-                case OP_CDR: {
-                    const val = this.preparelistop("cdr", expr, scope, 1)
-                    return val.slice(1)
-                }
-                case OP_LAST: {
-                    const val = this.preparelistop("last", expr, scope, 1);
-                    return val[val.length - 1];
                 }
 
                 case OP_QUOTE: {
@@ -309,24 +468,6 @@ export class Anima {
                     }
 
                     return expr[1];
-                }
-                case OP_LENGTH: {
-                    if(argCount != 1) {
-                        throw new Error(`length must be in format ["length", expr] but only have ${argCount} arguments`)
-                    }
-
-                    const target = this.evalinner(expr[1], scope);
-                    return Array.isArray(target) ? target.length : (typeof target === "string" ? target.length : 0);
-                }
-
-                case OP_CONTAINS: {
-                    if(argCount != 2) {
-                        throw new Error(`contains must be in format ["contains", expr, contains_expr] but only have ${argCount} arguments`)
-                    }
-
-                    const list = this.evalinner(expr[1], scope);
-                    const item = this.evalinner(expr[2], scope);
-                    return Array.isArray(list) ? list.includes(item) : false;
                 }
         
                 // Control flow
@@ -341,6 +482,7 @@ export class Anima {
                     expr = this.isTruthy(cond) ? expr[2] : expr[3];
                     continue;
                 }
+
                 case OP_COND: {
                     if (argCount === 0) throw new Error("cond requires at least one clause");
                     
@@ -376,7 +518,6 @@ export class Anima {
                     return null; 
                 }
 
-                // Logic (all logic short circuits)
                 case OP_AND: { 
                     if (argCount === 0) return true; 
                     for (let i = 0; i < argCount - 1; i++) {
@@ -388,6 +529,7 @@ export class Anima {
                     expr = expr[argCount];
                     continue;
                 }
+
                 case OP_OR: {
                     if (argCount === 0) return false;
                     for (let i = 0; i < argCount - 1; i++) {
@@ -399,151 +541,46 @@ export class Anima {
                     expr = expr[argCount];
                     continue;
                 }
-
-                case OP_EQ:
-                    if(argCount != 2) {
-                        throw new Error(`= condition must be in format ["=", expr_a expr_b] but only have ${argCount} arguments`)
-                    }
-
-                    let a = this.evalinner(expr[1], scope)
-                    if (typeof a !== "number") throw new Error("= expr 1 returned a non-number")
-                    let b = this.evalinner(expr[2], scope)
-                    if (typeof b !== "number") throw new Error("= expr 2 returned a non-number")
-                    return a === b
-                case OP_EQ_PTR1:
-                case OP_EQ_PTR2: {
-                    if(argCount != 2) {
-                        throw new Error(`${String(operator)} condition must be in format ["eqv?", expr_a expr_b] but only have ${argCount} arguments`)
-                    }
-
-                    return this.evalinner(expr[1], scope) === this.evalinner(expr[2], scope);
-                }
-                case OP_NOT: {
-                    if(argCount != 1) {
-                        throw new Error(`not condition must be in format ["not", expr] but only have ${argCount} arguments`)
-                    }
-
-                    return !this.isTruthy(this.evalinner(expr[1], scope))
-                }
-                case OP_EQ_DEEP1:
-                case OP_EQ_DEEP2: {
-                    if (argCount != 2) throw new Error(`${String(operator)} requires exactly 2 arguments`);
-                    
-                    const left = this.evalinner(expr[1], scope);
-                    const right = this.evalinner(expr[2], scope);
-                    
-                    return this.isDeepEqual(left, right);
-                }
-                
-                // TODO: Verify arguments
-                case OP_GT: return this.evalinner(expr[1], scope) > this.evalinner(expr[2], scope);
-                case OP_LT: return this.evalinner(expr[1], scope) < this.evalinner(expr[2], scope);
-                case OP_GTE: return this.evalinner(expr[1], scope) >= this.evalinner(expr[2], scope);
-                case OP_LTE: return this.evalinner(expr[1], scope) <= this.evalinner(expr[2], scope);    
-
-                case OP_ADD: {
-                    if (argCount < 2) throw new Error("+ requires at least 2 arguments");
-                    let result = this.evalinner(expr[1], scope);
-                    if (typeof result !== "number") throw new Error("+ requires numbers");
-                    
-                    for(let i = 1; i < argCount; i++) {
-                        const next = this.evalinner(expr[i+1], scope);
-                        if (typeof next !== "number") throw new Error("+ requires numbers");
-                        result += next; 
-                    }
-                    return result;
-                }
-                
-                case OP_SUB: {
-                    if (argCount < 2) throw new Error("- requires at least 2 arguments");
-                    let result = this.evalinner(expr[1], scope);
-                    if (typeof result !== "number") throw new Error("- requires numbers");
-                    
-                    for(let i = 1; i < argCount; i++) {
-                        const next = this.evalinner(expr[i+1], scope);
-                        if (typeof next !== "number") throw new Error("- requires numbers");
-                        result -= next;
-                    }
-                    return result;
-                }
-                
-                case OP_MUL: {
-                    if (argCount < 2) throw new Error("* requires at least 2 arguments");
-                    let result = this.evalinner(expr[1], scope);
-                    if (typeof result !== "number") throw new Error("* requires numbers");
-                    
-                    for(let i = 1; i < argCount; i++) {
-                        const next = this.evalinner(expr[i+1], scope);
-                        if (typeof next !== "number") throw new Error("* requires numbers");
-                        result *= next; 
-                    }
-                    return result;
-                }
-                
-                case OP_DIV: {
-                    if (argCount < 2) throw new Error("/ requires at least 2 arguments");
-                    let result = this.evalinner(expr[1], scope);
-                    if (typeof result !== "number") throw new Error("/ requires numbers");
-                    
-                    for(let i = 1; i < argCount; i++) {
-                        const next = this.evalinner(expr[i+1], scope);
-                        if (typeof next !== "number") throw new Error("/ requires numbers");
-                        result /= next; 
-                    }
-                    return result;
-                }
-                
-                case OP_MODULO: {
-                    if (argCount != 2) throw new Error("module requires 2 arguments");
-                    return this.evalinner(expr[1], scope) % this.evalinner(expr[2], scope);
-                }
-                
+                                
                 default: {
-                    // Procedure call if unknown
-                    const proc = this.evalinner(expr[0], scope)
+                    let proc;
                     
-                    // JS procedure call
-                    if (proc instanceof JSClosure) {
-                        const callargs = new Array(argCount)
-                        for (let i = 0; i < argCount; i++) {
-                            callargs[i] = this.evalinner(expr[i+1], scope);
-                        }
-
-                        // directly call closure, we also pass expr+scope to the function through JSClosureState
-                        // to enable for JS functions to perform TCO optimization and view the currently executing
-                        // closures scope
-                        const vmstate = new JSClosureState(expr, scope)
-                        const [tcoCont, retVal] = proc.call(vmstate, callargs)
-                        if(tcoCont) {
-                            expr = vmstate.vmexpr
-                            scope = vmstate.vmscope
-                            continue
-                        }
-                        return retVal
+                    // FAST PATH: if symbol
+                    if (typeof expr[0] === "symbol") {
+                        proc = BUILTIN_PROCS[expr[0]] || scope.get(expr[0])
+                    } else {
+                        // SLOW PATH: Dynamically computed procedures need to be eval'd explicitly 
+                        proc = this.evalinner(expr[0], scope);
+                    }
+                    
+                    // Handle builtins by directly passsing VM+expr+scope+computed argcount
+                    if (proc instanceof Builtin) {
+                        return proc.cb(this, argCount, expr, scope);
                     }
 
                     // Anima procedure
                     if (proc instanceof Closure) {
+                        if (argCount != proc.params.length) {
+                            throw new Error(`Attempted to call a procedure taking ${proc.params.length} arguments with ${argCount} arguments`);
+                        }
+                        
                         const callargs = new Array(argCount)
                         for (let i = 0; i < argCount; i++) {
                             callargs[i] = this.evalinner(expr[i+1], scope);
                         }
                         const callscope = proc.scope.nest();
-                        if (callargs.length != proc.params.length) {
-                            throw new Error(`Attempted to call a procedure taking ${proc.params.length} arguments with ${callargs.length} arguments`);
-                        }
                         
                         // bind args
                         for (let i = 0; i < proc.params.length; i++) {
                             callscope.set(proc.params[i], callargs[i]);
                         }
 
-                        // tail-call (optimization) with procedure body and newly bound callscope to avoid allocing new stack frame (similar to Scheme)
+                        // tail-call procedure body and newly bound callscope to avoid allocing new stack frame
                         expr = proc.body;
                         scope = callscope;
                         continue;
                     }
-                    throw new Error(`Unknown operator or attempted to call a non-procedure: ${JSON.stringify(operator)}`);
+                    throw new Error(`Unknown operator or attempted to call a non-procedure: ${String(operator)}`);
                 }
             }
         }
