@@ -725,6 +725,9 @@ export class ASP {
             // Quote
             if (token === "'") {
                 current++; // Skip the quote
+                if (current >= tokens.length) {
+                    throw new ASPParseError("Unexpected end of input: Missing expression after '", current);
+                }
                 const nextExpr = walk(); // Parse the next expr after the quote
                 return [OP_QUOTE, nextExpr];  // Wrap in quote builtin proc
             }
