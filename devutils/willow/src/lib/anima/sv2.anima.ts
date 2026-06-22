@@ -62,8 +62,9 @@ export class Closure {
 
 // Special Forms
 const OP_DEFINE = Symbol.for("define");
-const OP_DO     = Symbol.for("do");
+const OP_BEGIN     = Symbol.for("begin");
 const OP_LAMBDA = Symbol.for("lambda");
+const OP_LET    = Symbol.for("let");
 const OP_IF     = Symbol.for("if");
 const OP_COND   = Symbol.for("cond");
 const OP_ELSE   = Symbol.for("else");
@@ -78,6 +79,8 @@ const OP_LAST     = Symbol.for("last");
 const OP_LENGTH   = Symbol.for("length");
 const OP_EMPTY    = Symbol.for("empty?")
 const OP_CONTAINS = Symbol.for("contains");
+const OP_MAP      = Symbol.for("map")
+const OP_APPLY    = Symbol.for("apply")
 
 // Logic & Type Checking
 const OP_AND      = Symbol.for("and");
@@ -110,7 +113,7 @@ export const SPECIAL_FORMS = new Set([
     OP_ELSE, 
     OP_AND, 
     OP_OR, 
-    OP_DO
+    OP_BEGIN
 ])
 
 /** A builtin method in anima */
@@ -254,6 +257,63 @@ export const BUILTIN_PROCS: Record<symbol, Builtin> = {
         const item = vm.evalinner(expr[2], scope);
         return (Array.isArray(list) || list instanceof Cons) ? list.includes(item) : false;
     }),
+    [OP_MAP]: new Builtin((vm, argCount, expr, scope) => {
+        if (argCount < 2) throw new Error("map requires at least 2 arguments (procedure and 1+ lists to map over)");
+        
+        const proc = vm.evalinner(expr[1], scope);
+        const lists: any[] = [];
+        
+        for (let i = 2; i <= argCount; i++) {
+            lists.push(vm.evalinner(expr[i], scope));
+        }
+
+        const iters = lists.map(list => {
+            if (list === null) return [][Symbol.iterator]();
+            if (Array.isArray(list) || list instanceof Cons) return list[Symbol.iterator]();
+            throw new Error("map arguments must be lists");
+        });
+
+        const result = [];        
+        while (true) {
+            const nextVals = iters.map(it => it.next());
+            
+            if (nextVals.some(res => res.done)) {
+                break;
+            }
+            const args = [];
+            for (const res of nextVals) {
+                args.push(res.value);
+            }
+            result.push(vm.execproc(proc, args, scope));
+        }
+        
+        return result;
+    }),
+    [OP_APPLY]: new Builtin((vm, argCount, expr, scope) => {
+        if (argCount < 2) throw new Error("apply requires at least 2 arguments (apply procedure [arg...] lst)");
+        
+        const proc = vm.evalinner(expr[1], scope);
+        const args = [];
+        
+        for (let i = 2; i <= argCount; i++) {
+            args.push(vm.evalinner(expr[i], scope));
+        }
+
+        // Last arg must be the list of remaining args
+        const lst = args.pop();
+        
+        if (lst !== null) {
+            if (Array.isArray(lst) || lst instanceof Cons) {
+                for (const item of lst) {
+                    args.push(item);
+                }
+            } else {
+                throw new Error("apply: the last argument must be a list (apply procedure [arg...] lst)");
+            }
+        }
+
+        return vm.execproc(proc, args, scope);
+    }),
     [OP_NOT]: new Builtin((vm, argCount, expr, scope) => {
         if (argCount != 1) throw new Error("not requires 1 argument");
         return !vm.isTruthy(vm.evalinner(expr[1], scope));
@@ -291,7 +351,7 @@ export const BUILTIN_PROCS: Record<symbol, Builtin> = {
                 if (resolvedValue instanceof Builtin) return "procedure";
                 if(resolvedValue instanceof Closure) return "procedure"
                 if(Array.isArray(resolvedValue) || resolvedValue instanceof Cons) return "list"
-                return "unknown" // to allow consistency across all js engines/custom sv2 impls etc.
+                return "object" // to allow consistency across all js engines/custom sv2 impls etc.
             }
         }
     }),
@@ -418,9 +478,9 @@ export class Anima {
 
                         const val = this.evalinner(expr[2], scope);
                         scope.define(expr[1], val);
-                        return val;
+                        return undefined;
                     } else if (Array.isArray(expr[1])) {
-                        // (define (func_name arg1 arg2) body_expr...)
+                        // (define (func_name arg1 arg2) body_expr...), this one just gets rewritten to a normal define with lambda
                         if (expr[1].length === 0) throw new Error("define: missing function name");
                         const funcName = expr[1][0];
                         const params = expr[1].slice(1);
@@ -428,6 +488,7 @@ export class Anima {
                         expr = [OP_DEFINE, funcName, [OP_LAMBDA, params, ...body]];
                         continue
                     } else if (expr[1] instanceof Cons) {
+                        // same as above
                         const funcName = expr[1].head;
                         const params = expr[1].tail;
                         if (!params) throw new Error("define: missing params");
@@ -439,10 +500,9 @@ export class Anima {
                     }
                 }
 
-                // Executes a sequence of expressions, last expr is tail-called
-                case OP_DO: {
+                case OP_BEGIN: {
                     if(argCount == 0) {
-                        throw new Error(`do must be in format ["do", ...] but have ${argCount} arguments`)
+                        return undefined // evaluates to void
                     }
 
                     for (let i = 0; i < argCount - 1; i++) {
@@ -487,10 +547,57 @@ export class Anima {
                         }
                     }
 
-                    // add in a do block if theres more than one op
-                    const bodyAST = argCount === 2 ? expr[2] : [OP_DO, ...expr.slice(2)];
+                    // add in a begin block if theres more than one op
+                    const bodyAST = argCount === 2 ? expr[2] : [OP_BEGIN, ...expr.slice(2)];
 
                     return new Closure(elems, bodyAST, scope)   
+                }
+
+                case OP_LET: {
+                    // OP_LET is special in that it gets compiled down to a lambda in the end
+
+                    // normal let: (let ((var expr) ...) body1 body2 ...)
+                    if (argCount < 2) throw new Error(`let must be in format ["let", [[var expr]...], body...] but only have ${argCount} arguments`);
+
+                    const bindings = expr[1];
+                    if (!Array.isArray(bindings) && !(bindings instanceof Cons) && bindings !== null) {
+                        throw new Error("let arg 1 must be a list of form [[var expr]...]");
+                    }
+
+                    const body = expr.slice(2);
+                    const params: symbol[] = [];
+                    const exprs: any[] = [];
+
+                    if (bindings !== null) {
+                        for (const binding of bindings) {
+                            let sym, val;
+                            if (Array.isArray(binding)) {
+                                if (binding.length != 2) {
+                                    throw new Error(`let binding \`${binding}\` must be a list of form [var expr] but only have list of length ${binding.length}`);
+                                }
+                                sym = binding[0];
+                                val = binding[1];
+                            } else if (binding instanceof Cons) {
+                                if (binding.length != 2) {
+                                    throw new Error(`let binding \`${binding}\` must be a list of form [var expr] but only have list of length ${binding.length}`);
+                                }
+
+                                sym = binding.head;
+                                val = binding.tail?.head; 
+                            } else {
+                                throw new Error(`let binding \`${binding}\` must be a list of form [var expr]`);
+                            }
+
+                            if (typeof sym !== "symbol") throw new Error("let binding name must be a symbol");
+                            
+                            params.push(sym);
+                            exprs.push(val);
+                        }
+                    }
+
+                    // rewrite to lambda [(let ((var expr) ...) body1 body2 ...) => ((lambda (var...) body1 body2...) expr...)]
+                    expr = [[OP_LAMBDA, params, ...body], ...exprs];
+                    continue; 
                 }
 
                 case OP_QUOTE: {
@@ -545,8 +652,8 @@ export class Anima {
                         continue; 
                     }
                     
-                    // If nothing matches (meaning none of the if clauses resolved nor did the 'else'), return null
-                    return null; 
+                    // If nothing matches (meaning none of the if clauses resolved nor did the 'else'), return void
+                    return undefined; 
                 }
 
                 case OP_AND: { 
@@ -614,6 +721,32 @@ export class Anima {
                     throw new Error(`Unknown operator or attempted to call a non-procedure: ${String(operator)}`);
                 }
             }
+        }
+    }
+
+    // @internal
+    //
+    // Does not apply TCO
+    execproc(proc: any, args: any[], scope: AnimaScope) {
+        const argCount = args.length
+        
+        if (proc instanceof Builtin) {
+            return proc.cb(this, argCount, [proc, ...args], scope);
+        }
+
+        if (proc instanceof Closure) {
+            if (argCount != proc.params.length) {
+                throw new Error(`Attempted to call a procedure taking ${proc.params.length} arguments with ${argCount} arguments`);
+            }
+            
+            const callscope = proc.scope.nest();
+            
+            // bind args
+            for (let i = 0; i < proc.params.length; i++) {
+                callscope.define(proc.params[i], args[i]);
+            }
+
+            return this.evalinner(proc.body, callscope)
         }
     }
 }
@@ -788,7 +921,7 @@ export class ASP {
             // All other literals (numbers, symbols, booleans etc)
             current++; // consume current token
 
-            // Booleans+null
+            // Booleans+null (which is empty list)
             if (token === '#t') return true;
             if (token === '#f') return false;
             if (token === 'null') return null;
@@ -819,8 +952,8 @@ export class ASP {
         if (exprs.length == 0) return null
         if (exprs.length == 1) return exprs[0]
 
-        // Translate to do
-        return [OP_DO, ...exprs];
+        // Translate to begin
+        return [OP_BEGIN, ...exprs];
     }
 }
 

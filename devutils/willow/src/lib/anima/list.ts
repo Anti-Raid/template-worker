@@ -16,7 +16,7 @@ export class Cons {
             rtail = Cons.fromArray(tail);
         }
 
-        const len = 1 + (rtail instanceof Cons ? tail.length : 0);
+        const len = 1 + (rtail instanceof Cons ? rtail.length : 0);
         return new Cons(false, head, rtail, null, 0, len);
     }
 
@@ -95,7 +95,7 @@ export class Cons {
             stepsRemaining--;
         }
 
-        return undefined; // Unreachable due to the bounds check at the top
+        return undefined;
     }
 }
 

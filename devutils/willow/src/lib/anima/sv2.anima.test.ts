@@ -6,310 +6,387 @@ import { describe, it, expect, beforeEach } from 'vitest';
 const s = Symbol.for;
 
 describe('Anima', () => {
-    let evaluator: Anima;
-    let baseData: Record<string, any>;
+    let evaluator: Anima = new Anima();
+    let baseData: Record<string, any> = {
+        port: 8080,
+        protocol: "tcp",
+        is_active: true,
+        user_role: null 
+    };
 
-    beforeEach(() => {
-        evaluator = new Anima();
-        baseData = {
-            port: 8080,
-            protocol: "tcp",
-            is_active: true,
-            user_role: null 
-        };
-    });
-
-    const run = (expr: any) => evaluator.evaluate(expr, baseData);
+    const run = (expr: string) => {
+        const ast = new ASP(expr).parse();
+        return evaluator.evaluate(ast, baseData);
+    };
 
     describe('Primitives, Strings & Symbols', () => {
         it('evaluates boolean primitives', () => {
-            expect(run(true)).toBe(true);
-            expect(run(false)).toBe(false);
+            expect(run("#t")).toBe(true);
+            expect(run("#f")).toBe(false);
         });
 
         it('evaluates numbers and raw arrays', () => {
-            expect(run(42)).toBe(42);
-            expect(run([])).toBe(null);
+            expect(run("42")).toBe(42);
+            expect(run("()")).toBe(null); // ASP parses () as [], VM evals [] as null
         });
 
         it('evaluates native Symbols as implicit variables', () => {
-            expect(run(s("port"))).toBe(8080);
-            expect(run(s("protocol"))).toBe("tcp");
+            expect(run("port")).toBe(8080);
+            expect(run("protocol")).toBe("tcp");
         });
 
         it('evaluates literal JS strings as Scheme strings directly', () => {
-            expect(run("hello")).toBe("hello");
-            expect(run("port")).toBe("port"); // String primitive, not a variable lookup
+            expect(run('"hello"')).toBe("hello");
+            expect(run('"port"')).toBe("port"); // String primitive, not a variable lookup
         });
 
         it('errors for unknown variables', () => {
-            expect(() => run(s("missing_var"))).toThrow(MissingVarError);
+            expect(() => run("missing_var")).toThrow(MissingVarError);
         });
     });
 
     describe('Logic & Control Flow', () => {
         it('evaluates strict equality', () => {
-            expect(run([s("eqv?"), s("port"), 8080])).toBe(true);
-            expect(run([s("not"), [s("eqv?"), s("protocol"), "udp"]])).toBe(true);
+            expect(run("(eqv? port 8080)")).toBe(true);
+            expect(run(`(not (eqv? protocol "udp"))`)).toBe(true);
         });
 
         it('evaluates if statements using strict truthiness', () => {
-            expect(run([s("if"), s("is_active"), "yes", "no"])).toBe("yes");
-            expect(run([s("if"), s("user_role"), "yes", "no"])).toBe("no");
-            expect(run([s("if"), 0, "yes", "no"])).toBe("yes");
+            expect(run(`(if is_active "yes" "no")`)).toBe("yes");
+            expect(run(`(if user_role "yes" "no")`)).toBe("no");
+            expect(run(`(if 0 "yes" "no")`)).toBe("yes");
         });
 
         it('short-circuits AND statements', () => {
-            expect(run([s("and"), true, false, s("does_not_exist")])).toBe(false);
+            expect(run("(and #t #f does_not_exist)")).toBe(false);
         });
 
         it('short-circuits OR statements and returns actual truthy values', () => {
-            expect(run([s("or"), false, s("port"), ["crash!"]])).toBe(8080);
+            expect(run("(or #f port (crash!))")).toBe(8080);
         });
     });
 
     describe('Math Operations', () => {
         it('performs basic arithmetic', () => {
-            expect(run([s("+"), 10, 5])).toBe(15);
-            expect(run([s("-"), 10, 5])).toBe(5);
-            expect(run([s("*"), 10, 5])).toBe(50);
-            expect(run([s("/"), 10, 5])).toBe(2);
-            expect(run([s("modulo"), 10, 3])).toBe(1);
+            expect(run("(+ 10 5)")).toBe(15);
+            expect(run("(- 10 5)")).toBe(5);
+            expect(run("(* 10 5)")).toBe(50);
+            expect(run("(/ 10 5)")).toBe(2);
+            expect(run("(modulo 10 3)")).toBe(1);
         });
 
         it('performs numeric comparisons', () => {
-            expect(run([s(">"), s("port"), 1024])).toBe(true);
-            expect(run([s("<"), s("port"), 10000])).toBe(true);
-            expect(run([s(">="), 10, 10])).toBe(true);
-            expect(run([s("<="), 5, 10])).toBe(true);
+            expect(run("(> port 1024)")).toBe(true);
+            expect(run("(< port 10000)")).toBe(true);
+            expect(run("(>= 10 10)")).toBe(true);
+            expect(run("(<= 5 10)")).toBe(true);
         });
     });
 
     describe('Data Structures & Types', () => {
         it('creates lists and evaluates length', () => {
-            expect(run([s("list"), 1, 2, 3])).toEqual([1, 2, 3]);
-            expect(run([s("length"), [s("list"), "a", "b"]])).toBe(2);
-            expect(run([s("length"), "string_len"])).toBe(10);
+            expect(run("(list 1 2 3)")).toEqual([1, 2, 3]);
+            expect(run(`(length (list "a" "b"))`)).toBe(2);
+            expect(run(`(length "string_len")`)).toBe(10);
         });
 
         it('checks contains', () => {
-            expect(run([s("contains"), [s("list"), 1, 2], 2])).toBe(true);
-            expect(run([s("contains"), [s("list"), 1, 2], 3])).toBe(false);
+            expect(run("(contains (list 1 2) 2)")).toBe(true);
+            expect(run("(contains (list 1 2) 3)")).toBe(false);
         });
 
         it('evaluates type? with JS Symbols', () => {
-            expect(run([s("type?"), s("port")])).toBe("number");
-            expect(run([s("type?"), s("protocol")])).toBe("string");
-            expect(run([s("type?"), s("user_role")])).toBe("list");
+            expect(run("(type? port)")).toBe("number");
+            expect(run("(type? protocol)")).toBe("string");
+            expect(run("(type? user_role)")).toBe("list");
             
             // Verifying our new native Symbol logic!
-            expect(run([s("type?"), [s("quote"), s("my_symbol")]])).toBe("symbol");
+            expect(run("(type? 'my_symbol)")).toBe("symbol");
         });
     });
 
     describe('Lexical Scoping & Closures', () => {
-        it('executes DO sequences and DEFINEs variables', () => {
-            const ast = [
-                s("do"),
-                [s("define"), s("x"), 10],
-                [s("define"), s("y"), 20],
-                [s("+"), s("x"), s("y")]
-            ];
-            expect(run(ast)).toBe(30);
-            expect(baseData.x).toBeUndefined(); 
+        it('executes defines correctly', () => {
+            const script = `
+                (define x 10)
+                (define y 20)
+                (+ x y)
+            `;
+            expect(run(script)).toBe(30);
+            expect(baseData.x).toBeUndefined(); // ensure it never pollutes outer scope
         });
 
         it('creates and calls a lambda with arguments', () => {
-            const ast = [
-                s("do"),
-                [s("define"), s("add"), 
-                    [s("lambda"), [s("a"), s("b")], [s("+"), s("a"), s("b")]]
-                ],
-                [s("add"), 5, 7]
-            ];
-            expect(run(ast)).toBe(12);
+            const script = `
+                (begin
+                  (define (add a b) (+ a b))
+                  (add 5 7))
+            `;
+            expect(run(script)).toBe(12);
         });
 
-        it('creates and calls a lambda with multiple body expressions (implicit do)', () => {
-            const ast = [
-                s("do"),
-                [s("define"), s("counter"), 0],
-                [s("define"), s("increment"), 
-                    [s("lambda"), [], 
-                        [s("define"), s("counter"), [s("+"), s("counter"), 1]], // Body Expr 1
-                        s("counter")                                            // Body Expr 2
-                    ]
-                ],
-                [s("increment")]
-            ];
-            expect(run(ast)).toBe(1);
+        it('creates and calls a lambda with multiple body expressions', () => {
+            const script = `
+                (begin
+                  (define counter 0)
+                  (define (increment)
+                    (define counter (+ counter 1))
+                    counter)
+                  (increment))
+            `;
+            expect(run(script)).toBe(1);
         });
 
         it('respects closure scope (variables enclosed at creation)', () => {
-            const ast = [
-                s("do"),
-                [s("define"), s("x"), 100], 
-                [s("define"), s("make_adder"), 
-                    [s("lambda"), [s("y")], [s("+"), s("x"), s("y")]] 
-                ],
-                [s("define"), s("x"), 999], 
-                [s("make_adder"), 5] 
-            ];
-            expect(run(ast)).toBe(1004);
+            const script = `
+                (begin
+                  (define x 100)
+                  (define (make_adder y) (+ x y))
+                  (define x 999)
+                  (make_adder 5))
+            `;
+            expect(run(script)).toBe(1004);
         });
 
         it('Ensure valid TCO', () => {
-            const ast = [
-                s("do"),
-                [s("define"), s("loop"), 
-                    [s("lambda"), [s("n")], 
-                        [s("if"), [s("="), s("n"), 0],
-                            "survived!",
-                            [s("loop"), [s("-"), s("n"), 1]]
-                        ]
-                    ]
-                ],
-                [s("loop"), 15000]
-            ];
-            expect(() => run(ast)).not.toThrow();
-            expect(run(ast)).toBe("survived!");
+            const script = `
+                (begin
+                  (define (loop n)
+                    (if (= n 0)
+                        "survived!"
+                        (loop (- n 1))))
+                  (loop 15000))
+            `;
+            expect(() => run(script)).not.toThrow();
+            expect(run(script)).toBe("survived!");
         });
     });
 
     describe('quote operator & Native Symbols', () => {
         it('quotes primitive numbers', () => {
-            expect(run([s("quote"), 42])).toBe(42);
+            expect(run("'42")).toBe(42);
         });
 
         it('quotes Symbols perfectly', () => {
-            expect(run([s("quote"), s("x")])).toBe(s("x"));
+            expect(run("'x")).toBe(Symbol.for("x"));
         });
 
         it('protects lists and retains inner native types', () => {
-            const ast = [s("quote"), [s("+"), 1, 2]];
-            expect(run(ast)).toEqual([s("+"), 1, 2]);
+            expect(run("'(+ 1 2)")).toEqual([Symbol.for("+"), 1, 2]);
         });
 
         it('protects nested lists perfectly', () => {
-            const ast = [s("quote"), [1, [2, 3], 4]];
-            expect(run(ast)).toEqual([1, [2, 3], 4]);
+            expect(run("'(1 (2 3) 4)")).toEqual([1, [2, 3], 4]);
         });
 
         it('handles nested quotes recursively', () => {
-            const ast = [s("quote"), [s("quote"), 100]];
-            expect(run(ast)).toEqual([s("quote"), 100]);
+            expect(run("''100")).toEqual([Symbol.for("quote"), 100]);
         });
 
-        it('throws an error if given too many arguments', () => {
-            expect(() => run([s("quote"), 1, 2])).toThrow();
+        it('throws an error if given too many arguments natively', () => {
+            expect(() => run("(quote 1 2)")).toThrow();
         });
     });
 
     describe('cond special form', () => {
         it('Matches the first truthy condition', () => {
-            const ast = [
-                s("cond"),
-                [true, "first"],
-                [true, "second"]
-            ];
-            expect(run(ast)).toBe("first");
+            const script = `
+                (cond 
+                  (#t "first")
+                  (#t "second"))
+            `;
+            expect(run(script)).toBe("first");
         });
 
         it('Skips falsey conditions and matches later ones', () => {
-            const ast = [
-                s("cond"),
-                [false, "first"],
-                [[s("="), 1, 2], "second"],
-                [[s(">"), 5, 3], "third"]
-            ];
-            expect(run(ast)).toBe("third");
+            const script = `
+                (cond 
+                  (#f "first")
+                  ((= 1 2) "second")
+                  ((> 5 3) "third"))
+            `;
+            expect(run(script)).toBe("third");
         });
 
         it('Falls back to the else clause if nothing matches', () => {
-            const ast = [
-                s("cond"),
-                [false, "first"],
-                [null, "second"],
-                [s("else"), "fallback"]
-            ];
-            expect(run(ast)).toBe("fallback");
+            const script = `
+                (cond 
+                  (#f "first")
+                  (null "second")
+                  (else "fallback"))
+            `;
+            expect(run(script)).toBe("fallback");
         });
 
-        it('Returns null if no conditions match and there is no else clause', () => {
-            const ast = [
-                s("cond"),
-                [false, "first"],
-                [[s("="), 1, 2], "second"]
-            ];
-            expect(run(ast)).toBeNull();
+        it('Returns void if no conditions match and there is no else clause', () => {
+            const script = `
+                (cond 
+                  (#f "first")
+                  ((= 1 2) "second"))
+            `;
+            expect(run(script)).toBeUndefined();
         });
     });
 
     describe('Cons, Arrays & FFI Boundary', () => {
         it('constructs a proper list and extracts values (car/cdr)', () => {
-            expect(run([s("car"), [s("cons"), 1, [s("cons"), 2, null]]])).toBe(1);
-            expect(run([s("car"), [s("cdr"), [s("cons"), 1, [s("cons"), 2, null]]]])).toBe(2);
+            expect(run("(car (cons 1 (cons 2 null)))")).toBe(1);
+            expect(run("(car (cdr (cons 1 (cons 2 null))))")).toBe(2);
         });
 
         it('supports improper lists perfectly', () => {
-            // (cons 1 2) -> an improper pair
-            const ast = [s("cons"), 1, 2];
-            
-            expect(run([s("car"), ast])).toBe(1);
-            expect(run([s("cdr"), ast])).toBe(2);
-            
-            // length of an improper list with 1 cons pair is 1
-            expect(run([s("length"), ast])).toBe(1);
+            expect(run("(car (cons 1 2))")).toBe(1);
+            expect(run("(cdr (cons 1 2))")).toBe(2);
+            expect(run("(length (cons 1 2))")).toBe(1);
         });
 
         it('triggers the O(1) Fast Path for raw JS arrays', () => {
-            // We use `quote` to generate a raw JS array in the AST
-            const rawArray = [s("quote"), [10, 20, 30]];
-            
-            // car natively peeks at [0]
-            expect(run([s("car"), rawArray])).toBe(10);
-            
-            // cdr natively wraps the array in a Cons view, letting us extract [1]
-            expect(run([s("car"), [s("cdr"), rawArray]])).toBe(20);
-            
-            // length reads the native .length property
-            expect(run([s("length"), rawArray])).toBe(3);
+            expect(run("(car '(10 20 30))")).toBe(10);
+            expect(run("(car (cdr '(10 20 30)))")).toBe(20);
+            expect(run("(length '(10 20 30))")).toBe(3);
         });
 
-        it('handles array-to-cons gatekeeping in cons', () => {
-            const ast = [s("cons"), 1, [s("quote"), [2, 3]]];
-            
-            expect(run([s("car"), ast])).toBe(1);
-            expect(run([s("car"), [s("cdr"), ast]])).toBe(2);
-            expect(run([s("length"), ast])).toBe(3); // 1 + the array length of 2
+        it('handles array -> Cons perfectly', () => {
+            expect(run("(car (cons 1 '(2 3)))")).toBe(1);
+            expect(run("(car (cdr (cons 1 '(2 3))))")).toBe(2);
+            expect(run("(length (cons 1 '(2 3)))")).toBe(3); 
         });
 
         it('throws errors for empty lists', () => {
-            // car of null
-            expect(() => run([s("car"), null])).toThrow();
-            
-            // car of empty array
-            expect(() => run([s("car"), [s("quote"), []]])).toThrow();
-            
-            // cdr of empty array
-            expect(() => run([s("cdr"), [s("quote"), []]])).toThrow();
+            expect(() => run("(car null)")).toThrow();
+            expect(() => run("(car '())")).toThrow();
+            expect(() => run("(cdr '())")).toThrow();
         });
 
-        it('traverses hybrid structures with standard operators (last, contains)', () => {
-            const pureCons = [s("cons"), "a", [s("cons"), "b", null]];
-            const rawArray = [s("quote"), ["a", "b"]];
+        it('traverses cons-array hybrids with standard operators (last, contains)', () => {
+            expect(run(`(contains (cons "a" (cons "b" null)) "b")`)).toBe(true);
+            expect(run(`(contains (cons "a" (cons "b" null)) "c")`)).toBe(false);
+            expect(run(`(contains '("a" "b") "b")`)).toBe(true);
 
-            // OP_CONTAINS
-            expect(run([s("contains"), pureCons, "b"])).toBe(true);
-            expect(run([s("contains"), pureCons, "c"])).toBe(false);
-            expect(run([s("contains"), rawArray, "b"])).toBe(true);
+            expect(run(`(last (cons "a" (cons "b" null)))`)).toBe("b");
+            expect(run(`(last '("a" "b"))`)).toBe("b");
+            expect(run(`(last (cons "a" "b"))`)).toBe("b");
+        });
+    });
 
-            // OP_LAST
-            expect(run([s("last"), pureCons])).toBe("b");
-            expect(run([s("last"), rawArray])).toBe("b");
+    describe('let bindings', () => {
+        it('evaluates a simple single binding', () => {
+            const script = `(let ([x 10]) x)`;
+            expect(run(script)).toBe(10);
+        });
+
+        it('evaluates multiple bindings', () => {
+            const script1 = `
+                (let ([x 10] [y 20] [z 5]) 
+                  (- (+ x y) z))
+            `;
+            expect(run(script1)).toBe(25);
+
+            const script2 = `(let ((a 5) (b 5)) (+ a b))`;
+            expect(run(script2)).toBe(10);
+        });
+
+        it('shadows outer variables without mutating them (Lexical Purity)', () => {
+            const script = `
+                (begin
+                  (define x 100)
+                  (define result (let ([x 5] [y 5]) (+ x y)))
+                  (list result x))
+            `;
+            expect(run(script)).toStrictEqual([10, 100]);
+        });
+
+        it('supports multiple body expressions', () => {
+            const script = `
+                (let ([multiplier 10])
+                  (define x 5)
+                  (define y 2)
+                  (* x y multiplier))
+            `;
+            expect(run(script)).toBe(100);
+        });
+
+        it('handles empty bindings correctly', () => {
+            const script = `(let () 99)`;
+            expect(run(script)).toBe(99);
+        });
+        
+        it('throws an error for malformed bindings', () => {
+            const script = `(let ([x]) x)`;
+            expect(() => run(script)).toThrow();
+        });
+    });
+
+    describe('apply', () => {
+        it('applies a procedure to a single list of arguments', () => {
+            expect(run(`(apply + '(1 2 3 4))`)).toBe(10);
+            expect(run(`(apply * '(2 3 4))`)).toBe(24);
+        });
+
+        it('handles preceding standalone arguments before the final list', () => {
+            expect(run(`(apply + 100 200 '(1 2))`)).toBe(303);
+            expect(run(`(apply - 100 '(50 25))`)).toBe(25);
+        });
+
+        it('works flawlessly with user-defined closures', () => {
+            const script = `
+                (begin
+                  (define (multiply-add a b c) (+ (* a b) c))
+                  (apply multiply-add 10 '(5 2)))
+            `;
+            // (10 * 5) + 2 = 52
+            expect(run(script)).toBe(52); 
+        });
+
+        it('handles the empty list gracefully', () => {
+            const script = `
+                (begin
+                  (define (return-five) 5)
+                  (apply return-five '()))
+            `;
+            expect(run(script)).toBe(5);
+        });
+
+        it('throws an error if the last argument is not a list', () => {
+            expect(() => run(`(apply + 1 2 3)`)).toThrow(/must be a list/);
+        });
+    });
+
+    describe('map', () => {
+        it('maps a procedure over a single list', () => {
+            const script = `
+                (begin
+                  (define (double x) (* x 2))
+                  (map double '(1 2 3 4)))
+            `;
+            expect(run(script)).toEqual([2, 4, 6, 8]);
+        });
+
+        it('maps a procedure over multiple lists in parallel', () => {
+            const script = `(map + '(1 2 3) '(10 20 30))`;
+            expect(run(script)).toEqual([11, 22, 33]);
             
-            const improper = [s("cons"), "a", "b"];
-            expect(run([s("last"), improper])).toBe("b");
+            const script3 = `(map + '(1 1 1) '(2 2 2) '(3 3 3))`;
+            expect(run(script3)).toEqual([6, 6, 6]);
+        });
+
+        it('safely terminates when the shortest list is exhausted', () => {
+            const script = `(map + '(1 2 3 4 5) '(10 20))`;
+            expect(run(script)).toEqual([11, 22]);
+        });
+
+        it('maps over Cons as well', () => {
+            const script = `(map + (cons 1 (cons 2 null)) '(10 20))`;
+            expect(run(script)).toEqual([11, 22]);
+        });
+
+        it('returns an empty list when mapping over an empty list', () => {
+            const script = `(map + '())`;
+            expect(run(script)).toEqual([]);
+        });
+
+        it('throws an error if given a non-list argument', () => {
+            expect(() => run(`(map + '(1 2 3) 5)`)).toThrow(/must be lists/);
         });
     });
 });
@@ -389,16 +466,16 @@ describe('Anima String Parser (ASP)', () => {
                 (start port) ; start it up
             `;
             expect(new ASP(script).parse()).toEqual([
-                s("do"),
+                s("begin"),
                 [s("define"), s("port"), 8080],
                 [s("start"), s("port")]
             ]);
         });
     });
 
-    describe('Multiple Expressions (wrapped in do)', () => {
-        it('wraps multiple roots in a "do" block', () => {
-            expect(new ASP("1 2 3").parse()).toEqual([s("do"), 1, 2, 3]);
+    describe('Multiple Expressions', () => {
+        it('wraps multiple roots in a begin block', () => {
+            expect(new ASP("1 2 3").parse()).toEqual([s("begin"), 1, 2, 3]);
         });
     });
 
@@ -472,9 +549,9 @@ describe('ASTStringifier', () => {
             expect(roundtrip("'(1 2 3)")).toBe("(quote (1 2 3))");
         });
 
-        it('exposes implicit "do" for multiple expressions', () => {
+        it('exposes implicit begin for multiple expressions', () => {
             const multiExpr = "(define x 1) (+ x 2)";
-            expect(roundtrip(multiExpr)).toBe("(do (define x 1) (+ x 2))");
+            expect(roundtrip(multiExpr)).toBe("(begin (define x 1) (+ x 2))");
         });
     });
 
@@ -536,6 +613,27 @@ describe('Complex Tests', () => {
 
 (my-set? (list 1 2 3 4 4))`
 )).toBe("#f");
+
+        expect(run(`
+(define union
+    (lambda (a b)
+        (define (in a rst) 
+        (cond 
+            [(empty? rst) #f]
+            [(equal? a (car rst)) #t]
+            [else (in a (cdr rst))]))
+
+        (cond
+        ; if either set is empty, the other one if the union
+        [(empty? a) b]
+        [(empty? b) a]
+        ; if b is in a, skip it
+        [(in (car b) a) (union a (cdr b))]
+        [else (cons (car b) (union a (cdr b)))])))
+        
+    (list (equals? (union '(a b d e f h j) '(f c e g a)) '(c g a b d e f h j)))
+        `)).toEqual("(#t)")
+
         });
     });
 });

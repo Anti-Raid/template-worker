@@ -13,7 +13,7 @@
     import MultiSelect from '$lib/MultiSelect.svelte';
     import MultiTextBox from '$lib/MultiTextBox.svelte';
     import Toggle from '$lib/Toggle.svelte';
-    import { Anima, ASP } from '$lib/sv2.anima';
+    import { Anima, ASP } from '$lib/anima/sv2.anima';
 
 	let { template, form, formid, formidx, actions, formsetid }: {
         template: string,
