@@ -61,48 +61,48 @@ export class Closure {
 }
 
 // Special Forms
-const OP_DEFINE = Symbol.for("define");
-const OP_BEGIN     = Symbol.for("begin");
-const OP_LAMBDA = Symbol.for("lambda");
-const OP_LET    = Symbol.for("let");
-const OP_IF     = Symbol.for("if");
-const OP_COND   = Symbol.for("cond");
-const OP_ELSE   = Symbol.for("else");
-const OP_QUOTE  = Symbol.for("quote");
+export const OP_DEFINE = Symbol.for("define");
+export const OP_BEGIN     = Symbol.for("begin");
+export const OP_LAMBDA = Symbol.for("lambda");
+export const OP_LET    = Symbol.for("let");
+export const OP_IF     = Symbol.for("if");
+export const OP_COND   = Symbol.for("cond");
+export const OP_ELSE   = Symbol.for("else");
+export const OP_QUOTE  = Symbol.for("quote");
+export const OP_AND      = Symbol.for("and");
+export const OP_OR       = Symbol.for("or");
 
 // List Operations
-const OP_LIST     = Symbol.for("list");
-const OP_CONS     = Symbol.for("cons")
-const OP_CAR      = Symbol.for("car");
-const OP_CDR      = Symbol.for("cdr");
-const OP_LAST     = Symbol.for("last");
-const OP_LENGTH   = Symbol.for("length");
-const OP_EMPTY    = Symbol.for("empty?")
-const OP_CONTAINS = Symbol.for("contains");
-const OP_MAP      = Symbol.for("map")
-const OP_APPLY    = Symbol.for("apply")
+export const OP_LIST     = Symbol.for("list");
+export const OP_CONS     = Symbol.for("cons")
+export const OP_CAR      = Symbol.for("car");
+export const OP_CDR      = Symbol.for("cdr");
+export const OP_LAST     = Symbol.for("last");
+export const OP_LENGTH   = Symbol.for("length");
+export const OP_EMPTY    = Symbol.for("empty?")
+export const OP_CONTAINS = Symbol.for("contains");
+export const OP_MAP      = Symbol.for("map")
+export const OP_APPLY    = Symbol.for("apply")
 
 // Logic & Type Checking
-const OP_AND      = Symbol.for("and");
-const OP_OR       = Symbol.for("or");
-const OP_NOT      = Symbol.for("not");
-const OP_TYPE     = Symbol.for("type?");
-const OP_EQ       = Symbol.for("=");
-const OP_EQ_PTR1  = Symbol.for("eq?");
-const OP_EQ_PTR2  = Symbol.for("eqv?");
-const OP_EQ_DEEP1 = Symbol.for("equal?");
-const OP_EQ_DEEP2 = Symbol.for("equals?");
+export const OP_NOT      = Symbol.for("not");
+export const OP_TYPE     = Symbol.for("type?");
+export const OP_EQ       = Symbol.for("=");
+export const OP_EQ_PTR1  = Symbol.for("eq?");
+export const OP_EQ_PTR2  = Symbol.for("eqv?");
+export const OP_EQ_DEEP1 = Symbol.for("equal?");
+export const OP_EQ_DEEP2 = Symbol.for("equals?");
 
 // Math & Comparisons
-const OP_LT     = Symbol.for("<");
-const OP_GT     = Symbol.for(">");
-const OP_LTE    = Symbol.for("<=");
-const OP_GTE    = Symbol.for(">=");
-const OP_ADD    = Symbol.for("+");
-const OP_SUB    = Symbol.for("-");
-const OP_MUL    = Symbol.for("*");
-const OP_DIV    = Symbol.for("/");
-const OP_MODULO = Symbol.for("modulo");
+export const OP_LT     = Symbol.for("<");
+export const OP_GT     = Symbol.for(">");
+export const OP_LTE    = Symbol.for("<=");
+export const OP_GTE    = Symbol.for(">=");
+export const OP_ADD    = Symbol.for("+");
+export const OP_SUB    = Symbol.for("-");
+export const OP_MUL    = Symbol.for("*");
+export const OP_DIV    = Symbol.for("/");
+export const OP_MODULO = Symbol.for("modulo");
 
 export const SPECIAL_FORMS = new Set([
     OP_DEFINE, 
@@ -770,6 +770,7 @@ export class Anima {
         }
     }
 }
+
 
 export class ASPTokenError extends Error {
     pos: number;
