@@ -218,7 +218,7 @@ export const BUILTIN_PROCS: Record<symbol, Builtin> = {
         } else if (val === null) {
             throw new Error("car requires a non-empty list");
         } else {
-            throw new Error("cdr requires a list");
+            throw new Error(`cdr requires a list but got ${val}`);
         }
     }),
     [OP_LAST]: new Builtin((vm, argCount, expr, scope) => {
@@ -355,12 +355,244 @@ export const BUILTIN_PROCS: Record<symbol, Builtin> = {
             }
         }
     }),
+    // @ts-ignore
+    __proto__: null
+}
+
+/** A special form in anima */
+export class SpecialForm {
+    // cs is current vm expr state and can be set to allow for tco exec in a special form
+    cb: (vm: Anima, argCount: number, expr: any[], scope: AnimaScope, cs: {expr: any}) => any
+    constructor(cb: (vm: Anima, argCount: number, expr: any[], scope: AnimaScope, cs: {expr: any}) => any) {
+        this.cb = cb
+    }
+}
+export const SPECIAL_FORM_TCO_TRIGGER = Symbol("tco")
+
+export const SPECIAL_FORM_PROCS: Record<symbol, SpecialForm> = {
+    [OP_DEFINE]: new SpecialForm((vm, argCount, expr, scope, cs) => {
+        if (vm.disableDefine) {
+            throw new Error("define expressions are disabled in this context");
+        }
+
+        if(argCount < 2) {
+            throw new Error(`define must be in format ["define" varname arg] or [define (func_name arg1 arg2... argN) body_expr...] but have ${argCount} arguments`)
+        }
+
+        // Normal define
+        if(typeof expr[1] === "symbol") {
+            if (SPECIAL_FORMS.has(expr[1])) {
+                throw new Error(`${String(expr[1])}: bad syntax`)
+            }
+            if (expr[1] in BUILTIN_PROCS) {
+                throw new Error(`${String(expr[1])}: cannot shadow builtin procedure`)
+            }
+
+            const val = vm.evalinner(expr[2], scope);
+            scope.define(expr[1], val);
+            return undefined;
+        } else if (Array.isArray(expr[1])) {
+            // (define (func_name arg1 arg2) body_expr...), this one just gets rewritten to a normal define with lambda
+            if (expr[1].length === 0) throw new Error("define: missing function name");
+            const funcName = expr[1][0];
+            const params = expr[1].slice(1);
+            const body = expr.slice(2);
+            cs.expr = [OP_DEFINE, funcName, [OP_LAMBDA, params, ...body]];
+            return SPECIAL_FORM_TCO_TRIGGER
+        } else if (expr[1] instanceof Cons) {
+            // same as above
+            const funcName = expr[1].head;
+            const params = expr[1].tail;
+            if (!params) throw new Error("define: missing params");
+            const body = expr.slice(2);
+            cs.expr = [OP_DEFINE, funcName, [OP_LAMBDA, params, ...body]];
+            return SPECIAL_FORM_TCO_TRIGGER
+        } else {
+            throw new Error(`${String(expr[1])}: expr[1] not symbol or list syntax`)
+        }
+    }),
+    [OP_BEGIN]: new SpecialForm((vm, argCount, expr, scope, cs) => {
+        if(argCount == 0) {
+            return undefined // evaluates to void
+        }
+
+        for (let i = 0; i < argCount - 1; i++) {
+            vm.evalinner(expr[i+1], scope);
+        }
+
+        cs.expr = expr[argCount];
+        return SPECIAL_FORM_TCO_TRIGGER
+    }),
+    [OP_LAMBDA]: new SpecialForm((vm, argCount, expr, scope, cs) => {
+        if(vm.disableLambda) {
+            throw new Error("lambda expressions are disabled in this context")
+        }
+
+        if(argCount < 2) {
+            throw new Error(`lambda must be in format ["lambda", [bind-args...], body...] but only have ${argCount} arguments`)
+        }
+
+        let elems;
+        if (Array.isArray(expr[1])) {
+            elems = expr[1]
+        } else if (expr[1] instanceof Cons) {
+            elems = []
+            for (const p of expr[1]) {
+                elems.push(p);
+            }
+        } else {
+            throw new Error(`lambda parameters must be a list`);
+        }
+
+        // Validate that every parameter is a symbol
+        for(let i = 0; i < elems.length; i++) {
+            if(typeof elems[i] !== "symbol") {
+                throw new Error(`lambda parameter at index ${i} must be a symbol, but received ${typeof elems[i]}: ${String(elems[i])}`);
+            }
+            if (SPECIAL_FORMS.has(elems[i])) {
+                throw new Error(`${String(elems[i])}: bad syntax`)
+            }
+            if (elems[i] in BUILTIN_PROCS) {
+                throw new Error(`${String(elems[i])}: cannot shadow builtin procedure`)
+            }
+        }
+
+        // add in a begin block if theres more than one op
+        const bodyAST = argCount === 2 ? expr[2] : [OP_BEGIN, ...expr.slice(2)];
+
+        return new Closure(elems, bodyAST, scope)   
+    }),
+    [OP_LET]: new SpecialForm((vm, argCount, expr, scope, cs) => {
+        // OP_LET is special in that it gets compiled down to a lambda in the end
+
+        // normal let: (let ((var expr) ...) body1 body2 ...)
+        if (argCount < 2) throw new Error(`let must be in format ["let", [[var expr]...], body...] but only have ${argCount} arguments`);
+
+        const bindings = expr[1];
+        if (!Array.isArray(bindings) && !(bindings instanceof Cons) && bindings !== null) {
+            throw new Error("let arg 1 must be a list of form [[var expr]...]");
+        }
+
+        const body = expr.slice(2);
+        const params: symbol[] = [];
+        const exprs: any[] = [];
+
+        if (bindings !== null) {
+            for (const binding of bindings) {
+                let sym, val;
+                if (Array.isArray(binding)) {
+                    if (binding.length != 2) {
+                        throw new Error(`let binding \`${binding}\` must be a list of form [var expr] but only have list of length ${binding.length}`);
+                    }
+                    sym = binding[0];
+                    val = binding[1];
+                } else if (binding instanceof Cons) {
+                    if (binding.length != 2) {
+                        throw new Error(`let binding \`${binding}\` must be a list of form [var expr] but only have list of length ${binding.length}`);
+                    }
+
+                    sym = binding.head;
+                    val = binding.tail?.head; 
+                } else {
+                    throw new Error(`let binding \`${binding}\` must be a list of form [var expr]`);
+                }
+
+                if (typeof sym !== "symbol") throw new Error("let binding name must be a symbol");
+                
+                params.push(sym);
+                exprs.push(val);
+            }
+        }
+
+        // rewrite to lambda [(let ((var expr) ...) body1 body2 ...) => ((lambda (var...) body1 body2...) expr...)]
+        cs.expr = [[OP_LAMBDA, params, ...body], ...exprs];
+        return SPECIAL_FORM_TCO_TRIGGER; 
+    }),
+    [OP_QUOTE]: new SpecialForm((vm, argCount, expr, scope, cs) => {
+        if(argCount != 1) {
+            throw new Error(`quote must be in format ["quote", expr] but have ${argCount} arguments`)
+        }
+
+        return expr[1];
+    }),
+    [OP_IF]: new SpecialForm((vm, argCount, expr, scope, cs) => {
+        if(argCount != 3) {
+            throw new Error(`if condition must be in format ["if", condition, true_expr, false_expr] but only have ${argCount} arguments`)
+        }
+
+        const cond = vm.evalinner(expr[1], scope); 
+        
+        // Branches are in tail position
+        cs.expr = vm.isTruthy(cond) ? expr[2] : expr[3];
+        return SPECIAL_FORM_TCO_TRIGGER;
+    }),
+    [OP_COND]: new SpecialForm((vm, argCount, expr, scope, cs) => {
+        if (argCount === 0) throw new Error("cond requires at least one clause");
+        
+        let tailExpr = null;
+        let hasMatch = false;
+
+        for (let i = 0; i < argCount; i++) {
+            const clause = expr[i + 1];
+            
+            if (!Array.isArray(clause) || clause.length !== 2) {
+                throw new Error(`cond clause must be a list of exactly 2 elements: [condition, expr]`);
+            }
+            
+            const condition = clause[0];
+            const resultExpr = clause[1];
+            
+            // Check if it's the 'else' fallback, or if the condition evaluates to truthy. if so, we have a match
+            // to tail-call on
+            if (condition === OP_ELSE || vm.isTruthy(vm.evalinner(condition, scope))) {
+                tailExpr = resultExpr;
+                hasMatch = true;
+                break;
+            }
+        }
+
+        // If a branch matched, tail-call it
+        if (hasMatch) {
+            cs.expr = tailExpr;
+            return SPECIAL_FORM_TCO_TRIGGER; 
+        }
+        
+        // If nothing matches (meaning none of the if clauses resolved nor did the 'else'), return void
+        return undefined; 
+    }),
+    [OP_AND]: new SpecialForm((vm, argCount, expr, scope, cs) => {
+        if (argCount === 0) return true; 
+        for (let i = 0; i < argCount - 1; i++) {
+            const val = vm.evalinner(expr[i+1], scope)
+            if(!vm.isTruthy(val)) return val
+        }
+            
+        // Last expression is in tail position
+        cs.expr = expr[argCount];
+        return SPECIAL_FORM_TCO_TRIGGER;
+    }),
+    [OP_OR]: new SpecialForm((vm, argCount, expr, scope, cs) => {
+        if (argCount === 0) return false;
+        for (let i = 0; i < argCount - 1; i++) {
+            const val = vm.evalinner(expr[i+1], scope)
+            if (vm.isTruthy(val)) return val;
+        }
+
+        // Last expression is in tail position
+        cs.expr = expr[argCount];
+        return SPECIAL_FORM_TCO_TRIGGER;
+    }),
+    // @ts-ignore
+    __proto__: null
 }
 
 export class Anima {
     disableLambda: boolean
     disableDefine: boolean
     maxSteps: number; // 0 to disable
+
+    #currExprState = { expr: null as any };
+
     constructor(opts?: {disableLambda?: boolean, disableDefine?: boolean, maxSteps?: number}) {
         this.disableLambda = opts?.disableLambda || false
         this.disableDefine = opts?.disableDefine || false
@@ -457,270 +689,58 @@ export class Anima {
 
             const operator = expr[0];
             const argCount = expr.length-1
-            switch (operator) {
-                case OP_DEFINE: {
-                    if (this.disableDefine) {
-                        throw new Error("define expressions are disabled in this context");
-                    }
 
-                    if(argCount < 2) {
-                        throw new Error(`define must be in format ["define" varname arg] or [define (func_name arg1 arg2... argN) body_expr...] but have ${argCount} arguments`)
-                    }
-
-                    // Normal define
-                    if(typeof expr[1] === "symbol") {
-                        if (SPECIAL_FORMS.has(expr[1])) {
-                            throw new Error(`${String(expr[1])}: bad syntax`)
-                        }
-                        if (expr[1] in BUILTIN_PROCS) {
-                            throw new Error(`${String(expr[1])}: cannot shadow builtin procedure`)
-                        }
-
-                        const val = this.evalinner(expr[2], scope);
-                        scope.define(expr[1], val);
-                        return undefined;
-                    } else if (Array.isArray(expr[1])) {
-                        // (define (func_name arg1 arg2) body_expr...), this one just gets rewritten to a normal define with lambda
-                        if (expr[1].length === 0) throw new Error("define: missing function name");
-                        const funcName = expr[1][0];
-                        const params = expr[1].slice(1);
-                        const body = expr.slice(2);
-                        expr = [OP_DEFINE, funcName, [OP_LAMBDA, params, ...body]];
-                        continue
-                    } else if (expr[1] instanceof Cons) {
-                        // same as above
-                        const funcName = expr[1].head;
-                        const params = expr[1].tail;
-                        if (!params) throw new Error("define: missing params");
-                        const body = expr.slice(2);
-                        expr = [OP_DEFINE, funcName, [OP_LAMBDA, params, ...body]];
-                        continue
-                    } else {
-                        throw new Error(`${String(expr[1])}: expr[1] not symbol or list syntax`)
-                    }
-                }
-
-                case OP_BEGIN: {
-                    if(argCount == 0) {
-                        return undefined // evaluates to void
-                    }
-
-                    for (let i = 0; i < argCount - 1; i++) {
-                        this.evalinner(expr[i+1], scope);
-                    }
-
-                    expr = expr[argCount];
-                    continue;
-                }
-
-                case OP_LAMBDA: {
-                    if(this.disableLambda) {
-                        throw new Error("lambda expressions are disabled in this context")
-                    }
-
-                    if(argCount < 2) {
-                        throw new Error(`lambda must be in format ["lambda", [bind-args...], body...] but only have ${argCount} arguments`)
-                    }
-
-                    let elems;
-                    if (Array.isArray(expr[1])) {
-                        elems = expr[1]
-                    } else if (expr[1] instanceof Cons) {
-                        elems = []
-                        for (const p of expr[1]) {
-                            elems.push(p);
-                        }
-                    } else {
-                        throw new Error(`lambda parameters must be a list`);
-                    }
-
-                    // Validate that every parameter is a symbol
-                    for(let i = 0; i < elems.length; i++) {
-                        if(typeof elems[i] !== "symbol") {
-                            throw new Error(`lambda parameter at index ${i} must be a symbol, but received ${typeof elems[i]}: ${String(elems[i])}`);
-                        }
-                        if (SPECIAL_FORMS.has(elems[i])) {
-                            throw new Error(`${String(elems[i])}: bad syntax`)
-                        }
-                        if (elems[i] in BUILTIN_PROCS) {
-                            throw new Error(`${String(elems[i])}: cannot shadow builtin procedure`)
-                        }
-                    }
-
-                    // add in a begin block if theres more than one op
-                    const bodyAST = argCount === 2 ? expr[2] : [OP_BEGIN, ...expr.slice(2)];
-
-                    return new Closure(elems, bodyAST, scope)   
-                }
-
-                case OP_LET: {
-                    // OP_LET is special in that it gets compiled down to a lambda in the end
-
-                    // normal let: (let ((var expr) ...) body1 body2 ...)
-                    if (argCount < 2) throw new Error(`let must be in format ["let", [[var expr]...], body...] but only have ${argCount} arguments`);
-
-                    const bindings = expr[1];
-                    if (!Array.isArray(bindings) && !(bindings instanceof Cons) && bindings !== null) {
-                        throw new Error("let arg 1 must be a list of form [[var expr]...]");
-                    }
-
-                    const body = expr.slice(2);
-                    const params: symbol[] = [];
-                    const exprs: any[] = [];
-
-                    if (bindings !== null) {
-                        for (const binding of bindings) {
-                            let sym, val;
-                            if (Array.isArray(binding)) {
-                                if (binding.length != 2) {
-                                    throw new Error(`let binding \`${binding}\` must be a list of form [var expr] but only have list of length ${binding.length}`);
-                                }
-                                sym = binding[0];
-                                val = binding[1];
-                            } else if (binding instanceof Cons) {
-                                if (binding.length != 2) {
-                                    throw new Error(`let binding \`${binding}\` must be a list of form [var expr] but only have list of length ${binding.length}`);
-                                }
-
-                                sym = binding.head;
-                                val = binding.tail?.head; 
-                            } else {
-                                throw new Error(`let binding \`${binding}\` must be a list of form [var expr]`);
-                            }
-
-                            if (typeof sym !== "symbol") throw new Error("let binding name must be a symbol");
-                            
-                            params.push(sym);
-                            exprs.push(val);
-                        }
-                    }
-
-                    // rewrite to lambda [(let ((var expr) ...) body1 body2 ...) => ((lambda (var...) body1 body2...) expr...)]
-                    expr = [[OP_LAMBDA, params, ...body], ...exprs];
+            if (typeof operator === "symbol" && operator in SPECIAL_FORM_PROCS) {
+                this.#currExprState.expr = expr;
+                
+                const result = SPECIAL_FORM_PROCS[operator].cb(this, argCount, expr, scope, this.#currExprState);
+                
+                if (result === SPECIAL_FORM_TCO_TRIGGER) {
+                    expr = this.#currExprState.expr;
                     continue; 
                 }
-
-                case OP_QUOTE: {
-                    if(argCount != 1) {
-                        throw new Error(`quote must be in format ["quote", expr] but have ${argCount} arguments`)
-                    }
-
-                    return expr[1];
-                }
-        
-                // Control flow
-                case OP_IF: {
-                    if(argCount != 3) {
-                        throw new Error(`if condition must be in format ["if", condition, true_expr, false_expr] but only have ${argCount} arguments`)
-                    }
-
-                    const cond = this.evalinner(expr[1], scope); 
-                    
-                    // Branches are in tail position
-                    expr = this.isTruthy(cond) ? expr[2] : expr[3];
-                    continue;
-                }
-
-                case OP_COND: {
-                    if (argCount === 0) throw new Error("cond requires at least one clause");
-                    
-                    let tailExpr = null;
-                    let hasMatch = false;
-
-                    for (let i = 0; i < argCount; i++) {
-                        const clause = expr[i + 1];
-                        
-                        if (!Array.isArray(clause) || clause.length !== 2) {
-                            throw new Error(`cond clause must be a list of exactly 2 elements: [condition, expr]`);
-                        }
-                        
-                        const condition = clause[0];
-                        const resultExpr = clause[1];
-                        
-                        // Check if it's the 'else' fallback, or if the condition evaluates to truthy. if so, we have a match
-                        // to tail-call on
-                        if (condition === OP_ELSE || this.isTruthy(this.evalinner(condition, scope))) {
-                            tailExpr = resultExpr;
-                            hasMatch = true;
-                            break;
-                        }
-                    }
-
-                    // If a branch matched, tail-call it
-                    if (hasMatch) {
-                        expr = tailExpr;
-                        continue; 
-                    }
-                    
-                    // If nothing matches (meaning none of the if clauses resolved nor did the 'else'), return void
-                    return undefined; 
-                }
-
-                case OP_AND: { 
-                    if (argCount === 0) return true; 
-                    for (let i = 0; i < argCount - 1; i++) {
-                        const val = this.evalinner(expr[i+1], scope)
-                        if(!this.isTruthy(val)) return val
-                    }
-                        
-                    // Last expression is in tail position
-                    expr = expr[argCount];
-                    continue;
-                }
-
-                case OP_OR: {
-                    if (argCount === 0) return false;
-                    for (let i = 0; i < argCount - 1; i++) {
-                        const val = this.evalinner(expr[i+1], scope)
-                        if (this.isTruthy(val)) return val;
-                    }
-
-                    // Last expression is in tail position
-                    expr = expr[argCount];
-                    continue;
-                }
-                                
-                default: {
-                    let proc;
-                    
-                    // FAST PATH: if symbol
-                    if (typeof expr[0] === "symbol") {
-                        proc = BUILTIN_PROCS[expr[0]] || scope.get(expr[0])
-                    } else {
-                        // SLOW PATH: Dynamically computed procedures need to be eval'd explicitly 
-                        proc = this.evalinner(expr[0], scope);
-                    }
-                    
-                    // Handle builtins by directly passsing VM+expr+scope+computed argcount
-                    if (proc instanceof Builtin) {
-                        return proc.cb(this, argCount, expr, scope);
-                    }
-
-                    // Anima procedure
-                    if (proc instanceof Closure) {
-                        if (argCount != proc.params.length) {
-                            throw new Error(`Attempted to call a procedure taking ${proc.params.length} arguments with ${argCount} arguments`);
-                        }
-                        
-                        const callargs = new Array(argCount)
-                        for (let i = 0; i < argCount; i++) {
-                            callargs[i] = this.evalinner(expr[i+1], scope);
-                        }
-                        const callscope = proc.scope.nest();
-                        
-                        // bind args
-                        for (let i = 0; i < proc.params.length; i++) {
-                            callscope.define(proc.params[i], callargs[i]);
-                        }
-
-                        // tail-call procedure body and newly bound callscope to avoid allocing new stack frame
-                        expr = proc.body;
-                        scope = callscope;
-                        continue;
-                    }
-                    throw new Error(`Unknown operator or attempted to call a non-procedure: ${String(operator)}`);
-                }
+                
+                return result;
             }
+
+            let proc;
+            
+            // FAST PATH: if symbol
+            if (typeof expr[0] === "symbol") {
+                proc = BUILTIN_PROCS[expr[0]] || scope.get(expr[0])
+            } else {
+                // SLOW PATH: Dynamically computed procedures need to be eval'd explicitly 
+                proc = this.evalinner(expr[0], scope);
+            }
+            
+            // Handle builtins by directly passsing VM+expr+scope+computed argcount
+            if (proc instanceof Builtin) {
+                return proc.cb(this, argCount, expr, scope);
+            }
+
+            // Anima procedure
+            if (proc instanceof Closure) {
+                if (argCount != proc.params.length) {
+                    throw new Error(`Attempted to call a procedure taking ${proc.params.length} arguments with ${argCount} arguments`);
+                }
+                
+                const callargs = new Array(argCount)
+                for (let i = 0; i < argCount; i++) {
+                    callargs[i] = this.evalinner(expr[i+1], scope);
+                }
+                const callscope = proc.scope.nest();
+                
+                // bind args
+                for (let i = 0; i < proc.params.length; i++) {
+                    callscope.define(proc.params[i], callargs[i]);
+                }
+
+                // tail-call procedure body and newly bound callscope to avoid allocing new stack frame
+                expr = proc.body;
+                scope = callscope;
+                continue;
+            }
+            throw new Error(`Unknown operator or attempted to call a non-procedure: ${String(operator)}`);
         }
     }
 

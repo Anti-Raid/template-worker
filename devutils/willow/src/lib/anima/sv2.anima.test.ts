@@ -630,10 +630,14 @@ describe('Complex Tests', () => {
         ; if b is in a, skip it
         [(in (car b) a) (union a (cdr b))]
         [else (cons (car b) (union a (cdr b)))])))
-        
-    (list (equals? (union '(a b d e f h j) '(f c e g a)) '(c g a b d e f h j)))
-        `)).toEqual("(#t)")
 
+(define sum-of-squares
+  (lambda (a)
+    ; do x*x for every element in a, then sum them all up
+    (apply + [map (lambda (x) (* x x)) a])))
+        
+    (list (equal? (union '(a b d e f h j) '(f c e g a)) '(c g a b d e f h j)) (equal? (sum-of-squares (list 1 3 5 7)) 84))
+        `)).toEqual("(#t #t)")
         });
     });
 });
