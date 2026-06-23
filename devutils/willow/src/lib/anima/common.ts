@@ -70,7 +70,7 @@ export class MissingVarError extends Error {
 }
 
 export class AnimaScope {
-    #data: Record<string, any>;
+    #data: Record<string | symbol, any>;
     #outer: AnimaScope | null;
 
     /** gas/steps the vm has taken. Each vm eval loop takes 1 step, JS funcs can also increment steps etc as they desire */
@@ -88,32 +88,52 @@ export class AnimaScope {
     }
 
     get(key: symbol): any {
-        const skey = key.description // Symbol.keyFor(key); 
-        if (!skey) throw new Error(`Internal error: could not find symbol for ${String(key)}`);
-
         let scope: AnimaScope | null = this
         while(scope) {
-            if (Object.prototype.hasOwnProperty.call(scope.#data, skey)) {
-                return scope.#data[skey];
-            }            
+            if (key in scope.#data) {
+                return scope.#data[key];
+            }
+            
+            // Outer scope is the only bit that can have string symbols, so check for that too
+            if (scope.#outer === null && key.description) {
+                if (Object.hasOwn(scope.#data, key.description)) {
+                    return scope.#data[key.description];
+                }
+            }
+            
             scope = scope.#outer
         }
-        throw new MissingVarError(`Variable '${skey}' is not defined in the current scope.`);
+        throw new MissingVarError(`Variable '${String(key)}' is not defined in the current scope.`);
     }
 
     define(key: symbol, value: any) {
-        if (this.#outer === null) throw new Error("Cannot set key on global scope")
-        const skey = key.description // Symbol.keyFor(key); 
-        if (!skey) throw new Error(`Internal error: could not find symbol for ${String(key)}`);
-        this.#data[skey] = value;
+        if (this.#outer === null) throw new Error("Cannot define key on global scope")
+        this.#data[key] = value;
+    }
+
+    // set!
+    set(key: symbol, value: any): any {
+        let scope: AnimaScope | null = this
+        while(scope) {
+            if (scope.#outer === null) throw new Error("Cannot set! key on global scope")
+            if (key in scope.#data) {
+                scope.#data[key] = value;
+                return
+            }
+            
+            scope = scope.#outer
+        }
+        throw new MissingVarError(`Variable '${String(key)}' is not defined in the current scope.`);
     }
 }
 
 // Special Forms
 export const OP_DEFINE = Symbol.for("define");
+export const OP_SET    = Symbol.for("set!")
 export const OP_BEGIN     = Symbol.for("begin");
 export const OP_LAMBDA = Symbol.for("lambda");
 export const OP_LET    = Symbol.for("let");
+export const OP_LETREC = Symbol.for("letrec")
 export const OP_IF     = Symbol.for("if");
 export const OP_COND   = Symbol.for("cond");
 export const OP_ELSE   = Symbol.for("else"); // part of cond but not a special form

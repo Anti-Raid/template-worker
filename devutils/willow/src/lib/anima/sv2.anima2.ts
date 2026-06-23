@@ -39,7 +39,9 @@ import {
   AnimaScope,
   BUILTINS_OPS,
   ASP,
-  isTruthy
+  isTruthy,
+  OP_SET,
+  OP_LETREC
 } from "./common";
 import { Cons } from "./list";
 
@@ -66,6 +68,8 @@ export enum OpCode {
     POP,
     // Get a variable from either the list of registered builtins or the current scope (GETVAR [varname-idx])
     GETVAR,
+    // sets the top stack value on the stack on the current scope (SETVAR [varname-idx]), *always* pops stack top
+    SETVAR,
     // defines the top stack value on the stack on the current scope (SETVAR [varname-idx]), *always* pops stack top
     DEFINEVAR,
     // Jump if stack top is true, *always* pops stack top
@@ -168,6 +172,16 @@ export class ByteCode {
             this.inst.push(OpCode.DEFINEVAR, idx)
         }
     }
+    setVar(varname: symbol) {
+        const symIdx = this.#knownSymbols.get(varname)
+        if(symIdx) {
+            this.inst.push(OpCode.SETVAR, symIdx)
+        } else {
+            const idx = this.constants.push(varname) - 1
+            this.#knownSymbols.set(varname, idx)
+            this.inst.push(OpCode.SETVAR, idx)
+        }
+    }
     jumpIfTrue() {
         this.inst.push(OpCode.JUMPIFTRUE)
         return this.inst.push(-1) - 1 // to be replaced by compiler
@@ -260,6 +274,10 @@ export class ByteCode {
                     line += `DEFINEVAR ${this.#constToString(this.constants[this.inst[idx + 1]])}`;
                     idx += 2;
                     break;
+                case OpCode.SETVAR:
+                    line += `SETVAR ${this.#constToString(this.constants[this.inst[idx + 1]])}`;
+                    idx += 2;
+                    break;
                 case OpCode.JUMPIFTRUE:
                     line += `JUMPIFTRUE -> ${this.inst[idx + 1]}`;
                     idx += 2;
@@ -348,15 +366,16 @@ interface CmpOpts {
     bc: ByteCode
     tryOpt: boolean
     disableDefine: boolean
-    disableLambda: boolean,
+    disableLambda: boolean
+    disableSet: boolean
 }
 
 const SYMBOL_DOT = Symbol.for(".")
 
 export class AnimaCompiler {
-    compileExpr(expr: any[], disableDefine: boolean, disableLambda: boolean) {
+    compileExpr(expr: any[], disableDefine: boolean = false, disableLambda: boolean = false, disableSet: boolean = false) {
         const bc = new ByteCode();
-        this.#compile(expr, {leaveOnStack: true, isTail: true, bc, tryOpt: true, disableDefine, disableLambda })
+        this.#compile(expr, {leaveOnStack: true, isTail: true, bc, tryOpt: true, disableDefine, disableLambda, disableSet })
         return bc
     }
     #compile(expr: any, opts: CmpOpts, syntaxCtx?: string) {
@@ -404,11 +423,17 @@ export class AnimaCompiler {
                 case OP_DEFINE:
                     this.#compileDefine(expr, opts, syntaxCtx)
                     return
+                case OP_SET:
+                    this.#compileSet(expr, opts, syntaxCtx)
+                    return
                 case OP_LAMBDA:
                     this.#compileLambda(expr, opts, syntaxCtx)
                     return
                 case OP_LET:
                     this.#compileLet(expr, opts, syntaxCtx)
+                    return
+                case OP_LETREC:
+                    this.#compileLetrec(expr, opts, syntaxCtx)
                     return
                 case OP_AND:
                     this.#compileAnd(expr, opts, syntaxCtx)
@@ -574,6 +599,36 @@ export class AnimaCompiler {
         }
     }
 
+    #compileSet(expr: any, opts: CmpOpts, syntaxCtx?: string) {
+        if (opts.disableSet) {
+            throw new Error("set! expressions are disabled in this context");
+        }
+
+        if(expr.length != 3) {
+            throw new Error(`set! must be in format ["set!" varname arg] but have ${expr.length-1} arguments`)
+        }
+
+        // Normal define
+        if(typeof expr[1] !== "symbol") {
+            throw new Error(`${String(expr[1])}: expr[1] not symbol or list syntax`)
+        }
+
+        if (SPECIAL_FORMS.has(expr[1])) {
+            throw new Error(`${String(expr[1])}: bad syntax`)
+        }
+        if (expr[1] in BUILTINS_OPS) {
+            throw new Error(`${String(expr[1])}: cannot shadow builtin procedure`)
+        }
+        // We need to compile the second arg first and leave it on the stack
+        //
+        // This will place a e.g. (PUSH) <symbol>
+        this.#compile(expr[2], { ...opts, leaveOnStack: true, isTail: false });
+        opts.bc.setVar(expr[1])
+        if (opts.leaveOnStack) {
+            opts.bc.push(undefined);
+        }
+    }
+
     #compileLambda(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         if (!opts.leaveOnStack) return
         if(opts.disableLambda) {
@@ -690,6 +745,41 @@ export class AnimaCompiler {
             const equivExpr = [[OP_LAMBDA, params, ...body], ...exprs];
             this.#compile(equivExpr, opts, "let");
         }
+    }
+
+    #compileLetrec(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
+        // OP_LETREC is also special like let and can also be translated into a lambda
+        if (expr.length < 3) throw new Error(`letrec: bad syntax`);
+
+        const bindings = expr[1];
+        if (!Array.isArray(bindings) && bindings !== null) {
+            throw new Error(`letrec bindings must be a list of form [[var expr]...]`);
+        }
+
+        const body = expr.slice(2);
+        const params: symbol[] = [];
+        const dummyVals: any[] = []; // The <undefined> initializers
+        const setExprs: any[] = [];  // The (set! var expr) mutations
+
+        if (bindings !== null) {
+            for (const binding of bindings) {
+                if (!Array.isArray(binding) || binding.length !== 2) {
+                    throw new Error(`letrec binding \`${binding}\` must be a list of form [var expr]`);
+                }
+                const sym = binding[0];
+                const val = binding[1];
+
+                if (typeof sym !== "symbol") throw new Error("letrec binding name must be a symbol");
+                
+                params.push(sym);
+                dummyVals.push(null); 
+                setExprs.push([OP_SET, sym, val]); 
+            }
+        }
+
+        // rewrite to lambda [((lambda (params...) (set! p1 v1)... body...) null...)]
+        const equivExpr = [[OP_LAMBDA, params, ...setExprs, ...body], ...dummyVals];
+        this.#compile(equivExpr, opts, "letrec");
     }
 
     #compileAnd(expr: any, opts: CmpOpts, syntaxCtx?: string) {
@@ -1004,6 +1094,12 @@ export class AnimaVM {
                     const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
                     const val = stack.pop()
                     frame.scope.define(varname, val)
+                    break
+                }
+                case OpCode.SETVAR: {
+                    const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
+                    const val = stack.pop()
+                    frame.scope.set(varname, val)
                     break
                 }
                 case OpCode.JUMPIFTRUE: {
