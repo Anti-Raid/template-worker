@@ -1,25 +1,33 @@
-import { BUILTIN_PROCS, OP_BEGIN, OP_COND, OP_DEFINE, OP_ELSE, OP_IF, OP_LAMBDA, OP_QUOTE, SPECIAL_FORMS } from "./sv2.anima";
+import { ASP, BUILTIN_PROCS, OP_AND, OP_BEGIN, OP_COND, OP_DEFINE, OP_ELSE, OP_IF, OP_LAMBDA, OP_LET, OP_OR, OP_QUOTE, SPECIAL_FORMS } from "./sv2.anima";
 
 export enum OpCode {
-    // Push a constant number to the stack
-    PUSHNUMBER,
-    // Push a constant boolean (1/0) to the stack (PUSHBOOLEAN 0/1)
-    PUSHBOOLEAN,
-    // Push a empty list to the stack
-    PUSHEMPTYLIST,
-    // Push the void element (undefined) to the stack
-    PUSHVOID,
     // Push a constant from consts to the stack
     PUSH, 
+    // Push specialization for `true`
+    PUSH__TRUE,
+    // Push specialization for `false`
+    PUSH__FALSE,
+    // Push specialization for `empty list`
+    PUSH__EMPTYLIST,
+    // Push specialization for `void`
+    PUSH__VOID,
+    // Push specialization for all numbers between 0 and 255
+    PUSH__U8,
+    // Negate whatevers at top of stack
+    NEGATE,
+    // Push a duplicate of the top of the stack to top of stack
+    //
+    // Needed so OP_AND/OP_OR can DUP, then JUMPIFFALSE, preserving top of stack after the jump
+    DUP,
     // Pops out the top argument of the stack
     POP,
     // Get a variable from either the list of registered builtins or the current scope (GETVAR [varname-idx])
     GETVAR,
-    // Set the top stack value on the stack on the current scope (SETVAR [varname-idx])
+    // defines the top stack value on the stack on the current scope (SETVAR [varname-idx]), *always* pops stack top
     DEFINEVAR,
-    // Jump if stack top is false
+    // Jump if stack top is true, *always* pops stack top
     JUMPIFTRUE,
-    // Jump if stack top is false
+    // Jump if stack top is false, *always* pops stack top
     JUMPIFFALSE,
     // Jump unconditionally
     JUMP,
@@ -31,49 +39,86 @@ export enum OpCode {
     RETURN,
     // Creates a Closure out of a ClosureTemplate (NEWCLOSURE idx) and pushes it to top of stack
     NEWCLOSURE,
+
+    // Intrinsics
+    INTRINSIC_APPLY, // apply ()
 }
 
+// TODO: Use LEB128 (thanks gemini for letting me know this exists!) to encode numbers
 export class ByteCode {
-    #knownSymbols: Record<symbol, number>;
-    constructor(public constants: any[], public inst: number[]) {
-        this.#knownSymbols = Object.create(null)
+    #knownSymbols: Map<symbol, number>;
+    #knownNumbers: Map<number, number>;
+    public constants: any[]
+    public inst: number[]
+    constructor() {
+        this.constants = []
+        this.inst = []
+        this.#knownSymbols = new Map()
+        this.#knownNumbers = new Map()
     }
 
-    pushNumber = (v: number) => this.inst.push(OpCode.PUSHNUMBER, v)
-    pushBoolean = (v: boolean) => this.inst.push(OpCode.PUSHBOOLEAN, v ? 1 : 0)
-    pushEmptyList = () => this.inst.push(OpCode.PUSHEMPTYLIST)
-    pushVoid = () => this.inst.push(OpCode.PUSHVOID)
-    push = (v: any) => {
+    push(v: any) {
         if (typeof v === "symbol") {
-            if(v in this.#knownSymbols) {
-                this.inst.push(OpCode.PUSH, this.#knownSymbols[v])
+            const symIdx = this.#knownSymbols.get(v)
+            if(symIdx) {
+                this.inst.push(OpCode.PUSH, symIdx)
             } else {
                 const idx = this.constants.push(v) - 1
-                this.#knownSymbols[v] = idx
+                this.#knownSymbols.set(v, idx)
                 this.inst.push(OpCode.PUSH, idx)
             }
+        } else if (typeof v === "number") {
+            if (Number.isInteger(v) && v >= 0 && v <= 255) {
+                // We can use u8 specialization here
+                this.inst.push(OpCode.PUSH__U8, v);
+                return
+            } else if (Number.isInteger(v) && v >= -255 && v < 0) {
+                // We can use u8 specialization here but we need to negate after pushing
+                this.inst.push(OpCode.PUSH__U8, Math.abs(v));
+                this.negate()
+                return
+            }
+            // We need to use a normal push operation here
+            const numIdx = this.#knownNumbers.get(v)
+            if(numIdx) {
+                this.inst.push(OpCode.PUSH, numIdx)
+            } else {
+                const idx = this.constants.push(v) - 1
+                this.#knownNumbers.set(v, idx)
+                this.inst.push(OpCode.PUSH, idx)
+            }
+        } else if (typeof v === "boolean") {
+            this.inst.push(v ? OpCode.PUSH__TRUE : OpCode.PUSH__FALSE)
+        } else if(Array.isArray(v) && v.length === 0) {
+            this.inst.push(OpCode.PUSH__EMPTYLIST)
+        } else if (v === undefined) {
+            this.inst.push(OpCode.PUSH__VOID)
         } else {
             // TODO: Deduplicate stuff later once this actually works
             const idx = this.constants.push(v) - 1
             this.inst.push(OpCode.PUSH, idx)
         }
     }
-    pop = () => this.inst.push(OpCode.POP)
-    getVar = (varname: symbol) => {
-        if(varname in this.#knownSymbols) {
-            this.inst.push(OpCode.GETVAR, this.#knownSymbols[varname])
+    negate() { this.inst.push(OpCode.NEGATE) }
+    dup() { this.inst.push(OpCode.DUP) }
+    pop() { this.inst.push(OpCode.POP) }
+    getVar(varname: symbol) {
+        const symIdx = this.#knownSymbols.get(varname)
+        if(symIdx) {
+            this.inst.push(OpCode.GETVAR, symIdx)
         } else {
             const idx = this.constants.push(varname) - 1
-            this.#knownSymbols[varname] = idx
+            this.#knownSymbols.set(varname, idx)
             this.inst.push(OpCode.GETVAR, idx)
         }
     }
-    defineVar = (varname: symbol) => {
-        if(varname in this.#knownSymbols) {
-            this.inst.push(OpCode.DEFINEVAR, this.#knownSymbols[varname])
+    defineVar(varname: symbol) {
+        const symIdx = this.#knownSymbols.get(varname)
+        if(symIdx) {
+            this.inst.push(OpCode.DEFINEVAR, symIdx)
         } else {
             const idx = this.constants.push(varname) - 1
-            this.#knownSymbols[varname] = idx
+            this.#knownSymbols.set(varname, idx)
             this.inst.push(OpCode.DEFINEVAR, idx)
         }
     }
@@ -94,13 +139,143 @@ export class ByteCode {
         this.inst[jumpIdx] = this.inst.length; 
     }
 
-    call = (args: number) => this.inst.push(OpCode.CALL, args)
-    tailcall = (args: number) => this.inst.push(OpCode.TAILCALL, args)
-    return = () => this.inst.push(OpCode.RETURN)
-    newclosure = (tmplInfo: ClosureTemplate) => {
+    call(args: number) { this.inst.push(OpCode.CALL, args) }
+    tailcall(args: number) { this.inst.push(OpCode.TAILCALL, args) }
+    return() { this.inst.push(OpCode.RETURN) }
+    newclosure(tmplInfo: ClosureTemplate) {
         const idx = this.constants.push(tmplInfo) - 1
         this.inst.push(OpCode.NEWCLOSURE, idx)
     } 
+
+    intrinsicApply() {
+        this.inst.push(OpCode.INTRINSIC_APPLY)
+    }
+
+    #constToString(s: any): string {
+        if(typeof s === "symbol") {
+            return `'${s.toString()}`
+        } else if (typeof s === "string") {
+            return `"${s.toString()}"`
+        } else if (typeof s === "number") {
+            return `${s}`
+        } else if (typeof s === "boolean") {
+            return `<${s}>`
+        } else if (typeof s === "undefined") {
+            return `#<void>`
+        } else if (Array.isArray(s)) {
+            const r = []
+            for(const elem of s) {
+                r.push(this.#constToString(elem))
+            }
+            return `[${r.join(', ')}]`
+        } else {
+            return `<unknown:${s}>`
+        }
+    }
+
+    toString(): string {
+        let ops: string[] = [];
+        let idx = 0;
+        
+        while (idx < this.inst.length) {
+            const lineNum = idx.toString().padStart(4, '0');
+            const opcode = this.inst[idx];
+            let line = `${lineNum}: `;
+
+            switch (opcode) {
+                // 1 arg
+                case OpCode.PUSH:
+                    line += `PUSH ${this.#constToString(this.constants[this.inst[idx + 1]])}`;
+                    idx += 2;
+                    break;
+                case OpCode.PUSH__U8:
+                    line += `PUSH__U8 ${this.inst[idx + 1]}`;
+                    idx += 2;
+                    break;
+                case OpCode.GETVAR:
+                    line += `GETVAR ${this.#constToString(this.constants[this.inst[idx + 1]])}`;
+                    idx += 2;
+                    break;
+                case OpCode.DEFINEVAR:
+                    line += `DEFINEVAR ${this.#constToString(this.constants[this.inst[idx + 1]])}`;
+                    idx += 2;
+                    break;
+                case OpCode.JUMPIFTRUE:
+                    line += `JUMPIFTRUE -> ${this.inst[idx + 1]}`;
+                    idx += 2;
+                    break;
+                case OpCode.JUMPIFFALSE:
+                    line += `JUMPIFFALSE -> ${this.inst[idx + 1]}`;
+                    idx += 2;
+                    break;
+                case OpCode.JUMP:
+                    line += `JUMP -> ${this.inst[idx + 1]}`;
+                    idx += 2;
+                    break;
+                case OpCode.CALL:
+                    line += `CALL (args: ${this.inst[idx + 1]})`;
+                    idx += 2;
+                    break;
+                case OpCode.TAILCALL:
+                    line += `TAILCALL (args: ${this.inst[idx + 1]})`;
+                    idx += 2;
+                    break;
+                case OpCode.NEWCLOSURE:
+                    const tmpl = this.constants[this.inst[idx + 1]] as ClosureTemplate;
+                    const params = tmpl.params.map(p => p.toString()).join(" ");
+                    line += `NEWCLOSURE <fn(${params})>`;
+                    idx += 2;
+                    break;
+
+                // no arg
+                case OpCode.PUSH__TRUE:
+                    line += `PUSH__TRUE`;
+                    idx += 1;
+                    break;
+                case OpCode.PUSH__FALSE:
+                    line += `PUSH__FALSE`;
+                    idx += 1;
+                    break;
+                case OpCode.PUSH__EMPTYLIST:
+                    line += `PUSH__EMPTYLIST`;
+                    idx += 1;
+                    break;
+                case OpCode.PUSH__VOID:
+                    line += `PUSH__VOID`;
+                    idx += 1;
+                    break;
+                case OpCode.NEGATE:
+                    line += `NEGATE`
+                    idx += 1;
+                    break;
+                case OpCode.DUP:
+                    line += `DUP`;
+                    idx += 1;
+                    break;
+                case OpCode.POP:
+                    line += `POP`;
+                    idx += 1;
+                    break;
+                case OpCode.RETURN:
+                    line += `RETURN`;
+                    idx += 1;
+                    break;
+
+                // vm intrinsics
+                case OpCode.INTRINSIC_APPLY:
+                    line += `INTRINSIC_APPLY`
+                    idx += 1;
+                    break;
+
+                default:
+                    line += `UNKNOWN_OPCODE (${opcode})`;
+                    idx += 1;
+                    break;
+            }
+            ops.push(line);
+        }
+        return ops.join("\n");
+    }
 }
 
 interface CmpOpts {
@@ -114,7 +289,7 @@ interface CmpOpts {
 
 export class AnimaCompiler {
     compileExpr(expr: any[], disableDefine: boolean, disableLambda: boolean) {
-        const bc = new ByteCode([], []);
+        const bc = new ByteCode();
         this.#compile(expr, {leaveOnStack: true, isTail: true, bc, tryOpt: true, disableDefine, disableLambda })
         return bc
     }
@@ -129,11 +304,6 @@ export class AnimaCompiler {
             opts.bc.push(expr)
             if (!opts.leaveOnStack) opts.bc.pop()
             return
-        } else if (typeof expr === "boolean") {
-            if (!opts.leaveOnStack && opts.tryOpt) return 
-            opts.bc.pushBoolean(expr)
-            if (!opts.leaveOnStack) opts.bc.pop()
-            return
         } else if (!Array.isArray(expr)) {
             if (!opts.leaveOnStack && opts.tryOpt) return 
             opts.bc.push(expr)
@@ -144,7 +314,7 @@ export class AnimaCompiler {
         if (expr.length === 0) {
             // An empty array evaluates to null
             if (!opts.leaveOnStack && opts.tryOpt) return 
-            opts.bc.pushEmptyList()
+            opts.bc.push([]) // specializes internally to PUSH__EMPTYLIST
             if (!opts.leaveOnStack) opts.bc.pop()
             return
         }
@@ -171,6 +341,15 @@ export class AnimaCompiler {
                 case OP_LAMBDA:
                     this.#compileLambda(expr, opts)
                     return
+                case OP_LET:
+                    this.#compileLet(expr, opts)
+                    return
+                case OP_AND:
+                    this.#compileAnd(expr, opts)
+                    return
+                case OP_OR:
+                    this.#compileOr(expr, opts)
+                    return
             }
         }
 
@@ -180,7 +359,7 @@ export class AnimaCompiler {
     #compileBegin(expr: any[], opts: CmpOpts) {
         // We need to push a void if we see an empty begin block
         if (expr.length === 1) {
-            if (opts.leaveOnStack) opts.bc.pushVoid();
+            if (opts.leaveOnStack) opts.bc.push(undefined);
             return;
         }
 
@@ -265,6 +444,10 @@ export class AnimaCompiler {
             const resultExpr = this.#wrapMulti(clause.slice(1));
 
             if (condition === OP_ELSE) {
+                if (i !== expr.length - 1) {
+                    throw new Error("else must be the final clause in a cond statement");
+                }
+
                 result = resultExpr;
             } else {
                 result = [OP_IF, condition, resultExpr, result];
@@ -305,7 +488,7 @@ export class AnimaCompiler {
             this.#compile(expr[2], { ...opts, leaveOnStack: true, isTail: false });
             opts.bc.defineVar(expr[1])
             if (opts.leaveOnStack) {
-                opts.bc.pushVoid();
+                opts.bc.push(undefined);
             }
         } else if (Array.isArray(expr[1])) { 
             // (define (func_name arg1 arg2) body_expr...), this one just gets rewritten to a normal define with lambda
@@ -345,15 +528,144 @@ export class AnimaCompiler {
         }
 
         // Compile lambda body
-        const lambdaBc = new ByteCode([], [])
+        const lambdaBc = new ByteCode()
         this.#compile(this.#wrapMulti(expr.slice(2)), {...opts, leaveOnStack: true, isTail: true, bc: lambdaBc})
         lambdaBc.return()
         const template = new ClosureTemplate(expr[1], lambdaBc);
         opts.bc.newclosure(template)
     }
+
+    // TODO: Support named let form, maybe let*/letrec as well later
+    #compileLet(expr: any[], opts: CmpOpts) {
+        // OP_LET is special in that it gets compiled down to a lambda in the end
+
+        // normal let: (let ((var expr) ...) body1 body2 ...)
+        if (expr.length < 3) throw new Error(`let must be in format ["let", [[var expr]...], body...] but only have ${expr.length-1} arguments`);
+
+        const bindings = expr[1];
+        if (!Array.isArray(bindings) && bindings !== null) {
+            throw new Error("let arg 1 must be a list of form [[var expr]...]");
+        }
+
+        const body = expr.slice(2);
+        const params: symbol[] = [];
+        const exprs: any[] = [];
+
+        if (bindings !== null) {
+            for (const binding of bindings) {
+                let sym, val;
+                if (Array.isArray(binding)) {
+                    if (binding.length != 2) {
+                        throw new Error(`let binding \`${binding}\` must be a list of form [var expr] but only have list of length ${binding.length}`);
+                    }
+                    sym = binding[0];
+                    val = binding[1];
+                } else {
+                    throw new Error(`let binding \`${binding}\` must be a list of form [var expr]`);
+                }
+
+                if (typeof sym !== "symbol") throw new Error("let binding name must be a symbol");
+                
+                params.push(sym);
+                exprs.push(val);
+            }
+        }
+
+        // rewrite to lambda [(let ((var expr) ...) body1 body2 ...) => ((lambda (var...) body1 body2...) expr...)]
+        const equivExpr = [[OP_LAMBDA, params, ...body], ...exprs];
+        this.#compile(equivExpr, opts)
+    }
+
+    #compileAnd(expr: any[], opts: CmpOpts) {
+        // if (argCount === 0) return true; 
+        if (expr.length === 1) {
+            if (opts.leaveOnStack) opts.bc.push(true);
+            return;
+        }
+
+        // For every arg (excluding the tail cond), keep a list of jumps
+        // which we will patch later to go to the end of the and block
+        const jumpIndexes: number[] = [];
+
+        for (let i = 1; i < expr.length - 1; i++) {
+            // We need to compile the argument leave it on the stack
+            // to act as a condition
+            //
+            // This will place a e.g. (PUSH) <symbol>
+            this.#compile(expr[i], { ...opts, leaveOnStack: true, isTail: false });
+
+            if (opts.leaveOnStack) {
+                // If parent wants a return value to be left on stack,
+                // we cannot just jumpIfFalse as the jump will pop the return value
+                //
+                // Instead, DUP the top of stack so jumpIfFalse then pops the duplicate
+                // with the original (falsey) value left safely on top of stack 
+                opts.bc.dup();
+                jumpIndexes.push(opts.bc.jumpIfFalse()); // and short-circuits if false
+                // If we never jumped, pop the original return value and move on to the next cond                
+                opts.bc.pop(); 
+            } else {
+                // If the parent doesn't care about the return value (e.g. inside a 'begin' block),
+                // we can just jumpIfFalse which will pop from top of stack leaving no ret values on
+                // top of stack
+                jumpIndexes.push(opts.bc.jumpIfFalse());
+            }
+        }
+
+        // tail expr is the last cond so it gets directly evaluated (if all the and conds reach)
+        this.#compile(expr[expr.length - 1], opts);
+
+        for (let i = 0; i < jumpIndexes.length; i++) {
+            opts.bc.setJumpToCurrent(jumpIndexes[i]);
+        }
+    }
+
+    #compileOr(expr: any[], opts: CmpOpts) {
+        // if (argCount === 0) return false;
+        if (expr.length === 1) {
+            if (opts.leaveOnStack) opts.bc.push(false);
+            return;
+        }
+
+        // For every arg (excluding the tail cond), keep a list of jumps
+        // which we will patch later to go to the end of the and block
+        const jumpIndexes: number[] = [];
+
+        for (let i = 1; i < expr.length - 1; i++) {
+            // We need to compile the argument leave it on the stack
+            // to act as a condition
+            //
+            // This will place a e.g. (PUSH) <symbol>
+            this.#compile(expr[i], { ...opts, leaveOnStack: true, isTail: false });
+
+            if (opts.leaveOnStack) {
+                // If parent wants a return value to be left on stack,
+                // we cannot just jumpIfTrue as the jump will pop the return value
+                //
+                // Instead, DUP the top of stack so jumpIfTrue then pops the duplicate
+                // with the original (falsey) value left safely on top of stack 
+                opts.bc.dup();
+                jumpIndexes.push(opts.bc.jumpIfTrue()); // or short-circuits if true
+                // If we never jumped, pop the original return value and move on to the next cond                
+                opts.bc.pop(); 
+            } else {
+                // If the parent doesn't care about the return value (e.g. inside a 'begin' block),
+                // we can just jumpIfTrue which will pop from top of stack leaving no ret values on
+                // top of stack
+                jumpIndexes.push(opts.bc.jumpIfTrue());
+            }
+        }
+
+        // tail expr is the last cond so it gets directly evaluated (if all the and conds reach)
+        this.#compile(expr[expr.length - 1], opts);
+
+        for (let i = 0; i < jumpIndexes.length; i++) {
+            opts.bc.setJumpToCurrent(jumpIndexes[i]);
+        }
+    }
 }
 
-/** JS Closure */
+/** A template for a closure that can then be bound to a scope */
 export class ClosureTemplate {
     params: symbol[];
     code: ByteCode
@@ -363,3 +675,82 @@ export class ClosureTemplate {
         this.code = code
     }
 }
+
+/*const TEST_PROG = `
+(define union
+    (lambda (a b)
+        (define (in a rst) 
+        (cond 
+            [(empty? rst) #f]
+            [(equal? a (car rst)) #t]
+            [else (in a (cdr rst))]))
+
+        (cond
+        ; if either set is empty, the other one if the union
+        [(empty? a) b]
+        [(empty? b) a]
+        ; if b is in a, skip it
+        [(in (car b) a) (union a (cdr b))]
+        [else (cons (car b) (union a (cdr b)))])))
+
+(define sum-of-squares
+  (lambda (a)
+    ; do x*x for every element in a, then sum them all up
+    (apply + [map (lambda (x) (* x x)) a])))
+        
+    (list (equal? (union '(a b d e f h j) '(f c e g a)) '(c g a b d e f h j)) (equal? (sum-of-squares (list 1 3 5 7)) 84))
+`*/
+export const TEST_PROG = `(cond [#f 1] [#f 2])`
+
+export const TEST_PROG_BC = new AnimaCompiler().compileExpr(new ASP(TEST_PROG).parse(), false, false)
+
+/** 
+ * A builtin function. Builtin functions do not have access to their own lexical scope (at least not yet) 
+ * 
+ * 
+ * Unlike normal functions which pop from stack and bind to a new AnimaScope, builtin funcs keep values on
+ * stack and just do bytecode replacement
+*/
+export class BuiltinFunction {
+    // number of args needed on stack top, -1 means variadic
+    // if we are in variadic mode, the top of stack will contain 
+    // the number of arguments pushed on the stack
+    //
+    // Logic is similar to:
+    /*
+    case OpCode.CALL: {
+    const argCount = inst[frame.ip++];
+    const target = stack[stack.length - 1 - argCount]; // Get target w/o popping
+
+    if (target instanceof BuiltinFunction) {
+        // Pop target out
+        stack.splice(stack.length - 1 - argCount, 1);
+
+        if (target.nargs !== -1 && argCount !== target.nargs) {
+            throw new Error(`Builtin expected ${target.nargs} arguments, got ${argCount}`);
+        }
+
+        // If variadic, push argCount so builtin functions know many arguments it has
+        if (target.nargs === -1) {
+            stack.push(argCount);
+        }
+        const env = target.needsScope ? frame.env : globalExecutionScope;
+        frames.push(new CallFrame(target.bc.inst, env));
+        break; 
+    }
+    */
+    nargs: number 
+    bc: ByteCode
+    needsScope: boolean // do we need scope or not (if false, this will use the global execution scope as the scope in bytecode)
+
+    constructor(nargs: number, needsScope: boolean, initializer: (bc: ByteCode) => void) {
+        this.nargs = nargs
+        this.needsScope = needsScope
+        this.bc = new ByteCode()
+        initializer(this.bc)
+    }
+}
+
+const BUILTINS_APPLY = new BuiltinFunction(-1, false, (bc) => {
+    bc.intrinsicApply()
+});
