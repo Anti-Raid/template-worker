@@ -133,6 +133,7 @@ export const OP_SET    = Symbol.for("set!")
 export const OP_BEGIN     = Symbol.for("begin");
 export const OP_LAMBDA = Symbol.for("lambda");
 export const OP_LET    = Symbol.for("let");
+export const OP_LETSTAR = Symbol.for("let*")
 export const OP_LETREC = Symbol.for("letrec")
 export const OP_IF     = Symbol.for("if");
 export const OP_COND   = Symbol.for("cond");

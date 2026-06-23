@@ -41,7 +41,8 @@ import {
   ASP,
   isTruthy,
   OP_SET,
-  OP_LETREC
+  OP_LETREC,
+  OP_LETSTAR
 } from "./common";
 import { Cons } from "./list";
 
@@ -432,6 +433,9 @@ export class AnimaCompiler {
                 case OP_LET:
                     this.#compileLet(expr, opts, syntaxCtx)
                     return
+                case OP_LETSTAR:
+                    this.#compileLetStar(expr, opts, syntaxCtx)
+                    return
                 case OP_LETREC:
                     this.#compileLetrec(expr, opts, syntaxCtx)
                     return
@@ -691,7 +695,6 @@ export class AnimaCompiler {
         opts.bc.newclosure(template)
     }
 
-    // TODO: Support named let form, maybe let*/letrec as well later
     #compileLet(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         // OP_LET is special in that it gets compiled down to a lambda in the end
         if (expr.length < 3) throw new Error(`let must be in format ["let", [[var expr]...], body...] but only have ${expr.length-1} arguments`);
@@ -745,6 +748,48 @@ export class AnimaCompiler {
             const equivExpr = [[OP_LAMBDA, params, ...body], ...exprs];
             this.#compile(equivExpr, opts, "let");
         }
+    }
+
+    #compileLetStar(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
+        if (expr.length < 3) throw new Error(`let*: bad syntax`);
+
+        const bindings = expr[1];
+        if (!Array.isArray(bindings) && bindings !== null) {
+            throw new Error(`let* bindings must be a list of form [[var expr]...]`);
+        }
+
+        const body = expr.slice(2);
+
+        // No bindings
+        if (bindings === null || bindings.length === 0) {
+            const equivExpr = [[OP_LAMBDA, [], ...body]];
+            return this.#compile(equivExpr, opts, "let*");
+        }
+
+        // Start with innermost expr and work our way outwards (similar to cond)
+        let currentExpr = body; 
+        for (let i = bindings.length - 1; i >= 0; i--) {
+            const binding = bindings[i];
+            if (!Array.isArray(binding) || binding.length !== 2) {
+                throw new Error(`let* binding \`${binding}\` must be a list of form [var expr]`);
+            }
+            
+            const sym = binding[0];
+            const val = binding[1];
+
+            if (typeof sym !== "symbol") throw new Error("let* binding name must be a symbol");
+
+            // Wrap in lambda
+            const nextExpr = [
+                [OP_LAMBDA, [sym], ...currentExpr], 
+                val
+            ];
+            
+            // The result becomes the body for the next outer lambda.
+            currentExpr = [nextExpr];
+        }
+
+        this.#compile(currentExpr[0], opts, "let*");
     }
 
     #compileLetrec(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
