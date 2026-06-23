@@ -348,8 +348,10 @@ interface CmpOpts {
     bc: ByteCode
     tryOpt: boolean
     disableDefine: boolean
-    disableLambda: boolean
+    disableLambda: boolean,
 }
+
+const SYMBOL_DOT = Symbol.for(".")
 
 export class AnimaCompiler {
     compileExpr(expr: any[], disableDefine: boolean, disableLambda: boolean) {
@@ -357,7 +359,7 @@ export class AnimaCompiler {
         this.#compile(expr, {leaveOnStack: true, isTail: true, bc, tryOpt: true, disableDefine, disableLambda })
         return bc
     }
-    #compile(expr: any, opts: CmpOpts) {
+    #compile(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         // Raw values
         if (typeof expr === 'symbol') {
             opts.bc.getVar(expr)
@@ -388,35 +390,35 @@ export class AnimaCompiler {
         if (typeof operator === "symbol") {
             switch (operator) {
                 case OP_BEGIN:
-                    this.#compileBegin(expr, opts)
+                    this.#compileBegin(expr, opts, syntaxCtx)
                     return
                 case OP_IF:
-                    this.#compileIfCall(expr, opts)
+                    this.#compileIfCall(expr, opts, syntaxCtx)
                     return
                 case OP_COND:
-                    this.#compileCond(expr, opts)
+                    this.#compileCond(expr, opts, syntaxCtx)
                     return
                 case OP_QUOTE:
-                    this.#compileQuote(expr, opts)
+                    this.#compileQuote(expr, opts, syntaxCtx)
                     return
                 case OP_DEFINE:
-                    this.#compileDefine(expr, opts)
+                    this.#compileDefine(expr, opts, syntaxCtx)
                     return
                 case OP_LAMBDA:
-                    this.#compileLambda(expr, opts)
+                    this.#compileLambda(expr, opts, syntaxCtx)
                     return
                 case OP_LET:
-                    this.#compileLet(expr, opts)
+                    this.#compileLet(expr, opts, syntaxCtx)
                     return
                 case OP_AND:
-                    this.#compileAnd(expr, opts)
+                    this.#compileAnd(expr, opts, syntaxCtx)
                     return
                 case OP_OR:
-                    this.#compileOr(expr, opts)
+                    this.#compileOr(expr, opts, syntaxCtx)
                     return
                 // Intrinsic optimizations
                 case OP_APPLY:
-                    this.#optApply(expr, opts)
+                    this.#optApply(expr, opts, syntaxCtx)
                     return
             }
         }
@@ -424,7 +426,7 @@ export class AnimaCompiler {
         this.#compileNormalCall(expr, opts)
     }
 
-    #compileBegin(expr: any[], opts: CmpOpts) {
+    #compileBegin(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         // We need to push a void if we see an empty begin block
         if (expr.length === 1) {
             if (opts.leaveOnStack) opts.bc.push(undefined);
@@ -440,7 +442,7 @@ export class AnimaCompiler {
     }
 
     // a normal call
-    #compileNormalCall(expr: any[], opts: CmpOpts) {
+    #compileNormalCall(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         // We need to compile the first arg first and leave it on the stack
         //
         // This will place a e.g. (PUSH) <symbol>
@@ -464,7 +466,7 @@ export class AnimaCompiler {
     }
 
     // compiles both if calls as well as code that is converted into if calls
-    #compileIfCall(expr: any[], opts: CmpOpts) {
+    #compileIfCall(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         if(expr.length != 4) {
             throw new Error(`if condition must be in format ["if", condition, true_expr, false_expr] but only have ${expr.length-1} arguments`)
         }
@@ -497,7 +499,7 @@ export class AnimaCompiler {
         return [OP_BEGIN, ...exprs];
     }
 
-    #compileCond(expr: any[], opts: CmpOpts) {
+    #compileCond(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         // this just desugars down to a bunch of ifs
         if (expr.length === 1) throw new Error("cond requires at least one clause");
 
@@ -526,7 +528,7 @@ export class AnimaCompiler {
         this.#compile(result, opts);
     }
 
-    #compileQuote(expr: any[], opts: CmpOpts) {
+    #compileQuote(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         if(expr.length != 2) {
             throw new Error(`quote must be in format ["quote", expr] but have ${expr.length-1} arguments`)
         }
@@ -534,7 +536,7 @@ export class AnimaCompiler {
         opts.bc.push(expr[1])
     }
 
-    #compileDefine(expr: any[], opts: CmpOpts) {
+    #compileDefine(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         if (opts.disableDefine) {
             throw new Error("define expressions are disabled in this context");
         }
@@ -572,66 +574,98 @@ export class AnimaCompiler {
         }
     }
 
-    #compileLambda(expr: any[], opts: CmpOpts) {
+    #compileLambda(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         if (!opts.leaveOnStack) return
         if(opts.disableLambda) {
-            throw new Error("lambda expressions are disabled in this context")
+            throw new Error(`${syntaxCtx || "lambda"} expressions are disabled in this context [when compiling a lambda]`)
         }
 
         if(expr.length < 3) {
             throw new Error(`lambda must be in format ["lambda", [bind-args...], body...] but only have ${expr.length-1} arguments`)
         }
 
-        if (!Array.isArray(expr[1])) throw new Error("lambda arguments must be a list");
-        // Validate that every parameter is a symbol
-        for(let i = 0; i < expr[1].length; i++) {
-            if(typeof expr[1][i] !== "symbol") {
-                throw new Error(`lambda parameter at index ${i} must be a symbol, but received ${typeof expr[1][i]}: ${String(expr[1][i])}`);
+        const params: symbol[] = []
+        let remParams: symbol | null = null
+        let foundDot = false
+        if (Array.isArray(expr[1])) {
+            // Validate that every parameter is a symbol
+            const seen = new Set<symbol>();
+            for(let i = 0; i < expr[1].length; i++) {
+                if(typeof expr[1][i] !== "symbol") {
+                    throw new Error(`${syntaxCtx || "lambda"} parameter at index ${i} must be a symbol, but received ${typeof expr[1][i]}: ${String(expr[1][i])}`);
+                }
+                if (expr[1][i] === SYMBOL_DOT) {
+                    if (foundDot || remParams) throw new Error(`illegal use of \`.\` (multiple . is not allowed)`)
+                    foundDot = true
+                    continue
+                }
+                if (seen.has(expr[1][i])) {
+                    throw new Error(`${syntaxCtx || "lambda"} parameter at index ${i} is a duplicate parameter name: ${String(expr[1][i])}`);
+                }
+                seen.add(expr[1][i])
+
+                if (SPECIAL_FORMS.has(expr[1][i])) {
+                    throw new Error(`${String(expr[1][i])}: bad syntax`)
+                }
+                if (expr[1][i] in BUILTINS_OPS) {
+                    throw new Error(`${String(expr[1][i])}: cannot shadow builtin procedure`)
+                }
+
+                if (!foundDot) params.push(expr[1][i])
+                else {
+                    if (remParams) throw new Error(`illegal use of \`.\` (more than one symbol after dot)`); 
+                    remParams = expr[1][i]
+                }
             }
-            if (SPECIAL_FORMS.has(expr[1][i])) {
-                throw new Error(`${String(expr[1][i])}: bad syntax`)
+
+            if (foundDot && remParams === null) {
+                throw new Error(`illegal use of \`.\` (trailing . is not allowed)`)
             }
-            if (expr[1][i] in BUILTINS_OPS) {
-                throw new Error(`${String(expr[1][i])}: cannot shadow builtin procedure`)
-            }
+        } else if (typeof expr[1] === "symbol") {
+            // Then all args must be bound to remparams
+            remParams = expr[1]
+        } else {
+            throw new Error(`${syntaxCtx || "lambda"} arguments must be a symbol (to bind all as a list to said symbol) or a list`);
         }
 
         // Compile lambda body
         const lambdaBc = new ByteCode()
         this.#compile(this.#wrapMulti(expr.slice(2)), {...opts, leaveOnStack: true, isTail: true, bc: lambdaBc})
         lambdaBc.return()
-        const template = new ClosureTemplate(expr[1], lambdaBc);
+        const template = new ClosureTemplate(params, remParams, lambdaBc);
         opts.bc.newclosure(template)
     }
 
     // TODO: Support named let form, maybe let*/letrec as well later
-    #compileLet(expr: any[], opts: CmpOpts) {
+    #compileLet(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         // OP_LET is special in that it gets compiled down to a lambda in the end
-
-        // normal let: (let ((var expr) ...) body1 body2 ...)
         if (expr.length < 3) throw new Error(`let must be in format ["let", [[var expr]...], body...] but only have ${expr.length-1} arguments`);
 
-        const bindings = expr[1];
-        if (!Array.isArray(bindings) && bindings !== null) {
-            throw new Error("let arg 1 must be a list of form [[var expr]...]");
+        let loopName: symbol | null = null;
+        let bindingsIdx = 1;
+
+        if (typeof expr[1] === "symbol") {
+            loopName = expr[1];
+            bindingsIdx = 2;
+            if (expr.length < 4) throw new Error(`named let must include bindings and a body`);
         }
 
-        const body = expr.slice(2);
+        const bindings = expr[bindingsIdx];
+        if (!Array.isArray(bindings) && bindings !== null) {
+            throw new Error(`${loopName ? "named let" : "let"} bindings must be a list of form [[var expr]...]`);
+        }
+
+        const body = expr.slice(bindingsIdx + 1);
         const params: symbol[] = [];
         const exprs: any[] = [];
 
         if (bindings !== null) {
             for (const binding of bindings) {
-                let sym, val;
-                if (Array.isArray(binding)) {
-                    if (binding.length != 2) {
-                        throw new Error(`let binding \`${binding}\` must be a list of form [var expr] but only have list of length ${binding.length}`);
-                    }
-                    sym = binding[0];
-                    val = binding[1];
-                } else {
+                if (!Array.isArray(binding) || binding.length !== 2) {
                     throw new Error(`let binding \`${binding}\` must be a list of form [var expr]`);
                 }
+                const sym = binding[0];
+                const val = binding[1];
 
                 if (typeof sym !== "symbol") throw new Error("let binding name must be a symbol");
                 
@@ -640,12 +674,25 @@ export class AnimaCompiler {
             }
         }
 
-        // rewrite to lambda [(let ((var expr) ...) body1 body2 ...) => ((lambda (var...) body1 body2...) expr...)]
-        const equivExpr = [[OP_LAMBDA, params, ...body], ...exprs];
-        this.#compile(equivExpr, opts)
+        // Expand let/named let down to a lambda
+        if (loopName) {
+            const namedLetExpr = [
+                [
+                    OP_LAMBDA, 
+                    [], 
+                    [OP_DEFINE, loopName, [OP_LAMBDA, params, ...body]],
+                    [loopName, ...exprs]
+                ]
+            ];
+            this.#compile(namedLetExpr, opts, "named let");
+        } else {
+            // rewrite to lambda [(let ((var expr) ...) body1 body2 ...) => ((lambda (var...) body1 body2...) expr...)]
+            const equivExpr = [[OP_LAMBDA, params, ...body], ...exprs];
+            this.#compile(equivExpr, opts, "let");
+        }
     }
 
-    #compileAnd(expr: any[], opts: CmpOpts) {
+    #compileAnd(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         // if (argCount === 0) return true; 
         if (expr.length === 1) {
             if (opts.leaveOnStack) opts.bc.push(true);
@@ -689,7 +736,7 @@ export class AnimaCompiler {
         }
     }
 
-    #compileOr(expr: any[], opts: CmpOpts) {
+    #compileOr(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         // if (argCount === 0) return false;
         if (expr.length === 1) {
             if (opts.leaveOnStack) opts.bc.push(false);
@@ -734,7 +781,7 @@ export class AnimaCompiler {
     }
 
     /** Optimizes a direct (apply proc elems... rem-arg-lst) to inline INTRINSIC_APPLY */ 
-    #optApply(expr: any[], opts: CmpOpts) {
+    #optApply(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         if (expr.length < 3) {
             throw new Error("apply requires at least a procedure and a list");
         }
@@ -764,11 +811,13 @@ export class AnimaCompiler {
 
 /** A template for a closure that can then be bound to a scope */
 export class ClosureTemplate {
-    params: symbol[];
+    params: symbol[]; // base (individual param binds)
+    remParams: symbol | null; // where the remaining params should be bound too (if any). This implicitly makes a closure variadic as well
     code: ByteCode
 
-    constructor(params: symbol[], code: ByteCode) {
+    constructor(params: symbol[], remParams: symbol | null, code: ByteCode) {
         this.params = params
+        this.remParams = remParams
         this.code = code
     }
 }
@@ -846,7 +895,7 @@ export class NativeFunction {
 }
 
 const BUILTIN_PROCS: Record<symbol, BuiltinFunction | NativeFunction> = {
-    [OP_APPLY]: BUILTINS_APPLY,
+    [OP_APPLY]: BUILTINS_APPLY
 }
 
 class CallFrame {
@@ -1082,16 +1131,30 @@ export class AnimaVM {
             if (isTail) frames.pop();
         } else if (target instanceof Closure) {
             const template = target.tmpl;
-            if (template.params.length !== nargs) {
-                throw new Error(`expected ${template.params.length} args, got ${nargs}`);
+            const arity = template.params.length; // number of required args
+            if (template.remParams !== null) {
+                // variadic
+                if (nargs < arity) {
+                    throw new Error(`expected at least ${arity} args, got ${nargs}`);
+                }
+            } else {
+                if (nargs !== arity) {
+                    throw new Error(`expected exactly ${arity} args, got ${nargs}`);
+                }
             }
     
             // Bind args
             const args = nargs > 0 ? stack.splice(-nargs, nargs) : [];
             const callScope = target.scope.nest();
             
-            for (let i = 0; i < nargs; i++) {
+            // required
+            for (let i = 0; i < arity; i++) {
                 callScope.define(template.params[i], args[i]);
+            }
+            if (template.remParams !== null) {
+                // bind variadics
+                const restArgs = args.slice(arity);
+                callScope.define(template.remParams, restArgs);
             }
 
             if (isTail) {
