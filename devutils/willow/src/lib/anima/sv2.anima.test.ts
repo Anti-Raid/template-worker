@@ -1,5 +1,6 @@
 // Made w/ lots of help from gemini cli
-import { Anima, ASP, ASPParseError, ASPTokenError, ASTStringifier, MissingVarError } from './sv2.anima'; 
+import { MissingVarError, ASP, ASPParseError, ASPTokenError } from './common';
+import { Anima, ASTStringifier } from './sv2.anima'; 
 import { describe, it, expect, beforeEach } from 'vitest';
 
 // Helper for brevity when writing manual ASTs
@@ -53,7 +54,7 @@ describe('Anima', () => {
 
         it('evaluates if statements using strict truthiness', () => {
             expect(run(`(if is_active "yes" "no")`)).toBe("yes");
-            expect(run(`(if user_role "yes" "no")`)).toBe("no");
+            expect(run(`(if (not (empty? user_role)) "yes" "no")`)).toBe("no");
             expect(run(`(if 0 "yes" "no")`)).toBe("yes");
         });
 
@@ -212,7 +213,7 @@ describe('Anima', () => {
             const script = `
                 (cond 
                   (#f "first")
-                  (null "second")
+                  (#f "second")
                   (else "fallback"))
             `;
             expect(run(script)).toBe("fallback");

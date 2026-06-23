@@ -1,4 +1,47 @@
-import { ASP, BUILTIN_PROCS, OP_AND, OP_BEGIN, OP_COND, OP_DEFINE, OP_ELSE, OP_IF, OP_LAMBDA, OP_LET, OP_OR, OP_QUOTE, SPECIAL_FORMS } from "./sv2.anima";
+import {
+  OP_DEFINE,
+  OP_BEGIN,
+  OP_LAMBDA,
+  OP_LET,
+  OP_IF,
+  OP_COND,
+  OP_ELSE,
+  OP_QUOTE,
+  OP_AND,
+  OP_OR,
+  OP_LIST,
+  OP_CONS,
+  OP_CAR,
+  OP_CDR,
+  OP_LAST,
+  OP_LENGTH,
+  OP_EMPTY,
+  OP_CONTAINS,
+  OP_MAP,
+  OP_APPLY,
+  OP_NOT,
+  OP_TYPE,
+  OP_EQ,
+  OP_EQ_PTR1,
+  OP_EQ_PTR2,
+  OP_EQ_DEEP1,
+  OP_EQ_DEEP2,
+  OP_LT,
+  OP_GT,
+  OP_LTE,
+  OP_GTE,
+  OP_ADD,
+  OP_SUB,
+  OP_MUL,
+  OP_DIV,
+  OP_MODULO,
+  SPECIAL_FORMS,
+  AnimaScope,
+  BUILTINS_OPS,
+  ASP,
+  isTruthy
+} from "./common";
+import { Cons } from "./list";
 
 export enum OpCode {
     // Push a constant from consts to the stack
@@ -33,7 +76,7 @@ export enum OpCode {
     JUMP,
     // Call a builtin or custom procedure (CALL nargs)
     CALL, 
-    // Tail call a builtin or custom procedure (TAILCALL nargs). This reuses the existing stack frame instead of creating a new one (like call does)
+    // Tail call a builtin or custom procedure (TAILCALL nargs). This reuses/overwrites the existing stack frame instead of creating a new one (like call does)
     TAILCALL,
     // Return from function with top value as return value. All other values are cleared from stack       
     RETURN,
@@ -41,7 +84,10 @@ export enum OpCode {
     NEWCLOSURE,
 
     // Intrinsics
-    INTRINSIC_APPLY, // apply ()
+
+    // Given proc followed by nargs arguments pushed to stack followed by nargs in stack, perform a (apply proc args... rem-args-lst)
+    INTRINSIC_APPLY, // non-tail-call (creates its own stack frame)
+    INTRINSIC_TAIL_APPLY, // tail-call (overwrites existing frame)
 }
 
 // TODO: Use LEB128 (thanks gemini for letting me know this exists!) to encode numbers
@@ -95,7 +141,7 @@ export class ByteCode {
             this.inst.push(OpCode.PUSH__VOID)
         } else {
             // TODO: Deduplicate stuff later once this actually works
-            const idx = this.constants.push(v) - 1
+            const idx = this.constants.push(this.#freezeObj(v)) - 1
             this.inst.push(OpCode.PUSH, idx)
         }
     }
@@ -149,6 +195,20 @@ export class ByteCode {
 
     intrinsicApply() {
         this.inst.push(OpCode.INTRINSIC_APPLY)
+    }
+
+    intrinsicTailApply() {
+        this.inst.push(OpCode.INTRINSIC_TAIL_APPLY)
+    }
+
+    #freezeObj(obj: any) {
+        if (typeof obj !== "object") return obj
+        Object.keys(obj).forEach(prop => {
+            if (typeof obj[prop] === 'object' && !Object.isFrozen(obj[prop])) {
+                this.#freezeObj(obj[prop]);
+            }
+        });
+        return Object.freeze(obj);
     }
 
     #constToString(s: any): string {
@@ -266,6 +326,10 @@ export class ByteCode {
                     line += `INTRINSIC_APPLY`
                     idx += 1;
                     break;
+                case OpCode.INTRINSIC_TAIL_APPLY:
+                    line += `INTRINSIC_TAIL_APPLY`
+                    idx += 1;
+                    break;
 
                 default:
                     line += `UNKNOWN_OPCODE (${opcode})`;
@@ -350,6 +414,10 @@ export class AnimaCompiler {
                 case OP_OR:
                     this.#compileOr(expr, opts)
                     return
+                // Intrinsic optimizations
+                case OP_APPLY:
+                    this.#optApply(expr, opts)
+                    return
             }
         }
 
@@ -390,6 +458,7 @@ export class AnimaCompiler {
             opts.bc.tailcall(nargs)
         } else {
             opts.bc.call(nargs)
+            // Popping only matters in non-tail-calls
             if (!opts.leaveOnStack) opts.bc.pop()
         }
     }
@@ -479,7 +548,7 @@ export class AnimaCompiler {
             if (SPECIAL_FORMS.has(expr[1])) {
                 throw new Error(`${String(expr[1])}: bad syntax`)
             }
-            if (expr[1] in BUILTIN_PROCS) {
+            if (expr[1] in BUILTINS_OPS) {
                 throw new Error(`${String(expr[1])}: cannot shadow builtin procedure`)
             }
             // We need to compile the second arg first and leave it on the stack
@@ -522,7 +591,7 @@ export class AnimaCompiler {
             if (SPECIAL_FORMS.has(expr[1][i])) {
                 throw new Error(`${String(expr[1][i])}: bad syntax`)
             }
-            if (expr[1][i] in BUILTIN_PROCS) {
+            if (expr[1][i] in BUILTINS_OPS) {
                 throw new Error(`${String(expr[1][i])}: cannot shadow builtin procedure`)
             }
         }
@@ -663,6 +732,34 @@ export class AnimaCompiler {
             opts.bc.setJumpToCurrent(jumpIndexes[i]);
         }
     }
+
+    /** Optimizes a direct (apply proc elems... rem-arg-lst) to inline INTRINSIC_APPLY */ 
+    #optApply(expr: any[], opts: CmpOpts) {
+        if (expr.length < 3) {
+            throw new Error("apply requires at least a procedure and a list");
+        }
+
+        // Push proc
+        this.#compile(expr[1], { ...opts, leaveOnStack: true, isTail: false });
+        // Push args
+        const nargs = expr.length - 2; // expr - Symbol(apply) - proc
+        for(let i = 2; i < expr.length; i++) {
+            this.#compile(expr[i], { ...opts, leaveOnStack: true, isTail: false });
+        }
+        // Due to the vararg builtin function, INTRINSIC_APPLY also expects nargs at top of the stack
+        opts.bc.push(nargs);
+        // Now we're ready to do a INTRINSIC_APPLY 
+        if (opts.isTail) {
+            opts.bc.intrinsicTailApply()
+        } else {
+            opts.bc.intrinsicApply()
+
+            // Popping only matters in non-tail apply's
+            if (!opts.leaveOnStack) {
+                opts.bc.pop();
+            }
+        }
+    }
 }
 
 /** A template for a closure that can then be bound to a scope */
@@ -676,7 +773,12 @@ export class ClosureTemplate {
     }
 }
 
-/*const TEST_PROG = `
+/** An actual anima closure bound to a scope */
+export class Closure {
+    constructor(public tmpl: ClosureTemplate, public scope: AnimaScope) {}
+}
+
+const TEST_PROG = `
 (define union
     (lambda (a b)
         (define (in a rst) 
@@ -699,8 +801,8 @@ export class ClosureTemplate {
     (apply + [map (lambda (x) (* x x)) a])))
         
     (list (equal? (union '(a b d e f h j) '(f c e g a)) '(c g a b d e f h j)) (equal? (sum-of-squares (list 1 3 5 7)) 84))
-`*/
-export const TEST_PROG = `(cond [#f 1] [#f 2])`
+`
+//export const TEST_PROG = `(cond [#f 1] [#f 2])`
 
 export const TEST_PROG_BC = new AnimaCompiler().compileExpr(new ASP(TEST_PROG).parse(), false, false)
 
@@ -717,28 +819,6 @@ export class BuiltinFunction {
     // the number of arguments pushed on the stack
     //
     // Logic is similar to:
-    /*
-    case OpCode.CALL: {
-    const argCount = inst[frame.ip++];
-    const target = stack[stack.length - 1 - argCount]; // Get target w/o popping
-
-    if (target instanceof BuiltinFunction) {
-        // Pop target out
-        stack.splice(stack.length - 1 - argCount, 1);
-
-        if (target.nargs !== -1 && argCount !== target.nargs) {
-            throw new Error(`Builtin expected ${target.nargs} arguments, got ${argCount}`);
-        }
-
-        // If variadic, push argCount so builtin functions know many arguments it has
-        if (target.nargs === -1) {
-            stack.push(argCount);
-        }
-        const env = target.needsScope ? frame.env : globalExecutionScope;
-        frames.push(new CallFrame(target.bc.inst, env));
-        break; 
-    }
-    */
     nargs: number 
     bc: ByteCode
     needsScope: boolean // do we need scope or not (if false, this will use the global execution scope as the scope in bytecode)
@@ -752,5 +832,279 @@ export class BuiltinFunction {
 }
 
 const BUILTINS_APPLY = new BuiltinFunction(-1, false, (bc) => {
-    bc.intrinsicApply()
+    // note to self: its vararg, so nargs is at top of stack. As this is a stub that exists to trigger
+    // the intrinsic, the apply is also in tail position, so emit a tail apply instead of apply
+    bc.intrinsicTailApply()
 });
+
+export class NativeFunction {
+    constructor(
+        public name: string,
+        public nargs: number, // -1 for variadic
+        public cb: (...args: any[]) => any
+    ) {}
+}
+
+const BUILTIN_PROCS: Record<symbol, BuiltinFunction | NativeFunction> = {
+    [OP_APPLY]: BUILTINS_APPLY,
+}
+
+class CallFrame {
+    constructor(
+        public code: ByteCode,
+        public scope: AnimaScope,
+        public ip: number
+    ) {}
+
+    readNext() {
+        if (this.ip >= this.code.inst.length) {
+            throw new Error(`internal error: unexpected end of bytecode, instruction pointer out of bounds (${this.ip} >= ${this.code.inst.length}).`);
+        }
+        return this.code.inst[this.ip++]
+    }
+
+    getConst(idx: number) {
+        return this.code.constants[idx]
+    }
+}
+
+export class AnimaVM {
+    constructor(public maxSteps: number) {}
+
+    public evaluate(code: ByteCode, rawData: Record<string, any>): any {
+        const globalScope = new AnimaScope(rawData, null, {steps: 0})
+        const executionScope = globalScope.nest(); // Any "define" calls now write to this temporary scope
+        return this.#evalinner(code, executionScope);
+    }
+
+    public evaluateExpr(expr: any, disableDefine: boolean, disableLambda: boolean, rawData: Record<string, any>): any {
+        const bc = (new AnimaCompiler()).compileExpr(expr, disableDefine, disableLambda)
+        return this.evaluate(bc, rawData);
+    }
+
+    #evalinner(code: ByteCode, execScope: AnimaScope): any {
+        let scopeState = execScope.state
+
+        // Initial frame and stack
+        let frames: CallFrame[] = [new CallFrame(code, execScope, 0)];
+        let stack: any[] = [];
+
+        while (frames.length > 0) {
+            scopeState.steps++;
+            if (this.maxSteps && scopeState.steps > this.maxSteps) {
+                throw new Error(`Execution Limits Exceeded: Script ran for more than ${this.maxSteps} instructions.`);
+            }
+
+            const frame = frames[frames.length - 1];
+
+            // If we've reached the end of the call frame, pop
+            if (frame.ip >= frame.code.inst.length) {
+                frames.pop();
+                continue;
+            }
+
+            const opcode = frame.readNext()
+            switch (opcode) {
+                // Push
+                case OpCode.PUSH: {
+                    const constIdx = frame.readNext()
+                    stack.push(frame.getConst(constIdx));
+                    break;
+                }
+                // Push specializations
+                case OpCode.PUSH__TRUE: {
+                    stack.push(true)
+                    break
+                }
+                case OpCode.PUSH__FALSE: {
+                    stack.push(false)
+                    break
+                }
+                case OpCode.PUSH__EMPTYLIST: {
+                    stack.push(null) // empty list is null
+                    break
+                }
+                case OpCode.PUSH__VOID: {
+                    stack.push(undefined)
+                    break
+                }
+                case OpCode.PUSH__U8: {
+                    stack.push(frame.readNext())
+                    break
+                }
+                case OpCode.NEGATE: {
+                    const v = stack[stack.length-1]
+                    if (typeof v !== "number") throw new Error("cannot negate non-number")
+                    stack[stack.length-1] = -1*v
+                    break
+                }
+                case OpCode.DUP: {
+                    stack.push(stack[stack.length-1])
+                    break
+                }
+                case OpCode.POP: {
+                    stack.pop()
+                    break
+                }
+                case OpCode.GETVAR: {
+                    const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
+                    stack.push(BUILTIN_PROCS[varname] || frame.scope.get(varname))
+                    break
+                }
+                case OpCode.DEFINEVAR: {
+                    const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
+                    const val = stack.pop()
+                    frame.scope.define(varname, val)
+                    break
+                }
+                case OpCode.JUMPIFTRUE: {
+                    const jumpIdx = frame.readNext()
+                    if (isTruthy(stack.pop())) {
+                        frame.ip = jumpIdx
+                    }
+                    break
+                }
+                case OpCode.JUMPIFFALSE: {
+                    const jumpIdx = frame.readNext()
+                    if (!isTruthy(stack.pop())) {
+                        frame.ip = jumpIdx
+                    }
+                    break
+                }
+                case OpCode.JUMP: {
+                    const jumpIdx = frame.readNext()
+                    frame.ip = jumpIdx
+                    break
+                }
+
+                case OpCode.CALL:
+                case OpCode.TAILCALL: {
+                    const isTail = opcode === OpCode.TAILCALL;
+                    const nargs = frame.readNext();
+
+                    // Extract out the target
+                    const target = stack[stack.length - 1 - nargs];
+                    stack.splice(stack.length - 1 - nargs, 1);
+                    // Dispatch
+                    this.#dispatchCall(target, nargs, isTail, frame, frames, stack, execScope);
+                    break;
+                }
+                case OpCode.NEWCLOSURE: {
+                    const template = frame.getConst(frame.readNext()) as ClosureTemplate
+                    stack.push(new Closure(template, frame.scope));
+                    break;
+                }
+                case OpCode.RETURN: {
+                    frames.pop()
+                    break
+                }
+                case OpCode.INTRINSIC_APPLY:
+                case OpCode.INTRINSIC_TAIL_APPLY: {
+                    const isTail = opcode === OpCode.INTRINSIC_TAIL_APPLY;
+                    
+                    const applyArgCount = stack.pop();
+                    const listArg = stack.pop();
+                    
+                    const standardArgs = [];
+                    for (let i = 0; i < applyArgCount - 1; i++) {
+                        standardArgs.push(stack.pop());
+                    }
+                    standardArgs.reverse(); 
+                    
+                    // Extract out target
+                    const target = stack.pop();
+                    
+                    // Flatten the final list
+                    const finalArgs = [...standardArgs];
+                    if (Array.isArray(listArg) || listArg instanceof Cons) {
+                        finalArgs.push(...listArg);
+                    } else if (listArg === null) {
+                        // Empty list
+                    } else {
+                        throw new Error("apply: last argument must be a list");
+                    }
+                    
+                    // Push flattened args to stack
+                    for (const arg of finalArgs) {
+                        stack.push(arg);
+                    }
+
+                    // Dispatch
+                    this.#dispatchCall(target, finalArgs.length, isTail, frame, frames, stack, execScope);
+                    break;
+                }
+            }
+        }
+    }
+
+    /**
+     * Note: stack must contain top narg elements in correct order (with arg0 at bottom and argN at top) with target already removed
+     * @param target    The target procedure to execute (BuiltinFunction | NativeFunction | Closure).
+     * @param nargs     The exact number of arguments currently sitting on top of the stack.
+     * @param isTail    Whether to overwrite the current frame (TCO) instead of pushing a new one.
+     * @param frame     The current active call frame.
+     * @param frames    Reference to the global VM call stack.
+     * @param stack     Reference to the global VM data/evaluation stack.
+     * @param execScope VM global execution scope.
+     */
+    #dispatchCall(
+        target: any, 
+        nargs: number, 
+        isTail: boolean, 
+        frame: CallFrame, 
+        frames: CallFrame[], 
+        stack: any[], 
+        execScope: AnimaScope
+    ) {
+        if (target instanceof BuiltinFunction) {
+            if (target.nargs !== -1 && nargs !== target.nargs) {
+                throw new Error(`Builtin expected ${target.nargs} args, got ${nargs}`);
+            }
+            
+            if (target.nargs === -1) stack.push(nargs);
+
+            const env = target.needsScope ? frame.scope : execScope;
+            if (isTail) {
+                frame.code = target.bc;
+                frame.scope = env;
+                frame.ip = 0; 
+            } else {
+                frames.push(new CallFrame(target.bc, env, 0));
+            }
+        } else if (target instanceof NativeFunction) {
+            if (target.nargs !== -1 && target.nargs !== nargs) {
+                throw new Error(`${target.name}: expected ${target.nargs} args, got ${nargs}`);
+            }
+            
+            const args = nargs > 0 ? stack.splice(-nargs, nargs) : [];
+            
+            stack.push(target.cb(...args));
+            if (isTail) frames.pop();
+        } else if (target instanceof Closure) {
+            const template = target.tmpl;
+            if (template.params.length !== nargs) {
+                throw new Error(`expected ${template.params.length} args, got ${nargs}`);
+            }
+    
+            // Bind args
+            const args = nargs > 0 ? stack.splice(-nargs, nargs) : [];
+            const callScope = target.scope.nest();
+            
+            for (let i = 0; i < nargs; i++) {
+                callScope.define(template.params[i], args[i]);
+            }
+
+            if (isTail) {
+                // Reuse existing frame (TCO)
+                frame.code = template.code;
+                frame.scope = callScope;
+                frame.ip = 0; 
+            } else {
+                // Push new frame
+                frames.push(new CallFrame(template.code, callScope, 0));
+            }
+        } else {
+            throw new Error(`Attempted to call a non-procedure: ${String(target)}`);
+        }
+    }
+}
