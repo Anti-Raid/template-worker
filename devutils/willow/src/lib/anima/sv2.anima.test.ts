@@ -1,6 +1,6 @@
 // Made w/ lots of help from gemini cli
-import { MissingVarError, ASP, ASPParseError, ASPTokenError } from './common';
-import { Anima, ASTStringifier } from './sv2.anima'; 
+import { MissingVarError, ASP, ASPParseError, ASPTokenError, ASTStringifier } from './common';
+import { Anima } from './sv2.anima'; 
 import { describe, it, expect, beforeEach } from 'vitest';
 
 // Helper for brevity when writing manual ASTs
@@ -399,10 +399,9 @@ describe('Anima String Parser (ASP)', () => {
             expect(new ASP("-3.14").parse()).toBe(-3.14);
         });
 
-        it('parses booleans and null', () => {
+        it('parses booleans', () => {
             expect(new ASP("#t").parse()).toBe(true);
             expect(new ASP("#f").parse()).toBe(false);
-            expect(new ASP("null").parse()).toBe(null);
         });
 
         it('parses symbols natively', () => {

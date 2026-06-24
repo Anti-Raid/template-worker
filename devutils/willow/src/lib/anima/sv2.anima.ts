@@ -1,4 +1,4 @@
-import { AnimaScope, isDeepEqual, isTruthy } from "./common";
+import { AnimaScope, IProcedure, isDeepEqual, isTruthy } from "./common";
 import { Cons } from "./list";
 import {
   OP_DEFINE,
@@ -41,12 +41,13 @@ import {
 } from "./common";
 
 /** JS Closure */
-export class Closure {
+export class Closure extends IProcedure {
     params: symbol[];
     body: any;
     scope: AnimaScope;
 
     constructor(params: symbol[], body: any, scope: AnimaScope) {
+        super()
         this.params = params
         this.body = body
         this.scope = scope
@@ -54,9 +55,10 @@ export class Closure {
 }
 
 /** A builtin method in anima */
-export class Builtin {
+export class Builtin extends IProcedure {
     cb: (vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => any
     constructor(cb: (vm: Anima, argCount: number, expr: any[], scope: AnimaScope) => any) {
+        super()
         this.cb = cb
     }
 }
@@ -646,63 +648,3 @@ export class Anima {
     }
 }
 
-export class ASTStringifier {
-    constructor() {}
-    public stringify(ast: any): string {
-        // Booleans+null+number
-        if (ast === null) return "null";
-        if (typeof ast === "number") {
-            return String(ast);
-        } else if (typeof ast === "boolean") {
-            return ast ? "#t" : "#f"
-        }
-
-        // String
-        if (typeof ast === "string") {
-            return JSON.stringify(ast);
-        }
-
-        // Symbol
-        if (typeof ast === "symbol") {
-            return /*Symbol.keyFor(ast)*/ ast.description || ast.toString();
-        }
-
-        // Lists
-        if (Array.isArray(ast)) {
-            const lst = new Array(ast.length)
-            for(let i = 0; i < ast.length; i++) {
-                lst[i] = this.stringify(ast[i]);
-            }
-            return `(${lst.join(" ")})`;
-        }
-
-        // Cons
-        if (ast instanceof Cons) {
-            const parts: string[] = [];
-            let current: any = ast;
-
-            while (current !== null) {
-                if (current instanceof Cons) {
-                    parts.push(this.stringify(current.head));
-                    current = current.tail;
-                } else {
-                    // Improper list/pair
-                    parts.push(".");
-                    parts.push(this.stringify(current));
-                    break;
-                }
-            }
-            return `(${parts.join(" ")})`;
-        }
-
-        // Procs
-        if (ast instanceof Builtin || ast instanceof Closure) {
-            return `<procedure>`;
-        }
-
-        // Undefined
-        if (ast === undefined) return `<#void>`
-
-        throw new Error(`Cannot stringify unknown AST node: ${JSON.stringify(ast)}`);
-    }
-}

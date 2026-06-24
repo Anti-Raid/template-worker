@@ -243,12 +243,20 @@ export class ASPParseError extends Error {
 }
 
 const ASP_SPECIAL_TOKENS = new Set(['(', ')', '[', ']', ';', '"', "'"])
+
+// Represents a dotted pair, only supported in bytecode compiler
+export class DottedPair {
+    constructor(public items: any[], public rest: any) {}
+}
+
 export class ASP {    
     #str: string;
     #currPos: number;
-    constructor(str: string) {
+    #supportsDottedPairs: boolean = false // only bytecode compiler supports these, AST interpreter does not
+    constructor(str: string, supportsDottedPairs: boolean = false) {
         this.#str = str
         this.#currPos = 0
+        this.#supportsDottedPairs = supportsDottedPairs
     }
 
     /** Look at the current character without moving forward */
@@ -370,12 +378,26 @@ export class ASP {
                 const expectedClose = token === '(' ? ')' : ']';
                 current++; 
                 const lst: any[] = [];
-                
+
                 while (tokens[current] !== expectedClose) {
                     if (current >= tokens.length || tokens[current] === ')' || tokens[current] === ']') {
                         throw new ASPParseError(`Mismatched or missing closing bracket for '${token}'`, current);
                     }
-                    lst.push(walk());
+
+                    if (this.#supportsDottedPairs && tokens[current] === '.') {
+                        current++; // consume .
+                        if (tokens[current] === expectedClose) {
+                            throw new Error(`Syntax error: trailing '.' is not allowed`);
+                        }
+                        // Parse rest and make sure its the final guy
+                        const remParam = walk();
+                        if (tokens[current] !== expectedClose) {
+                            throw new Error(`Syntax error: multiple expressions after '.' is not allowed`);
+                        }
+                        current++;
+                        return new DottedPair(lst, remParam)
+                    }
+                    lst.push(walk())
                 }
                 
                 current++; 
@@ -423,5 +445,77 @@ export class ASP {
 
         // Translate to begin
         return [OP_BEGIN, ...exprs];
+    }
+}
+
+// Marker class that all procs should extend from
+export class IProcedure {}
+
+export class ASTStringifier {
+    constructor() {}
+
+    public stringify(ast: any): string {
+        // Booleans+number
+        if (typeof ast === "number") {
+            return String(ast);
+        } else if (typeof ast === "boolean") {
+            return ast ? "#t" : "#f"
+        }
+
+        // String
+        if (typeof ast === "string") {
+            return JSON.stringify(ast);
+        }
+
+        // Symbol
+        if (typeof ast === "symbol") {
+            return /*Symbol.keyFor(ast)*/ ast.description || ast.toString();
+        }
+
+        // Lists
+        if (ast === null) return "()";
+        if (Array.isArray(ast)) {
+            const lst = new Array(ast.length)
+            for(let i = 0; i < ast.length; i++) {
+                lst[i] = this.stringify(ast[i]);
+            }
+            return `(${lst.join(" ")})`;
+        }
+
+        // Cons
+        if (ast instanceof Cons) {
+            const parts: string[] = [];
+            let current: any = ast;
+
+            while (current !== null) {
+                if (current instanceof Cons) {
+                    parts.push(this.stringify(current.head));
+                    current = current.tail;
+                } else {
+                    // Improper list/pair
+                    parts.push(".");
+                    parts.push(this.stringify(current));
+                    break;
+                }
+            }
+            return `(${parts.join(" ")})`;
+        } else if (ast instanceof DottedPair) {
+            const lst = new Array(ast.items.length)
+            for(let i = 0; i < ast.items.length; i++) {
+                lst[i] = this.stringify(ast.items[i]);
+            }
+            const rest = this.stringify(ast.rest);
+            return `(${lst.join(" ")} . ${rest})`
+        }
+
+        // Procs
+        if (ast instanceof IProcedure) {
+            return `<procedure>`;
+        }
+
+        // Undefined
+        if (ast === undefined) return `<#void>`
+
+        throw new Error(`Cannot stringify unknown AST node: ${JSON.stringify(ast)}`);
     }
 }

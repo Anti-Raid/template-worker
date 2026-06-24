@@ -42,7 +42,10 @@ import {
   isTruthy,
   OP_SET,
   OP_LETREC,
-  OP_LETSTAR
+  OP_LETSTAR,
+  IProcedure,
+  DottedPair,
+  ASTStringifier
 } from "./common";
 import { Cons } from "./list";
 
@@ -371,9 +374,9 @@ interface CmpOpts {
     disableSet: boolean
 }
 
-const SYMBOL_DOT = Symbol.for(".")
-
 export class AnimaCompiler {
+    s = new ASTStringifier()
+
     compileExpr(expr: any[], disableDefine: boolean = false, disableLambda: boolean = false, disableSet: boolean = false) {
         const bc = new ByteCode();
         this.#compile(expr, {leaveOnStack: true, isTail: true, bc, tryOpt: true, disableDefine, disableLambda, disableSet })
@@ -390,6 +393,8 @@ export class AnimaCompiler {
             opts.bc.push(expr)
             if (!opts.leaveOnStack) opts.bc.pop()
             return
+        } else if (expr instanceof DottedPair) {
+            throw new Error(`bad syntax: illegal use of dotted pair in execution context (consider quoting e.g. ${`'${this.s.stringify(expr)}`})`);
         } else if (!Array.isArray(expr)) {
             if (!opts.leaveOnStack && opts.tryOpt) return 
             opts.bc.push(expr)
@@ -455,7 +460,7 @@ export class AnimaCompiler {
         this.#compileNormalCall(expr, opts)
     }
 
-    #compileBegin(expr: any, opts: CmpOpts, syntaxCtx?: string) {
+    #compileBegin(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
         // We need to push a void if we see an empty begin block
         if (expr.length === 1) {
             if (opts.leaveOnStack) opts.bc.push(undefined);
@@ -471,7 +476,7 @@ export class AnimaCompiler {
     }
 
     // a normal call
-    #compileNormalCall(expr: any, opts: CmpOpts, syntaxCtx?: string) {
+    #compileNormalCall(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
         // We need to compile the first arg first and leave it on the stack
         //
         // This will place a e.g. (PUSH) <symbol>
@@ -495,7 +500,7 @@ export class AnimaCompiler {
     }
 
     // compiles both if calls as well as code that is converted into if calls
-    #compileIfCall(expr: any, opts: CmpOpts, syntaxCtx?: string) {
+    #compileIfCall(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
         if(expr.length != 4) {
             throw new Error(`if condition must be in format ["if", condition, true_expr, false_expr] but only have ${expr.length-1} arguments`)
         }
@@ -528,7 +533,7 @@ export class AnimaCompiler {
         return [OP_BEGIN, ...exprs];
     }
 
-    #compileCond(expr: any, opts: CmpOpts, syntaxCtx?: string) {
+    #compileCond(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
         // this just desugars down to a bunch of ifs
         if (expr.length === 1) throw new Error("cond requires at least one clause");
 
@@ -557,15 +562,40 @@ export class AnimaCompiler {
         this.#compile(result, opts);
     }
 
-    #compileQuote(expr: any, opts: CmpOpts, syntaxCtx?: string) {
+    // Normalizes an expression
+    //
+    // In particular:
+    // - Converts all DottedPair's into Cons
+    #normalizeExpr(expr: any): any {
+        // Try preserving array-ness as far as possible for performance purposes
+        if (Array.isArray(expr)) {
+            if (expr.length === 0) return null; 
+            return expr.map(e => this.#normalizeExpr(e))
+        }
+
+        if (expr instanceof DottedPair) {
+            const items = expr.items.map(e => this.#normalizeExpr(e));
+            let tail = this.#normalizeExpr(expr.rest);
+
+            // Build the cons backwards as (1 2 . 3) => (cons 1 (cons 2 3))
+            for (let i = items.length - 1; i >= 0; i--) {
+                tail = Cons.pair(items[i], tail);
+            }
+            return tail;
+        }
+
+        return expr;
+    }
+
+    #compileQuote(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
         if(expr.length != 2) {
             throw new Error(`quote must be in format ["quote", expr] but have ${expr.length-1} arguments`)
         }
         if(!opts.leaveOnStack) return
-        opts.bc.push(expr[1])
+        opts.bc.push(this.#normalizeExpr(expr[1]))
     }
 
-    #compileDefine(expr: any, opts: CmpOpts, syntaxCtx?: string) {
+    #compileDefine(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
         if (opts.disableDefine) {
             throw new Error("define expressions are disabled in this context");
         }
@@ -574,14 +604,10 @@ export class AnimaCompiler {
             throw new Error(`define must be in format ["define" varname arg] or [define (func_name arg1 arg2... argN) body_expr...] but have ${expr.length-1} arguments`)
         }
 
-        // Normal define
         if(typeof expr[1] === "symbol") {
-            if (SPECIAL_FORMS.has(expr[1])) {
-                throw new Error(`${String(expr[1])}: bad syntax`)
-            }
-            if (expr[1] in BUILTINS_OPS) {
-                throw new Error(`${String(expr[1])}: cannot shadow builtin procedure`)
-            }
+            // Normal define
+            this.#ensureCanBind(expr[1], undefined, syntaxCtx || "define")
+
             // We need to compile the second arg first and leave it on the stack
             //
             // This will place a e.g. (PUSH) <symbol>
@@ -598,12 +624,25 @@ export class AnimaCompiler {
             const body = expr.slice(2);
             const equivExpr = [OP_DEFINE, funcName, [OP_LAMBDA, params, ...body]];
             this.#compile(equivExpr, opts)
+        } else if (expr[1] instanceof DottedPair) {
+            // (define (func arg1 . rest) body...)
+            if (expr[1].items.length === 0) throw new Error("define: missing function name");
+            const funcName = expr[1].items[0];
+            const params = expr[1].items.slice(1);
+            const body = expr.slice(2);
+            
+            // If it's (define (func . rest)), the lambda args are just the symbol `rest` (which will then bind everything to remParams)
+            // If it's (define (func x . rest)), it's a new DottedPair
+            const lambdaArgs = params.length === 0 ? expr[1].rest : new DottedPair(params, expr[1].rest);
+
+            const equivExpr = [OP_DEFINE, funcName, [OP_LAMBDA, lambdaArgs, ...body]];
+            this.#compile(equivExpr, opts);
         } else {
             throw new Error(`${String(expr[1])}: expr[1] not symbol or list syntax`)
         }
     }
 
-    #compileSet(expr: any, opts: CmpOpts, syntaxCtx?: string) {
+    #compileSet(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
         if (opts.disableSet) {
             throw new Error("set! expressions are disabled in this context");
         }
@@ -617,12 +656,8 @@ export class AnimaCompiler {
             throw new Error(`${String(expr[1])}: expr[1] not symbol or list syntax`)
         }
 
-        if (SPECIAL_FORMS.has(expr[1])) {
-            throw new Error(`${String(expr[1])}: bad syntax`)
-        }
-        if (expr[1] in BUILTINS_OPS) {
-            throw new Error(`${String(expr[1])}: cannot shadow builtin procedure`)
-        }
+        this.#ensureCanBind(expr[1], undefined, syntaxCtx || "set!")
+
         // We need to compile the second arg first and leave it on the stack
         //
         // This will place a e.g. (PUSH) <symbol>
@@ -633,8 +668,27 @@ export class AnimaCompiler {
         }
     }
 
-    #compileLambda(expr: any, opts: CmpOpts, syntaxCtx?: string) {
-        if (!opts.leaveOnStack) return
+    #ensureCanBind(param: any, seen: Set<symbol> | undefined, syntaxCtx: string) {
+        if(typeof param !== "symbol") {
+            throw new Error(`${syntaxCtx} parameter must be a symbol, but received ${typeof param}: ${String(param)}`);
+        }
+        
+        if (seen) {
+            if (seen.has(param)) {
+                throw new Error(`${syntaxCtx} parameter is a duplicate parameter name: ${String(param)}`);
+            }
+            seen.add(param)
+        }
+
+        if (SPECIAL_FORMS.has(param)) {
+            throw new Error(`${String(param)}: bad syntax`)
+        }
+        if (param in BUILTINS_OPS) {
+            throw new Error(`${String(param)}: cannot shadow builtin procedure`)
+        }
+    }
+
+    #compileLambda(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
         if(opts.disableLambda) {
             throw new Error(`${syntaxCtx || "lambda"} expressions are disabled in this context [when compiling a lambda]`)
         }
@@ -643,49 +697,32 @@ export class AnimaCompiler {
             throw new Error(`lambda must be in format ["lambda", [bind-args...], body...] but only have ${expr.length-1} arguments`)
         }
 
-        const params: symbol[] = []
+        let params: symbol[] = []
         let remParams: symbol | null = null
-        let foundDot = false
         if (Array.isArray(expr[1])) {
-            // Validate that every parameter is a symbol
-            const seen = new Set<symbol>();
-            for(let i = 0; i < expr[1].length; i++) {
-                if(typeof expr[1][i] !== "symbol") {
-                    throw new Error(`${syntaxCtx || "lambda"} parameter at index ${i} must be a symbol, but received ${typeof expr[1][i]}: ${String(expr[1][i])}`);
-                }
-                if (expr[1][i] === SYMBOL_DOT) {
-                    if (foundDot || remParams) throw new Error(`illegal use of \`.\` (multiple . is not allowed)`)
-                    foundDot = true
-                    continue
-                }
-                if (seen.has(expr[1][i])) {
-                    throw new Error(`${syntaxCtx || "lambda"} parameter at index ${i} is a duplicate parameter name: ${String(expr[1][i])}`);
-                }
-                seen.add(expr[1][i])
-
-                if (SPECIAL_FORMS.has(expr[1][i])) {
-                    throw new Error(`${String(expr[1][i])}: bad syntax`)
-                }
-                if (expr[1][i] in BUILTINS_OPS) {
-                    throw new Error(`${String(expr[1][i])}: cannot shadow builtin procedure`)
-                }
-
-                if (!foundDot) params.push(expr[1][i])
-                else {
-                    if (remParams) throw new Error(`illegal use of \`.\` (more than one symbol after dot)`); 
-                    remParams = expr[1][i]
-                }
-            }
-
-            if (foundDot && remParams === null) {
-                throw new Error(`illegal use of \`.\` (trailing . is not allowed)`)
-            }
+            params = expr[1]
+        } else if (expr[1] instanceof DottedPair) {
+            // Bind params to items and remParam to remParams
+            params = expr[1].items
+            remParams = expr[1].rest
         } else if (typeof expr[1] === "symbol") {
             // Then all args must be bound to remparams
             remParams = expr[1]
         } else {
             throw new Error(`${syntaxCtx || "lambda"} arguments must be a symbol (to bind all as a list to said symbol) or a list`);
         }
+
+        // Validate params and remParams here
+        const seen = new Set<symbol>();
+        for(let i = 0; i < params.length; i++) {
+            this.#ensureCanBind(params[i], seen, syntaxCtx || "lambda")
+        }
+        if (remParams) this.#ensureCanBind(remParams, seen, syntaxCtx || "lambda")
+
+        // Once we've verified the syntax, we can then drop the entire lambda if its not actually needed on the stack
+        //
+        // This lets us keep the syntax checking without the work
+        if (!opts.leaveOnStack) return
 
         // Compile lambda body
         const lambdaBc = new ByteCode()
@@ -695,7 +732,7 @@ export class AnimaCompiler {
         opts.bc.newclosure(template)
     }
 
-    #compileLet(expr: any, opts: CmpOpts, syntaxCtx?: string) {
+    #compileLet(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
         // OP_LET is special in that it gets compiled down to a lambda in the end
         if (expr.length < 3) throw new Error(`let must be in format ["let", [[var expr]...], body...] but only have ${expr.length-1} arguments`);
 
@@ -827,7 +864,7 @@ export class AnimaCompiler {
         this.#compile(equivExpr, opts, "letrec");
     }
 
-    #compileAnd(expr: any, opts: CmpOpts, syntaxCtx?: string) {
+    #compileAnd(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
         // if (argCount === 0) return true; 
         if (expr.length === 1) {
             if (opts.leaveOnStack) opts.bc.push(true);
@@ -871,7 +908,7 @@ export class AnimaCompiler {
         }
     }
 
-    #compileOr(expr: any, opts: CmpOpts, syntaxCtx?: string) {
+    #compileOr(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
         // if (argCount === 0) return false;
         if (expr.length === 1) {
             if (opts.leaveOnStack) opts.bc.push(false);
@@ -916,7 +953,7 @@ export class AnimaCompiler {
     }
 
     /** Optimizes a direct (apply proc elems... rem-arg-lst) to inline INTRINSIC_APPLY */ 
-    #optApply(expr: any, opts: CmpOpts, syntaxCtx?: string) {
+    #optApply(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
         if (expr.length < 3) {
             throw new Error("apply requires at least a procedure and a list");
         }
@@ -958,8 +995,10 @@ export class ClosureTemplate {
 }
 
 /** An actual anima closure bound to a scope */
-export class Closure {
-    constructor(public tmpl: ClosureTemplate, public scope: AnimaScope) {}
+export class Closure extends IProcedure {
+    constructor(public tmpl: ClosureTemplate, public scope: AnimaScope) {
+        super()
+    }
 }
 
 const TEST_PROG = `
@@ -997,7 +1036,7 @@ export const TEST_PROG_BC = new AnimaCompiler().compileExpr(new ASP(TEST_PROG).p
  * Unlike normal functions which pop from stack and bind to a new AnimaScope, builtin funcs keep values on
  * stack and just do bytecode replacement
 */
-export class BuiltinFunction {
+export class BuiltinFunction extends IProcedure {
     // number of args needed on stack top, -1 means variadic
     // if we are in variadic mode, the top of stack will contain 
     // the number of arguments pushed on the stack
@@ -1008,6 +1047,7 @@ export class BuiltinFunction {
     needsScope: boolean // do we need scope or not (if false, this will use the global execution scope as the scope in bytecode)
 
     constructor(nargs: number, needsScope: boolean, initializer: (bc: ByteCode) => void) {
+        super()
         this.nargs = nargs
         this.needsScope = needsScope
         this.bc = new ByteCode()
@@ -1021,12 +1061,14 @@ const BUILTINS_APPLY = new BuiltinFunction(-1, false, (bc) => {
     bc.intrinsicTailApply()
 });
 
-export class NativeFunction {
+export class NativeFunction extends IProcedure {
     constructor(
         public name: string,
         public nargs: number, // -1 for variadic
         public cb: (...args: any[]) => any
-    ) {}
+    ) {
+        super()
+    }
 }
 
 const BUILTIN_PROCS: Record<symbol, BuiltinFunction | NativeFunction> = {
