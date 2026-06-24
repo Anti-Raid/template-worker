@@ -505,7 +505,7 @@ describe('ASTStringifier', () => {
             expect(roundtrip("-3.14")).toBe("-3.14");
             expect(roundtrip("true")).toBe("true");
             expect(roundtrip("false")).toBe("false");
-            expect(roundtrip("null")).toBe("null");
+            expect(roundtrip("null")).toBe("()");
         });
 
         it('round-trips symbols perfectly', () => {

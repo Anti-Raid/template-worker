@@ -103,13 +103,14 @@ export enum OpCode {
     INTRINSIC_SUB,
     INTRINSIC_MUL,
     INTRINSIC_DIV,
+    INTRINSIC_EQ,
 
     // 2-arg, no nargs
     INTRINSIC_MODULO, 
     INTRINSIC_REMAINDER,
 
     // list, same as add/sub/mul/div in syntax
-    INTRINSIC_LIST
+    INTRINSIC_LIST,
 }
 
 // TODO: Use LEB128 (thanks gemini for letting me know this exists!) to encode numbers
@@ -247,6 +248,10 @@ export class ByteCode {
 
     intrinsicDiv() {
         this.inst.push(OpCode.INTRINSIC_DIV)
+    }
+
+    intrinsicEq() {
+        this.inst.push(OpCode.INTRINSIC_EQ)
     }
 
     intrinsicModulo() {
@@ -412,12 +417,19 @@ export class ByteCode {
                     break;
                 case OpCode.INTRINSIC_MODULO:
                     line += `INTRINSIC_MODULO`
+                    idx += 1
                     break
                 case OpCode.INTRINSIC_REMAINDER:
                     line += `INTRINSIC_REMAINDER`
+                    idx += 1
                     break
                 case OpCode.INTRINSIC_LIST:
                     line += `INTRINSIC_LIST`
+                    idx += 1
+                    break
+                case OpCode.INTRINSIC_EQ:
+                    line += `INTRINSIC_EQ`
+                    idx += 1
                     break
                 default:
                     line += `UNKNOWN_OPCODE (${opcode})`;
@@ -442,10 +454,20 @@ interface CmpOpts {
 
 export class AnimaCompiler {
     s = new ASTStringifier()
+    t = new AnimaTransformer()
+    o = new ASTOptimizer()
 
-    compileExpr(expr: any[], disableDefine: boolean = false, disableLambda: boolean = false, disableSet: boolean = false) {
+    compileStr(s: string, disableLambda: boolean = false, disableSet: boolean = false, tryOpt = true) {
+        return this.compileExpr(new ASP(s, true).parse(), disableLambda, disableSet, tryOpt)
+    }
+
+    compileExpr(expr: any, disableDefine: boolean = false, disableLambda: boolean = false, disableSet: boolean = false, tryOpt = true) {
+        // First transform the expr so all conds are resolved
+        let trExpr = this.t.transform(expr)
+        if (tryOpt) trExpr = this.o.optimize(trExpr)
+
         const bc = new ByteCode();
-        this.#compile(expr, {leaveOnStack: true, isTail: true, bc, tryOpt: true, disableDefine, disableLambda, disableSet })
+        this.#compile(trExpr, {leaveOnStack: true, isTail: true, bc, tryOpt, disableDefine, disableLambda, disableSet })
         return bc
     }
     #compile(expr: any, opts: CmpOpts, syntaxCtx?: string) {
@@ -487,8 +509,7 @@ export class AnimaCompiler {
                     this.#compileIfCall(expr, opts, syntaxCtx)
                     return
                 case OP_COND:
-                    this.#compileCond(expr, opts, syntaxCtx)
-                    return
+                    throw new Error("internal error: cond should be transformed by AnimaTransform prior to reaching here")
                 case OP_QUOTE:
                     this.#compileQuote(expr, opts, syntaxCtx)
                     return
@@ -502,14 +523,11 @@ export class AnimaCompiler {
                     this.#compileLambda(expr, opts, syntaxCtx)
                     return
                 case OP_LET:
-                    this.#compileLet(expr, opts, syntaxCtx)
-                    return
+                    throw new Error("internal error: let should be transformed by AnimaTransform prior to reaching here")
                 case OP_LETSTAR:
-                    this.#compileLetStar(expr, opts, syntaxCtx)
-                    return
+                    throw new Error("internal error: let* should be transformed by AnimaTransform prior to reaching here")
                 case OP_LETREC:
-                    this.#compileLetrec(expr, opts, syntaxCtx)
-                    return
+                    throw new Error("internal error: letrec should be transformed by AnimaTransform prior to reaching here")
                 case OP_AND:
                     this.#compileAnd(expr, opts, syntaxCtx)
                     return
@@ -524,6 +542,7 @@ export class AnimaCompiler {
                 case OP_SUB:
                 case OP_MUL:
                 case OP_DIV:
+                case OP_EQ:
                     this.#optIntrinsicNormal(expr, opts, syntaxCtx)
                     return
                 case OP_MODULO:
@@ -560,8 +579,6 @@ export class AnimaCompiler {
         //
         // This will place a e.g. (PUSH) <symbol>
         this.#compile(expr[0], { ...opts, leaveOnStack: true, isTail: false })
-
-        // TODO: Do param number here (maybe???)
 
         // Push all arguments
         const nargs = expr.length-1 // [func a b c] -> 5 - 2 = 3 args
@@ -612,35 +629,6 @@ export class AnimaCompiler {
         return [OP_BEGIN, ...exprs];
     }
 
-    #compileCond(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
-        // this just desugars down to a bunch of ifs
-        if (expr.length === 1) throw new Error("cond requires at least one clause");
-
-        let result: any = []; 
-
-        for (let i = expr.length - 1; i >= 1; i--) {
-            const clause = expr[i];
-            if (!Array.isArray(clause) || clause.length < 2) {
-                throw new Error(`cond clause must be a list of exactly 2 elements: [condition, expr...]`);
-            }
-
-            const condition = clause[0];
-            const resultExpr = this.#wrapMulti(clause.slice(1));
-
-            if (condition === OP_ELSE) {
-                if (i !== expr.length - 1) {
-                    throw new Error("else must be the final clause in a cond statement");
-                }
-
-                result = resultExpr;
-            } else {
-                result = [OP_IF, condition, resultExpr, result];
-            }
-        }
-
-        this.#compile(result, opts);
-    }
-
     // Normalizes an expression
     //
     // In particular:
@@ -683,41 +671,18 @@ export class AnimaCompiler {
             throw new Error(`define must be in format ["define" varname arg] or [define (func_name arg1 arg2... argN) body_expr...] but have ${expr.length-1} arguments`)
         }
 
-        if(typeof expr[1] === "symbol") {
-            // Normal define
-            this.#ensureCanBind(expr[1], undefined, syntaxCtx || "define")
+        if(typeof expr[1] !== "symbol") throw new Error("internal error: complex defines should be transformed by AnimaTransform prior to reaching here")
 
-            // We need to compile the second arg first and leave it on the stack
-            //
-            // This will place a e.g. (PUSH) <symbol>
-            this.#compile(expr[2], { ...opts, leaveOnStack: true, isTail: false });
-            opts.bc.defineVar(expr[1])
-            if (opts.leaveOnStack) {
-                opts.bc.push(undefined);
-            }
-        } else if (Array.isArray(expr[1])) { 
-            // (define (func_name arg1 arg2) body_expr...), this one just gets rewritten to a normal define with lambda
-            if (expr[1].length === 0) throw new Error("define: missing function name");
-            const funcName = expr[1][0];
-            const params = expr[1].slice(1);
-            const body = expr.slice(2);
-            const equivExpr = [OP_DEFINE, funcName, [OP_LAMBDA, params, ...body]];
-            this.#compile(equivExpr, opts)
-        } else if (expr[1] instanceof DottedPair) {
-            // (define (func arg1 . rest) body...)
-            if (expr[1].items.length === 0) throw new Error("define: missing function name");
-            const funcName = expr[1].items[0];
-            const params = expr[1].items.slice(1);
-            const body = expr.slice(2);
-            
-            // If it's (define (func . rest)), the lambda args are just the symbol `rest` (which will then bind everything to remParams)
-            // If it's (define (func x . rest)), it's a new DottedPair
-            const lambdaArgs = params.length === 0 ? expr[1].rest : new DottedPair(params, expr[1].rest);
+        // By now, everything here should be a normal define
+        this.#ensureCanBind(expr[1], undefined, syntaxCtx || "define")
 
-            const equivExpr = [OP_DEFINE, funcName, [OP_LAMBDA, lambdaArgs, ...body]];
-            this.#compile(equivExpr, opts);
-        } else {
-            throw new Error(`${String(expr[1])}: expr[1] not symbol or list syntax`)
+        // We need to compile the second arg first and leave it on the stack
+        //
+        // This will place a e.g. (PUSH) <symbol>
+        this.#compile(expr[2], { ...opts, leaveOnStack: true, isTail: false });
+        opts.bc.defineVar(expr[1])
+        if (opts.leaveOnStack) {
+            opts.bc.push(undefined);
         }
     }
 
@@ -809,138 +774,6 @@ export class AnimaCompiler {
         lambdaBc.return()
         const template = new ClosureTemplate(params, remParams, lambdaBc);
         opts.bc.newclosure(template)
-    }
-
-    #compileLet(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
-        // OP_LET is special in that it gets compiled down to a lambda in the end
-        if (expr.length < 3) throw new Error(`let must be in format ["let", [[var expr]...], body...] but only have ${expr.length-1} arguments`);
-
-        let loopName: symbol | null = null;
-        let bindingsIdx = 1;
-
-        if (typeof expr[1] === "symbol") {
-            loopName = expr[1];
-            bindingsIdx = 2;
-            if (expr.length < 4) throw new Error(`named let must include bindings and a body`);
-        }
-
-        const bindings = expr[bindingsIdx];
-        if (!Array.isArray(bindings) && bindings !== null) {
-            throw new Error(`${loopName ? "named let" : "let"} bindings must be a list of form [[var expr]...]`);
-        }
-
-        const body = expr.slice(bindingsIdx + 1);
-        const params: symbol[] = [];
-        const exprs: any[] = [];
-
-        if (bindings !== null) {
-            for (const binding of bindings) {
-                if (!Array.isArray(binding) || binding.length !== 2) {
-                    throw new Error(`let binding \`${binding}\` must be a list of form [var expr]`);
-                }
-                const sym = binding[0];
-                const val = binding[1];
-
-                if (typeof sym !== "symbol") throw new Error("let binding name must be a symbol");
-                
-                params.push(sym);
-                exprs.push(val);
-            }
-        }
-
-        // Expand let/named let down to a lambda
-        if (loopName) {
-            const namedLetExpr = [
-                [
-                    OP_LAMBDA, 
-                    [], 
-                    [OP_DEFINE, loopName, [OP_LAMBDA, params, ...body]],
-                    [loopName, ...exprs]
-                ]
-            ];
-            this.#compile(namedLetExpr, opts, "named let");
-        } else {
-            // rewrite to lambda [(let ((var expr) ...) body1 body2 ...) => ((lambda (var...) body1 body2...) expr...)]
-            const equivExpr = [[OP_LAMBDA, params, ...body], ...exprs];
-            this.#compile(equivExpr, opts, "let");
-        }
-    }
-
-    #compileLetStar(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
-        if (expr.length < 3) throw new Error(`let*: bad syntax`);
-
-        const bindings = expr[1];
-        if (!Array.isArray(bindings) && bindings !== null) {
-            throw new Error(`let* bindings must be a list of form [[var expr]...]`);
-        }
-
-        const body = expr.slice(2);
-
-        // No bindings
-        if (bindings === null || bindings.length === 0) {
-            const equivExpr = [[OP_LAMBDA, [], ...body]];
-            return this.#compile(equivExpr, opts, "let*");
-        }
-
-        // Start with innermost expr and work our way outwards (similar to cond)
-        let currentExpr = body; 
-        for (let i = bindings.length - 1; i >= 0; i--) {
-            const binding = bindings[i];
-            if (!Array.isArray(binding) || binding.length !== 2) {
-                throw new Error(`let* binding \`${binding}\` must be a list of form [var expr]`);
-            }
-            
-            const sym = binding[0];
-            const val = binding[1];
-
-            if (typeof sym !== "symbol") throw new Error("let* binding name must be a symbol");
-
-            // Wrap in lambda
-            const nextExpr = [
-                [OP_LAMBDA, [sym], ...currentExpr], 
-                val
-            ];
-            
-            // The result becomes the body for the next outer lambda.
-            currentExpr = [nextExpr];
-        }
-
-        this.#compile(currentExpr[0], opts, "let*");
-    }
-
-    #compileLetrec(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
-        // OP_LETREC is also special like let and can also be translated into a lambda
-        if (expr.length < 3) throw new Error(`letrec: bad syntax`);
-
-        const bindings = expr[1];
-        if (!Array.isArray(bindings) && bindings !== null) {
-            throw new Error(`letrec bindings must be a list of form [[var expr]...]`);
-        }
-
-        const body = expr.slice(2);
-        const params: symbol[] = [];
-        const dummyVals: any[] = []; // The <undefined> initializers
-        const setExprs: any[] = [];  // The (set! var expr) mutations
-
-        if (bindings !== null) {
-            for (const binding of bindings) {
-                if (!Array.isArray(binding) || binding.length !== 2) {
-                    throw new Error(`letrec binding \`${binding}\` must be a list of form [var expr]`);
-                }
-                const sym = binding[0];
-                const val = binding[1];
-
-                if (typeof sym !== "symbol") throw new Error("letrec binding name must be a symbol");
-                
-                params.push(sym);
-                dummyVals.push(null); 
-                setExprs.push([OP_SET, sym, val]); 
-            }
-        }
-
-        // rewrite to lambda [((lambda (params...) (set! p1 v1)... body...) null...)]
-        const equivExpr = [[OP_LAMBDA, params, ...setExprs, ...body], ...dummyVals];
-        this.#compile(equivExpr, opts, "letrec");
     }
 
     #compileAnd(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
@@ -1075,6 +908,7 @@ export class AnimaCompiler {
         else if (op === OP_SUB) opts.bc.intrinsicSub()
         else if (op === OP_MUL) opts.bc.intrinsicMul()
         else if (op === OP_DIV) opts.bc.intrinsicDiv()
+        else if (op === OP_EQ) opts.bc.intrinsicEq()
         else throw new Error(`internal error: no intrinsic for op ${op}`)
         if (!opts.leaveOnStack) {
             opts.bc.pop();
@@ -1204,6 +1038,10 @@ const BUILTINS_LIST = new BuiltinFunction(-1, false, (bc) => {
     bc.intrinsicList()
 });
 
+const BUILTINS_EQ = new BuiltinFunction(-1, false, (bc) => {
+    bc.intrinsicEq()
+})
+
 export class NativeFunction extends IProcedure {
     constructor(
         public name: string,
@@ -1215,7 +1053,7 @@ export class NativeFunction extends IProcedure {
 }
 
 /** Registry of all builtin builtin procedures */
-export const BUILTIN_PROCS: Record<symbol, BuiltinFunction | NativeFunction> = {
+export const BUILTIN_PROCS: Record<symbol, BuiltinFunction | NativeFunction | Closure> = {
     [OP_APPLY]: BUILTINS_APPLY,
     [OP_ADD]: BUILTINS_ADD,
     [OP_SUB]: BUILTINS_SUB,
@@ -1224,6 +1062,7 @@ export const BUILTIN_PROCS: Record<symbol, BuiltinFunction | NativeFunction> = {
     [OP_MODULO]: BUILTINS_MODULO,
     [OP_REMAINDER]: BUILTINS_REMAINDER,
     [OP_LIST]: BUILTINS_LIST,
+    [OP_EQ]: BUILTINS_EQ,
     // @ts-ignore
     __proto__: null
 }
@@ -1248,10 +1087,10 @@ class CallFrame {
 }
 
 export class AnimaVM {
-    constructor(public maxSteps: number) {}
+    constructor(public steps: number = 0, public maxSteps: number = 0) {}
 
     public evaluate(code: ByteCode, rawData: Record<string, any>): any {
-        const globalScope = new AnimaScope(rawData, null, {steps: 0})
+        const globalScope = new AnimaScope(rawData, null)
         const executionScope = globalScope.nest(); // Any "define" calls now write to this temporary scope
         return this.#evalinner(code, executionScope);
     }
@@ -1261,16 +1100,19 @@ export class AnimaVM {
         return this.evaluate(bc, rawData);
     }
 
-    #evalinner(code: ByteCode, execScope: AnimaScope): any {
-        let scopeState = execScope.state
+    public evaluateStr(expr: string, rawData: Record<string, any>, disableDefine: boolean = false, disableLambda: boolean = false): any {
+        const bc = (new AnimaCompiler()).compileStr(expr, disableDefine, disableLambda)
+        return this.evaluate(bc, rawData);
+    }
 
+    #evalinner(code: ByteCode, execScope: AnimaScope): any {
         // Initial frame and stack
         let frames: CallFrame[] = [new CallFrame(code, execScope, 0)];
         let stack: any[] = [];
 
         while (frames.length > 0) {
-            scopeState.steps++;
-            if (this.maxSteps && scopeState.steps > this.maxSteps) {
+            this.steps++;
+            if (this.maxSteps && this.steps > this.maxSteps) {
                 throw new Error(`Execution Limits Exceeded: Script ran for more than ${this.maxSteps} instructions.`);
             }
 
@@ -1406,7 +1248,7 @@ export class AnimaVM {
                     } else if (listArg === null) {
                         // Empty list
                     } else {
-                        throw new Error("apply: last argument must be a list");
+                        throw new Error(`apply: last argument must be a list but got ${listArg}`);
                     }
                     
                     // Push flattened args to stack
@@ -1512,6 +1354,25 @@ export class AnimaVM {
                     stack.push(lst);
                     break
                 }
+                case OpCode.INTRINSIC_EQ: {
+                    const nargs = stack.pop() as number;
+                    if (nargs === 0) throw new Error("= requires at least 1 argument");
+                    
+                    let top = stack[stack.length - nargs];
+                    if (typeof top !== "number") throw new Error(`= requires numbers, but received ${typeof top}`);
+                    let res = true
+                    for (let i = 1; i < nargs; i++) {
+                        const val = stack[stack.length - nargs + i]
+                        if (typeof val !== "number") throw new Error(`= requires numbers, but received ${typeof val}`);
+                        if (val != top) {
+                            res = false
+                            break
+                        }
+                    }
+                    stack.length -= nargs
+                    stack.push(res)
+                    break
+                }
             }
         }
         
@@ -1608,6 +1469,466 @@ export class AnimaVM {
     }
 }
 
+// Optimizer layer
+
+const FOLDABLE_MATH_OPS = new Set([
+    OP_ADD,
+    OP_SUB,
+    OP_MUL,
+    OP_DIV,
+    OP_MODULO,
+    OP_REMAINDER,
+    OP_EQ,
+])
+
+class AnimaTransformer {
+    transform(ast: any): any {
+        return this.#transform(ast)
+    }
+    #transform(ast: any, ctx?: string): any {
+        if (ast instanceof DottedPair) {
+            ast.items = ast.items.map(i => this.#transform(i));
+            ast.rest = this.#transform(ast.rest);
+            return ast;
+        }
+
+        if (Array.isArray(ast) && ast.length >= 0) {
+            const op = ast[0];
+            if (op === OP_QUOTE) return ast; // cannot desugar a quote
+            
+            // transform the inner first
+            const expanded = ast.map(i => this.#transform(i));
+            const expandedOp = expanded[0];
+
+            switch (expandedOp) {
+                case OP_COND:
+                    return this.#transformCond(expanded)
+                case OP_DEFINE:
+                    return this.#transformDefineComplex(expanded)
+                case OP_LET:
+                    return this.#transformLet(expanded)
+                case OP_LETSTAR:
+                    return this.#transformLetStar(expanded)
+                case OP_LETREC:
+                    return this.#transformLetrec(expanded)
+            }
+
+            return expanded;
+        }
+
+        // if no transformations apply, just return the original ast
+        return ast
+    }
+
+    #wrapMulti = (exprs: any[]) => {
+        if (exprs.length === 0) return []; 
+        if (exprs.length === 1) return exprs[0];
+        return [OP_BEGIN, ...exprs];
+    }
+
+    #transformCond(expr: any[]) {
+        if (expr.length === 1) throw new Error("cond requires at least one clause");
+
+        let result: any = undefined; 
+
+        for (let i = expr.length - 1; i >= 1; i--) {
+            const clause = expr[i];
+            if (!Array.isArray(clause) || clause.length < 2) {
+                throw new Error(`cond clause must be a list of exactly 2 elements: [condition, expr...]`);
+            }
+
+            const condition = clause[0];
+            const resultExpr = this.#wrapMulti(clause.slice(1));
+
+            if (condition === OP_ELSE) {
+                if (i !== expr.length - 1) {
+                    throw new Error("else must be the final clause in a cond statement");
+                }
+                result = resultExpr;
+            } else {
+                result = [OP_IF, condition, resultExpr, result];
+            }
+        }
+
+        return result; // Fixed
+    }
+
+    #transformDefineComplex(expr: any[]) {
+        if(expr.length < 3) {
+            throw new Error(`define must be in format ["define" varname arg] or [define (func_name arg1 arg2... argN) body_expr...] but have ${expr.length-1} arguments`)
+        }
+
+        if(typeof expr[1] === "symbol") {
+            // Normal define
+            if(expr.length !== 3) {
+                throw new Error(`define must be in format (define varname expr), but received ${expr.length - 1} arguments`);
+            }
+
+            return expr
+        } else if (Array.isArray(expr[1])) { 
+            // (define (func_name arg1 arg2) body_expr...), this one just gets rewritten to a normal define with lambda
+            if (expr[1].length === 0) throw new Error("define: missing function name");
+            const funcName = expr[1][0];
+            const params = expr[1].slice(1);
+            const body = expr.slice(2);
+            const equivExpr = [OP_DEFINE, funcName, [OP_LAMBDA, params, ...body]];
+            return equivExpr
+        } else if (expr[1] instanceof DottedPair) {
+            // (define (func arg1 . rest) body...)
+            if (expr[1].items.length === 0) throw new Error("define: missing function name");
+            const funcName = expr[1].items[0];
+            const params = expr[1].items.slice(1);
+            const body = expr.slice(2);
+            
+            // If it's (define (func . rest)), the lambda args are just the symbol `rest` (which will then bind everything to remParams)
+            // If it's (define (func x . rest)), it's a new DottedPair
+            const lambdaArgs = params.length === 0 ? expr[1].rest : new DottedPair(params, expr[1].rest);
+
+            const equivExpr = [OP_DEFINE, funcName, [OP_LAMBDA, lambdaArgs, ...body]];
+            return equivExpr
+        } else {
+            throw new Error(`define: ${String(expr[1])} not symbol or list syntax`)
+        }
+    }
+
+    #transformLet(expr: any[], ctx?: string) {
+        if (expr.length < 3) throw new Error(`let must be in format ["let", [[var expr]...], body...] but only have ${expr.length-1} arguments`);
+
+        let loopName: symbol | null = null;
+        let bindingsIdx = 1;
+
+        if (typeof expr[1] === "symbol") {
+            loopName = expr[1];
+            bindingsIdx = 2;
+            if (expr.length < 4) throw new Error(`named let must include bindings and a body`);
+        }
+
+        const bindings = expr[bindingsIdx];
+        if (!Array.isArray(bindings) && bindings !== null) {
+            throw new Error(`${loopName ? "named let" : "let"} bindings must be a list of form [[var expr]...]`);
+        }
+
+        const body = expr.slice(bindingsIdx + 1);
+        const params: symbol[] = [];
+        const exprs: any[] = [];
+
+        if (bindings !== null) {
+            for (const binding of bindings) {
+                if (!Array.isArray(binding) || binding.length !== 2) {
+                    throw new Error(`let binding \`${binding}\` must be a list of form [var expr]`);
+                }
+                const sym = binding[0];
+                const val = binding[1];
+
+                if (typeof sym !== "symbol") throw new Error("let binding name must be a symbol");
+                
+                params.push(sym);
+                exprs.push(val);
+            }
+        }
+
+        // Expand let/named let down to a lambda
+        if (loopName) {
+            const namedLetExpr = [
+                [
+                    OP_LAMBDA, 
+                    [], 
+                    [OP_DEFINE, loopName, [OP_LAMBDA, params, ...body]],
+                    [loopName, ...exprs]
+                ]
+            ];
+            return namedLetExpr;
+        } else {
+            // rewrite to lambda [(let ((var expr) ...) body1 body2 ...) => ((lambda (var...) body1 body2...) expr...)]
+            const equivExpr = [[OP_LAMBDA, params, ...body], ...exprs];
+            return equivExpr
+        }
+    }
+
+    #transformLetStar(expr: any[]) {
+        if (expr.length < 3) throw new Error(`let*: bad syntax`);
+
+        const bindings = expr[1];
+        if (!Array.isArray(bindings) && bindings !== null) {
+            throw new Error(`let* bindings must be a list of form [[var expr]...]`);
+        }
+
+        const body = expr.slice(2);
+
+        // No bindings
+        if (bindings === null || bindings.length === 0) {
+            const equivExpr = [[OP_LAMBDA, [], ...body]];
+            return equivExpr
+        }
+
+        // Start with innermost expr and work our way outwards (similar to cond)
+        let currentExpr = body; 
+        for (let i = bindings.length - 1; i >= 0; i--) {
+            const binding = bindings[i];
+            if (!Array.isArray(binding) || binding.length !== 2) {
+                throw new Error(`let* binding \`${binding}\` must be a list of form [var expr]`);
+            }
+            
+            const sym = binding[0];
+            const val = binding[1];
+
+            if (typeof sym !== "symbol") throw new Error("let* binding name must be a symbol");
+
+            // Wrap in lambda
+            const nextExpr = [
+                [OP_LAMBDA, [sym], ...currentExpr], 
+                val
+            ];
+            
+            // The result becomes the body for the next outer lambda.
+            currentExpr = [nextExpr];
+        }
+
+        return currentExpr[0]
+    }
+
+    #transformLetrec(expr: any[]) {
+        // OP_LETREC is also special like let and can also be translated into a lambda
+        if (expr.length < 3) throw new Error(`letrec: bad syntax`);
+
+        const bindings = expr[1];
+        if (!Array.isArray(bindings) && bindings !== null) {
+            throw new Error(`letrec bindings must be a list of form [[var expr]...]`);
+        }
+
+        const body = expr.slice(2);
+        const params: symbol[] = [];
+        const dummyVals: any[] = []; // The <undefined> initializers
+        const setExprs: any[] = [];  // The (set! var expr) mutations
+
+        if (bindings !== null) {
+            for (const binding of bindings) {
+                if (!Array.isArray(binding) || binding.length !== 2) {
+                    throw new Error(`letrec binding \`${binding}\` must be a list of form [var expr]`);
+                }
+                const sym = binding[0];
+                const val = binding[1];
+
+                if (typeof sym !== "symbol") throw new Error("letrec binding name must be a symbol");
+                
+                params.push(sym);
+                dummyVals.push(undefined); 
+                setExprs.push([OP_SET, sym, val]); 
+            }
+        }
+
+        // rewrite to lambda [((lambda (params...) (set! p1 v1)... body...) null...)]
+        const equivExpr = [[OP_LAMBDA, params, ...setExprs, ...body], ...dummyVals];
+        return equivExpr
+    }
+}
+
+// Optimizes a fully transformed AST
+class ASTOptimizer {
+    public optimize(ast: any): any {
+        // Base cases: primitives, strings, symbols, or null
+        if (ast === null || typeof ast !== "object") {
+            return ast;
+        }
+
+        if (ast instanceof DottedPair) {
+            // optimize inner items of dotted pair
+            ast.items = ast.items.map((item: any) => this.optimize(item));
+            ast.rest = this.optimize(ast.rest);
+            return ast;
+        }
+
+        if (Array.isArray(ast)) {
+            if (ast.length === 0) return ast;
+
+            const op = ast[0];
+
+            if (op === OP_QUOTE) {
+                return ast;
+            }
+
+            // Optimize all children first. This turns (+ 1 (* 2 3)) into (+ 1 6) for example, which we then optimize further to 7
+            const optAst = ast.map(node => this.optimize(node));
+            const optOp = optAst[0];
+
+            // Prune if's
+            if (optOp === OP_IF && optAst.length >= 3) {
+                const condition = optAst[1];
+                
+                // If the condition is a resolved primitive (boolean, number, string)
+                if (typeof condition === "boolean" || typeof condition === "number" || typeof condition === "string") {
+                    const isTruthy = condition !== false;
+                    
+                    if (isTruthy) {
+                        return optAst[2]; // Return the true branch
+                    } else {
+                        // Return the false branch or #<void>
+                        return optAst.length > 3 ? optAst[3] : undefined;
+                    }
+                }
+            }
+
+            // Constant folding
+            if (FOLDABLE_MATH_OPS.has(optOp)) {
+                // Check if all arguments are literal numbers
+                const isAllNumbers = optAst.length === 1 || optAst.slice(1).every(arg => typeof arg === "number");
+                
+                if (isAllNumbers) {
+                    // try to do the math at compile time, if it fails, we know it wont work at runtime and 
+                    // can just kill everything else
+                    return this.#foldMath(optOp, optAst.slice(1));
+                }
+            }
+
+            return optAst;
+        }
+
+        return ast;
+    }
+
+    // Tries to optimize math prior to passing to main compiler
+    #foldMath(op: symbol, args: number[]): boolean | number {
+        const nargs = args.length;
+
+        if (op === OP_ADD) {
+            return args.reduce((sum, val) => sum + val, 0);
+        }
+
+        if (op === OP_MUL) {
+            return args.reduce((prod, val) => prod * val, 1);
+        }
+
+        if (op === OP_SUB) {
+            if (nargs === 0) throw new Error("- requires at least 1 argument");
+            if (nargs === 1) return -args[0];
+            let acc = args[0];
+            for (let i = 1; i < nargs; i++) acc -= args[i];
+            return acc;
+        }
+
+        if (op === OP_DIV) {
+            if (nargs === 0) throw new Error("/ requires at least 1 argument");
+            if (nargs === 1) {
+                if (args[0] === 0) throw new Error("/: division by zero");
+                return 1 / args[0];
+            }
+            let acc = args[0];
+            for (let i = 1; i < nargs; i++) {
+                if (args[i] === 0) throw new Error("/: division by zero");
+                acc /= args[i];
+            }
+            return acc;
+        }
+
+        if (op === OP_MODULO) {
+            if (nargs !== 2) throw new Error("modulo requires 2 arguments");
+            if (args[1] === 0) throw new Error("modulo: division by zero");
+            return ((args[0] % args[1]) + args[1]) % args[1];
+        }
+
+        if (op === OP_REMAINDER) {
+            if (nargs !== 2) throw new Error("modulo requires 2 arguments");
+            if (args[1] === 0) throw new Error("modulo: division by zero");
+            return ((args[0] % args[1]) + args[1]) % args[1];
+        }
+
+        if (op === OP_EQ) {
+            if (nargs !== 0) throw new Error("= requires at least 1 argument");
+            let top = args[0]
+            for(let i = 1; i < args.length; i++) {
+                if (args[i] != top) return false
+            }
+            return true
+        }
+
+        throw new Error("Unknown math op");
+    }
+}
+
+class MapObj {
+    #proc: any;
+    #iters: (ArrayIterator<any> | Generator<any, void, unknown>)[]
+    #isdone: boolean
+    constructor(args: any[]) {
+        if (args.length < 2) throw new Error("map requires at least 2 arguments (procedure and 1+ lists to map over)");
+        
+        const proc = args[0];
+        const lists = args.slice(1)
+        const iters = lists.map(list => {
+            if (list === null) return [][Symbol.iterator]();
+            if (Array.isArray(list) || list instanceof Cons) return list[Symbol.iterator]();
+            throw new Error("map arguments must be lists");
+        });
+        this.#proc = proc
+        this.#iters = iters
+        this.#isdone = false
+    }
+
+    get done() { return this.#isdone }
+
+    next() {
+        if (this.#isdone) throw new Error("internal error: map iter done but %MapObjNext still called")
+        const nextVals = this.#iters.map(it => it.next());
+            
+        if (nextVals.some(res => res.done)) {
+            this.#isdone = true
+            return
+        }
+
+        // Unlike cons, this avoids the allocation of O(N) extra cons array views making it more performant
+        const args = [];
+        for (const res of nextVals) {
+            args.push(res.value);
+        }
+
+        return args
+    }
+}
+
+export const PRELUDE_SCOPE = {
+    [Symbol.for("%MapObj")]: new NativeFunction("%MapObj", -1, (...args) => {
+        return new MapObj(args)
+    }),
+    [Symbol.for("%MapObjDone")]: new NativeFunction("%MapObjDone", 1, (...args) => {
+        return args[0].done
+    }),
+    [Symbol.for("%MapObjNext")]: new NativeFunction("%MapObjNext", 1, (...args) => {
+        return args[0].next()
+    }),
+    [Symbol.for("%ArrayNew")]: new NativeFunction("%ArrayNew", 0, (...args) => {
+        return []
+    }),
+    [Symbol.for("%ArrayPush")]: new NativeFunction("%ArrayPush", 2, (...args) => {
+        if(!Array.isArray(args[0])) throw new Error(`internal error: %ArrayPush called on non-array ${args[0]}`)
+        args[0].push(args[1])
+    }),
+    [Symbol.for("%Builtin")]: new NativeFunction("%Builtin", 2, (...args) => {
+        if (typeof args[0] !== "symbol") throw new Error(`${args[0]} is not a symbol`)
+        if (!(args[1] instanceof Closure)) throw new Error(`${args[1]} is not a Closure`)
+        console.log(`Registering ${String(args[0])}`)
+        BUILTIN_PROCS[args[0]] = args[1]
+    }),
+    // @ts-ignore
+    __proto__: null
+}
+
+// Prelude
+const PRELUDE_VM = new AnimaVM()
+PRELUDE_VM.evaluateStr(`
+(%Builtin 'map (lambda (f . lists)
+    (let ((iter (apply %MapObj f lists))
+          (result (%ArrayNew)))
+    
+    (let loop ()
+      (let ((args (%MapObjNext iter)))      
+        (if (%MapObjDone iter)              
+            result                          
+            (begin
+                (%ArrayPush result (apply f args)) 
+                (loop))))))))    
+`, PRELUDE_SCOPE)
+
+/*
 const TEST_PROG = `
 (define union
     (lambda (a b)
@@ -1635,3 +1956,4 @@ const TEST_PROG = `
 //export const TEST_PROG = `(cond [#f 1] [#f 2])`
 
 export const TEST_PROG_BC = new AnimaCompiler().compileExpr(new ASP(TEST_PROG).parse(), false, false)
+*/

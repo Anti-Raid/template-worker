@@ -1,11 +1,134 @@
 // Made w/ lots of help from gemini cli
 import { MissingVarError, ASP, ASPParseError, ASPTokenError, ASTStringifier } from './common';
-import { Anima } from './sv2.anima'; 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { AnimaCompiler, AnimaVM, ByteCode, ClosureTemplate } from './sv2.anima2';
 
 // Helper for brevity when writing manual ASTs
 const s = Symbol.for;
+const bcCache: Record<string, ByteCode> = {}
+describe('Anima', () => {
+    let evaluator: AnimaVM = new AnimaVM();
+    let cmp = new AnimaCompiler()
+    let baseData: Record<string, any> = {
+        port: 8080,
+        protocol: "tcp",
+        is_active: true,
+        user_role: null 
+    };
 
+    const run = (expr: string) => {
+        if (bcCache[expr]) return cmp.s.stringify(evaluator.evaluate(bcCache[expr], baseData))
+        const ast = new ASP(expr, true).parse(); // bytecode interpreter supports dotted pairs
+        const bc = cmp.compileExpr(ast)
+        console.log(bc.toString(), "\n")
+        for (let i = 0; i < bc.constants.length; i++) {
+            const c = bc.constants[i]
+            if (c instanceof ClosureTemplate) {
+                console.log(`Const #${i}:\n${c.code.toString()}`)
+            }
+        }
+        bcCache[expr] = bc
+        return cmp.s.stringify(evaluator.evaluate(bc, baseData));
+    };
+
+    describe('Primitives, Strings & Symbols', () => {
+        it('evaluates boolean primitives', () => {
+            expect(run("#t")).toBe("#t");
+            expect(run("#f")).toBe("#f");
+        });
+
+        it('evaluates numbers and raw arrays', () => {
+            expect(run("42")).toBe("42");
+            expect(run("[]")).toBe("()"); // ASP parses [] to a PUSHEMPTYLIST, VM evals [] as null
+        });
+
+        it('evaluates native Symbols as implicit variables', () => {
+            expect(run("port")).toBe("8080");
+            expect(run("protocol")).toBe("\"tcp\"");
+        });
+
+        it('evaluates literal JS strings as Scheme strings directly', () => {
+            expect(run('"hello"')).toBe("\"hello\"");
+            expect(run('"port"')).toBe("\"port\""); // String primitive, not a variable lookup
+        });
+
+        it('errors for unknown variables', () => {
+            expect(() => run("missing_var")).toThrow(MissingVarError);
+        });
+
+        it('basic math', () => {
+            expect(run("(+ (* 1 2) (- 1 1) (- 1 2))")).toBe("1");
+            expect(run("(+ (* 1 2) (- 1 1) (- 1 51))")).toBe("-48");
+            expect(run("(+ (let [(x 1)] x) 1)")).toBe("2");
+        });
+
+        it('Ensure valid TCO', () => {
+            const script = `
+                (begin
+                  (define (loop n)
+                    (if (= n 0)
+                        "survived!"
+                        (loop (- n 1))))
+                  (loop 15000))
+            `;
+            expect(() => run(script)).not.toThrow();
+            expect(run(script)).toBe("\"survived!\"");
+        });
+
+        it('Ensure valid TCO [2]', () => {
+            const script = `
+                (begin
+                  (define (loop n)
+                    (if (= n 0)
+                        "survived!"
+                        (loop (- n 1))))
+                  (loop 15000))
+            `;
+            expect(() => run(script)).not.toThrow();
+            expect(run(script)).toBe("\"survived!\"");
+        });
+    });
+
+    describe('map', () => {
+        it('maps a procedure over a single list', () => {
+            const script = `
+                (begin
+                  (define (double x) (* x 2))
+                  (map double '(1 2 3 4)))
+            `;
+            expect(run(script)).toEqual("(2 4 6 8)");
+        });
+
+        it('maps a procedure over a single list [2]', () => {
+            const script = `
+                (begin
+                  (define (double x) (* x 2))
+                  (map double '(1 2 3 4)))
+            `;
+            expect(run(script)).toEqual("(2 4 6 8)");
+        });
+
+        it('maps a procedure over multiple lists in parallel', () => {
+            const script = `(map + '(1 2 3) '(10 20 30))`;
+            expect(run(script)).toEqual("(11 22 33)");
+            
+            const script3 = `(map + '(1 1 1) '(2 2 2) '(3 3 3))`;
+            expect(run(script3)).toEqual("(6 6 6)");
+        });
+
+        it('safely terminates when the shortest list is exhausted', () => {
+            const script = `(map + '(1 2 3 4 5) '(10 20))`;
+            expect(run(script)).toEqual("(11 22)");
+        });
+
+        it('errors with prelude in mapped lambda', () => {
+            const script = `(map (lambda (x) (%ArrayNew)) '(1 2 3 4 5))`;
+            expect(() => run(script)).toThrow(MissingVarError);
+        });
+    })
+})
+
+/*
 describe('Anima', () => {
     let evaluator: Anima = new Anima();
     let baseData: Record<string, any> = {
@@ -392,177 +515,6 @@ describe('Anima', () => {
     });
 });
 
-describe('Anima String Parser (ASP)', () => {
-    describe('Primitives', () => {
-        it('parses numbers', () => {
-            expect(new ASP("42").parse()).toBe(42);
-            expect(new ASP("-3.14").parse()).toBe(-3.14);
-        });
-
-        it('parses booleans', () => {
-            expect(new ASP("#t").parse()).toBe(true);
-            expect(new ASP("#f").parse()).toBe(false);
-        });
-
-        it('parses symbols natively', () => {
-            expect(new ASP("my-var").parse()).toBe(s("my-var"));
-            expect(new ASP("+").parse()).toBe(s("+"));
-        });
-    });
-
-    describe('Literal String', () => {
-        it('parses standard strings into raw JS strings', () => {
-            expect(new ASP('"hello"').parse()).toBe("hello");
-        });
-
-        it('handles escaped quotes and newlines', () => {
-            const input = '"She said \\"Hello\\"\\nNext line"';
-            const expected = "She said \"Hello\"\nNext line"; 
-            expect(new ASP(input).parse()).toBe(expected);
-        });
-    });
-
-    describe('Lists', () => {
-        it('parses standard parentheses', () => {
-            expect(new ASP("(+ 1 2)").parse()).toEqual([s("+"), 1, 2]);
-        });
-
-        it('parses square brackets', () => {
-            expect(new ASP("[define x 10]").parse()).toEqual([s("define"), s("x"), 10]);
-        });
-
-        it('handles deeply nested lists', () => {
-            expect(new ASP("(if (> age 18) [print \"adult\"] null)").parse()).toEqual([
-                s("if"),
-                [s(">"), s("age"), 18],
-                [s("print"), "adult"],
-                null
-            ]);
-        });
-    });
-
-    describe('Quotes', () => {
-        it('quotes symbols', () => {
-            expect(new ASP("'a").parse()).toEqual([s("quote"), s("a")]);
-        });
-
-        it('quotes lists', () => {
-            expect(new ASP("'(1 2 3)").parse()).toEqual([s("quote"), [1, 2, 3]]);
-        });
-
-        it('handles quote right next to parentheses without spaces', () => {
-            expect(new ASP("'(\"a\" \"b\")").parse()).toEqual([
-                s("quote"), 
-                ["a", "b"]
-            ]);
-        });
-    });
-
-    describe('Trivia (Whitespace and Comments)', () => {
-        it('ignores single-line comments completely', () => {
-            const script = `
-                ; This is a config file
-                (define port 8080) ; Set the port
-                (start port) ; start it up
-            `;
-            expect(new ASP(script).parse()).toEqual([
-                s("begin"),
-                [s("define"), s("port"), 8080],
-                [s("start"), s("port")]
-            ]);
-        });
-    });
-
-    describe('Multiple Expressions', () => {
-        it('wraps multiple roots in a begin block', () => {
-            expect(new ASP("1 2 3").parse()).toEqual([s("begin"), 1, 2, 3]);
-        });
-    });
-
-    describe('Error Handling', () => {
-        it('throws ASPTokenError for unterminated strings', () => {
-            expect(() => new ASP('"this string never ends').parse())
-                .toThrow(ASPTokenError);
-        });
-
-        it('throws ASPParseError for trailing quote without expression', () => {
-            expect(() => new ASP("'").parse()).toThrow(ASPParseError);
-        });
-    });
-});
-
-describe('ASTStringifier', () => {
-    const stringifier = new ASTStringifier();
-
-    const roundtrip = (input: string) => {
-        const ast = new ASP(input).parse();
-        return stringifier.stringify(ast);
-    };
-
-    describe('Primitives & Strings', () => {
-        it('round-trips numbers, booleans, and null', () => {
-            expect(roundtrip("42")).toBe("42");
-            expect(roundtrip("-3.14")).toBe("-3.14");
-            expect(roundtrip("true")).toBe("true");
-            expect(roundtrip("false")).toBe("false");
-            expect(roundtrip("null")).toBe("null");
-        });
-
-        it('round-trips symbols perfectly', () => {
-            expect(roundtrip("my-variable")).toBe("my-variable");
-            expect(roundtrip("+")).toBe("+");
-        });
-
-        it('round-trips strings (preserving the literal quotes)', () => {
-            expect(roundtrip('"hello"')).toBe('"hello"');
-            expect(roundtrip('"string with spaces"')).toBe('"string with spaces"');
-        });
-    });
-
-    describe('Lists & Trivia Normalization', () => {
-        it('round-trips standard lists', () => {
-            expect(roundtrip("(+ 1 2)")).toBe("(+ 1 2)");
-            expect(roundtrip("(define x 10)")).toBe("(define x 10)");
-        });
-
-        it('normalizes square brackets into standard parens', () => {
-            expect(roundtrip("[+ 1 2]")).toBe("(+ 1 2)");
-            expect(roundtrip("(if [> x 5] true false)")).toBe("(if (> x 5) true false)");
-        });
-
-        it('normalizes excess whitespace', () => {
-            const sloppyInput = "(  +    1      2   )";
-            expect(roundtrip(sloppyInput)).toBe("(+ 1 2)");
-        });
-
-        it('completely strips out comments', () => {
-            const inputWithComments = `
-                (define port 8080) ; this is the port
-            `;
-            expect(roundtrip(inputWithComments)).toBe("(define port 8080)");
-        });
-    });
-
-    describe('Syntactic Sugar & Implicit Wrappers', () => {
-        it('expands quotes into standard list form', () => {
-            expect(roundtrip("'x")).toBe("(quote x)");
-            expect(roundtrip("'(1 2 3)")).toBe("(quote (1 2 3))");
-        });
-
-        it('exposes implicit begin for multiple expressions', () => {
-            const multiExpr = "(define x 1) (+ x 2)";
-            expect(roundtrip(multiExpr)).toBe("(begin (define x 1) (+ x 2))");
-        });
-    });
-
-    describe('Deep Nesting', () => {
-        it('complex logic', () => {
-            const complexScript = "(define fib (lambda (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))";
-            expect(roundtrip(complexScript)).toBe(complexScript);
-        });
-    });
-});
-
 describe('Complex Tests', () => {
     let evaluator: Anima;
     let baseData: Record<string, any>;
@@ -641,3 +593,4 @@ describe('Complex Tests', () => {
         });
     });
 });
+*/

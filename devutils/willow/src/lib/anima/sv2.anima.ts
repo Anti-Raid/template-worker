@@ -126,6 +126,7 @@ export const BUILTIN_PROCS: Record<symbol, Builtin> = {
         }
         return lst;
     }),
+    // todo
     [OP_CONS]: new Builtin((vm, argCount, expr, scope) => {
         if (argCount != 2) throw new Error("cons requires 2 arguments [cons a d]");
         const a = vm.evalinner(expr[1], scope);
@@ -228,6 +229,7 @@ export const BUILTIN_PROCS: Record<symbol, Builtin> = {
         
         return result;
     }),
+    // todo end
     [OP_APPLY]: new Builtin((vm, argCount, expr, scope) => {
         if (argCount < 2) throw new Error("apply requires at least 2 arguments (apply procedure [arg...] lst)");
         
@@ -253,6 +255,7 @@ export const BUILTIN_PROCS: Record<symbol, Builtin> = {
 
         return vm.execproc(proc, args, scope);
     }),
+    // todo
     [OP_NOT]: new Builtin((vm, argCount, expr, scope) => {
         if (argCount != 1) throw new Error("not requires 1 argument");
         return !isTruthy(vm.evalinner(expr[1], scope));
@@ -528,6 +531,7 @@ export const SPECIAL_FORM_PROCS: Record<symbol, SpecialForm> = {
 export class Anima {
     disableLambda: boolean
     disableDefine: boolean
+    steps: number;
     maxSteps: number; // 0 to disable
 
     #currExprState = { expr: null as any };
@@ -535,11 +539,12 @@ export class Anima {
     constructor(opts?: {disableLambda?: boolean, disableDefine?: boolean, maxSteps?: number}) {
         this.disableLambda = opts?.disableLambda || false
         this.disableDefine = opts?.disableDefine || false
+        this.steps = 0;
         this.maxSteps = opts?.maxSteps || 0
     }
 
     public evaluate(expr: any, rawData: Record<string, any>): any {
-        const globalScope = new AnimaScope(rawData, null, {steps: 0})
+        const globalScope = new AnimaScope(rawData, null)
         const executionScope = globalScope.nest(); // Any "define" calls now write to this temporary scope
         return this.evalinner(expr, executionScope);
     }
@@ -551,8 +556,8 @@ export class Anima {
         let scope = initialScope;
 
         while (true) {
-            scope.state.steps++;
-            if (this.maxSteps && scope.state.steps > this.maxSteps) {
+            this.steps++;
+            if (this.maxSteps && this.steps > this.maxSteps) {
                 throw new Error(`Execution Limits Exceeded: Script ran for more than ${this.maxSteps} cycles.`);
             }
 

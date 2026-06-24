@@ -73,18 +73,14 @@ export class AnimaScope {
     #data: Record<string | symbol, any>;
     #outer: AnimaScope | null;
 
-    /** gas/steps the vm has taken. Each vm eval loop takes 1 step, JS funcs can also increment steps etc as they desire */
-    state: {steps: number}; 
-
-    constructor(data: Record<string, any>, outer: AnimaScope | null, state: {steps: number}) {
+    constructor(data: Record<string, any>, outer: AnimaScope | null) {
         this.#data = data
         this.#outer = outer
-        this.state = state
     }
 
     nest(): AnimaScope {
         // Nested scopes don't need to be reactive
-        return new AnimaScope(Object.create(null), this, this.state);
+        return new AnimaScope(Object.create(null), this);
     }
 
     get(key: symbol): any {
@@ -218,7 +214,8 @@ export const BUILTINS_OPS = new Set([
     OP_SUB,
     OP_MUL,
     OP_DIV,
-    OP_MODULO
+    OP_MODULO,
+    OP_REMAINDER
 ]);
 
 export class ASPTokenError extends Error {
