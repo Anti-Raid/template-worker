@@ -173,6 +173,7 @@ export const OP_SUB    = Symbol.for("-");
 export const OP_MUL    = Symbol.for("*");
 export const OP_DIV    = Symbol.for("/");
 export const OP_MODULO = Symbol.for("modulo");
+export const OP_REMAINDER = Symbol.for("remainder")
 
 export const SPECIAL_FORMS = new Set([
     OP_DEFINE, 

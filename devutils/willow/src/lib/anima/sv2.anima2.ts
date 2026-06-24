@@ -45,7 +45,8 @@ import {
   OP_LETSTAR,
   IProcedure,
   DottedPair,
-  ASTStringifier
+  ASTStringifier,
+  OP_REMAINDER
 } from "./common";
 import { Cons } from "./list";
 
@@ -96,6 +97,19 @@ export enum OpCode {
     // Given proc followed by nargs arguments pushed to stack followed by nargs in stack, perform a (apply proc args... rem-args-lst)
     INTRINSIC_APPLY, // non-tail-call (creates its own stack frame)
     INTRINSIC_TAIL_APPLY, // tail-call (overwrites existing frame)
+
+    // Given n values on stack followed by nargs in stack, adds/subs/muls/divs all of them and pushes the result to stack
+    INTRINSIC_ADD,
+    INTRINSIC_SUB,
+    INTRINSIC_MUL,
+    INTRINSIC_DIV,
+
+    // 2-arg, no nargs
+    INTRINSIC_MODULO, 
+    INTRINSIC_REMAINDER,
+
+    // list, same as add/sub/mul/div in syntax
+    INTRINSIC_LIST
 }
 
 // TODO: Use LEB128 (thanks gemini for letting me know this exists!) to encode numbers
@@ -143,7 +157,7 @@ export class ByteCode {
             }
         } else if (typeof v === "boolean") {
             this.inst.push(v ? OpCode.PUSH__TRUE : OpCode.PUSH__FALSE)
-        } else if(Array.isArray(v) && v.length === 0) {
+        } else if((Array.isArray(v) && v.length === 0) || v === null) {
             this.inst.push(OpCode.PUSH__EMPTYLIST)
         } else if (v === undefined) {
             this.inst.push(OpCode.PUSH__VOID)
@@ -217,6 +231,34 @@ export class ByteCode {
 
     intrinsicTailApply() {
         this.inst.push(OpCode.INTRINSIC_TAIL_APPLY)
+    }
+
+    intrinsicAdd() {
+        this.inst.push(OpCode.INTRINSIC_ADD)
+    }
+
+    intrinsicSub() {
+        this.inst.push(OpCode.INTRINSIC_SUB)
+    }
+
+    intrinsicMul() {
+        this.inst.push(OpCode.INTRINSIC_MUL)
+    }
+
+    intrinsicDiv() {
+        this.inst.push(OpCode.INTRINSIC_DIV)
+    }
+
+    intrinsicModulo() {
+        this.inst.push(OpCode.INTRINSIC_MODULO)
+    }
+
+    intrinsicRemainder() {
+        this.inst.push(OpCode.INTRINSIC_REMAINDER)
+    }
+
+    intrinsicList() {
+        this.inst.push(OpCode.INTRINSIC_LIST)
     }
 
     #freezeObj(obj: any) {
@@ -352,7 +394,31 @@ export class ByteCode {
                     line += `INTRINSIC_TAIL_APPLY`
                     idx += 1;
                     break;
-
+                case OpCode.INTRINSIC_ADD:
+                    line += `INTRINSIC_ADD`;
+                    idx += 1
+                    break;
+                case OpCode.INTRINSIC_SUB:
+                    line += `INTRINSIC_SUB`;
+                    idx += 1
+                    break;
+                case OpCode.INTRINSIC_MUL:
+                    line += `INTRINSIC_MUL`;
+                    idx += 1
+                    break;
+                case OpCode.INTRINSIC_DIV:
+                    line += `INTRINSIC_DIV`;
+                    idx += 1
+                    break;
+                case OpCode.INTRINSIC_MODULO:
+                    line += `INTRINSIC_MODULO`
+                    break
+                case OpCode.INTRINSIC_REMAINDER:
+                    line += `INTRINSIC_REMAINDER`
+                    break
+                case OpCode.INTRINSIC_LIST:
+                    line += `INTRINSIC_LIST`
+                    break
                 default:
                     line += `UNKNOWN_OPCODE (${opcode})`;
                     idx += 1;
@@ -453,6 +519,19 @@ export class AnimaCompiler {
                 // Intrinsic optimizations
                 case OP_APPLY:
                     this.#optApply(expr, opts, syntaxCtx)
+                    return
+                case OP_ADD:
+                case OP_SUB:
+                case OP_MUL:
+                case OP_DIV:
+                    this.#optIntrinsicNormal(expr, opts, syntaxCtx)
+                    return
+                case OP_MODULO:
+                case OP_REMAINDER:
+                    this.#optIntrinsicTwoArgs(expr, opts, syntaxCtx)
+                    return
+                case OP_LIST:
+                    this.#optList(expr, opts, syntaxCtx)
                     return
             }
         }
@@ -979,6 +1058,68 @@ export class AnimaCompiler {
             }
         }
     }
+
+    /** Optimizes intrinsic ops to a INTRINSIC_ADD/SUB/MUL/DIV */ 
+    #optIntrinsicNormal(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
+        const op = expr[0]
+
+        // Push args
+        const nargs = expr.length - 1; // expr - Symbol(op)
+        for(let i = 1; i < expr.length; i++) {
+            this.#compile(expr[i], { ...opts, leaveOnStack: true, isTail: false });
+        }
+        // Due to the vararg builtin function, normal intrinsics also expects nargs at top of the stack
+        opts.bc.push(nargs);
+        // Now we're ready to do the intrinsic
+        if (op === OP_ADD) opts.bc.intrinsicAdd()
+        else if (op === OP_SUB) opts.bc.intrinsicSub()
+        else if (op === OP_MUL) opts.bc.intrinsicMul()
+        else if (op === OP_DIV) opts.bc.intrinsicDiv()
+        else throw new Error(`internal error: no intrinsic for op ${op}`)
+        if (!opts.leaveOnStack) {
+            opts.bc.pop();
+        }
+    }
+
+    #optIntrinsicTwoArgs(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
+        const op = expr[0]
+
+        if (expr.length !== 3) {
+            throw new Error(`${op} requires exactly 2 arguments, got ${expr.length - 1}`);
+        }
+
+        this.#compile(expr[1], { ...opts, leaveOnStack: true, isTail: false });
+        this.#compile(expr[2], { ...opts, leaveOnStack: true, isTail: false });
+        
+        if (op === OP_MODULO) opts.bc.intrinsicModulo();
+        if (op === OP_REMAINDER) opts.bc.intrinsicRemainder();
+        
+        if (!opts.leaveOnStack) {
+            opts.bc.pop();
+        }
+    }
+
+    /** Optimizes list to an INTRINSIC_LIST */ 
+    #optList(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
+        const op = expr[0]
+
+        // Push args
+        const nargs = expr.length - 1; // expr - Symbol(op)
+        if (nargs === 0) {
+            // We can optimize this down to an empty list
+            opts.bc.push([])
+        } else {
+            for(let i = 1; i < expr.length; i++) {
+                this.#compile(expr[i], { ...opts, leaveOnStack: true, isTail: false });
+            }
+            // Due to the vararg builtin function, normal intrinsics also expects nargs at top of the stack
+            opts.bc.push(nargs);
+            opts.bc.intrinsicList()
+        }
+        if (!opts.leaveOnStack) {
+            opts.bc.pop();
+        }
+    }
 }
 
 /** A template for a closure that can then be bound to a scope */
@@ -1001,34 +1142,6 @@ export class Closure extends IProcedure {
     }
 }
 
-const TEST_PROG = `
-(define union
-    (lambda (a b)
-        (define (in a rst) 
-        (cond 
-            [(empty? rst) #f]
-            [(equal? a (car rst)) #t]
-            [else (in a (cdr rst))]))
-
-        (cond
-        ; if either set is empty, the other one if the union
-        [(empty? a) b]
-        [(empty? b) a]
-        ; if b is in a, skip it
-        [(in (car b) a) (union a (cdr b))]
-        [else (cons (car b) (union a (cdr b)))])))
-
-(define sum-of-squares
-  (lambda (a)
-    ; do x*x for every element in a, then sum them all up
-    (apply + [map (lambda (x) (* x x)) a])))
-        
-    (list (equal? (union '(a b d e f h j) '(f c e g a)) '(c g a b d e f h j)) (equal? (sum-of-squares (list 1 3 5 7)) 84))
-`
-//export const TEST_PROG = `(cond [#f 1] [#f 2])`
-
-export const TEST_PROG_BC = new AnimaCompiler().compileExpr(new ASP(TEST_PROG).parse(), false, false)
-
 /** 
  * A builtin function. Builtin functions do not have access to their own lexical scope (at least not yet) 
  * 
@@ -1040,8 +1153,6 @@ export class BuiltinFunction extends IProcedure {
     // number of args needed on stack top, -1 means variadic
     // if we are in variadic mode, the top of stack will contain 
     // the number of arguments pushed on the stack
-    //
-    // Logic is similar to:
     nargs: number 
     bc: ByteCode
     needsScope: boolean // do we need scope or not (if false, this will use the global execution scope as the scope in bytecode)
@@ -1061,6 +1172,38 @@ const BUILTINS_APPLY = new BuiltinFunction(-1, false, (bc) => {
     bc.intrinsicTailApply()
 });
 
+const BUILTINS_ADD = new BuiltinFunction(-1, false, (bc) => {
+    // note to self: its vararg, so nargs is at top of stack
+    bc.intrinsicAdd()
+});
+
+const BUILTINS_SUB = new BuiltinFunction(-1, false, (bc) => {
+    // note to self: its vararg, so nargs is at top of stack
+    bc.intrinsicSub()
+});
+
+const BUILTINS_MUL = new BuiltinFunction(-1, false, (bc) => {
+    // note to self: its vararg, so nargs is at top of stack
+    bc.intrinsicMul()
+});
+
+const BUILTINS_DIV = new BuiltinFunction(-1, false, (bc) => {
+    // note to self: its vararg, so nargs is at top of stack
+    bc.intrinsicDiv()
+});
+
+const BUILTINS_MODULO = new BuiltinFunction(2, false, (bc) => {
+    bc.intrinsicModulo()
+});
+
+const BUILTINS_REMAINDER = new BuiltinFunction(2, false, (bc) => {
+    bc.intrinsicRemainder()
+});
+
+const BUILTINS_LIST = new BuiltinFunction(-1, false, (bc) => {
+    bc.intrinsicList()
+});
+
 export class NativeFunction extends IProcedure {
     constructor(
         public name: string,
@@ -1071,8 +1214,18 @@ export class NativeFunction extends IProcedure {
     }
 }
 
-const BUILTIN_PROCS: Record<symbol, BuiltinFunction | NativeFunction> = {
-    [OP_APPLY]: BUILTINS_APPLY
+/** Registry of all builtin builtin procedures */
+export const BUILTIN_PROCS: Record<symbol, BuiltinFunction | NativeFunction> = {
+    [OP_APPLY]: BUILTINS_APPLY,
+    [OP_ADD]: BUILTINS_ADD,
+    [OP_SUB]: BUILTINS_SUB,
+    [OP_MUL]: BUILTINS_MUL,
+    [OP_DIV]: BUILTINS_DIV,
+    [OP_MODULO]: BUILTINS_MODULO,
+    [OP_REMAINDER]: BUILTINS_REMAINDER,
+    [OP_LIST]: BUILTINS_LIST,
+    // @ts-ignore
+    __proto__: null
 }
 
 class CallFrame {
@@ -1265,8 +1418,108 @@ export class AnimaVM {
                     this.#dispatchCall(target, finalArgs.length, isTail, frame, frames, stack, execScope);
                     break;
                 }
+                case OpCode.INTRINSIC_ADD: {
+                    const nargs = stack.pop() as number;
+                    let acc = 0; 
+                    for (let i = 0; i < nargs; i++) {
+                        const val = stack[stack.length - nargs + i]
+                        if (typeof val !== "number") throw new Error(`+ requires numbers, but received ${typeof val}`);
+                        acc += val
+                    }
+                    stack.length -= nargs
+                    stack.push(acc)
+                    break;
+                }
+                case OpCode.INTRINSIC_SUB: {
+                    const nargs = stack.pop() as number;
+                    if (nargs === 0) throw new Error("- requires at least 1 argument");
+                    
+                    if (nargs === 1) {
+                        const val = stack[stack.length - 1];
+                        if (typeof val !== "number") throw new Error(`- requires numbers, but received ${typeof val}`);
+                        stack[stack.length - 1] = -val; 
+                        break;
+                    }
+
+                    let acc = stack[stack.length - nargs];
+                    if (typeof acc !== "number") throw new Error(`- requires numbers, but received ${typeof acc}`);
+                    for (let i = 1; i < nargs; i++) {
+                        const val = stack[stack.length - nargs + i]
+                        if (typeof val !== "number") throw new Error(`- requires numbers, but received ${typeof val}`);
+                        acc -= val
+                    }
+                    stack.length -= nargs
+                    stack.push(acc)
+                    break
+                }
+                case OpCode.INTRINSIC_MUL: {
+                    const nargs = stack.pop() as number;
+                    let acc = 1; 
+                    for (let i = 0; i < nargs; i++) {
+                        const val = stack[stack.length - nargs + i]
+                        if (typeof val !== "number") throw new Error(`* requires numbers, but received ${typeof val}`);
+                        acc *= val
+                    }
+                    stack.length -= nargs
+                    stack.push(acc)
+                    break;
+                }
+                case OpCode.INTRINSIC_DIV: {
+                    const nargs = stack.pop() as number;
+                    if (nargs === 0) throw new Error("/ requires at least 1 argument");
+                    
+                    if (nargs === 1) {
+                        const val = stack[stack.length - 1];
+                        if (typeof val !== "number") throw new Error(`/ requires numbers, but received ${typeof val}`);
+                        if (val === 0) throw new Error("division by zero");
+                        stack[stack.length - 1] = 1/val; 
+                        break;
+                    }
+
+                    let acc = stack[stack.length - nargs];
+                    if (typeof acc !== "number") throw new Error(`/ requires numbers, but received ${typeof acc}`);
+                    for (let i = 1; i < nargs; i++) {
+                        const val = stack[stack.length - nargs + i]
+                        if (typeof val !== "number") throw new Error(`/ requires numbers, but received ${typeof val}`);
+                        if (val === 0) throw new Error("/: division by zero")
+                        acc /= val
+                    }
+                    stack.length -= nargs
+                    stack.push(acc)
+                    break
+                }
+                case OpCode.INTRINSIC_MODULO: {
+                    const a = stack[stack.length-2]
+                    const b = stack[stack.length-1]
+                    if (typeof a !== "number" || typeof b !== "number") throw new Error(`modulo: requires numbers, but received ${typeof a}/${typeof b}`);
+                    if (b === 0) throw new Error("modulo: division by zero");
+                    stack.pop()
+                    stack[stack.length-1] = ((a % b) + b) % b
+                    break
+                }
+                case OpCode.INTRINSIC_REMAINDER: {
+                    const a = stack[stack.length-2]
+                    const b = stack[stack.length-1]
+                    if (typeof a !== "number" || typeof b !== "number") throw new Error(`remainder: requires numbers, but received ${typeof a}/${typeof b}`);
+                    if (b === 0) throw new Error("remainder: division by zero");
+                    stack.pop()
+                    stack[stack.length-1] = a % b
+                    break
+                }
+                case OpCode.INTRINSIC_LIST: {
+                    const nargs = stack.pop() as number;
+                    const lst = stack.splice(stack.length - nargs, nargs);
+                    stack.push(lst);
+                    break
+                }
             }
         }
+        
+        if (stack.length > 1) {
+            console.error(`Stack leak detected: ${stack.length} elems instead of 1, stack: ${stack}`)
+        }
+        if (stack.length > 0) return stack.pop()
+        return undefined
     }
 
     /**
@@ -1354,3 +1607,31 @@ export class AnimaVM {
         }
     }
 }
+
+const TEST_PROG = `
+(define union
+    (lambda (a b)
+        (define (in a rst) 
+        (cond 
+            [(empty? rst) #f]
+            [(equal? a (car rst)) #t]
+            [else (in a (cdr rst))]))
+
+        (cond
+        ; if either set is empty, the other one if the union
+        [(empty? a) b]
+        [(empty? b) a]
+        ; if b is in a, skip it
+        [(in (car b) a) (union a (cdr b))]
+        [else (cons (car b) (union a (cdr b)))])))
+
+(define sum-of-squares
+  (lambda (a)
+    ; do x*x for every element in a, then sum them all up
+    (apply + [map (lambda (x) (* x x)) a])))
+        
+    (list (equal? (union '(a b d e f h j) '(f c e g a)) '(c g a b d e f h j)) (equal? (sum-of-squares (list 1 3 5 7)) 84))
+`
+//export const TEST_PROG = `(cond [#f 1] [#f 2])`
+
+export const TEST_PROG_BC = new AnimaCompiler().compileExpr(new ASP(TEST_PROG).parse(), false, false)
