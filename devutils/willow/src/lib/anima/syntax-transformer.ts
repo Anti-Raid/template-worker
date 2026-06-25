@@ -20,6 +20,7 @@ export class AnimaTransformer {
     transform(ast: any): any {
         return this.#transform(ast)
     }
+
     #transform(ast: any, ctx?: string): any {
         if (ast instanceof DottedPair) {
             ast.items = ast.items.map(i => this.#transform(i));
@@ -31,24 +32,32 @@ export class AnimaTransformer {
             const op = ast[0];
             if (op === OP_QUOTE) return ast; // cannot desugar a quote
             
-            // transform the inner first
-            const expanded = ast.map(i => this.#transform(i));
-            const expandedOp = expanded[0];
-
-            switch (expandedOp) {
+            switch (op) {
+                case OP_QUOTE: 
+                    return ast; 
                 case OP_COND:
-                    return this.#transformCond(expanded)
+                    // First transform to ifs', then transform the inner
+                    return this.#transform(this.#transformCond(ast));
                 case OP_DEFINE:
-                    return this.#transformDefineComplex(expanded)
+                    // First desugar the complex defines
+                    const [defResult, modified] = this.#transformDefineComplex(ast);
+                    if (modified) {
+                        // Complex -> normal define
+                        return this.#transform(defResult)
+                    }
+                    ast = defResult as any[];
+                    break
                 case OP_LET:
-                    return this.#transformLet(expanded)
+                    return this.#transform(this.#transformLet(ast));
                 case OP_LETSTAR:
-                    return this.#transformLetStar(expanded)
+                    return this.#transform(this.#transformLetStar(ast));
                 case OP_LETREC:
-                    return this.#transformLetrec(expanded)
+                    return this.#transform(this.#transformLetrec(ast));
+                case OP_LAMBDA:
+                    return this.#transformLambda(ast);
             }
 
-            return expanded;
+            return ast.map((i: any) => this.#transform(i));
         }
 
         // if no transformations apply, just return the original ast
@@ -85,10 +94,10 @@ export class AnimaTransformer {
             }
         }
 
-        return result; // Fixed
+        return result;
     }
 
-    #transformDefineComplex(expr: any[]) {
+    #transformDefineComplex(expr: any[]): [any[], boolean] {
         if(expr.length < 3) {
             throw new Error(`define must be in format ["define" varname arg] or [define (func_name arg1 arg2... argN) body_expr...] but have ${expr.length-1} arguments`)
         }
@@ -99,7 +108,7 @@ export class AnimaTransformer {
                 throw new Error(`define must be in format (define varname expr), but received ${expr.length - 1} arguments`);
             }
 
-            return expr
+            return [expr, false]
         } else if (Array.isArray(expr[1])) { 
             // (define (func_name arg1 arg2) body_expr...), this one just gets rewritten to a normal define with lambda
             if (expr[1].length === 0) throw new Error("define: missing function name");
@@ -107,7 +116,7 @@ export class AnimaTransformer {
             const params = expr[1].slice(1);
             const body = expr.slice(2);
             const equivExpr = [OP_DEFINE, funcName, [OP_LAMBDA, params, ...body]];
-            return equivExpr
+            return [equivExpr, true]
         } else if (expr[1] instanceof DottedPair) {
             // (define (func arg1 . rest) body...)
             if (expr[1].items.length === 0) throw new Error("define: missing function name");
@@ -120,10 +129,46 @@ export class AnimaTransformer {
             const lambdaArgs = params.length === 0 ? expr[1].rest : new DottedPair(params, expr[1].rest);
 
             const equivExpr = [OP_DEFINE, funcName, [OP_LAMBDA, lambdaArgs, ...body]];
-            return equivExpr
+            return [equivExpr, true]
         } else {
             throw new Error(`define: ${String(expr[1])} not symbol or list syntax`)
         }
+    }
+
+    #transformLambda(expr: any[]) {
+        const args = expr[1]
+        const rawBody = expr.slice(2)
+
+        const internalDefines: any[][] = []
+        const body: any[] = []
+        let isAtTop = true
+
+        for (let stmt of rawBody) {
+            // Transform all inner statements
+            stmt = this.#transform(stmt, "lambda")
+
+            if (Array.isArray(stmt) && stmt[0] === OP_DEFINE) {
+                if (!isAtTop) throw new Error(`Internal define (${expr}) can only exist at the top-level of a lambda`)
+                internalDefines.push(stmt)
+                continue
+            }
+            isAtTop = false
+            body.push(stmt)
+        }
+
+        // If no defines to transform, just return the transformed body
+        if (internalDefines.length === 0) {
+            return [OP_LAMBDA, args, ...body]
+        }
+        
+        // Extract the names and values from the [OP_DEFINE, name, value] nodes
+        // 
+        // Then wrap in a letrec which will then be processed into a lambda with set!'s
+        const letrecBindings = internalDefines.map(def => [def[1], def[2]])
+        const letrecExpr = [OP_LETREC, letrecBindings, ...body]
+        const desugaredBody = this.#transform(letrecExpr, "lambda")
+
+        return [OP_LAMBDA, args, desugaredBody]
     }
 
     #transformLet(expr: any[], ctx?: string) {

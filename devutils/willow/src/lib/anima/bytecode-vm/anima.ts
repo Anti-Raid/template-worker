@@ -1,7 +1,7 @@
-import { AnimaScope, ExposedProps } from "../common";
+import { ExposedProps } from "../common";
 import { createScope } from "./bootstrap";
 import { AnimaCompiler } from "./compiler";
-import { AnimaVM, BuiltinFunction, ByteCode, Closure, ClosureTemplate, NativeFunction } from "./vm";
+import { AnimaVM, BuiltinFunction, ByteCode, Closure, ClosureTemplate, NativeFunction, Globals } from "./vm";
 
 interface AnimaOpts {
     disableLambda?: boolean,
@@ -13,7 +13,7 @@ interface AnimaOpts {
 export class Anima {
     #vm: AnimaVM
     #comp: AnimaCompiler
-    #scope: AnimaScope
+    #scope: Globals
     #disableLambda: boolean
     #disableDefine: boolean
     #disableSet: boolean
@@ -41,4 +41,4 @@ export class Anima {
 }
 
 // Re-export
-export { AnimaCompiler, ByteCode, AnimaScope, ExposedProps, ClosureTemplate, NativeFunction, BuiltinFunction, Closure }
+export { AnimaCompiler, ByteCode, Globals, ExposedProps, ClosureTemplate, NativeFunction, BuiltinFunction, Closure }

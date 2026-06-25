@@ -1,7 +1,7 @@
-import { AnimaScope, OP_ADD, OP_APPLY, OP_DIV, OP_EQ, OP_LIST, OP_MODULO, OP_MUL, OP_REMAINDER, OP_SUB, OP_UI_GET } from "../common";
+import { OP_ADD, OP_APPLY, OP_DIV, OP_EQ, OP_LIST, OP_MODULO, OP_MUL, OP_REMAINDER, OP_SUB, OP_UI_GET } from "../common";
 import { Cons } from "../list";
 import { AnimaCompiler, ByteCodeBuilder } from "./compiler";
-import { AnimaVM, BuiltinFunction, NativeFunction } from "./vm";
+import { AnimaVM, BuiltinFunction, Globals, NativeFunction } from "./vm";
 
 class MapObj {
     #iters: (ArrayIterator<any> | Generator<any, void, unknown>)[]
@@ -47,7 +47,7 @@ const newBc = (initializer: (bc: ByteCodeBuilder) => void) => {
     return bc.build()
 }
 
-const privScope = AnimaScope.newWith({
+const privScope = Globals.newWith({
     [Symbol.for("%MapObj")]: new NativeFunction("%MapObj", -1, (...args) => {
         return new MapObj(args)
     }),
@@ -64,40 +64,40 @@ const privScope = AnimaScope.newWith({
         if(!Array.isArray(args[0])) throw new Error(`internal error: %ArrayPush called on non-array ${args[0]}`)
         args[0].push(args[1])
     }),
-    [OP_APPLY]: new BuiltinFunction(-1, false, newBc((bc) => {
+    [OP_APPLY]: new BuiltinFunction(-1, newBc((bc) => {
         // note to self: its vararg, so nargs is at top of stack. As this is a stub that exists to trigger
         // the intrinsic, the apply is also in tail position, so emit a tail apply instead of apply
         bc.intrinsicTailApply()
     })),
-    [OP_ADD]: new BuiltinFunction(-1, false, newBc((bc) => {
+    [OP_ADD]: new BuiltinFunction(-1, newBc((bc) => {
         // note to self: its vararg, so nargs is at top of stack
         bc.intrinsicAdd()
     })),
-    [OP_SUB]: new BuiltinFunction(-1, false, newBc((bc) => {
+    [OP_SUB]: new BuiltinFunction(-1, newBc((bc) => {
         // note to self: its vararg, so nargs is at top of stack
         bc.intrinsicSub()
     })),
-    [OP_MUL]: new BuiltinFunction(-1, false, newBc((bc) => {
+    [OP_MUL]: new BuiltinFunction(-1, newBc((bc) => {
         // note to self: its vararg, so nargs is at top of stack
         bc.intrinsicMul()
     })),
-    [OP_DIV]: new BuiltinFunction(-1, false, newBc((bc) => {
+    [OP_DIV]: new BuiltinFunction(-1, newBc((bc) => {
         // note to self: its vararg, so nargs is at top of stack
         bc.intrinsicDiv()
     })),
-    [OP_MODULO]: new BuiltinFunction(2, false, newBc((bc) => {
+    [OP_MODULO]: new BuiltinFunction(2, newBc((bc) => {
         bc.intrinsicModulo()
     })),
-    [OP_REMAINDER]: new BuiltinFunction(2, false, newBc((bc) => {
+    [OP_REMAINDER]: new BuiltinFunction(2, newBc((bc) => {
         bc.intrinsicRemainder()
     })),
-    [OP_LIST]: new BuiltinFunction(-1, false, newBc((bc) => {
+    [OP_LIST]: new BuiltinFunction(-1, newBc((bc) => {
         bc.intrinsicList()
     })),
-    [OP_UI_GET]: new BuiltinFunction(-1, false, newBc((bc) => {
+    [OP_UI_GET]: new BuiltinFunction(-1, newBc((bc) => {
         bc.intrinsicUiGet()
     })),
-    [OP_EQ]: new BuiltinFunction(-1, false, newBc((bc) => {
+    [OP_EQ]: new BuiltinFunction(-1, newBc((bc) => {
         bc.intrinsicEq()
     })),
 }, false);
@@ -119,19 +119,20 @@ const PRELUDE = `
 const bootstrapVM = new AnimaVM();
 const bootstrapComp = new AnimaCompiler()
 const PRELUDE_BC = bootstrapComp.compileStr(PRELUDE)
+console.log(PRELUDE_BC.constants[0].code.toString())
 bootstrapVM.evaluate(PRELUDE_BC, privScope)
 
-const publicScope = AnimaScope.new(false); 
-for (const [sym, value] of privScope.entries()) {
+
+/*const publicScope = Globals.newWith({}, false); 
+for (const [sym, value] of privScope.data.entries()) {
     const symName = Symbol.keyFor(sym) || sym.description || "%Unknown";
     
     // Drop prelude fns in the public root scope
     if (!symName.startsWith("%")) {
-        publicScope.define(sym, value);
+        publicScope.data.set(sym, value);
     }
-}
-publicScope.setFrozen(true)
+}*/
 
-export function createScope(): AnimaScope {
-    return publicScope.nest();
+export function createScope(): Globals {
+    return privScope
 }

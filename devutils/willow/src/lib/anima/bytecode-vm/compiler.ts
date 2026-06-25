@@ -89,14 +89,26 @@ export class ByteCodeBuilder {
     negate() { this.inst.push(OpCode.NEGATE) }
     dup() { this.inst.push(OpCode.DUP) }
     pop() { this.inst.push(OpCode.POP) }
-    getVar(varname: symbol) {
+    getVar(varname: symbol, scope: CompilerScope) {
+        // Check if we can resolve it to a local/upvar
+        const resolved = scope.resolve(varname)
+        if (resolved) {
+            // resolved -> [depth, index]
+            const [depth, index] = resolved
+            if (depth === 0) {
+                this.inst.push(OpCode.GETLOCAL, index)
+            } else {
+                this.inst.push(OpCode.GETUPVAR, depth, index)
+            }
+            return
+        }
         const symIdx = this.#knownSymbols.get(varname)
         if(symIdx) {
-            this.inst.push(OpCode.GETVAR, symIdx)
+            this.inst.push(OpCode.GETGLOBALS, symIdx)
         } else {
             const idx = this.constants.push(varname) - 1
             this.#knownSymbols.set(varname, idx)
-            this.inst.push(OpCode.GETVAR, idx)
+            this.inst.push(OpCode.GETGLOBALS, idx)
         }
     }
     defineVar(varname: symbol) {
@@ -109,14 +121,27 @@ export class ByteCodeBuilder {
             this.inst.push(OpCode.DEFINEVAR, idx)
         }
     }
-    setVar(varname: symbol) {
+    setVar(varname: symbol, scope: CompilerScope) {
+        // Check if we can resolve it to a local/upvar
+        const resolved = scope.resolve(varname)
+        if (resolved) {
+            // resolved -> [depth, index]
+            const [depth, index] = resolved
+            if (depth === 0) {
+                this.inst.push(OpCode.SETLOCAL, index)
+            } else {
+                this.inst.push(OpCode.SETUPVAR, depth, index)
+            }
+            return
+        }
+
         const symIdx = this.#knownSymbols.get(varname)
         if(symIdx) {
-            this.inst.push(OpCode.SETVAR, symIdx)
+            this.inst.push(OpCode.SETGLOBALS, symIdx)
         } else {
             const idx = this.constants.push(varname) - 1
             this.#knownSymbols.set(varname, idx)
-            this.inst.push(OpCode.SETVAR, idx)
+            this.inst.push(OpCode.SETGLOBALS, idx)
         }
     }
     jumpIfTrue() {
@@ -203,6 +228,30 @@ export class ByteCodeBuilder {
     }
 }
 
+/** Helper utility for keeping track of variable scoping */
+class CompilerScope {
+    locals: symbol[] = [];
+    outer: CompilerScope | null;
+    
+    constructor(outer: CompilerScope | null = null) {
+        this.outer = outer;
+    }
+
+    addLocal(sym: symbol) {
+        // Returns the index the variable is defined at
+        return this.locals.push(sym) - 1;
+    }
+
+    // Returns [depth, index] or null if it's a global
+    resolve(sym: symbol, depth = 0): [number, number] | null {
+        const index = this.locals.indexOf(sym);
+        if (index !== -1) return [depth, index];
+        
+        if (this.outer) return this.outer.resolve(sym, depth + 1);
+        return null;
+    }
+}
+
 interface CmpOpts {
     leaveOnStack: boolean // whether to leave created values on the stack or not
     isTail: boolean // whether this is a tail-call or not (for tco)
@@ -211,6 +260,7 @@ interface CmpOpts {
     disableDefine: boolean
     disableLambda: boolean
     disableSet: boolean
+    scope: CompilerScope
 }
 
 export class AnimaCompiler {
@@ -228,14 +278,14 @@ export class AnimaCompiler {
         if (tryOpt) trExpr = this.o.optimize(trExpr)
 
         const bc = new ByteCodeBuilder();
-        this.#compile(trExpr, {leaveOnStack: true, isTail: true, bc, tryOpt, disableDefine, disableLambda, disableSet })
+        this.#compile(trExpr, {leaveOnStack: true, isTail: true, bc, tryOpt, disableDefine, disableLambda, disableSet, scope: new CompilerScope() })
         return bc.build()
     }
 
     #compile(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         // Raw values
         if (typeof expr === 'symbol') {
-            opts.bc.getVar(expr)
+            opts.bc.getVar(expr, opts.scope)
             if (!opts.leaveOnStack) opts.bc.pop()
             return
         } else if (typeof expr === "string") {
@@ -427,7 +477,12 @@ export class AnimaCompiler {
         opts.bc.push(this.#normalizeExpr(expr[1]))
     }
 
+    // note that the syntax transformer alr handles defines inside a lambda so
     #compileDefine(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
+        if (opts.scope.outer) {
+            throw new Error(`internal error: define found inside lambda-expr or other lexical scoping (let/let*/letrec), internal defines should be transformed by AnimaTransform prior to reaching here`);
+        }
+
         if (opts.disableDefine) {
             throw new Error("define expressions are disabled in this context");
         }
@@ -471,7 +526,7 @@ export class AnimaCompiler {
         //
         // This will place a e.g. (PUSH) <symbol>
         this.#compile(expr[2], { ...opts, leaveOnStack: true, isTail: false });
-        opts.bc.setVar(expr[1])
+        opts.bc.setVar(expr[1], opts.scope)
         if (opts.leaveOnStack) {
             opts.bc.push(undefined);
         }
@@ -506,6 +561,8 @@ export class AnimaCompiler {
             throw new Error(`lambda must be in format ["lambda", [bind-args...], body...] but only have ${expr.length-1} arguments`)
         }
 
+        const lambdaScope = new CompilerScope(opts.scope)
+
         let params: symbol[] = []
         let remParams: symbol | null = null
         if (Array.isArray(expr[1])) {
@@ -525,8 +582,12 @@ export class AnimaCompiler {
         const seen = new Set<symbol>();
         for(let i = 0; i < params.length; i++) {
             this.#ensureCanBind(params[i], seen, syntaxCtx || "lambda")
+            lambdaScope.addLocal(params[i])
         }
-        if (remParams) this.#ensureCanBind(remParams, seen, syntaxCtx || "lambda")
+        if (remParams) {
+            this.#ensureCanBind(remParams, seen, syntaxCtx || "lambda")
+            lambdaScope.addLocal(remParams)
+        }
 
         // Once we've verified the syntax, we can then drop the entire lambda if its not actually needed on the stack
         //
@@ -535,9 +596,9 @@ export class AnimaCompiler {
 
         // Compile lambda body
         const lambdaBc = new ByteCodeBuilder()
-        this.#compile(this.#wrapMulti(expr.slice(2)), {...opts, leaveOnStack: true, isTail: true, bc: lambdaBc})
+        this.#compile(this.#wrapMulti(expr.slice(2)), {...opts, leaveOnStack: true, isTail: true, bc: lambdaBc, scope: lambdaScope })
         lambdaBc.return()
-        const template = new ClosureTemplate(params, remParams, lambdaBc.build());
+        const template = new ClosureTemplate(params, remParams, lambdaBc.build(), lambdaScope.locals.length);
         opts.bc.newclosure(template)
     }
 

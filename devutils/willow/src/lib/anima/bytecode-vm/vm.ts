@@ -1,4 +1,4 @@
-import { AnimaScope, ExposedProps, IProcedure } from "../common";
+import { ExposedProps, IProcedure, MissingVarError } from "../common";
 import { isTruthy } from "../common";
 import { Cons } from "../list";
 
@@ -23,11 +23,16 @@ export enum OpCode {
     DUP,
     // Pops out the top argument of the stack
     POP,
-    // Get a variable from either the list of registered builtins or the current scope (GETVAR [varname-idx])
-    GETVAR,
-    // sets the top stack value on the stack on the current scope (SETVAR [varname-idx]), *always* pops stack top
-    SETVAR,
-    // defines the top stack value on the stack on the current scope (SETVAR [varname-idx]), *always* pops stack top
+
+    // Gets/sets variables
+    GETUPVAR, // <depth> <slot>
+    SETUPVAR, // <depth> <slot>, value on top of stack, *always* pops stack top
+    GETLOCAL, // <slot>
+    SETLOCAL, // <slot>, value on top of stack, *always* pops stack top
+    GETGLOBALS, // <symbol>
+    SETGLOBALS, // <symbol>, value on top of stack, *always* pops stack top
+
+    // defines the top stack value on the stack on the current scope (DEFINEVAR [varname-idx]), *always* pops stack top
     DEFINEVAR,
     // Jump if stack top is true, *always* pops stack top
     JUMPIFTRUE,
@@ -117,16 +122,32 @@ export class ByteCode {
                     line += `PUSH__U8 ${this.inst[idx + 1]}`;
                     idx += 2;
                     break;
-                case OpCode.GETVAR:
-                    line += `GETVAR ${this.#constToString(this.constants[this.inst[idx + 1]])}`;
+                case OpCode.GETUPVAR:
+                    line += `GETUPVAR (depth=${this.inst[idx + 1]}, slot=${this.inst[idx + 2]})`;
+                    idx += 3;
+                    break;
+                case OpCode.GETLOCAL:
+                    line += `GETLOCAL (slot=${this.inst[idx + 1]})`;
+                    idx += 2;
+                    break;
+                case OpCode.GETGLOBALS:
+                    line += `GETGLOBALS ${this.#constToString(this.constants[this.inst[idx + 1]])}`;
+                    idx += 2;
+                    break;
+                case OpCode.SETUPVAR:
+                    line += `SETUPVAR (depth=${this.inst[idx + 1]}, slot=${this.inst[idx + 2]})`;
+                    idx += 3;
+                    break;
+                case OpCode.SETLOCAL:
+                    line += `SETLOCAL (slot=${this.inst[idx + 1]})`;
+                    idx += 2;
+                    break;
+                case OpCode.SETGLOBALS:
+                    line += `SETGLOBALS ${this.#constToString(this.constants[this.inst[idx + 1]])}`;
                     idx += 2;
                     break;
                 case OpCode.DEFINEVAR:
                     line += `DEFINEVAR ${this.#constToString(this.constants[this.inst[idx + 1]])}`;
-                    idx += 2;
-                    break;
-                case OpCode.SETVAR:
-                    line += `SETVAR ${this.#constToString(this.constants[this.inst[idx + 1]])}`;
                     idx += 2;
                     break;
                 case OpCode.JUMPIFTRUE:
@@ -251,17 +272,19 @@ export class ClosureTemplate {
     params: symbol[]; // base (individual param binds)
     remParams: symbol | null; // where the remaining params should be bound too (if any). This implicitly makes a closure variadic as well
     code: ByteCode
+    numLocals: number
 
-    constructor(params: symbol[], remParams: symbol | null, code: ByteCode) {
+    constructor(params: symbol[], remParams: symbol | null, code: ByteCode, numLocals: number) {
         this.params = params
         this.remParams = remParams
         this.code = code
+        this.numLocals = numLocals
     }
 }
 
 /** An actual anima closure bound to a scope */
 export class Closure extends IProcedure {
-    constructor(public tmpl: ClosureTemplate, public scope: AnimaScope) {
+    constructor(public tmpl: ClosureTemplate, public scopes: VmScope[]) {
         super()
     }
 }
@@ -279,12 +302,10 @@ export class BuiltinFunction extends IProcedure {
     // the number of arguments pushed on the stack
     nargs: number 
     bc: ByteCode
-    needsScope: boolean // do we need scope or not (if false, this will use the global execution scope as the scope in bytecode)
 
-    constructor(nargs: number, needsScope: boolean, bc: ByteCode) {
+    constructor(nargs: number, bc: ByteCode) {
         super()
         this.nargs = nargs
-        this.needsScope = needsScope
         this.bc = bc
     }
 }
@@ -299,10 +320,27 @@ export class NativeFunction extends IProcedure {
     }
 }
 
+/** The scope the actual anima engine has/uses */
+export class VmScope {
+    constructor(public slots: any[]) {}
+}
+
+export class Globals {
+    constructor(public data: Map<symbol, any>, public frozen: boolean = false) {}
+
+    static newWith(fields: Record<symbol, any>, frozen: boolean = false) {
+        const map = new Map()
+        Object.getOwnPropertySymbols(fields).forEach((sym) => {
+            map.set(sym, fields[sym])
+        });
+        return new Globals(map, frozen);
+    }
+}
+
 class CallFrame {
     constructor(
         public code: ByteCode,
-        public scope: AnimaScope,
+        public scopes: VmScope[],
         public ip: number
     ) {}
 
@@ -321,13 +359,13 @@ class CallFrame {
 export class AnimaVM {
     constructor(public steps: number = 0, public maxSteps: number = 0) {}
 
-    public evaluate(code: ByteCode, scope: AnimaScope, props?: ExposedProps): any {
+    public evaluate(code: ByteCode, scope: Globals, props?: ExposedProps): any {
         return this.#evalinner(code, scope, props);
     }
 
-    #evalinner(code: ByteCode, execScope: AnimaScope, props?: ExposedProps): any {
+    #evalinner(code: ByteCode, execScope: Globals, props?: ExposedProps): any {
         // Initial frame and stack
-        let frames: CallFrame[] = [new CallFrame(code, execScope, 0)];
+        let frames: CallFrame[] = [new CallFrame(code, [], 0)];
         let stack: any[] = [];
 
         while (frames.length > 0) {
@@ -386,21 +424,49 @@ export class AnimaVM {
                     stack.pop()
                     break
                 }
-                case OpCode.GETVAR: {
+                case OpCode.GETUPVAR: {
+                    const depth = frame.readNext()
+                    const slot = frame.readNext()
+                    stack.push(frame.scopes[depth].slots[slot])
+                    break
+                }
+                case OpCode.GETLOCAL: {
+                    const slot = frame.readNext()
+                    stack.push(frame.scopes[0].slots[slot])
+                    break
+                }
+                case OpCode.GETGLOBALS: {
                     const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
-                    stack.push(frame.scope.get(varname))
+                    if (!execScope.data.has(varname)) throw new MissingVarError(`Variable '${String(varname)}' is not defined in the current scope.`)
+                    stack.push(execScope.data.get(varname))
+                    break
+                }
+                case OpCode.SETUPVAR: {
+                    const depth = frame.readNext()
+                    const slot = frame.readNext()
+                    const val = stack.pop()
+                    frame.scopes[depth].slots[slot] = val
+                    break
+                }
+                case OpCode.SETLOCAL: {
+                    const slot = frame.readNext()
+                    const val = stack.pop()
+                    frame.scopes[0].slots[slot] = val
+                    break
+                }
+                case OpCode.SETGLOBALS: {
+                    const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
+                    const val = stack.pop()
+                    if (execScope.frozen) throw new Error(`Variable '${String(varname)}' cannot be set in a frozen scope.`);
+                    if (!execScope.data.has(varname)) throw new MissingVarError(`Variable '${String(varname)}' is not defined in the current scope.`)
+                    execScope.data.set(varname, val)
                     break
                 }
                 case OpCode.DEFINEVAR: {
                     const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
                     const val = stack.pop()
-                    frame.scope.define(varname, val)
-                    break
-                }
-                case OpCode.SETVAR: {
-                    const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
-                    const val = stack.pop()
-                    frame.scope.set(varname, val)
+                    if (execScope.frozen) throw new Error(`Variable '${String(varname)}' cannot be defined in a frozen scope.`);
+                    execScope.data.set(varname, val)
                     break
                 }
                 case OpCode.JUMPIFTRUE: {
@@ -432,12 +498,12 @@ export class AnimaVM {
                     const target = stack[stack.length - 1 - nargs];
                     stack.splice(stack.length - 1 - nargs, 1);
                     // Dispatch
-                    this.#dispatchCall(target, nargs, isTail, frame, frames, stack, execScope);
+                    this.#dispatchCall(target, nargs, isTail, frame, frames, stack);
                     break;
                 }
                 case OpCode.NEWCLOSURE: {
                     const template = frame.getConst(frame.readNext()) as ClosureTemplate
-                    stack.push(new Closure(template, frame.scope));
+                    stack.push(new Closure(template, frame.scopes)); // we always start with a initial null scope
                     break;
                 }
                 case OpCode.RETURN: {
@@ -476,7 +542,7 @@ export class AnimaVM {
                     }
 
                     // Dispatch
-                    this.#dispatchCall(target, finalArgs.length, isTail, frame, frames, stack, execScope);
+                    this.#dispatchCall(target, finalArgs.length, isTail, frame, frames, stack);
                     break;
                 }
                 case OpCode.INTRINSIC_ADD: {
@@ -622,7 +688,6 @@ export class AnimaVM {
      * @param frame     The current active call frame.
      * @param frames    Reference to the global VM call stack.
      * @param stack     Reference to the global VM data/evaluation stack.
-     * @param execScope VM global execution scope.
      */
     #dispatchCall(
         target: any, 
@@ -631,8 +696,8 @@ export class AnimaVM {
         frame: CallFrame, 
         frames: CallFrame[], 
         stack: any[], 
-        execScope: AnimaScope
     ) {
+        const stackBase = stack.length - nargs; // where does stack start
         if (target instanceof BuiltinFunction) {
             if (target.nargs !== -1 && nargs !== target.nargs) {
                 throw new Error(`Builtin expected ${target.nargs} args, got ${nargs}`);
@@ -640,20 +705,20 @@ export class AnimaVM {
             
             if (target.nargs === -1) stack.push(nargs);
 
-            const env = target.needsScope ? frame.scope : execScope;
+            // BuiltinFunction's reuse existing scope
             if (isTail) {
                 frame.code = target.bc;
-                frame.scope = env;
                 frame.ip = 0; 
             } else {
-                frames.push(new CallFrame(target.bc, env, 0));
+                frames.push(new CallFrame(target.bc, frame.scopes, 0));
             }
         } else if (target instanceof NativeFunction) {
             if (target.nargs !== -1 && target.nargs !== nargs) {
                 throw new Error(`${target.name}: expected ${target.nargs} args, got ${nargs}`);
             }
             
-            const args = nargs > 0 ? stack.splice(-nargs, nargs) : [];
+            const args = nargs > 0 ? stack.slice(stackBase) : [];
+            stack.length = stackBase;
             
             stack.push(target.cb(...args));
             if (isTail) frames.pop();
@@ -672,27 +737,31 @@ export class AnimaVM {
             }
     
             // Bind args
-            const args = nargs > 0 ? stack.splice(-nargs, nargs) : [];
-            const callScope = target.scope.nest();
+            const callScope = new VmScope(new Array(template.numLocals));
             
             // required
             for (let i = 0; i < arity; i++) {
-                callScope.define(template.params[i], args[i]);
+                callScope.slots[i] = stack[stackBase + i];
             }
+            // variadic
             if (template.remParams !== null) {
-                // bind variadics
-                const restArgs = args.slice(arity);
-                callScope.define(template.remParams, restArgs);
+                const restArgs = [];
+                for (let i = arity; i < nargs; i++) {
+                    restArgs.push(stack[stackBase + i]);
+                }
+                callScope.slots[arity] = restArgs;
             }
 
+            const c = [callScope, ...target.scopes];
+
+            stack.length = stackBase
             if (isTail) {
                 // Reuse existing frame (TCO)
                 frame.code = template.code;
-                frame.scope = callScope;
+                frame.scopes = c
                 frame.ip = 0; 
             } else {
-                // Push new frame
-                frames.push(new CallFrame(template.code, callScope, 0));
+                frames.push(new CallFrame(template.code, c, 0));
             }
         } else {
             throw new Error(`Attempted to call a non-procedure: ${String(target)}`);
