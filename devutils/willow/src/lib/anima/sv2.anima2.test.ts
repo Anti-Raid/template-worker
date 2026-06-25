@@ -1,23 +1,20 @@
 // Made w/ lots of help from gemini cli
-import { MissingVarError, ASP, ASPParseError, ASPTokenError, ASTStringifier } from './common';
-import { describe, it, expect, beforeEach } from 'vitest';
-import { AnimaCompiler, AnimaVM, ByteCode, ClosureTemplate } from './sv2.anima2';
+import { MissingVarError, ASP, isDeepEqual } from './common';
+import { describe, it, expect } from 'vitest';
+import { Cons } from './list';
+import { Anima, AnimaCompiler, ByteCode, ClosureTemplate } from './bytecode-vm/anima';
 
-// Helper for brevity when writing manual ASTs
-const s = Symbol.for;
 const bcCache: Record<string, ByteCode> = {}
 describe('Anima', () => {
-    let evaluator: AnimaVM = new AnimaVM();
+    let evaluator: Anima = new Anima();
     let cmp = new AnimaCompiler()
-    let baseData: Record<string, any> = {
-        port: 8080,
-        protocol: "tcp",
-        is_active: true,
-        user_role: null 
-    };
+    evaluator.rootScope.define(Symbol.for("port"), 8080)
+    evaluator.rootScope.define(Symbol.for("protocol"), "tcp")
+    evaluator.rootScope.define(Symbol.for("is_active"), true)
+    evaluator.rootScope.define(Symbol.for("user_role"), null)
 
     const run = (expr: string) => {
-        if (bcCache[expr]) return cmp.s.stringify(evaluator.evaluate(bcCache[expr], baseData))
+        if (bcCache[expr]) return cmp.s.stringify(evaluator.evaluate(bcCache[expr]))
         const ast = new ASP(expr, true).parse(); // bytecode interpreter supports dotted pairs
         const bc = cmp.compileExpr(ast)
         console.log(bc.toString(), "\n")
@@ -28,7 +25,7 @@ describe('Anima', () => {
             }
         }
         bcCache[expr] = bc
-        return cmp.s.stringify(evaluator.evaluate(bc, baseData));
+        return cmp.s.stringify(evaluator.evaluate(bc));
     };
 
     describe('Primitives, Strings & Symbols', () => {
@@ -127,6 +124,93 @@ describe('Anima', () => {
         });
     })
 })
+
+describe("isDeepEqual: Improper Lists (Dotted Pairs)", () => {
+    
+    it("should correctly equate identical improper lists", () => {
+        // (1 2 . 3)
+        const a = Cons.pair(1, Cons.pair(2, 3));
+        const b = Cons.pair(1, Cons.pair(2, 3));
+        expect(isDeepEqual(a, b)).toBe(true);
+    });
+
+    it("should fail when comparing a proper list to an improper list", () => {
+        // (1 2 3) 
+        const proper = Cons.pair(1, Cons.pair(2, Cons.pair(3, null)));
+        // (1 2 . 3)
+        const improper = Cons.pair(1, Cons.pair(2, 3));
+        
+        expect(isDeepEqual(proper, improper)).toBe(false);
+    });
+
+    it("should fail when comparing an improper list to a native JS Array", () => {
+        // (1 2 3)
+        const arr = [1, 2, 3];
+        // (1 2 3) as cons
+        const arrCons = Cons.pair(1, Cons.pair(2, Cons.pair(3, null)))
+        // (1 2 . 3) 
+        const improper = Cons.pair(1, Cons.pair(2, 3));
+        
+        expect(isDeepEqual(arr, arrCons)).toBe(true);
+        expect(isDeepEqual(arr, improper)).toBe(false);
+    });
+
+    it("should fail when improper lists have different tails", () => {
+        // (1 2 . 3)
+        const a = Cons.pair(1, Cons.pair(2, 3));
+        // (1 2 . 4)
+        const b = Cons.pair(1, Cons.pair(2, 4));
+        
+        expect(isDeepEqual(a, b)).toBe(false);
+    });
+
+    it("should correctly handle nested improper lists", () => {
+        // (1 (2 . 3) . 4)
+        const a = Cons.pair(1, Cons.pair(Cons.pair(2, 3), 4));
+        const b = Cons.pair(1, Cons.pair(Cons.pair(2, 3), 4));
+        // (1 (2 . 99) . 4)
+        const c = Cons.pair(1, Cons.pair(Cons.pair(2, 99), 4));
+
+        expect(isDeepEqual(a, b)).toBe(true);
+        expect(isDeepEqual(a, c)).toBe(false);
+    });
+    
+    it("should correctly handle list primitive equalities", () => {
+        const a = Cons.pair(1, 2); // (1 . 2)
+        const b = 2; // primitive (2)
+        expect(isDeepEqual(a, b)).toBe(false);
+    });
+});
+
+/*
+const TEST_PROG = `
+(define union
+    (lambda (a b)
+        (define (in a rst) 
+        (cond 
+            [(empty? rst) #f]
+            [(equal? a (car rst)) #t]
+            [else (in a (cdr rst))]))
+
+        (cond
+        ; if either set is empty, the other one if the union
+        [(empty? a) b]
+        [(empty? b) a]
+        ; if b is in a, skip it
+        [(in (car b) a) (union a (cdr b))]
+        [else (cons (car b) (union a (cdr b)))])))
+
+(define sum-of-squares
+  (lambda (a)
+    ; do x*x for every element in a, then sum them all up
+    (apply + [map (lambda (x) (* x x)) a])))
+        
+    (list (equal? (union '(a b d e f h j) '(f c e g a)) '(c g a b d e f h j)) (equal? (sum-of-squares (list 1 3 5 7)) 84))
+`
+//export const TEST_PROG = `(cond [#f 1] [#f 2])`
+
+export const TEST_PROG_BC = new AnimaCompiler().compileExpr(new ASP(TEST_PROG).parse(), false, false)
+*/
 
 /*
 describe('Anima', () => {

@@ -19,43 +19,22 @@ export const isDeepEqual = (a: any, b: any): boolean => {
         if (len !== b.length) return false;
         if (len === 0) return true;
 
-        const aIsCons = a instanceof Cons;
-        const bIsCons = b instanceof Cons;
+        const iterA = a[Symbol.iterator]();
+        const iterB = b[Symbol.iterator]();
 
-        if (aIsCons && bIsCons) {
-            let currA = a as Cons;
-            let currB = b as Cons;
-            for (let i = 0; i < len; i++) {
-                if (!isDeepEqual(currA.head, currB.head)) return false;
-                currA = currA.tail as Cons;
-                currB = currB.tail as Cons;
+        while (true) {
+            const nextA = iterA.next();
+            const nextB = iterB.next();
+
+            if (nextA.done) {
+                return isDeepEqual(nextA.value, nextB.value); 
             }
-            if (!isDeepEqual(currA, currB)) return false;
-        } else if (!aIsCons && !bIsCons) {
-            const arrA = a as any[];
-            const arrB = b as any[];
-            for (let i = 0; i < len; i++) {
-                if (!isDeepEqual(arrA[i], arrB[i])) return false;
+
+            // Compare the current elements
+            if (!isDeepEqual(nextA.value, nextB.value)) {
+                return false;
             }
-        } else if (aIsCons && !bIsCons) {
-            let currA = a as Cons;
-            const arrB = b as any[];
-            for (let i = 0; i < len; i++) {
-                if (!isDeepEqual(currA.head, arrB[i])) return false;
-                currA = currA.tail as Cons;
-            }
-            if (currA !== null) return false;
-        } else { // !aIsCons && bIsCons
-            const arrA = a as any[];
-            let currB = b as Cons;
-            for (let i = 0; i < len; i++) {
-                if (!isDeepEqual(arrA[i], currB.head)) return false;
-                currB = currB.tail as Cons;
-            }
-            if (currB !== null) return false;
         }
-
-        return true;
     }
 
     // Closures/other types
@@ -69,57 +48,88 @@ export class MissingVarError extends Error {
     }
 }
 
+/** Properties that are exposed to the anima engine, can be retrieved with (ui-get propname) */
+export class ExposedProps {
+    #props: Record<string, any>;
+
+    constructor(props: Record<string, any>) {
+        this.#props = props
+    }
+
+    get(key: string): any {
+        if (Object.hasOwn(this.#props, key)) {
+            return this.#props[key]
+        }
+        return undefined
+    }
+}
+
+/** The scope the actual anima engine has/uses */
 export class AnimaScope {
-    #data: Record<string | symbol, any>;
+    #data: Map<symbol, any>;
+    #frozen: boolean;
     #outer: AnimaScope | null;
 
-    constructor(data: Record<string, any>, outer: AnimaScope | null) {
+    private constructor(data: Map<symbol, any>, frozen: boolean, outer: AnimaScope | null) {
         this.#data = data
+        this.#frozen = frozen
         this.#outer = outer
     }
 
+    static new(frozen: boolean = false) {
+        return new AnimaScope(new Map(), frozen, null);
+    }
+
+    static newWith(fields: Record<symbol, any>, frozen: boolean = false) {
+        const map = new Map()
+        Object.getOwnPropertySymbols(fields).forEach((sym) => {
+            map.set(sym, fields[sym])
+        });
+        return new AnimaScope(map, frozen, null);
+    }
+
     nest(): AnimaScope {
-        // Nested scopes don't need to be reactive
-        return new AnimaScope(Object.create(null), this);
+        return new AnimaScope(new Map(), false, this);
     }
 
     get(key: symbol): any {
         let scope: AnimaScope | null = this
         while(scope) {
-            if (key in scope.#data) {
-                return scope.#data[key];
+            if (scope.#data.has(key)) {
+                return scope.#data.get(key)
             }
-            
-            // Outer scope is the only bit that can have string symbols, so check for that too
-            if (scope.#outer === null && key.description) {
-                if (Object.hasOwn(scope.#data, key.description)) {
-                    return scope.#data[key.description];
-                }
-            }
-            
+                        
             scope = scope.#outer
         }
         throw new MissingVarError(`Variable '${String(key)}' is not defined in the current scope.`);
     }
 
+    setFrozen(frozen: boolean) {
+        this.#frozen = frozen
+    }
+
     define(key: symbol, value: any) {
-        if (this.#outer === null) throw new Error("Cannot define key on global scope")
-        this.#data[key] = value;
+        if (this.#frozen) throw new Error(`Variable '${String(key)}' cannot be defined in a frozen scope.`);
+        this.#data.set(key, value);
     }
 
     // set!
     set(key: symbol, value: any): any {
         let scope: AnimaScope | null = this
         while(scope) {
-            if (scope.#outer === null) throw new Error("Cannot set! key on global scope")
-            if (key in scope.#data) {
-                scope.#data[key] = value;
+            if (scope.#data.has(key)) {
+                if (scope.#frozen) throw new Error(`Variable '${String(key)}' cannot be set! in a frozen scope.`);
+                scope.#data.set(key, value);
                 return
             }
             
             scope = scope.#outer
         }
         throw new MissingVarError(`Variable '${String(key)}' is not defined in the current scope.`);
+    }
+
+    entries(): IterableIterator<[symbol, any]> {
+        return this.#data.entries();
     }
 }
 
@@ -171,6 +181,9 @@ export const OP_DIV    = Symbol.for("/");
 export const OP_MODULO = Symbol.for("modulo");
 export const OP_REMAINDER = Symbol.for("remainder")
 
+// Misc
+export const OP_UI_GET = Symbol.for("ui-get")
+
 export const SPECIAL_FORMS = new Set([
     OP_DEFINE, 
     OP_QUOTE, 
@@ -215,7 +228,10 @@ export const BUILTINS_OPS = new Set([
     OP_MUL,
     OP_DIV,
     OP_MODULO,
-    OP_REMAINDER
+    OP_REMAINDER,
+
+    // Misc
+    OP_UI_GET
 ]);
 
 export class ASPTokenError extends Error {

@@ -59,8 +59,8 @@ export class Cons {
                 yield current.head;
                 current = current.tail;
             } else {
-                yield current; 
-                break;
+                // improper lists are annoying and need to know the final element is improper
+                return current
             }
         }
     }

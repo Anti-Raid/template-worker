@@ -1,5 +1,5 @@
-import { AnimaScope, IProcedure, isDeepEqual, isTruthy } from "./common";
-import { Cons } from "./list";
+import { AnimaScope, IProcedure, isDeepEqual, isTruthy } from "../common";
+import { Cons } from "../list";
 import {
   OP_DEFINE,
   OP_BEGIN,
@@ -38,7 +38,7 @@ import {
   OP_DIV,
   OP_MODULO,
   SPECIAL_FORMS
-} from "./common";
+} from "../common";
 
 /** JS Closure */
 export class Closure extends IProcedure {
