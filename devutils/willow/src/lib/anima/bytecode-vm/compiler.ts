@@ -30,9 +30,8 @@ import {
 import { Cons } from "../list";
 import { AnimaOptimizer } from "../optimizer";
 import { AnimaTransformer } from "../syntax-transformer";
-import { ByteCode, ClosureTemplate, OpCode } from "./vm";
+import { ClosureTemplate, OpCode, ByteCode } from "./vm";
 
-// TODO: Use LEB128 (thanks gemini for letting me know this exists!) to encode numbers
 export class ByteCodeBuilder {
     #knownSymbols: Map<symbol, number>;
     #knownNumbers: Map<number, number>;

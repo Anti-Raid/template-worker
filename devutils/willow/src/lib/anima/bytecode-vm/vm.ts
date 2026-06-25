@@ -68,7 +68,6 @@ export enum OpCode {
     INTRINSIC_UI_GET
 }
 
-// TODO: Use LEB128 (thanks gemini for letting me know this exists!) to encode numbers
 export class ByteCode {
     public constants: any[]
     public inst: Uint32Array
@@ -93,7 +92,7 @@ export class ByteCode {
             for(const elem of s) {
                 r.push(this.#constToString(elem))
             }
-            return `[${r.join(', ')}]`
+            return `(${r.join(' ')})`
         } else {
             return `<unknown:${s}>`
         }
@@ -151,7 +150,7 @@ export class ByteCode {
                     idx += 2;
                     break;
                 case OpCode.NEWCLOSURE:
-                    const tmpl = this.constants[this.inst[idx + 1]] as ClosureTemplate;
+                    const tmpl = this.constants[this.inst[idx + 1]] as {params: any[]};
                     const params = tmpl.params.map(p => p.toString()).join(" ");
                     line += `NEWCLOSURE <fn(${params})>`;
                     idx += 2;
