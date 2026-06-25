@@ -1,6 +1,6 @@
 import { AnimaScope, OP_ADD, OP_APPLY, OP_DIV, OP_EQ, OP_LIST, OP_MODULO, OP_MUL, OP_REMAINDER, OP_SUB, OP_UI_GET } from "../common";
 import { Cons } from "../list";
-import { AnimaCompiler } from "./compiler";
+import { AnimaCompiler, ByteCodeBuilder } from "./compiler";
 import { AnimaVM, BuiltinFunction, NativeFunction } from "./vm";
 
 class MapObj {
@@ -41,6 +41,12 @@ class MapObj {
     }
 }
 
+const newBc = (initializer: (bc: ByteCodeBuilder) => void) => {
+    const bc = new ByteCodeBuilder()
+    initializer(bc)
+    return bc.build()
+}
+
 const privScope = AnimaScope.newWith({
     [Symbol.for("%MapObj")]: new NativeFunction("%MapObj", -1, (...args) => {
         return new MapObj(args)
@@ -58,42 +64,42 @@ const privScope = AnimaScope.newWith({
         if(!Array.isArray(args[0])) throw new Error(`internal error: %ArrayPush called on non-array ${args[0]}`)
         args[0].push(args[1])
     }),
-    [OP_APPLY]: new BuiltinFunction(-1, false, (bc) => {
+    [OP_APPLY]: new BuiltinFunction(-1, false, newBc((bc) => {
         // note to self: its vararg, so nargs is at top of stack. As this is a stub that exists to trigger
         // the intrinsic, the apply is also in tail position, so emit a tail apply instead of apply
         bc.intrinsicTailApply()
-    }),
-    [OP_ADD]: new BuiltinFunction(-1, false, (bc) => {
+    })),
+    [OP_ADD]: new BuiltinFunction(-1, false, newBc((bc) => {
         // note to self: its vararg, so nargs is at top of stack
         bc.intrinsicAdd()
-    }),
-    [OP_SUB]: new BuiltinFunction(-1, false, (bc) => {
+    })),
+    [OP_SUB]: new BuiltinFunction(-1, false, newBc((bc) => {
         // note to self: its vararg, so nargs is at top of stack
         bc.intrinsicSub()
-    }),
-    [OP_MUL]: new BuiltinFunction(-1, false, (bc) => {
+    })),
+    [OP_MUL]: new BuiltinFunction(-1, false, newBc((bc) => {
         // note to self: its vararg, so nargs is at top of stack
         bc.intrinsicMul()
-    }),
-    [OP_DIV]: new BuiltinFunction(-1, false, (bc) => {
+    })),
+    [OP_DIV]: new BuiltinFunction(-1, false, newBc((bc) => {
         // note to self: its vararg, so nargs is at top of stack
         bc.intrinsicDiv()
-    }),
-    [OP_MODULO]: new BuiltinFunction(2, false, (bc) => {
+    })),
+    [OP_MODULO]: new BuiltinFunction(2, false, newBc((bc) => {
         bc.intrinsicModulo()
-    }),
-    [OP_REMAINDER]: new BuiltinFunction(2, false, (bc) => {
+    })),
+    [OP_REMAINDER]: new BuiltinFunction(2, false, newBc((bc) => {
         bc.intrinsicRemainder()
-    }),
-    [OP_LIST]: new BuiltinFunction(-1, false, (bc) => {
+    })),
+    [OP_LIST]: new BuiltinFunction(-1, false, newBc((bc) => {
         bc.intrinsicList()
-    }),
-    [OP_UI_GET]: new BuiltinFunction(-1, false, (bc) => {
+    })),
+    [OP_UI_GET]: new BuiltinFunction(-1, false, newBc((bc) => {
         bc.intrinsicUiGet()
-    }),
-    [OP_EQ]: new BuiltinFunction(-1, false, (bc) => {
+    })),
+    [OP_EQ]: new BuiltinFunction(-1, false, newBc((bc) => {
         bc.intrinsicEq()
-    }),
+    })),
 }, false);
 
 const PRELUDE = `

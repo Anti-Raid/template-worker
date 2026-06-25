@@ -30,12 +30,184 @@ import {
 import { Cons } from "../list";
 import { AnimaOptimizer } from "../optimizer";
 import { AnimaTransformer } from "../syntax-transformer";
-import { ByteCode, ClosureTemplate } from "./vm";
+import { ByteCode, ClosureTemplate, OpCode } from "./vm";
+
+// TODO: Use LEB128 (thanks gemini for letting me know this exists!) to encode numbers
+export class ByteCodeBuilder {
+    #knownSymbols: Map<symbol, number>;
+    #knownNumbers: Map<number, number>;
+    public constants: any[]
+    public inst: number[]
+    constructor() {
+        this.constants = []
+        this.inst = []
+        this.#knownSymbols = new Map()
+        this.#knownNumbers = new Map()
+    }
+
+    push(v: any) {
+        if (typeof v === "symbol") {
+            const symIdx = this.#knownSymbols.get(v)
+            if(symIdx) {
+                this.inst.push(OpCode.PUSH, symIdx)
+            } else {
+                const idx = this.constants.push(v) - 1
+                this.#knownSymbols.set(v, idx)
+                this.inst.push(OpCode.PUSH, idx)
+            }
+        } else if (typeof v === "number") {
+            if (Number.isInteger(v) && v >= 0 && v <= 255) {
+                // We can use u8 specialization here
+                this.inst.push(OpCode.PUSH__U8, v);
+                return
+            } else if (Number.isInteger(v) && v >= -255 && v < 0) {
+                // We can use u8 specialization here but we need to negate after pushing
+                this.inst.push(OpCode.PUSH__U8, Math.abs(v));
+                this.negate()
+                return
+            }
+            // We need to use a normal push operation here
+            const numIdx = this.#knownNumbers.get(v)
+            if(numIdx) {
+                this.inst.push(OpCode.PUSH, numIdx)
+            } else {
+                const idx = this.constants.push(v) - 1
+                this.#knownNumbers.set(v, idx)
+                this.inst.push(OpCode.PUSH, idx)
+            }
+        } else if (typeof v === "boolean") {
+            this.inst.push(v ? OpCode.PUSH__TRUE : OpCode.PUSH__FALSE)
+        } else if((Array.isArray(v) && v.length === 0) || v === null) {
+            this.inst.push(OpCode.PUSH__EMPTYLIST)
+        } else if (v === undefined) {
+            this.inst.push(OpCode.PUSH__VOID)
+        } else {
+            // TODO: Deduplicate stuff later once this actually works
+            const idx = this.constants.push(this.#freezeObj(v)) - 1
+            this.inst.push(OpCode.PUSH, idx)
+        }
+    }
+    negate() { this.inst.push(OpCode.NEGATE) }
+    dup() { this.inst.push(OpCode.DUP) }
+    pop() { this.inst.push(OpCode.POP) }
+    getVar(varname: symbol) {
+        const symIdx = this.#knownSymbols.get(varname)
+        if(symIdx) {
+            this.inst.push(OpCode.GETVAR, symIdx)
+        } else {
+            const idx = this.constants.push(varname) - 1
+            this.#knownSymbols.set(varname, idx)
+            this.inst.push(OpCode.GETVAR, idx)
+        }
+    }
+    defineVar(varname: symbol) {
+        const symIdx = this.#knownSymbols.get(varname)
+        if(symIdx) {
+            this.inst.push(OpCode.DEFINEVAR, symIdx)
+        } else {
+            const idx = this.constants.push(varname) - 1
+            this.#knownSymbols.set(varname, idx)
+            this.inst.push(OpCode.DEFINEVAR, idx)
+        }
+    }
+    setVar(varname: symbol) {
+        const symIdx = this.#knownSymbols.get(varname)
+        if(symIdx) {
+            this.inst.push(OpCode.SETVAR, symIdx)
+        } else {
+            const idx = this.constants.push(varname) - 1
+            this.#knownSymbols.set(varname, idx)
+            this.inst.push(OpCode.SETVAR, idx)
+        }
+    }
+    jumpIfTrue() {
+        this.inst.push(OpCode.JUMPIFTRUE)
+        return this.inst.push(-1) - 1 // to be replaced by compiler
+    }
+    jumpIfFalse() {
+        this.inst.push(OpCode.JUMPIFFALSE)
+        return this.inst.push(-1) - 1 // to be replaced by compiler
+    }
+    jump() {
+        this.inst.push(OpCode.JUMP)
+        return this.inst.push(-1) - 1 // to be replaced by compiler
+    }
+    setJumpToCurrent(jumpIdx: number) {
+        if (this.inst[jumpIdx] != -1) throw new Error("internal error: setJumpToCurrent not called on unfilled jump idx")
+        this.inst[jumpIdx] = this.inst.length; 
+    }
+
+    call(args: number) { this.inst.push(OpCode.CALL, args) }
+    tailcall(args: number) { this.inst.push(OpCode.TAILCALL, args) }
+    return() { this.inst.push(OpCode.RETURN) }
+    newclosure(tmplInfo: ClosureTemplate) {
+        const idx = this.constants.push(tmplInfo) - 1
+        this.inst.push(OpCode.NEWCLOSURE, idx)
+    } 
+
+    intrinsicApply() {
+        this.inst.push(OpCode.INTRINSIC_APPLY)
+    }
+
+    intrinsicTailApply() {
+        this.inst.push(OpCode.INTRINSIC_TAIL_APPLY)
+    }
+
+    intrinsicAdd() {
+        this.inst.push(OpCode.INTRINSIC_ADD)
+    }
+
+    intrinsicSub() {
+        this.inst.push(OpCode.INTRINSIC_SUB)
+    }
+
+    intrinsicMul() {
+        this.inst.push(OpCode.INTRINSIC_MUL)
+    }
+
+    intrinsicDiv() {
+        this.inst.push(OpCode.INTRINSIC_DIV)
+    }
+
+    intrinsicEq() {
+        this.inst.push(OpCode.INTRINSIC_EQ)
+    }
+
+    intrinsicModulo() {
+        this.inst.push(OpCode.INTRINSIC_MODULO)
+    }
+
+    intrinsicRemainder() {
+        this.inst.push(OpCode.INTRINSIC_REMAINDER)
+    }
+
+    intrinsicList() {
+        this.inst.push(OpCode.INTRINSIC_LIST)
+    }
+
+    intrinsicUiGet() {
+        this.inst.push(OpCode.INTRINSIC_UI_GET)
+    }
+
+    #freezeObj(obj: any) {
+        if (typeof obj !== "object") return obj
+        Object.keys(obj).forEach(prop => {
+            if (typeof obj[prop] === 'object' && !Object.isFrozen(obj[prop])) {
+                this.#freezeObj(obj[prop]);
+            }
+        });
+        return Object.freeze(obj);
+    }
+
+    build() {
+        return new ByteCode(this.constants, this.inst)
+    }
+}
 
 interface CmpOpts {
     leaveOnStack: boolean // whether to leave created values on the stack or not
     isTail: boolean // whether this is a tail-call or not (for tco)
-    bc: ByteCode
+    bc: ByteCodeBuilder
     tryOpt: boolean
     disableDefine: boolean
     disableLambda: boolean
@@ -56,9 +228,9 @@ export class AnimaCompiler {
         let trExpr = this.t.transform(expr)
         if (tryOpt) trExpr = this.o.optimize(trExpr)
 
-        const bc = new ByteCode();
+        const bc = new ByteCodeBuilder();
         this.#compile(trExpr, {leaveOnStack: true, isTail: true, bc, tryOpt, disableDefine, disableLambda, disableSet })
-        return bc
+        return bc.build()
     }
 
     #compile(expr: any, opts: CmpOpts, syntaxCtx?: string) {
@@ -363,10 +535,10 @@ export class AnimaCompiler {
         if (!opts.leaveOnStack) return
 
         // Compile lambda body
-        const lambdaBc = new ByteCode()
+        const lambdaBc = new ByteCodeBuilder()
         this.#compile(this.#wrapMulti(expr.slice(2)), {...opts, leaveOnStack: true, isTail: true, bc: lambdaBc})
         lambdaBc.return()
-        const template = new ClosureTemplate(params, remParams, lambdaBc);
+        const template = new ClosureTemplate(params, remParams, lambdaBc.build());
         opts.bc.newclosure(template)
     }
 
