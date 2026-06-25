@@ -504,12 +504,11 @@ export class AnimaVM {
         while (frames.length > 0) {
             this.steps++;
             if (this.maxSteps && this.steps > this.maxSteps) {
-                throw new Error(`Execution Limits Exceeded: Script ran for more than ${this.maxSteps} instructions.`);
+                throw new Error(`Script ran for more than ${this.maxSteps} instructions.`);
             }
 
             const frame = frames[frames.length - 1];
 
-            // If we've reached the end of the call frame, pop
             if (frame.ip >= frame.code.inst.length) {
                 frames.pop();
                 continue;
