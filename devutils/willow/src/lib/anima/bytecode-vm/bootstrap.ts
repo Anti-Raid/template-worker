@@ -1,5 +1,6 @@
 import { AnimaScope, OP_ADD, OP_APPLY, OP_DIV, OP_EQ, OP_LIST, OP_MODULO, OP_MUL, OP_REMAINDER, OP_SUB, OP_UI_GET } from "../common";
 import { Cons } from "../list";
+import { AnimaCompiler } from "./compiler";
 import { AnimaVM, BuiltinFunction, NativeFunction } from "./vm";
 
 class MapObj {
@@ -95,8 +96,7 @@ const privScope = AnimaScope.newWith({
     }),
 }, false);
 
-const bootstrapVM = new AnimaVM();
-bootstrapVM.evaluateStr(`
+const PRELUDE = `
 (define (map f . lists)
     (let ((iter (apply %MapObj f lists))
           (result (%ArrayNew)))
@@ -108,7 +108,12 @@ bootstrapVM.evaluateStr(`
             (begin
                 (%ArrayPush result (apply f args)) 
                 (loop)))))))    
-`, privScope)
+`
+
+const bootstrapVM = new AnimaVM();
+const bootstrapComp = new AnimaCompiler()
+const PRELUDE_BC = bootstrapComp.compileStr(PRELUDE)
+bootstrapVM.evaluate(PRELUDE_BC, privScope)
 
 const publicScope = AnimaScope.new(false); 
 for (const [sym, value] of privScope.entries()) {

@@ -486,16 +486,6 @@ export class AnimaVM {
         return this.#evalinner(code, scope, props);
     }
 
-    public evaluateExpr(expr: any, disableDefine: boolean, disableLambda: boolean, scope: AnimaScope, props?: ExposedProps): any {
-        const bc = (new AnimaCompiler()).compileExpr(expr, disableDefine, disableLambda)
-        return this.evaluate(bc, scope, props);
-    }
-
-    public evaluateStr(expr: string, scope: AnimaScope, disableDefine: boolean = false, disableLambda: boolean = false, props?: ExposedProps): any {
-        const bc = (new AnimaCompiler()).compileStr(expr, disableDefine, disableLambda)
-        return this.evaluate(bc, scope, props);
-    }
-
     #evalinner(code: ByteCode, execScope: AnimaScope, props?: ExposedProps): any {
         // Initial frame and stack
         let frames: CallFrame[] = [new CallFrame(code, execScope, 0)];

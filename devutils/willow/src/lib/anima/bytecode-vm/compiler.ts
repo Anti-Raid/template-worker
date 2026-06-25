@@ -47,8 +47,8 @@ export class AnimaCompiler {
     t = new AnimaTransformer()
     o = new AnimaOptimizer()
 
-    compileStr(s: string, disableLambda: boolean = false, disableSet: boolean = false, tryOpt = true) {
-        return this.compileExpr(new ASP(s, true).parse(), disableLambda, disableSet, tryOpt)
+    compileStr(s: string, disableDefine: boolean = false, disableLambda: boolean = false, disableSet: boolean = false, tryOpt = true) {
+        return this.compileExpr(new ASP(s, true).parse(), disableDefine, disableLambda, disableSet, tryOpt)
     }
 
     compileExpr(expr: any, disableDefine: boolean = false, disableLambda: boolean = false, disableSet: boolean = false, tryOpt = true) {
@@ -60,6 +60,7 @@ export class AnimaCompiler {
         this.#compile(trExpr, {leaveOnStack: true, isTail: true, bc, tryOpt, disableDefine, disableLambda, disableSet })
         return bc
     }
+
     #compile(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         // Raw values
         if (typeof expr === 'symbol') {

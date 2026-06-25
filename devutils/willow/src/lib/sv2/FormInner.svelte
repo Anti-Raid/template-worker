@@ -13,7 +13,8 @@
     import MultiSelect from '$lib/MultiSelect.svelte';
     import MultiTextBox from '$lib/MultiTextBox.svelte';
     import Toggle from '$lib/Toggle.svelte';
-    import { Anima, ASP } from '$lib/anima/sv2.anima';
+    import { Anima, ByteCode, ExposedProps } from '$lib/anima/bytecode-vm/anima';
+    import { isTruthy } from '$lib/anima/common';
 
 	let { template, form, formid, formidx, actions, formsetid }: {
         template: string,
@@ -33,22 +34,23 @@
         maxSteps: 5000 
     });
 
-    const astCache = new Map<string, any>();
-    const getAST = (cond: string) => {
+    const astCache = new Map<string, ByteCode>();
+    const getBytecode = (cond: string): ByteCode => {
         if (!astCache.has(cond)) {
-            astCache.set(cond, new ASP(cond).parse());
+            astCache.set(cond, branchEngine.compileStr(cond));
         }
-        return astCache.get(cond);
+        return astCache.get(cond)!;
     };
     const visibleElements = $derived.by(() => {
+        const props = new ExposedProps(data)
         const flattenVisible = (elems: FormElement[]): FormElement[] => {
             const result: FormElement[] = [];
             
             for (const el of elems) {
                 if (el.type === "Branch") {
                     try {
-                        const ast = getAST(el.cond);
-                        const isVisible = branchEngine.isTruthy(branchEngine.evaluate(ast, data));
+                        const ast = getBytecode(el.cond);
+                        const isVisible = isTruthy(branchEngine.evaluate(ast, props));
                         
                         if (isVisible) {
                             result.push(...flattenVisible(el.elems));
@@ -68,11 +70,12 @@
 
     const gatherData = (rec: Record<string, any>, elems: FormElement[]) => {
         const sourceData = mps.state.settings[template].formdata[formsetid][formidx].data;
+        const props = new ExposedProps(sourceData)
         for(const elem of elems) {
             if (elem.type == "DisplayElement") continue
             if (elem.type === "Branch") {
-                const ast = getAST(elem.cond)
-                const isVisible = branchEngine.isTruthy(branchEngine.evaluate(ast, sourceData));
+                const ast = getBytecode(elem.cond)
+                const isVisible = isTruthy(branchEngine.evaluate(ast, props));
                 if (isVisible) {
                     gatherData(rec, elem.elems);
                 }

@@ -3,31 +3,40 @@ import { createScope } from "./bootstrap";
 import { AnimaCompiler } from "./compiler";
 import { AnimaVM, BuiltinFunction, ByteCode, Closure, ClosureTemplate, NativeFunction } from "./vm";
 
+interface AnimaOpts {
+    disableLambda?: boolean,
+    disableDefine?: boolean,
+    disableSet?: boolean,
+    maxSteps?: number
+}
+
 export class Anima {
     #vm: AnimaVM
+    #comp: AnimaCompiler
     #scope: AnimaScope
-    #exposedProps?: ExposedProps
+    #disableLambda: boolean
+    #disableDefine: boolean
+    #disableSet: boolean
 
     get rootScope() {
         return this.#scope
     }
 
-    constructor(props?: ExposedProps) {
-        this.#vm = new AnimaVM()
+    constructor(opts?: AnimaOpts) {
+        this.#vm = new AnimaVM(0, opts?.maxSteps ? opts.maxSteps : 0)
+        this.#comp = new AnimaCompiler()
         this.#scope = createScope()
-        this.#exposedProps = props
+        this.#disableLambda = opts?.disableLambda || false
+        this.#disableDefine = opts?.disableDefine || false
+        this.#disableSet = opts?.disableSet || false
     }
 
-    public evaluate(code: ByteCode): any {
-        return this.#vm.evaluate(code, this.#scope);
+    public compileStr(expr: string): ByteCode {
+        return this.#comp.compileStr(expr, this.#disableDefine, this.#disableLambda, this.#disableSet)
     }
 
-    public evaluateExpr(expr: any, disableDefine: boolean = false, disableLambda: boolean = false): any {
-        return this.#vm.evaluateExpr(expr, disableDefine, disableLambda, this.#scope);
-    }
-
-    public evaluateStr(expr: string, disableDefine: boolean = false, disableLambda: boolean = false): any {
-        return this.#vm.evaluateStr(expr, this.#scope, disableDefine, disableLambda);
+    public evaluate(code: ByteCode, props?: ExposedProps): any {
+        return this.#vm.evaluate(code, this.#scope, props);
     }
 }
 
