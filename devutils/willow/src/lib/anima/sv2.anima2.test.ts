@@ -17,13 +17,7 @@ describe('Anima', () => {
         if (bcCache[expr]) return cmp.s.stringify(evaluator.evaluate(bcCache[expr]))
         const ast = new ASP(expr, true).parse(); // bytecode interpreter supports dotted pairs
         const bc = cmp.compileExpr(ast)
-        console.log(bc.toString(), "\n")
-        for (let i = 0; i < bc.constants.length; i++) {
-            const c = bc.constants[i]
-            if (c instanceof ClosureTemplate) {
-                console.log(`Const #${i}:\n${c.code.toString()}`)
-            }
-        }
+        bc.deepPrint()
         bcCache[expr] = bc
         return cmp.s.stringify(evaluator.evaluate(bc));
     };
@@ -110,6 +104,86 @@ describe('Anima', () => {
             `
             expect(run(script)).toBe("0")
         })
+
+        it('test upvars/upvalues', () => {
+            const script = `
+(define (f n)
+  (define m n) ; m will now become a upvalue
+  (define (o)
+    (define (q) (+ 1 m))
+    (+ 1 (q))
+  )
+  (o)
+)
+
+(f 1)
+            `
+            expect(run(script)).toBe("3")
+
+            expect(run(`
+(define (test-deep-reach x)
+  (define (level1)
+    (define (level2)
+      (define (level3)
+        (+ x 10))  ; level3 uses 'x'
+      (level3))    ; level2 just passes through
+    (level2))      ; level1 just passes through
+  (level1))
+
+(test-deep-reach 5)    
+            `)).toBe("15")
+
+            expect(run(`
+(define (test-shadowing)
+  (let ((x 100))
+    (let ((x 20))
+      (let ((f (lambda () x)))
+        (let ((x 50))
+          (f)))))) ; f should still return 20, not 50 or 100
+
+(test-shadowing)
+            `)).toBe("20")
+
+            expect(run(`
+(define (make-account initial)
+  (let ((balance initial))
+    (define (withdraw amount)
+      (set! balance (- balance amount))
+      balance)
+    (define (deposit amount)
+      (set! balance (+ balance amount))
+      balance)
+    (withdraw 10)
+    (deposit 50)))
+
+(make-account 100)
+            `)).toBe("140")
+
+            expect(run(`
+(define (make-counter)
+  (let ((count 0))
+    (lambda ()
+      (set! count (+ count 1))
+      count)))
+
+(let ((counter-a (make-counter))
+      (counter-b (make-counter)))
+  (counter-a) ; 1
+  (counter-a) ; 2
+  (counter-b) ; 1 (Should be completely independent)
+  (counter-a))
+`)).toBe("3")
+
+            expect(run(`
+(define (multiplier factor)
+  (lambda (n)
+    (* n factor)))
+
+(let ((times-two (multiplier 2))
+      (times-five (multiplier 5)))
+  (+ (times-two 10) (times-five 10)))
+                `)).toBe("70")
+        })
     });
 
     describe('map', () => {
@@ -144,10 +218,10 @@ describe('Anima', () => {
             expect(run(script)).toEqual("(11 22)");
         });
 
-        //it('errors with prelude in mapped lambda', () => {
-        //    const script = `(map (lambda (x) (%ArrayNew)) '(1 2 3 4 5))`;
-        //    expect(() => run(script)).toThrow(MissingVarError);
-        //});
+        it('errors with prelude in mapped lambda', () => {
+            const script = `(map (lambda (x) (%ArrayNew)) '(1 2 3 4 5))`;
+            expect(() => run(script)).toThrow(MissingVarError);
+        });
     })
 })
 

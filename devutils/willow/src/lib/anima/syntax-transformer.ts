@@ -146,7 +146,8 @@ export class AnimaTransformer {
         for (let stmt of rawBody) {
             if (Array.isArray(stmt) && stmt[0] === OP_DEFINE) {
                 if (!isAtTop) throw new Error(`Internal define (${expr}) can only exist at the top-level of a lambda`)
-                internalDefines.push(stmt)
+                const [normalizedStmt] = this.#transformDefineComplex(stmt);
+                internalDefines.push(normalizedStmt)
                 continue
             }
             isAtTop = false

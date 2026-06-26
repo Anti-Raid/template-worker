@@ -265,6 +265,17 @@ export class ByteCode {
         }
         return ops.join("\n");
     }
+
+    deepPrint() {
+        console.log(this.toString(), "\n")
+        for (let i = 0; i < this.constants.length; i++) {
+            const c = this.constants[i]
+            if (c instanceof ClosureTemplate) {
+                console.log(`Const #${i}:\n`)
+                c.code.deepPrint()
+            }
+        }
+    }
 }
 
 export type UpVarLoc = { index: number, local: boolean }

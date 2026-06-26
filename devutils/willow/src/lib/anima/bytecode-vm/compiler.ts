@@ -284,7 +284,7 @@ class CompilerScope {
         // Check if we already captured this exact upvalue to avoid duplicates
         const existingIdx = this.upvars.findIndex(u => u.index === upvar.index && u.local === upvar.local);
         if (existingIdx !== -1) {
-            console.log("recorded upvar", upvar, "at index:", existingIdx);
+            //console.log("recorded upvar", upvar, "at index:", existingIdx);
             return existingIdx;
         }
         return this.upvars.push(upvar) - 1;
