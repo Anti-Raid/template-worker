@@ -30,7 +30,7 @@ import {
 import { Cons } from "../list";
 import { AnimaOptimizer } from "../optimizer";
 import { AnimaTransformer } from "../syntax-transformer";
-import { ClosureTemplate, OpCode, ByteCode } from "./vm";
+import { ClosureTemplate, OpCode, ByteCode, type UpVarLoc } from "./vm";
 
 export class ByteCodeBuilder {
     #knownSymbols: Map<symbol, number>;
@@ -92,16 +92,18 @@ export class ByteCodeBuilder {
     getVar(varname: symbol, scope: CompilerScope) {
         // Check if we can resolve it to a local/upvar
         const resolved = scope.resolve(varname)
-        if (resolved) {
-            // resolved -> [depth, index]
-            const [depth, index] = resolved
-            if (depth === 0) {
-                this.inst.push(OpCode.GETLOCAL, index)
-            } else {
-                this.inst.push(OpCode.GETUPVAR, depth, index)
-            }
-            return
+
+        if (resolved.type === 'Local') {
+            this.inst.push(OpCode.GETLOCAL, resolved.index);
+            return;
+        } 
+        
+        if (resolved.type === 'Upvar') {
+            this.inst.push(OpCode.GETUPVAR, resolved.index);
+            return;
         }
+
+        // Handle it as a global
         const symIdx = this.#knownSymbols.get(varname)
         if(symIdx) {
             this.inst.push(OpCode.GETGLOBALS, symIdx)
@@ -124,17 +126,18 @@ export class ByteCodeBuilder {
     setVar(varname: symbol, scope: CompilerScope) {
         // Check if we can resolve it to a local/upvar
         const resolved = scope.resolve(varname)
-        if (resolved) {
-            // resolved -> [depth, index]
-            const [depth, index] = resolved
-            if (depth === 0) {
-                this.inst.push(OpCode.SETLOCAL, index)
-            } else {
-                this.inst.push(OpCode.SETUPVAR, depth, index)
-            }
-            return
+
+        if (resolved.type === 'Local') {
+            this.inst.push(OpCode.SETLOCAL, resolved.index);
+            return;
+        } 
+        
+        if (resolved.type === 'Upvar') {
+            this.inst.push(OpCode.SETUPVAR, resolved.index);
+            return;
         }
 
+        // Handle it as a global
         const symIdx = this.#knownSymbols.get(varname)
         if(symIdx) {
             this.inst.push(OpCode.SETGLOBALS, symIdx)
@@ -143,12 +146,6 @@ export class ByteCodeBuilder {
             this.#knownSymbols.set(varname, idx)
             this.inst.push(OpCode.SETGLOBALS, idx)
         }
-    }
-    block(numLocals: number) {
-        this.inst.push(OpCode.BLOCK, numLocals)
-    }
-    endBlock() {
-        this.inst.push(OpCode.ENDBLOCK)
     }
 
     jumpIfTrue() {
@@ -235,13 +232,17 @@ export class ByteCodeBuilder {
     }
 }
 
+type Resolve = { type: "Global" } | { type: "Local", depth: number, index: number } | { type: "Upvar", index: number }
+
 /** Helper utility for keeping track of variable scoping */
 class CompilerScope {
     locals: symbol[] = [];
     outer: CompilerScope | null;
-    
-    constructor(outer: CompilerScope | null = null) {
+    upvars: UpVarLoc[] = [];
+
+    constructor(outer: CompilerScope | null) {
         this.outer = outer;
+        this.upvars = []
     }
 
     addLocal(sym: symbol) {
@@ -249,13 +250,44 @@ class CompilerScope {
         return this.locals.push(sym) - 1;
     }
 
-    // Returns [depth, index] or null if it's a global
-    resolve(sym: symbol, depth = 0): [number, number] | null {
-        const index = this.locals.indexOf(sym);
-        if (index !== -1) return [depth, index];
+    // Returns the result of resolving
+    resolve(sym: symbol, depth = 0): Resolve {
+        // Check if its a local
+        const index = this.locals.indexOf(sym)
+        if (index !== -1) return { type: 'Local', depth, index }
+        // Check if its global
+        if (!this.outer) return { type: "Global" }
         
-        if (this.outer) return this.outer.resolve(sym, depth + 1);
-        return null;
+        // Ask parent to try resolving it as a upvar
+        const parentResolved = this.outer.resolve(sym, 0)
+        // We record that we either need to grab the parent's local at [depth, index]
+        // or record that we need to grab the parent's upvar at [index]
+        if (parentResolved.type === 'Local') {
+            return { 
+                type: 'Upvar', 
+                index: this.#recordUpvar({ local: true, index: parentResolved.index }) 
+            };
+        } 
+    
+        if (parentResolved.type === 'Upvar') {
+            return { 
+                type: 'Upvar', 
+                index: this.#recordUpvar({ local: false, index: parentResolved.index }) 
+            };
+        }
+
+        return parentResolved // global
+    }
+
+    // Records a upvar from parent scope
+    #recordUpvar(upvar: UpVarLoc) {
+        // Check if we already captured this exact upvalue to avoid duplicates
+        const existingIdx = this.upvars.findIndex(u => u.index === upvar.index && u.local === upvar.local);
+        if (existingIdx !== -1) {
+            console.log("recorded upvar", upvar, "at index:", existingIdx);
+            return existingIdx;
+        }
+        return this.upvars.push(upvar) - 1;
     }
 }
 
@@ -285,7 +317,7 @@ export class AnimaCompiler {
         if (tryOpt) trExpr = this.o.optimize(trExpr)
 
         const bc = new ByteCodeBuilder();
-        this.#compile(trExpr, {leaveOnStack: true, isTail: true, bc, tryOpt, disableDefine, disableLambda, disableSet, scope: new CompilerScope() })
+        this.#compile(trExpr, {leaveOnStack: true, isTail: true, bc, tryOpt, disableDefine, disableLambda, disableSet, scope: new CompilerScope(null) })
         return bc.build()
     }
 
@@ -395,31 +427,7 @@ export class AnimaCompiler {
 
     // a normal call
     #compileNormalCall(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
-        // if we have a non-variadic IIFE ((lambda (params...) body) args...), then we can optimize it down
-        // to BLOCK/ENDBLOCK instead of doing a whole function call
-        const first = expr[0]
-        if (Array.isArray(first) && first[0] === OP_LAMBDA && Array.isArray(first[1])) {
-            const params = first[1];
-            const body = first.slice(2);
-            const args = expr.slice(1)
-            if (params.length !== args.length) {
-                throw new Error(`expected exactly ${params.length} args, got ${args.length}`);
-            }
-            const blockScope = new CompilerScope(opts.scope)
-            // Push all arguments, arg binding happens on old scope but its bound as a local to blockScope
-            const seen = new Set<symbol>();
-            for(let i = 0; i < params.length; i++) {
-                this.#ensureCanBind(params[i], seen, syntaxCtx || "lambda")
-                this.#compile(args[i], { ...opts, leaveOnStack: true, isTail: false })
-                blockScope.addLocal(params[i])
-            }
-
-            // Start new lexical scope
-            opts.bc.block(params.length);
-            this.#compile(this.#wrapMulti(body), {...opts, scope: blockScope })
-            opts.bc.endBlock()
-            return
-        }
+        // TODO: Consider optimizing IIFE's with a new BLOCK/ENDBLOCK instr 
 
         // We need to compile the first arg first and leave it on the stack
         //
@@ -629,7 +637,7 @@ export class AnimaCompiler {
         const lambdaBc = new ByteCodeBuilder()
         this.#compile(this.#wrapMulti(expr.slice(2)), {...opts, leaveOnStack: true, isTail: true, bc: lambdaBc, scope: lambdaScope })
         lambdaBc.return()
-        const template = new ClosureTemplate(params, remParams, lambdaBc.build(), lambdaScope.locals.length);
+        const template = new ClosureTemplate(params, remParams, lambdaBc.build(), lambdaScope.locals.length, lambdaScope.upvars);
         opts.bc.newclosure(template)
     }
 

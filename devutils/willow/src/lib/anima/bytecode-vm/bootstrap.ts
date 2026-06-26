@@ -1,7 +1,7 @@
 import { OP_ADD, OP_APPLY, OP_DIV, OP_EQ, OP_LIST, OP_MODULO, OP_MUL, OP_REMAINDER, OP_SUB, OP_UI_GET } from "../common";
 import { Cons } from "../list";
 import { AnimaCompiler, ByteCodeBuilder } from "./compiler";
-import { AnimaVM, BuiltinFunction, Globals, NativeFunction } from "./vm";
+import { AnimaVM, BuiltinFunction, ClosureTemplate, Globals, NativeFunction } from "./vm";
 
 class MapObj {
     #iters: (ArrayIterator<any> | Generator<any, void, unknown>)[]
@@ -128,7 +128,15 @@ const PRELUDE = `
 const bootstrapVM = new AnimaVM();
 const bootstrapComp = new AnimaCompiler()
 const PRELUDE_BC = bootstrapComp.compileStr(PRELUDE)
+
 console.log(PRELUDE_BC.constants[0].code.toString())
+for (let i = 0; i < PRELUDE_BC.constants.length; i++) {
+    const c = PRELUDE_BC.constants[i]
+    if (c instanceof ClosureTemplate) {
+        console.log(`Const #${i}:\n${c.code.toString()}`)
+    }
+}
+
 bootstrapVM.evaluate(PRELUDE_BC, privScope)
 
 
