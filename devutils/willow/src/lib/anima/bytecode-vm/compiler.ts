@@ -32,7 +32,8 @@ import { AnimaOptimizer } from "../optimizer";
 import { AnimaTransformer } from "../syntax-transformer";
 import { ClosureTemplate, OpCode, ByteCode, type UpVarLoc } from "./vm";
 
-export class ByteCodeBuilder {
+/** A helper to create bytecode */
+class ByteCodeBuilder {
     #knownSymbols: Map<symbol, number>;
     #knownNumbers: Map<number, number>;
     public constants: any[]
@@ -234,9 +235,33 @@ export class ByteCodeBuilder {
 
 type Resolve = { type: "Global" } | { type: "Local", depth: number, index: number } | { type: "Upvar", index: number }
 
+/** 
+ * Tracks/'simulates' block-level variable shadowing (within a function) at compile-time 
+ * 
+ * Used internally for optimizing out IIFE's etc.
+*/
+class Block {
+    bindings = new Map<symbol, number>();
+    parent: Block | null;
+
+    constructor(parent: Block | null = null) {
+        this.parent = parent;
+    }
+
+    // Walks up the nested blocks (within the SAME function) to find the slot
+    resolve(sym: symbol): number | null {
+        if (this.bindings.has(sym)) return this.bindings.get(sym)!;
+        if (this.parent) return this.parent.resolve(sym);
+        return null;
+    }
+}
+
 /** Helper utility for keeping track of variable scoping */
 class CompilerScope {
-    locals: symbol[] = [];
+    // Keeps track of variables that have been shadowed etc.
+    currBlock: Block = new Block();
+    currSlot: number = 0;
+
     outer: CompilerScope | null;
     upvars: UpVarLoc[] = [];
 
@@ -245,23 +270,39 @@ class CompilerScope {
         this.upvars = []
     }
 
+    get numLocals() {
+        return this.currSlot
+    }
+
+    enterBlock() {
+        this.currBlock = new Block(this.currBlock);
+    }
+
+    exitBlock() {
+        if (this.currBlock.parent) {
+            this.currBlock = this.currBlock.parent;
+        } else {
+            throw new Error("internal error: cannot exit root block of CompilerScope.");
+        }
+    }
+    
+    // Returns the index the variable is defined at
     addLocal(sym: symbol) {
-        // Returns the index the variable is defined at
-        return this.locals.push(sym) - 1;
+        const slot = this.currSlot++;
+        this.currBlock.bindings.set(sym, slot);
+        return slot;
     }
 
     // Returns the result of resolving
     resolve(sym: symbol, depth = 0): Resolve {
         // Check if its a local
-        const index = this.locals.indexOf(sym)
-        if (index !== -1) return { type: 'Local', depth, index }
+        const index = this.currBlock.resolve(sym)
+        if (index !== null) return { type: 'Local', depth, index }
         // Check if its global
         if (!this.outer) return { type: "Global" }
         
         // Ask parent to try resolving it as a upvar
         const parentResolved = this.outer.resolve(sym, 0)
-        // We record that we either need to grab the parent's local at [depth, index]
-        // or record that we need to grab the parent's upvar at [index]
         if (parentResolved.type === 'Local') {
             return { 
                 type: 'Upvar', 
@@ -637,7 +678,7 @@ export class AnimaCompiler {
         const lambdaBc = new ByteCodeBuilder()
         this.#compile(this.#wrapMulti(expr.slice(2)), {...opts, leaveOnStack: true, isTail: true, bc: lambdaBc, scope: lambdaScope })
         lambdaBc.return()
-        const template = new ClosureTemplate(params, remParams, lambdaBc.build(), lambdaScope.locals.length, lambdaScope.upvars);
+        const template = new ClosureTemplate(params, remParams, lambdaBc.build(), lambdaScope.numLocals, lambdaScope.upvars);
         opts.bc.newclosure(template)
     }
 

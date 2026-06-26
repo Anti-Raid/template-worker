@@ -1,7 +1,7 @@
 import { OP_ADD, OP_APPLY, OP_DIV, OP_EQ, OP_LIST, OP_MODULO, OP_MUL, OP_REMAINDER, OP_SUB, OP_UI_GET } from "../common";
 import { Cons } from "../list";
-import { AnimaCompiler, ByteCodeBuilder } from "./compiler";
-import { AnimaVM, BuiltinFunction, ClosureTemplate, Globals, NativeFunction } from "./vm";
+import { AnimaCompiler } from "./compiler";
+import { AnimaVM, BuiltinFunction, ByteCode, ClosureTemplate, Globals, NativeFunction, OpCode } from "./vm";
 
 class MapObj {
     #iters: (ArrayIterator<any> | Generator<any, void, unknown>)[]
@@ -41,10 +41,10 @@ class MapObj {
     }
 }
 
-const newBc = (initializer: (bc: ByteCodeBuilder) => void) => {
-    const bc = new ByteCodeBuilder()
+const newBc = (initializer: (bc: number[]) => void) => {
+    const bc: number[] = []
     initializer(bc)
-    return bc.build()
+    return new ByteCode([], bc)
 }
 
 const privScope = Globals.newWith({
@@ -67,38 +67,38 @@ const privScope = Globals.newWith({
     [OP_APPLY]: new BuiltinFunction(-1, newBc((bc) => {
         // note to self: its vararg, so nargs is at top of stack. As this is a stub that exists to trigger
         // the intrinsic, the apply is also in tail position, so emit a tail apply instead of apply
-        bc.intrinsicTailApply()
+        bc.push(OpCode.INTRINSIC_TAIL_APPLY)
     })),
     [OP_ADD]: new BuiltinFunction(-1, newBc((bc) => {
         // note to self: its vararg, so nargs is at top of stack
-        bc.intrinsicAdd()
+        bc.push(OpCode.INTRINSIC_ADD)
     })),
     [OP_SUB]: new BuiltinFunction(-1, newBc((bc) => {
         // note to self: its vararg, so nargs is at top of stack
-        bc.intrinsicSub()
+        bc.push(OpCode.INTRINSIC_SUB)
     })),
     [OP_MUL]: new BuiltinFunction(-1, newBc((bc) => {
         // note to self: its vararg, so nargs is at top of stack
-        bc.intrinsicMul()
+        bc.push(OpCode.INTRINSIC_MUL)
     })),
     [OP_DIV]: new BuiltinFunction(-1, newBc((bc) => {
         // note to self: its vararg, so nargs is at top of stack
-        bc.intrinsicDiv()
+        bc.push(OpCode.INTRINSIC_DIV)
     })),
     [OP_MODULO]: new BuiltinFunction(2, newBc((bc) => {
-        bc.intrinsicModulo()
+        bc.push(OpCode.INTRINSIC_MODULO)
     })),
     [OP_REMAINDER]: new BuiltinFunction(2, newBc((bc) => {
-        bc.intrinsicRemainder()
+        bc.push(OpCode.INTRINSIC_REMAINDER)
     })),
     [OP_LIST]: new BuiltinFunction(-1, newBc((bc) => {
-        bc.intrinsicList()
+        bc.push(OpCode.INTRINSIC_LIST)
     })),
     [OP_UI_GET]: new BuiltinFunction(-1, newBc((bc) => {
-        bc.intrinsicUiGet()
+        bc.push(OpCode.INTRINSIC_UI_GET)
     })),
     [OP_EQ]: new BuiltinFunction(-1, newBc((bc) => {
-        bc.intrinsicEq()
+        bc.push(OpCode.INTRINSIC_EQ)
     })),
 }, false);
 
