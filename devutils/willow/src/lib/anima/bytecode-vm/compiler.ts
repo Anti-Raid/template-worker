@@ -902,6 +902,11 @@ export class AnimaCompiler {
             const seen = new Set<symbol>();
             for(let i = 0; i < params.length; i++) {
                 this.#ensureCanBind(params[i], seen, syntaxCtx || "lambda")
+
+                // The vm guarantees that locals are initially undefined as a default value
+                if (args[i] === undefined) {
+                    continue
+                }
                 this.#compile(args[i], { ...opts, leaveOnStack: true, isTail: false })
             }
 
@@ -912,6 +917,9 @@ export class AnimaCompiler {
             }
             // setlocal all of our args in reverse order
             for(let i = params.length - 1; i >= 0; i--) {
+                if (args[i] === undefined) {
+                    continue 
+                }
                 opts.bc.setVar(params[i], opts.scope) // note to self: setVar calls resolve internally which will then yield the exact slot
             }
 
