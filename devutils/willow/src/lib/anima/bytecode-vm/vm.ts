@@ -76,9 +76,11 @@ export enum OpCode {
 export class ByteCode {
     public constants: any[]
     public inst: Uint32Array
-    constructor(constants: any[], inst: number[]) {
+    public numLocals: number
+    constructor(constants: any[], inst: number[], numLocals: number) {
         this.constants = constants
         this.inst = new Uint32Array(inst)
+        this.numLocals = numLocals
     }
 
     #constToString(s: any): string {
@@ -263,7 +265,7 @@ export class ByteCode {
             }
             ops.push(line);
         }
-        return ops.join("\n");
+        return `NumLocals: ${this.numLocals}\n` + ops.join("\n");
     }
 
     deepPrint() {
@@ -285,14 +287,12 @@ export class ClosureTemplate {
     params: symbol[]; // base (individual param binds)
     remParams: symbol | null; // where the remaining params should be bound too (if any). This implicitly makes a closure variadic as well
     code: ByteCode
-    numLocals: number
     upvarLocs: UpVarLoc[] // what upvars do we need to capture
 
-    constructor(params: symbol[], remParams: symbol | null, code: ByteCode, numLocals: number, upvarLocs: UpVarLoc[]) {
+    constructor(params: symbol[], remParams: symbol | null, code: ByteCode, upvarLocs: UpVarLoc[]) {
         this.params = params
         this.remParams = remParams
         this.code = code
-        this.numLocals = numLocals
         this.upvarLocs = upvarLocs
     }
 }
@@ -391,7 +391,7 @@ export class AnimaVM {
 
     #evalinner(code: ByteCode, execScope: Globals, props?: ExposedProps): any {
         // Initial frame and stack
-        let frames: CallFrame[] = [new CallFrame(code, new VmScope(0), [], 0)];
+        let frames: CallFrame[] = [new CallFrame(code, new VmScope(code.numLocals), [], 0)];
         let stack: any[] = [];
 
         while (frames.length > 0) {
@@ -773,7 +773,7 @@ export class AnimaVM {
             }
     
             // Bind args
-            const callScope = new VmScope(template.numLocals);
+            const callScope = new VmScope(template.code.numLocals);
             
             // required
             for (let i = 0; i < arity; i++) {

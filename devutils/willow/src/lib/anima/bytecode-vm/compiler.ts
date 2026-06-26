@@ -228,12 +228,12 @@ class ByteCodeBuilder {
         return Object.freeze(obj);
     }
 
-    build() {
-        return new ByteCode(this.constants, this.inst)
+    build(numLocals: number) {
+        return new ByteCode(this.constants, this.inst, numLocals)
     }
 }
 
-type Resolve = { type: "Global" } | { type: "Local", depth: number, index: number } | { type: "Upvar", index: number }
+type Resolve = { type: "Global" } | { type: "Local", index: number } | { type: "Upvar", index: number }
 
 /** 
  * Tracks/'simulates' block-level variable shadowing (within a function) at compile-time 
@@ -294,15 +294,15 @@ class CompilerScope {
     }
 
     // Returns the result of resolving
-    resolve(sym: symbol, depth = 0): Resolve {
+    resolve(sym: symbol): Resolve {
         // Check if its a local
         const index = this.currBlock.resolve(sym)
-        if (index !== null) return { type: 'Local', depth, index }
+        if (index !== null) return { type: 'Local', index }
         // Check if its global
         if (!this.outer) return { type: "Global" }
         
         // Ask parent to try resolving it as a upvar
-        const parentResolved = this.outer.resolve(sym, 0)
+        const parentResolved = this.outer.resolve(sym)
         if (parentResolved.type === 'Local') {
             return { 
                 type: 'Upvar', 
@@ -358,8 +358,9 @@ export class AnimaCompiler {
         if (tryOpt) trExpr = this.o.optimize(trExpr)
 
         const bc = new ByteCodeBuilder();
-        this.#compile(trExpr, {leaveOnStack: true, isTail: true, bc, tryOpt, disableDefine, disableLambda, disableSet, scope: new CompilerScope(null) })
-        return bc.build()
+        const scope = new CompilerScope(null)
+        this.#compile(trExpr, {leaveOnStack: true, isTail: true, bc, tryOpt, disableDefine, disableLambda, disableSet, scope })
+        return bc.build(scope.numLocals)
     }
 
     #compile(expr: any, opts: CmpOpts, syntaxCtx?: string) {
@@ -468,7 +469,10 @@ export class AnimaCompiler {
 
     // a normal call
     #compileNormalCall(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
-        // TODO: Consider optimizing IIFE's with a new BLOCK/ENDBLOCK instr 
+        // Try IIFE optimizations
+        if(this.#optIIFE(expr, opts)) {
+            return
+        }
 
         // We need to compile the first arg first and leave it on the stack
         //
@@ -678,7 +682,7 @@ export class AnimaCompiler {
         const lambdaBc = new ByteCodeBuilder()
         this.#compile(this.#wrapMulti(expr.slice(2)), {...opts, leaveOnStack: true, isTail: true, bc: lambdaBc, scope: lambdaScope })
         lambdaBc.return()
-        const template = new ClosureTemplate(params, remParams, lambdaBc.build(), lambdaScope.numLocals, lambdaScope.upvars);
+        const template = new ClosureTemplate(params, remParams, lambdaBc.build(lambdaScope.numLocals), lambdaScope.upvars);
         opts.bc.newclosure(template)
     }
 
@@ -876,6 +880,46 @@ export class AnimaCompiler {
         }
         if (!opts.leaveOnStack) {
             opts.bc.pop();
+        }
+    }
+
+    #optIIFE(expr: any[], opts: CmpOpts, syntaxCtx?: string): boolean {
+        // if we have a non-variadic IIFE ((lambda (params...) body) args...), then we can optimize it down
+        // to BLOCK/ENDBLOCK instead of doing a whole function call
+        //
+        // TODO: add a thing to transformer etc to track down call/cc calls so we can bail out if we see a call/cc
+        // call. Not important right now though as we don't support call/cc
+        const first = expr[0]
+        if (Array.isArray(first) && first[0] === OP_LAMBDA && Array.isArray(first[1])) {
+            const params = first[1];
+            const body = first.slice(2);
+            const args = expr.slice(1)
+            if (params.length !== args.length) {
+                throw new Error(`expected exactly ${params.length} args, got ${args.length}`);
+            }
+            
+            // Bind all arguments in prior to entering the iife's block
+            const seen = new Set<symbol>();
+            for(let i = 0; i < params.length; i++) {
+                this.#ensureCanBind(params[i], seen, syntaxCtx || "lambda")
+                this.#compile(args[i], { ...opts, leaveOnStack: true, isTail: false })
+            }
+
+            opts.scope.enterBlock()
+            // alloc slots for every parameter
+            for(let i = 0; i < params.length; i++) {
+                opts.scope.addLocal(params[i])
+            }
+            // setlocal all of our args in reverse order
+            for(let i = params.length - 1; i >= 0; i--) {
+                opts.bc.setVar(params[i], opts.scope) // note to self: setVar calls resolve internally which will then yield the exact slot
+            }
+
+            this.#compile(this.#wrapMulti(body), opts)
+            opts.scope.exitBlock()
+            return true
+        } else {
+            return false
         }
     }
 }

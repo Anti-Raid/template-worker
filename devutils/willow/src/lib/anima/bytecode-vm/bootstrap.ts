@@ -44,7 +44,7 @@ class MapObj {
 const newBc = (initializer: (bc: number[]) => void) => {
     const bc: number[] = []
     initializer(bc)
-    return new ByteCode([], bc)
+    return new ByteCode([], bc, 0)
 }
 
 const privScope = Globals.newWith({
@@ -128,15 +128,7 @@ const PRELUDE = `
 const bootstrapVM = new AnimaVM();
 const bootstrapComp = new AnimaCompiler()
 const PRELUDE_BC = bootstrapComp.compileStr(PRELUDE)
-
-console.log(PRELUDE_BC.constants[0].code.toString())
-for (let i = 0; i < PRELUDE_BC.constants.length; i++) {
-    const c = PRELUDE_BC.constants[i]
-    if (c instanceof ClosureTemplate) {
-        console.log(`Const #${i}:\n${c.code.toString()}`)
-    }
-}
-
+PRELUDE_BC.deepPrint()
 bootstrapVM.evaluate(PRELUDE_BC, privScope)
 
 
