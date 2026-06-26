@@ -52,7 +52,7 @@ export class AnimaTransformer {
                 case OP_LETSTAR:
                     return this.#transform(this.#transformLetStar(ast));
                 case OP_LETREC:
-                    return this.#transform(this.#transformLetrec(ast));
+                    return this.#transform(this.#transformLetrec(ast, ctx));
                 case OP_LAMBDA:
                     return this.#transformLambda(ast);
             }
@@ -144,9 +144,6 @@ export class AnimaTransformer {
         let isAtTop = true
 
         for (let stmt of rawBody) {
-            // Transform all inner statements
-            stmt = this.#transform(stmt, "lambda")
-
             if (Array.isArray(stmt) && stmt[0] === OP_DEFINE) {
                 if (!isAtTop) throw new Error(`Internal define (${expr}) can only exist at the top-level of a lambda`)
                 internalDefines.push(stmt)
@@ -158,7 +155,8 @@ export class AnimaTransformer {
 
         // If no defines to transform, just return the transformed body
         if (internalDefines.length === 0) {
-            return [OP_LAMBDA, args, ...body]
+            const transformedBody = body.map(b => this.#transform(b, "lambda"));
+            return [OP_LAMBDA, args, ...transformedBody];
         }
         
         // Extract the names and values from the [OP_DEFINE, name, value] nodes
@@ -172,7 +170,7 @@ export class AnimaTransformer {
     }
 
     #transformLet(expr: any[], ctx?: string) {
-        if (expr.length < 3) throw new Error(`let must be in format ["let", [[var expr]...], body...] but only have ${expr.length-1} arguments`);
+        if (expr.length < 3) throw new Error(`${ctx || 'let'} must be in format ["let", [[var expr]...], body...] but only have ${expr.length-1} arguments`);
 
         let loopName: symbol | null = null;
         let bindingsIdx = 1;
@@ -237,7 +235,7 @@ export class AnimaTransformer {
 
         // No bindings
         if (bindings === null || bindings.length === 0) {
-            const equivExpr = [[OP_LAMBDA, [], ...body]];
+            const equivExpr = this.#transform([[OP_LAMBDA, [], ...body]], "let*");
             return equivExpr
         }
 
@@ -264,12 +262,12 @@ export class AnimaTransformer {
             currentExpr = [nextExpr];
         }
 
-        return currentExpr[0]
+        return this.#transform(currentExpr[0], "let*")
     }
 
-    #transformLetrec(expr: any[]) {
+    #transformLetrec(expr: any[], ctx?: string) {
         // OP_LETREC is also special like let and can also be translated into a lambda
-        if (expr.length < 3) throw new Error(`letrec: bad syntax`);
+        if (expr.length < 3) throw new Error(`${ctx || 'letrec'}: bad syntax`);
 
         const bindings = expr[1];
         if (!Array.isArray(bindings) && bindings !== null) {

@@ -103,17 +103,26 @@ const privScope = Globals.newWith({
 }, false);
 
 const PRELUDE = `
-(define (map f . lists)
-    (let ((iter (apply %MapObj f lists))
-          (result (%ArrayNew)))
-    
-    (let loop ()
-      (let ((args (%MapObjNext iter)))      
-        (if (%MapObjDone iter)              
-            result                          
-            (begin
-                (%ArrayPush result (apply f args)) 
-                (loop)))))))    
+(define create-map (lambda ()
+    ; copy in prelude as locals to the lambda
+    (define %MapObj_ %MapObj)
+    (define %ArrayNew_ %ArrayNew)
+    (define %ArrayPush_ %ArrayPush)
+    (define %MapObjNext_ %MapObjNext)
+    (define %MapObjDone_ %MapObjDone)
+    (lambda (f . lists)
+        (let ((iter (apply %MapObj_ f lists))
+            (result (%ArrayNew_)))
+        
+        (let loop ()
+        (let ((args (%MapObjNext_ iter)))      
+            (if (%MapObjDone_ iter)              
+                result                          
+                (begin
+                    (%ArrayPush_ result (apply f args)) 
+                    (loop)))))))))
+
+(define map (create-map))
 `
 
 const bootstrapVM = new AnimaVM();
@@ -123,7 +132,7 @@ console.log(PRELUDE_BC.constants[0].code.toString())
 bootstrapVM.evaluate(PRELUDE_BC, privScope)
 
 
-/*const publicScope = Globals.newWith({}, false); 
+const publicScope = Globals.newWith({}, false); 
 for (const [sym, value] of privScope.data.entries()) {
     const symName = Symbol.keyFor(sym) || sym.description || "%Unknown";
     
@@ -131,8 +140,8 @@ for (const [sym, value] of privScope.data.entries()) {
     if (!symName.startsWith("%")) {
         publicScope.data.set(sym, value);
     }
-}*/
+}
 
 export function createScope(): Globals {
-    return privScope
+    return publicScope
 }

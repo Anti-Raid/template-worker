@@ -31,9 +31,12 @@ export enum OpCode {
     SETLOCAL, // <slot>, value on top of stack, *always* pops stack top
     GETGLOBALS, // <symbol>
     SETGLOBALS, // <symbol>, value on top of stack, *always* pops stack top
-
     // defines the top stack value on the stack on the current scope (DEFINEVAR [varname-idx]), *always* pops stack top
     DEFINEVAR,
+
+    BLOCK, // start a new lexical scope manually (needed for optimizing out IIFEs) (BLOCK <numlocals>)
+    ENDBLOCK, // ends the lexical scope created by BLOCK
+
     // Jump if stack top is true, *always* pops stack top
     JUMPIFTRUE,
     // Jump if stack top is false, *always* pops stack top
@@ -149,6 +152,14 @@ export class ByteCode {
                 case OpCode.DEFINEVAR:
                     line += `DEFINEVAR ${this.#constToString(this.constants[this.inst[idx + 1]])}`;
                     idx += 2;
+                    break;
+                case OpCode.BLOCK: 
+                    line += `BLOCK (locals=${this.inst[idx + 1]})`;
+                    idx += 2;
+                    break;
+                case OpCode.ENDBLOCK:
+                    line += `ENDBLOCK`
+                    idx += 1;
                     break;
                 case OpCode.JUMPIFTRUE:
                     line += `JUMPIFTRUE -> ${this.inst[idx + 1]}`;
@@ -468,6 +479,21 @@ export class AnimaVM {
                     if (execScope.frozen) throw new Error(`Variable '${String(varname)}' cannot be defined in a frozen scope.`);
                     execScope.data.set(varname, val)
                     break
+                }
+                case OpCode.BLOCK: {
+                    const numLocals = frame.readNext();
+                    const blockScope = new VmScope(new Array(numLocals));
+                    const stackBase = stack.length - numLocals
+                    for (let i = 0; i < numLocals; i++) {
+                        blockScope.slots[i] = stack[stackBase + i];
+                    }
+                    stack.length = stackBase;
+                    frame.scopes = [blockScope, ...frame.scopes];
+                    break;
+                }
+                case OpCode.ENDBLOCK: {
+                    frame.scopes = frame.scopes.slice(1);
+                    break;
                 }
                 case OpCode.JUMPIFTRUE: {
                     const jumpIdx = frame.readNext()

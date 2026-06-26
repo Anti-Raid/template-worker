@@ -144,6 +144,13 @@ export class ByteCodeBuilder {
             this.inst.push(OpCode.SETGLOBALS, idx)
         }
     }
+    block(numLocals: number) {
+        this.inst.push(OpCode.BLOCK, numLocals)
+    }
+    endBlock() {
+        this.inst.push(OpCode.ENDBLOCK)
+    }
+
     jumpIfTrue() {
         this.inst.push(OpCode.JUMPIFTRUE)
         return this.inst.push(-1) - 1 // to be replaced by compiler
@@ -335,11 +342,9 @@ export class AnimaCompiler {
                     this.#compileLambda(expr, opts, syntaxCtx)
                     return
                 case OP_LET:
-                    throw new Error("internal error: let should be transformed by AnimaTransform prior to reaching here")
                 case OP_LETSTAR:
-                    throw new Error("internal error: let* should be transformed by AnimaTransform prior to reaching here")
                 case OP_LETREC:
-                    throw new Error("internal error: letrec should be transformed by AnimaTransform prior to reaching here")
+                    throw new Error("internal error: let should be transformed by AnimaTransform prior to reaching here")
                 case OP_AND:
                     this.#compileAnd(expr, opts, syntaxCtx)
                     return
@@ -390,6 +395,32 @@ export class AnimaCompiler {
 
     // a normal call
     #compileNormalCall(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
+        // if we have a non-variadic IIFE ((lambda (params...) body) args...), then we can optimize it down
+        // to BLOCK/ENDBLOCK instead of doing a whole function call
+        const first = expr[0]
+        if (Array.isArray(first) && first[0] === OP_LAMBDA && Array.isArray(first[1])) {
+            const params = first[1];
+            const body = first.slice(2);
+            const args = expr.slice(1)
+            if (params.length !== args.length) {
+                throw new Error(`expected exactly ${params.length} args, got ${args.length}`);
+            }
+            const blockScope = new CompilerScope(opts.scope)
+            // Push all arguments, arg binding happens on old scope but its bound as a local to blockScope
+            const seen = new Set<symbol>();
+            for(let i = 0; i < params.length; i++) {
+                this.#ensureCanBind(params[i], seen, syntaxCtx || "lambda")
+                this.#compile(args[i], { ...opts, leaveOnStack: true, isTail: false })
+                blockScope.addLocal(params[i])
+            }
+
+            // Start new lexical scope
+            opts.bc.block(params.length);
+            this.#compile(this.#wrapMulti(body), {...opts, scope: blockScope })
+            opts.bc.endBlock()
+            return
+        }
+
         // We need to compile the first arg first and leave it on the stack
         //
         // This will place a e.g. (PUSH) <symbol>
