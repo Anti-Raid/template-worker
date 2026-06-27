@@ -25,7 +25,9 @@ import {
   DottedPair,
   ASTStringifier,
   OP_REMAINDER,
-  OP_UI_GET
+  OP_UI_GET,
+  normalizeExpr,
+  ensureCanBind
 } from "../common";
 import { Cons } from "../list";
 import { AnimaOptimizer } from "../optimizer";
@@ -430,37 +432,12 @@ export class AnimaCompiler {
         return [OP_BEGIN, ...exprs];
     }
 
-    // Normalizes an expression
-    //
-    // In particular:
-    // - Converts all DottedPair's into Cons
-    #normalizeExpr(expr: any): any {
-        // Try preserving array-ness as far as possible for performance purposes
-        if (Array.isArray(expr)) {
-            if (expr.length === 0) return null; 
-            return expr.map(e => this.#normalizeExpr(e))
-        }
-
-        if (expr instanceof DottedPair) {
-            const items = expr.items.map(e => this.#normalizeExpr(e));
-            let tail = this.#normalizeExpr(expr.rest);
-
-            // Build the cons backwards as (1 2 . 3) => (cons 1 (cons 2 3))
-            for (let i = items.length - 1; i >= 0; i--) {
-                tail = Cons.pair(items[i], tail);
-            }
-            return tail;
-        }
-
-        return expr;
-    }
-
     #compileQuote(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
         if(expr.length != 2) {
             throw new Error(`quote must be in format ["quote", expr] but have ${expr.length-1} arguments`)
         }
         if(!opts.leaveOnStack) return
-        opts.bc.push(this.#normalizeExpr(expr[1]))
+        opts.bc.push(normalizeExpr(expr[1]))
     }
 
     // note that the syntax transformer alr handles defines inside a lambda so
@@ -480,7 +457,7 @@ export class AnimaCompiler {
         if(typeof expr[1] !== "symbol") throw new Error("internal error: complex defines should be transformed by AnimaTransform prior to reaching here")
 
         // By now, everything here should be a normal define
-        this.#ensureCanBind(expr[1], undefined, syntaxCtx || "define")
+        ensureCanBind(expr[1], undefined, syntaxCtx || "define")
 
         // We need to compile the second arg first and leave it on the stack
         //
@@ -506,7 +483,7 @@ export class AnimaCompiler {
             throw new Error(`${String(expr[1])}: expr[1] not symbol or list syntax`)
         }
 
-        this.#ensureCanBind(expr[1], undefined, syntaxCtx || "set!")
+        ensureCanBind(expr[1], undefined, syntaxCtx || "set!")
 
         // We need to compile the second arg first and leave it on the stack
         //
@@ -515,26 +492,6 @@ export class AnimaCompiler {
         opts.bc.setVar(expr[1], opts.scope)
         if (opts.leaveOnStack) {
             opts.bc.push(undefined);
-        }
-    }
-
-    #ensureCanBind(param: any, seen: Set<symbol> | undefined, syntaxCtx: string) {
-        if(typeof param !== "symbol") {
-            throw new Error(`${syntaxCtx} parameter must be a symbol, but received ${typeof param}: ${String(param)}`);
-        }
-        
-        if (seen) {
-            if (seen.has(param)) {
-                throw new Error(`${syntaxCtx} parameter is a duplicate parameter name: ${String(param)}`);
-            }
-            seen.add(param)
-        }
-
-        if (SPECIAL_FORMS.has(param)) {
-            throw new Error(`${String(param)}: bad syntax`)
-        }
-        if (param in BUILTINS_OPS) {
-            throw new Error(`${String(param)}: cannot shadow builtin procedure`)
         }
     }
 
@@ -567,11 +524,11 @@ export class AnimaCompiler {
         // Validate params and remParams here
         const seen = new Set<symbol>();
         for(let i = 0; i < params.length; i++) {
-            this.#ensureCanBind(params[i], seen, syntaxCtx || "lambda")
+            ensureCanBind(params[i], seen, syntaxCtx || "lambda")
             lambdaScope.addLocal(params[i])
         }
         if (remParams) {
-            this.#ensureCanBind(remParams, seen, syntaxCtx || "lambda")
+            ensureCanBind(remParams, seen, syntaxCtx || "lambda")
             lambdaScope.addLocal(remParams)
         }
 
@@ -803,7 +760,7 @@ export class AnimaCompiler {
             // Bind all arguments in prior to entering the iife's block
             const seen = new Set<symbol>();
             for(let i = 0; i < params.length; i++) {
-                this.#ensureCanBind(params[i], seen, syntaxCtx || "lambda")
+                ensureCanBind(params[i], seen, syntaxCtx || "lambda")
 
                 // The vm guarantees that locals are initially undefined as a default value
                 if (args[i] === undefined) {

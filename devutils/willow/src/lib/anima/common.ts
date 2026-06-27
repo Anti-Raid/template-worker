@@ -464,3 +464,48 @@ export class ASTStringifier {
         throw new Error(`Cannot stringify unknown AST node: ${JSON.stringify(ast)}`);
     }
 }
+
+// Normalizes an expression
+//
+// In particular:
+// - Converts all DottedPair's into Cons
+export const normalizeExpr = (expr: any): any =>{
+    // Try preserving array-ness as far as possible for performance purposes
+    if (Array.isArray(expr)) {
+        if (expr.length === 0) return null; 
+        return expr.map(e => normalizeExpr(e))
+    }
+
+    if (expr instanceof DottedPair) {
+        const items = expr.items.map(e => normalizeExpr(e));
+        let tail = normalizeExpr(expr.rest);
+
+        // Build the cons backwards as (1 2 . 3) => (cons 1 (cons 2 3))
+        for (let i = items.length - 1; i >= 0; i--) {
+            tail = Cons.pair(items[i], tail);
+        }
+        return tail;
+    }
+
+    return expr;
+}
+
+export const ensureCanBind = (param: any, seen: Set<symbol> | undefined, syntaxCtx: string) => {
+    if(typeof param !== "symbol") {
+        throw new Error(`${syntaxCtx} parameter must be a symbol, but received ${typeof param}: ${String(param)}`);
+    }
+    
+    if (seen) {
+        if (seen.has(param)) {
+            throw new Error(`${syntaxCtx} parameter is a duplicate parameter name: ${String(param)}`);
+        }
+        seen.add(param)
+    }
+
+    if (SPECIAL_FORMS.has(param)) {
+        throw new Error(`${String(param)}: bad syntax`)
+    }
+    if (param in BUILTINS_OPS) {
+        throw new Error(`${String(param)}: cannot shadow builtin procedure`)
+    }
+}
