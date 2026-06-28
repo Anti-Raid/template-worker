@@ -21,11 +21,13 @@ type Node = {
 } | {
     t: "LoadUpvar",
     destReg: number,
-    upvarIdx: number
+    upvarIdx: number,
+    andUnbox: boolean
 } | {
     t: "SetUpvar",
     srcReg: number,
-    upvarIdx: number
+    upvarIdx: number,
+    andBox: boolean
 } | {
     t: "LoadGlobal",
     destReg: number,
@@ -145,7 +147,8 @@ class IR {
 
         const jumpIdxs: Map<number, JumpLabel> = new Map()
         const resolvedLabels: Map<JumpLabel, number> = new Map()
-        for(const node of this.nodes) {
+        for(let i = 0; i < this.nodes.length; i++) {
+            const node = this.nodes[i]
             switch (node.t) {
                 case "LoadValue": {
                     const v = node.constant
@@ -176,11 +179,11 @@ class IR {
                     }
                 }
                 case "LoadUpvar": {
-                    inst.push(OpCode.LOADUPVAR, node.destReg, node.upvarIdx)
+                    inst.push(OpCode.LOADUPVAR, node.destReg, node.upvarIdx, node.andUnbox ? 1 : 0)
                     break
                 }
                 case "SetUpvar": {
-                    inst.push(OpCode.SETUPVAR, node.srcReg, node.upvarIdx)
+                    inst.push(OpCode.SETUPVAR, node.srcReg, node.upvarIdx, node.andBox ? 1 : 0)
                     break
                 }
                 case "LoadGlobal": {
@@ -251,6 +254,13 @@ class IR {
                 default:
                     let _: never = node;
             }
+        }
+
+        for(const [jump, label] of jumpIdxs) {
+            const resolvedOffset = resolvedLabels.get(label)
+            if(resolvedOffset === undefined) throw new Error(`unresolved label ${label.id}`)
+            if(inst[jump] !== -1) throw new Error(`inst[jump] !== -1`)
+            inst[jump] = resolvedOffset
         }
 
         console.log(cpool, cpool.constants)
@@ -474,7 +484,7 @@ export class Compiler {
         const valReg = opts.scope.allocTemp();
         this.#compile(expr[2], { ...opts, destReg: valReg, isTail: false });
         const res = this.#setVar(expr[1], opts.scope, valReg)
-        if(res) opts.nodes.push(res)
+        if(res) opts.nodes.push(...res)
         opts.scope.freeTemp(valReg)
         if (opts.destReg !== undefined) {
             opts.nodes.push({t: "LoadValue", destReg: opts.destReg, constant: undefined})
@@ -640,12 +650,12 @@ export class Compiler {
             for(let i = 0; i < params.length; i++) {
                 const slot = opts.scope.addLocal(params[i])
                 opts.nodes.push({ t: "Box", srcReg: regs[i], destReg: slot })
+                opts.scope.freeTemp(regs[i])
             }
 
             this.#compile(this.#wrapMulti(body), opts)
             opts.scope.exitBlock()
 
-            for(const reg of regs) opts.scope.freeTemp(reg)
             return true
         } else {
             return false
@@ -689,7 +699,7 @@ export class Compiler {
         if (resolved.type === 'Upvar') {
             if (destReg !== undefined) {
                 // right now, we need to load the upvalue in and unbox it
-                return [{t: "LoadUpvar", upvarIdx: resolved.index, destReg }, {t: "Unbox", srcReg: destReg, destReg }]
+                return [{t: "LoadUpvar", upvarIdx: resolved.index, destReg, andUnbox: true }]
             }
             return []
         }
@@ -699,19 +709,19 @@ export class Compiler {
         return [{t: "LoadGlobal", sym: varname, destReg}]
     }
 
-    #setVar(varname: symbol, scope: CompilerScope, srcReg: number): Node | null {
+    #setVar(varname: symbol, scope: CompilerScope, srcReg: number): Node[] {
         // Check if we can resolve it to a local/upvar
         const resolved = scope.resolve(varname)
 
         if (resolved.type === 'Local') {
-            return { t: "SetBox", srcReg, destReg: resolved.index }
+            return [{ t: "SetBox", srcReg, destReg: resolved.index }]
         } 
         
         if (resolved.type === 'Upvar') {
-            return { t: "SetUpvar", srcReg, upvarIdx: resolved.index }
+            return [{ t: "SetUpvar", srcReg, upvarIdx: resolved.index, andBox: true }]
         }
 
         // Assume global
-        return {t: "SetGlobal", sym: varname, srcReg}
+        return [{t: "SetGlobal", sym: varname, srcReg}]
     }
 }

@@ -2,21 +2,19 @@ import { Compiler } from "./compiler";
 import { deepPrint } from "./utils";
 import { AnimaVM, Globals } from "./vm";
 
-const c = new Compiler()
-const bc = c.compile(`
-(define (make-counter)
-  (let ((count 0))
-    (lambda ()
-      (set! count (+ count 1))
-      count)))
+const code = `
+(begin
+  (define (loop n)
+    (if (= n 0)
+        "survived!"
+        (loop (- n 1))))
+  (loop 15000))`
 
-(let ((counter-a (make-counter))
-      (counter-b (make-counter)))
-  (counter-a) ; 1
-  (counter-a) ; 2
-  (counter-b) ; 1 (Should be completely independent)
-  (counter-a))
-`)
+const c = new Compiler()
+const bc = c.compile(code)
 
 console.log(deepPrint(bc))
-new AnimaVM().evaluate(bc, new Globals(new Map()))
+const t1 = performance.now()
+const retv = new AnimaVM().evaluate(bc, new Globals(new Map()))
+const t2 = performance.now()
+console.log(retv, t2-t1)

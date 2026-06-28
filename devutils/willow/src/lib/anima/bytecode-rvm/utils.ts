@@ -18,7 +18,7 @@ const constToString = (s: any): string => {
         }
         return `(${r.join(' ')})`
     } else if (s instanceof ClosureTemplate) {
-        return `fn(${String(s.params)})`
+        return `fn(${s.params.map(x => String(x)).join(', ')})`
     } {
         return `<unknown:${s}>`
     }
@@ -28,11 +28,11 @@ const stringifyInst = (inst: ByteCode): string[] => {
     let ops: string[] = [];
     let idx = 0;
 
-    const padOp = (name: string) => name.padEnd(14, ' ');
+    const padOp = (name: string) => name.padEnd(20, ' ');
 
     while (idx < inst.inst.length) {
         const lineNum = idx.toString().padStart(4, '0');
-        const opcode = inst.inst[idx];
+        const opcode: OpCode = inst.inst[idx];
         let line = `${lineNum}: `;
 
         switch (opcode) {
@@ -82,13 +82,13 @@ const stringifyInst = (inst: ByteCode): string[] => {
                 break;
 
             case OpCode.LOADUPVAR:
-                line += `${padOp("LOADUPVAR")} r${inst.inst[idx + 1]}, upvar(${inst.inst[idx + 2]})`;
-                idx += 3;
+                line += `${padOp("LOADUPVAR")} r${inst.inst[idx + 1]}, upvar(${inst.inst[idx + 2]}) andUnbox=${inst.inst[idx + 3]}`;
+                idx += 4;
                 break;
                 
             case OpCode.SETUPVAR:
-                line += `${padOp("SETUPVAR")} r${inst.inst[idx + 2]}, upvar(${inst.inst[idx + 1]})`;
-                idx += 3;
+                line += `${padOp("SETUPVAR")} r${inst.inst[idx + 2]}, upvar(${inst.inst[idx + 1]}) andBox=${inst.inst[idx + 3]}`;
+                idx += 4;
                 break;
 
             case OpCode.LOADGLOBAL:
@@ -135,11 +135,8 @@ const stringifyInst = (inst: ByteCode): string[] => {
                 idx += 5;
                 break;
             }
-
             default:
-                line += `UNKNOWN OPCODE: ${opcode}`;
-                idx += 1; // Fallback to avoid infinite loops if data is corrupted
-                break;
+                let _: never = opcode
         }
         
         ops.push(line);

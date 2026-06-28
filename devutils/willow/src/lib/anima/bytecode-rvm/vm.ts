@@ -28,7 +28,7 @@ export enum OpCode {
     UNBOX,
     SETBOX,
     // not yet used
-    MOVE
+    MOVE,
 }
 
 export class ByteCode {
@@ -451,7 +451,7 @@ export class AnimaVM {
             }
 
             const opcode: OpCode = frame.readNext()
-            console.log(`${OpCode[opcode]} ${regs.join(', ')}`)
+            //console.log(`${OpCode[opcode]} ${regs.join(', ')}`)
             switch (opcode) {
                 // Load
                 case OpCode.LOADCONST: {
@@ -496,13 +496,15 @@ export class AnimaVM {
                 case OpCode.LOADUPVAR: {
                     const destReg = frame.readNext()
                     const upvarIdx = frame.readNext()
-                    regs[destReg] = frame.upvars[upvarIdx]
+                    const andUnbox = frame.readNext()
+                    regs[destReg] = andUnbox ? (frame.upvars[upvarIdx] as Box).val : frame.upvars[upvarIdx]
                     break
                 }
                 case OpCode.SETUPVAR: {
                     const srcReg = frame.readNext()
                     const upvarIdx = frame.readNext()
-                    frame.upvars[upvarIdx] = regs[srcReg]
+                    const andBox = frame.readNext()
+                    frame.upvars[upvarIdx] = andBox ? new Box(regs[srcReg]) : regs[srcReg]
                     break
                 }
                 case OpCode.LOADGLOBAL: {
@@ -574,10 +576,6 @@ export class AnimaVM {
                     const destReg = frame.readNext()
                     const tidx = frame.readNext()
                     const template = frame.getConst(tidx) as ClosureTemplate
-                    if (!template) {
-                        throw new Error(`NEWCLOSURE: Template at index ${tidx} is undefined! 
-                                        Available constants: ${JSON.stringify(frame.code.constants)}`);
-                    }
                     const closure = new Closure(template)
                     // Copy over upvalues
                     for (let i = 0; i < template.upvarLocs.length; i++) {
@@ -612,7 +610,6 @@ export class AnimaVM {
                 case OpCode.UNBOX: {
                     const destReg = frame.readNext();
                     const srcReg = frame.readNext();
-                    console.log("Unboxing", regs[srcReg], regs[srcReg].val)
                     regs[destReg] = (regs[srcReg] as Box).val
                     break
                 }
