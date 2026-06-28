@@ -87,7 +87,7 @@ const stringifyInst = (inst: ByteCode): string[] => {
                 break;
                 
             case OpCode.SETUPVAR:
-                line += `${padOp("SETUPVAR")} r${inst.inst[idx + 2]}, upvar(${inst.inst[idx + 1]}) andBox=${inst.inst[idx + 3]}`;
+                line += `${padOp("SETUPVAR")} r${inst.inst[idx + 1]}, upvar(${inst.inst[idx + 2]}) andBox=${inst.inst[idx + 3]}`;
                 idx += 4;
                 break;
 

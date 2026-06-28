@@ -11,6 +11,7 @@ import {
   OP_LETREC,
   OP_LETSTAR,
   DottedPair,
+  ensureCanBind,
 } from "./common";
 
 /**
@@ -55,6 +56,8 @@ export class AnimaTransformer {
                     return this.#transform(this.#transformLetrec(ast, ctx));
                 case OP_LAMBDA:
                     return this.#transformLambda(ast);
+                case OP_SET:
+                    this.#validateSet(ast, ctx)
             }
 
             return ast.map((i: any) => this.#transform(i));
@@ -62,6 +65,18 @@ export class AnimaTransformer {
 
         // if no transformations apply, just return the original ast
         return ast
+    }
+
+    #validateSet(expr: any[], ctx?: string) {
+        if(expr.length != 3) {
+            throw new Error(`set! must be in format ["set!" varname arg] but have ${expr.length-1} arguments`)
+        }
+
+        if(typeof expr[1] !== "symbol") {
+            throw new Error(`${String(expr[1])}: expr[1] not symbol or list syntax`)
+        }
+
+        ensureCanBind(expr[1], undefined, ctx || "set!")
     }
 
     #wrapMulti = (exprs: any[]) => {
@@ -136,6 +151,10 @@ export class AnimaTransformer {
     }
 
     #transformLambda(expr: any[]) {
+        if(expr.length < 3) {
+            throw new Error(`lambda must be in format ["lambda", [bind-args...], body...] but only have ${expr.length-1} arguments`)
+        }
+
         const args = expr[1]
         const rawBody = expr.slice(2)
 

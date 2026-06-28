@@ -1,4 +1,4 @@
-import { ExposedProps, IProcedure, isDeepEqual, MissingVarError, OP_ADD, OP_CAR, OP_CDR, OP_CONS, OP_CONTAINS, OP_DIV, OP_EMPTY, OP_EQ, OP_GT, OP_GTE, OP_LAST, OP_LENGTH, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_NOT, OP_REMAINDER, OP_SUB } from "../common";
+import { ExposedProps, IProcedure, isDeepEqual, MissingVarError, OP_ADD, OP_CAR, OP_CDR, OP_CONS, OP_CONTAINS, OP_DIV, OP_EMPTY, OP_EQ, OP_EQ_DEEP1, OP_EQ_PTR1, OP_GT, OP_GTE, OP_LAST, OP_LENGTH, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_NOT, OP_REMAINDER, OP_SUB } from "../common";
 import { isTruthy } from "../common";
 import { Cons } from "../list";
 
@@ -174,6 +174,34 @@ export const IBUILTINS: BuiltinFunction[] = [
             const val = regs[i]
             if (typeof val !== "number") throw new Error(`= requires numbers, but received ${typeof val}`);
             if (val !== start) {
+                res = false
+                break
+            }
+        }
+        regs[destReg] = res
+    }),
+    new BuiltinFunction(OP_EQ_PTR1, (regs, destReg, startReg, nargs) => {
+        if (nargs === 0) throw new Error("eq? requires at least 1 argument");
+        
+        let start = regs[startReg];
+        let res = true
+        for (let i = startReg+1; i < startReg+nargs; i++) {
+            const val = regs[i]
+            if (val !== start) {
+                res = false
+                break
+            }
+        }
+        regs[destReg] = res
+    }),
+    new BuiltinFunction(OP_EQ_DEEP1, (regs, destReg, startReg, nargs) => {
+        if (nargs === 0) throw new Error("equal? requires at least 1 argument");
+        
+        let start = regs[startReg];
+        let res = true
+        for (let i = startReg+1; i < startReg+nargs; i++) {
+            const val = regs[i]
+            if (!isDeepEqual(val, start)) {
                 res = false
                 break
             }
@@ -381,6 +409,13 @@ class RegBlock {
     }*/
 }
 
+const regOut = (reg: any): any => {
+    if (reg instanceof Box) return `Box<${regOut(reg.val)}>`
+    if (reg instanceof Closure) return `Closure<${reg.tmpl.params.map(x => x.description).join(", ")}>`
+    if (typeof reg === "symbol") return `${reg.description || '<symbol>'}`
+    return JSON.stringify(reg)
+}
+
 // To make life debugging registers easier
 class Box {
     constructor(public val: any) {}
@@ -451,7 +486,7 @@ export class AnimaVM {
             }
 
             const opcode: OpCode = frame.readNext()
-            //console.log(`${OpCode[opcode]} ${regs.join(', ')}`)
+            //console.log(`${OpCode[opcode]} ${regs.map(r => regOut(r)).join(', ')}`)
             switch (opcode) {
                 // Load
                 case OpCode.LOADCONST: {

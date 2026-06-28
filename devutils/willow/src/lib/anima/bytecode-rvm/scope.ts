@@ -2,6 +2,65 @@ import type { UpVarLoc } from "./vm";
 
 export type Resolve = { type: "Global" } | { type: "Local", index: number } | { type: "Upvar", index: number }
 
+export class VariableMetadata {
+    mutable: boolean = false; // is this variable mutated in this scope or not
+    isCaptured: boolean = false; // is the variable captured in this scope or not
+    get isBoxed() { return this.isCaptured && this.mutable }
+}
+
+export class AnalysisScope {
+    #vals = new Map<symbol, VariableMetadata>()
+    outer: AnalysisScope | null;
+
+    constructor(outer: AnalysisScope | null) {
+        this.outer = outer;
+    }
+
+    dbgPrint() {
+        for(const [sym, md] of this.#vals.entries()) {
+            console.log(JSON.stringify({sym: sym.description, md}))
+        }
+    }
+
+    define(sym: symbol) {
+        this.#vals.set(sym, new VariableMetadata());
+    }
+
+    getVarinfo(sym: symbol): VariableMetadata | null {
+        if (this.#vals.has(sym)) return this.#vals.get(sym)!;
+        if (this.outer) return this.outer.getVarinfo(sym);
+        return null;
+    }
+
+    readVar(sym: symbol): boolean {
+        if (this.#vals.has(sym)) {
+            return true; // Found locally
+        }
+        
+        if (this.outer && this.outer.readVar(sym)) {
+            this.outer.markCaptured(sym);
+            return true;
+        }
+        return false;
+    }
+
+    markCaptured(sym: symbol) {
+        if (this.#vals.has(sym)) {
+            this.#vals.get(sym)!.isCaptured = true;
+        } else if (this.outer) {
+            this.outer.markCaptured(sym);
+        }
+    }
+
+    markMutable(sym: symbol) {
+        if (this.#vals.has(sym)) {
+            this.#vals.get(sym)!.mutable = true;
+        } else if (this.outer) {
+            this.outer.markMutable(sym);
+        }
+    }
+}
+
 /** 
  * Tracks/'simulates' block-level variable shadowing (within a function) at compile-time 
  * 

@@ -1,6 +1,7 @@
-import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_ADD, OP_AND, OP_APPLY, OP_BEGIN, OP_CAR, OP_CDR, OP_COND, OP_CONS, OP_CONTAINS, OP_DEFINE, OP_DIV, OP_EQ, OP_GT, OP_GTE, OP_IF, OP_LAMBDA, OP_LET, OP_LETREC, OP_LETSTAR, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_OR, OP_QUOTE, OP_REMAINDER, OP_SET, OP_SUB } from "../common";
+import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_ADD, OP_AND, OP_APPLY, OP_BEGIN, OP_CAR, OP_CDR, OP_COND, OP_CONS, OP_CONTAINS, OP_DEFINE, OP_DIV, OP_EMPTY, OP_EQ, OP_EQ_DEEP1, OP_EQ_PTR1, OP_GT, OP_GTE, OP_IF, OP_LAMBDA, OP_LENGTH, OP_LET, OP_LETREC, OP_LETSTAR, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_OR, OP_QUOTE, OP_REMAINDER, OP_SET, OP_SUB } from "../common";
 import { AnimaTransformer } from "../syntax-transformer";
-import { CompilerScope } from "./scope";
+import { AstAnalysis } from "./analysis";
+import { AnalysisScope, CompilerScope } from "./scope";
 import { ByteCode, ClosureTemplate, IBUILTINS, OpCode, type UpVarLoc } from "./vm";
 
 export class JumpLabel {
@@ -263,7 +264,6 @@ class IR {
             inst[jump] = resolvedOffset
         }
 
-        console.log(cpool, cpool.constants)
         return new ByteCode(cpool.constants, new Uint32Array(inst), numRegs)
     }
 }
@@ -289,7 +289,11 @@ interface CmpOpts {
     destReg?: number // where to store dest reg
     isTail: boolean // whether this is a tail-call or not (for tco)
     nodes: Node[]
-    scope: CompilerScope
+    scope: CompilerScope,
+
+    // From pass 1
+    ascope: AnalysisScope,
+    analyzer: AstAnalysis
 }
 
 export class Compiler {
@@ -303,11 +307,14 @@ export class Compiler {
 
         // Step 1 is to apply the syntax transformation of cond/let/let*/letrec into simple form
         let trExpr = this.t.transform(ast)
+        // Step 2 is to analyze our variables so we know what to box and what not to box
+        let analyzer = new AstAnalysis()
+        const ascope = analyzer.analyze(trExpr)
 
         const scope = new CompilerScope(null)
         const nodes: Node[] = []
         const retReg = scope.allocTemp(); // no need to free the temp reg as we return?
-        this.#compile(trExpr, {destReg: retReg, isTail: true, nodes, scope})
+        this.#compile(trExpr, {destReg: retReg, isTail: true, nodes, scope, ascope, analyzer})
         nodes.push({t: "Return", reg: retReg})
         const ir = new IR(nodes)
         return ir.lower(scope.numRegs)
@@ -316,7 +323,7 @@ export class Compiler {
     #compile(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         // Raw values
         if (typeof expr === 'symbol') {
-            const res = this.#getVar(expr, opts.scope, opts.destReg)
+            const res = this.#getVar(expr, opts, opts.destReg)
             if (res) opts.nodes.push(...res)
             return
         } else if (expr instanceof DottedPair) {
@@ -368,6 +375,8 @@ export class Compiler {
                 case OP_MUL:
                 case OP_DIV:
                 case OP_EQ:
+                case OP_EQ_PTR1:
+                case OP_EQ_DEEP1:
                 case OP_MODULO:
                 case OP_REMAINDER:
                 case OP_LIST:
@@ -380,6 +389,8 @@ export class Compiler {
                 case OP_CONS:
                 case OP_CONTAINS:
                 case OP_MEMBER:
+                case OP_EMPTY:
+                case OP_LENGTH:
                     const int = IBUILTINS.findLastIndex(x => x.name === operator)
                     if(int !== -1) this.#optIntrinsicNormal(expr, int, opts, syntaxCtx)
                     else throw new Error(`internal error: failed to find intrinsic for ${String(operator)}`)
@@ -451,7 +462,7 @@ export class Compiler {
         }
 
         if(expr.length !== 3) {
-            throw new Error(`define must be in format ["define" varname arg] (post transformation) but have ${expr.length-1} arguments`)
+            throw new Error(`define must be in format ["define" varname arg] (post transformation) but have ${expr.length-1} arguments, complex defines should be transformed by AnimaTransform prior to reaching here`)
         }
 
         if(typeof expr[1] !== "symbol") throw new Error("internal error: complex defines should be transformed by AnimaTransform prior to reaching here")
@@ -470,20 +481,12 @@ export class Compiler {
     }
 
     #compileSet(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
-        if(expr.length != 3) {
-            throw new Error(`set! must be in format ["set!" varname arg] but have ${expr.length-1} arguments`)
-        }
-
-        if(typeof expr[1] !== "symbol") {
-            throw new Error(`${String(expr[1])}: expr[1] not symbol or list syntax`)
-        }
-
-        ensureCanBind(expr[1], undefined, syntaxCtx || "set!")
+        // AnimaTransform ensures sets are of correct form
 
         // We need to compile the second arg first and leave it on a temp reg
         const valReg = opts.scope.allocTemp();
         this.#compile(expr[2], { ...opts, destReg: valReg, isTail: false });
-        const res = this.#setVar(expr[1], opts.scope, valReg)
+        const res = this.#setVar(expr[1], opts, valReg)
         if(res) opts.nodes.push(...res)
         opts.scope.freeTemp(valReg)
         if (opts.destReg !== undefined) {
@@ -492,12 +495,11 @@ export class Compiler {
     }
 
     #compileLambda(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
-        if(expr.length < 3) {
-            throw new Error(`lambda must be in format ["lambda", [bind-args...], body...] but only have ${expr.length-1} arguments`)
-        }
-
+        // AnimaTransform ensures lambdas are of correct form
         const lambdaScope = new CompilerScope(opts.scope)
-
+        const ascope = opts.analyzer.scopeMap.get(expr)
+        if (!ascope) throw new Error(`internal error: could not find ascope for expr ${expr}`)
+    
         let params: symbol[] = []
         let remParams: symbol | null = null
         if (Array.isArray(expr[1])) {
@@ -517,11 +519,19 @@ export class Compiler {
         const seen = new Set<symbol>();
         for(let i = 0; i < params.length; i++) {
             ensureCanBind(params[i], seen, syntaxCtx || "lambda")
-            lambdaScope.addLocal(params[i])
+            const reg = lambdaScope.addLocal(params[i])
+
+            const inf = ascope.getVarinfo(params[i])
+            if(!inf) throw new Error("Could not fetch varinfo")
+            if(inf.isBoxed) opts.nodes.push({t: "Box", destReg: reg, srcReg: reg})
         }
         if (remParams) {
             ensureCanBind(remParams, seen, syntaxCtx || "lambda")
-            lambdaScope.addLocal(remParams)
+            const reg = lambdaScope.addLocal(remParams)
+
+            const inf = ascope.getVarinfo(remParams)
+            if(!inf) throw new Error("Could not fetch varinfo")
+            if(inf.isBoxed) opts.nodes.push({t: "Box", destReg: reg, srcReg: reg})
         }
 
         // Once we've verified the syntax, we can then drop the entire lambda if its not actually needed
@@ -530,7 +540,7 @@ export class Compiler {
         // Compile lambda body
         const lambdaNodes: Node[] = []
         const retReg = lambdaScope.allocTemp() // no need to free the temp reg as we return?
-        this.#compile(this.#wrapMulti(expr.slice(2)), {...opts, destReg: retReg, isTail: true, nodes: lambdaNodes, scope: lambdaScope })
+        this.#compile(this.#wrapMulti(expr.slice(2)), {...opts, destReg: retReg, isTail: true, nodes: lambdaNodes, scope: lambdaScope, ascope })
         lambdaNodes.push({t: "Return", reg: retReg})
         const template = new ClosureTemplateIR(params, remParams, lambdaNodes, lambdaScope.numRegs, lambdaScope.upvars);
         opts.nodes.push({t: "NewClosure", template: template, destReg: opts.destReg})
@@ -605,7 +615,6 @@ export class Compiler {
         const startReg = opts.scope.regAlloc.allocBlock(nargs);
         for (let i = 1; i < expr.length; i++) {
             this.#compile(expr[i], { ...opts, destReg: startReg+i-1, isTail: false })
-            opts.nodes.push({t: "Box", destReg: startReg+i-1, srcReg: startReg+i-1}) // we need to box the value always (for now)
         }
 
         if (opts.isTail) {
@@ -628,6 +637,9 @@ export class Compiler {
         // call. Not important right now though as we don't support call/cc
         const first = expr[0]
         if (Array.isArray(first) && first[0] === OP_LAMBDA && Array.isArray(first[1])) {
+            const ascope = opts.analyzer.scopeMap.get(first)
+            if (!ascope) throw new Error(`internal error: could not find ascope for expr ${first}`)
+
             const params = first[1];
             const body = first.slice(2);
             const args = expr.slice(1)
@@ -635,25 +647,22 @@ export class Compiler {
                 throw new Error(`expected exactly ${params.length} args, got ${args.length}`);
             }
             
-            // Bind all arguments in prior to entering the iife's block
+            // Bind all arguments 
             const seen = new Set<symbol>();
-            const regs: number[] = []
+            opts.scope.enterBlock()
             for(let i = 0; i < params.length; i++) {
                 ensureCanBind(params[i], seen, syntaxCtx || "lambda")
-                const destReg = opts.scope.allocTemp()
-                this.#compile(args[i], { ...opts, destReg: destReg, isTail: false })
-                regs.push(destReg)
+                const inf = ascope.getVarinfo(params[i]);
+                if(!inf) throw new Error("Could not fetch varinfo")
+                
+                const destReg = opts.scope.addLocal(params[i])
+                this.#compile(args[i], { ...opts, destReg: destReg, isTail: false, ascope })
+                if(inf && inf.isBoxed) {
+                    opts.nodes.push({ t: "Box", srcReg: destReg, destReg })
+                }
             }
 
-            opts.scope.enterBlock()
-            // alloc slot regs for every parameter
-            for(let i = 0; i < params.length; i++) {
-                const slot = opts.scope.addLocal(params[i])
-                opts.nodes.push({ t: "Box", srcReg: regs[i], destReg: slot })
-                opts.scope.freeTemp(regs[i])
-            }
-
-            this.#compile(this.#wrapMulti(body), opts)
+            this.#compile(this.#wrapMulti(body), {...opts, ascope})
             opts.scope.exitBlock()
 
             return true
@@ -684,22 +693,35 @@ export class Compiler {
         return [OP_BEGIN, ...exprs];
     }
 
-    #getVar(varname: symbol, scope: CompilerScope, destReg?: number): Node[] {
+    #getVar(varname: symbol, opts: CmpOpts, destReg?: number): Node[] {
         // Check if we can resolve it to a local/upvar
-        const resolved = scope.resolve(varname)
+        const resolved = opts.scope.resolve(varname)
 
         if (resolved.type === 'Local') {
-            // If we need to emit a move, then move, otherwise do nothing
-            if (destReg !== undefined) {
-                return [{t: "Unbox", srcReg: resolved.index, destReg }]
+            const aresolved = opts.ascope.getVarinfo(varname)
+            if (!aresolved) throw new Error(`internal error: ${String(varname)} has no analysis info present`)
+            
+            if (aresolved.isBoxed) {
+                if (destReg !== undefined) {
+                    // Unbox
+                    return [{t: "Unbox", srcReg: resolved.index, destReg }]
+                }
+            } else {
+                // Move
+                if (destReg !== undefined && resolved.index !== destReg) {
+                    return [{t: "Move", srcReg: resolved.index, destReg }]
+                }
             }
             return []
         } 
         
         if (resolved.type === 'Upvar') {
+            const aresolved = opts.ascope.getVarinfo(varname)
+            if (!aresolved) throw new Error(`internal error: ${String(varname)} has no analysis info present`)
+
             if (destReg !== undefined) {
-                // right now, we need to load the upvalue in and unbox it
-                return [{t: "LoadUpvar", upvarIdx: resolved.index, destReg, andUnbox: true }]
+                // right now, we need to load the upvalue in and unbox it (if boxed)
+                return [{t: "LoadUpvar", upvarIdx: resolved.index, destReg, andUnbox: aresolved.isBoxed }]
             }
             return []
         }
@@ -709,16 +731,35 @@ export class Compiler {
         return [{t: "LoadGlobal", sym: varname, destReg}]
     }
 
-    #setVar(varname: symbol, scope: CompilerScope, srcReg: number): Node[] {
+    #setVar(varname: symbol, opts: CmpOpts, srcReg: number): Node[] {
         // Check if we can resolve it to a local/upvar
-        const resolved = scope.resolve(varname)
+        const resolved = opts.scope.resolve(varname)
 
         if (resolved.type === 'Local') {
-            return [{ t: "SetBox", srcReg, destReg: resolved.index }]
+            const aresolved = opts.ascope.getVarinfo(varname)
+            if (!aresolved) throw new Error(`internal error: ${String(varname)} has no analysis info present`)
+
+            if (aresolved.isBoxed) {
+                return [{ t: "SetBox", srcReg, destReg: resolved.index }]
+            } else {
+                if (srcReg !== resolved.index) {
+                    return [{ t: "Move", srcReg, destReg: resolved.index }];
+                }
+            }
         } 
         
         if (resolved.type === 'Upvar') {
-            return [{ t: "SetUpvar", srcReg, upvarIdx: resolved.index, andBox: true }]
+            const aresolved = opts.ascope.getVarinfo(varname)
+            if (!aresolved) throw new Error(`internal error: ${String(varname)} has no analysis info present`)
+
+            if (aresolved.isBoxed) {
+                const tmpReg = opts.scope.allocTemp()
+                const nodes: Node[] = [{t: "LoadUpvar", andUnbox: false, destReg: tmpReg, upvarIdx: resolved.index}, { t: "SetBox", destReg: tmpReg, srcReg }]
+                opts.scope.freeTemp(tmpReg)
+                return nodes
+            } else {
+                return [{ t: "SetUpvar", srcReg, upvarIdx: resolved.index, andBox: false }];
+            }
         }
 
         // Assume global

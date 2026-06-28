@@ -506,7 +506,7 @@ export const ensureCanBind = (param: any, seen: Set<symbol> | undefined, syntaxC
     if (SPECIAL_FORMS.has(param)) {
         throw new Error(`${String(param)}: bad syntax`)
     }
-    if (param in BUILTINS_OPS) {
+    if (BUILTINS_OPS.has(param)) {
         throw new Error(`${String(param)}: cannot shadow builtin procedure`)
     }
 }
