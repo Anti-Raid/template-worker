@@ -21,6 +21,10 @@ export class Block {
         this.#allocatedRegs.set(reg, sym)
     }
 
+    getBoundRegs() {
+        return this.#allocatedRegs.keys()
+    }
+
     isRegAllocated(reg: number): boolean {
         if (this.#allocatedRegs.has(reg)) return true
         if (this.parent) return this.parent.isRegAllocated(reg)
@@ -49,7 +53,7 @@ export class CompilerScope {
         this.upvars = []
     }
 
-    get numLocals() {
+    get numRegs() {
         return this.regAlloc.total
     }
 
@@ -58,6 +62,10 @@ export class CompilerScope {
     }
 
     exitBlock() {
+        for (const reg of this.currBlock.getBoundRegs()) {
+            this.regAlloc.free(reg);
+        }
+
         if (this.currBlock.parent) {
             this.currBlock = this.currBlock.parent;
         } else {
@@ -123,33 +131,65 @@ export class CompilerScope {
 }
 
 export class RegAlloc {
-    next: number = 0 // next reg number
-    freelist: number[] = []
+    used: Uint8Array = new Uint8Array(64); 
+    nreg: number = 0;
 
     alloc(): number {
-        if (this.freelist.length > 0) {
-            return this.freelist.pop() as number
-        } else {
-            return this.next++
+        // Look for a reg we can reuse
+        for (let i = 0; i < this.nreg; i++) {
+            if (this.used[i] === 0) {
+                this.used[i] = 1;
+                return i;
+            }
         }
+        // Worst case: expand the nregs
+        return this.#expandAndClaim(1);
+    }
+
+    allocBlock(n: number): number {
+        let consecutive = 0;
+        let start = -1;
+        
+        // Look for a consecutive block of reg's we can reuse
+        for (let i = 0; i < this.nreg; i++) {
+            if (this.used[i] === 0) {
+                if (consecutive === 0) start = i;
+                consecutive++;
+                
+                if (consecutive === n) {
+                    this.used.fill(1, start, start + n);
+                    return start;
+                }
+            } else {
+                consecutive = 0;
+            }
+        }
+        // Worst case: expand the nregs
+        return this.#expandAndClaim(n);
     }
 
     free(reg: number) {
-        this.freelist.push(reg);
-    }
-
-    // allocates a continous block of n registers starting from n
-    allocBlock(n: number): number {
-        const start = this.next;
-        this.next += n;
-        return start;
+        this.used[reg] = 0;
     }
 
     freeBlock(start: number, n: number) {
-        for (let i = 0; i < n; i++) {
-            this.free(start + i);
-        }
+        this.used.fill(0, start, start + n);
     }
 
-    get total() { return this.next }
+    #expandAndClaim(n: number): number {
+        const start = this.nreg;
+        this.nreg += n;
+    
+        // Resize the used array
+        if (this.nreg > this.used.length) {
+            const newArray = new Uint8Array(this.used.length * 2);
+            newArray.set(this.used);
+            this.used = newArray;
+        }
+        
+        this.used.fill(1, start, start + n);
+        return start;
+    }
+
+    get total() { return this.nreg; }
 }

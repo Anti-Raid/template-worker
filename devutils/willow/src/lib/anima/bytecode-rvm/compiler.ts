@@ -1,8 +1,7 @@
-
-import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_ADD, OP_AND, OP_APPLY, OP_BEGIN, OP_COND, OP_DEFINE, OP_DIV, OP_EQ, OP_IF, OP_LAMBDA, OP_LET, OP_LETREC, OP_LETSTAR, OP_LIST, OP_MODULO, OP_MUL, OP_OR, OP_QUOTE, OP_REMAINDER, OP_SET, OP_SUB } from "../common";
+import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_ADD, OP_AND, OP_APPLY, OP_BEGIN, OP_CAR, OP_CDR, OP_COND, OP_CONS, OP_CONTAINS, OP_DEFINE, OP_DIV, OP_EQ, OP_GT, OP_GTE, OP_IF, OP_LAMBDA, OP_LET, OP_LETREC, OP_LETSTAR, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_OR, OP_QUOTE, OP_REMAINDER, OP_SET, OP_SUB } from "../common";
 import { AnimaTransformer } from "../syntax-transformer";
 import { CompilerScope } from "./scope";
-import { ClosureTemplate, type UpVarLoc } from "./vm";
+import { ByteCode, ClosureTemplate, IBUILTINS, OpCode, type UpVarLoc } from "./vm";
 
 export class JumpLabel {
     public id: number;
@@ -19,9 +18,6 @@ type Node = {
     t: "Move",
     destReg: number,
     srcReg: number,
-} | {
-    t: "Negate",
-    reg: number,
 } | {
     t: "LoadUpvar",
     destReg: number,
@@ -72,31 +68,194 @@ type Node = {
     destReg: number,
     template: ClosureTemplateIR
 } | {
-    // Last arg must be a list
-    t: "IApply",
-    procReg: number,
-    destReg: number,
-    startReg: number,
-    nargs: number,
-} | {
-    // Last arg must be a list
-    t: "ITailApply",
-    procReg: number,
-    startReg: number,
-    nargs: number,
-} | {
-    // Not really a bytecode op, but can be optimized/constant folded (or emitted as IADD/ISUB/IMUL/IDIV/IMODULO/IREMAINDER ops etc.)
+    // A call to a builtin function
     t: "IBuiltin",
-    f: BuiltinFunction
+    builtinIdx: number,
     destReg: number,
     startReg: number,
     nargs: number
 } | {
-    // Not really a bytecode op, but can be optimized out or emitted as IASSERTNUMBER ops etc.
-    t: "IBuiltinAssert",
-    f: BuiltinFunction
-    startReg: number,
-    nargs: number
+    // reg[destReg] = [reg[srcReg]]
+    t: "Box",
+    destReg: number,
+    srcReg: number
+} | {
+    // reg[destReg] = reg[srcReg][0]
+    t: "Unbox",
+    destReg: number,
+    srcReg: number
+} | {
+    // reg[destReg][0] = reg[srcReg]
+    t: "SetBox",
+    destReg: number,
+    srcReg: number
+} | {
+    t: "Move",
+    destReg: number,
+    srcReg: number
+}
+
+class ConstPool {
+    #known: Map<unknown, number>;
+    public constants: any[]
+    constructor() {
+        this.constants = []
+        this.#known = new Map()
+    }
+
+    // Register a symbol with the constant pool
+    push(s: unknown) {
+        // Try to deduplicate anything
+        if (s === null || typeof s !== "object") {
+            const symIdx = this.#known.get(s)
+            if(symIdx !== undefined) {
+                return symIdx
+            } else {
+                const idx = this.constants.push(s) - 1
+                this.#known.set(s, idx)
+                return idx
+            }
+        }
+
+        // TODO: Deduplicate stuff later
+        return this.constants.push(this.#freezeObj(s)) - 1
+    }
+
+    mutPush(s: unknown) {
+        return this.constants.push(s) - 1
+    }
+
+    #freezeObj(obj: any) {
+        if (typeof obj !== "object") return obj
+        Object.keys(obj).forEach(prop => {
+            if (typeof obj[prop] === 'object' && !Object.isFrozen(obj[prop])) {
+                this.#freezeObj(obj[prop]);
+            }
+        });
+        return Object.freeze(obj);
+    }
+}
+
+class IR {
+    constructor(public nodes: Node[]) {}
+
+    lower(numRegs: number): ByteCode {
+        const cpool = new ConstPool()
+        const inst: number[] = []
+
+        const jumpIdxs: Map<number, JumpLabel> = new Map()
+        const resolvedLabels: Map<JumpLabel, number> = new Map()
+        for(const node of this.nodes) {
+            switch (node.t) {
+                case "LoadValue": {
+                    const v = node.constant
+                    if (typeof v === "number") {   
+                        if (Number.isInteger(v) && v >= 0 && v <= 0xFFFFFFFF) {
+                            // We can use u32 specialization here
+                            inst.push(OpCode.LOADU32, node.destReg, v);
+                        } else if (Number.isInteger(v) && v >= -1 * 0xFFFFFFFF && v < 0) {
+                            // We can use u32 specialization here but we need to negate after pushing
+                            inst.push(OpCode.LOADU32, node.destReg, Math.abs(v));
+                            inst.push(OpCode.NEGATE, node.destReg)
+                        } else {
+                            inst.push(OpCode.LOADCONST, node.destReg, cpool.push(v))
+                        }
+                        continue
+                    } else if (typeof v === "boolean") {
+                        inst.push((v ? OpCode.LOADTRUE : OpCode.LOADFALSE), node.destReg)
+                        continue
+                    } else if((Array.isArray(v) && v.length === 0) || v === null) {
+                        inst.push(OpCode.LOADEMPTYLIST, node.destReg)
+                        continue
+                    } else if (v === undefined) {
+                        inst.push(OpCode.LOADVOID, node.destReg)
+                        continue
+                    } else {
+                        inst.push(OpCode.LOADCONST, node.destReg, cpool.push(v))
+                        continue
+                    }
+                }
+                case "LoadUpvar": {
+                    inst.push(OpCode.LOADUPVAR, node.destReg, node.upvarIdx)
+                    break
+                }
+                case "SetUpvar": {
+                    inst.push(OpCode.SETUPVAR, node.srcReg, node.upvarIdx)
+                    break
+                }
+                case "LoadGlobal": {
+                    inst.push(OpCode.LOADGLOBAL, node.destReg, cpool.push(node.sym))
+                    break
+                }
+                case "SetGlobal": {
+                    inst.push(OpCode.SETGLOBAL, node.srcReg, cpool.push(node.sym))
+                    break
+                }
+                case "HasGlobal": {
+                    inst.push(OpCode.HASGLOBAL, cpool.push(node.sym))
+                    break
+                }
+                case "Label": {
+                    resolvedLabels.set(node.label, inst.length)
+                    break
+                }
+                case "CondJump": {
+                    const jidx = inst.push(node.cond === "False" ? OpCode.JIF : OpCode.JIT, node.reg, -1) - 1
+                    jumpIdxs.set(jidx, node.label)
+                    break
+                }
+                case "Jump": {
+                    const jidx = inst.push(OpCode.JUMP, -1) - 1
+                    jumpIdxs.set(jidx, node.label)
+                    break
+                }
+                case "Call": {
+                    inst.push(OpCode.CALL, node.procReg, node.destReg, node.startReg, node.nargs)
+                    break
+                }
+                case "TailCall": {
+                    inst.push(OpCode.TAILCALL, node.procReg, node.startReg, node.nargs)
+                    break
+                }
+                case "IBuiltin": {
+                    inst.push(OpCode.BUILTINCALL, node.builtinIdx, node.destReg, node.startReg, node.nargs)
+                    break
+                }
+                case "Return": {
+                    inst.push(OpCode.RETURN, node.reg)
+                    break
+                }
+                case "NewClosure": {
+                    const closureBc = new IR(node.template.code).lower(node.template.numRegs)
+                    const ctidx = cpool.mutPush(new ClosureTemplate(node.template.params, node.template.remParams, closureBc, node.template.upvarLocs))
+                    //console.log(ctidx, cpool.constants)
+                    inst.push(OpCode.NEWCLOSURE, node.destReg, ctidx)
+                    break
+                }
+                case "Box": {
+                    inst.push(OpCode.BOX, node.destReg, node.srcReg)
+                    break
+                }
+                case "SetBox": {
+                    inst.push(OpCode.SETBOX, node.destReg, node.srcReg)
+                    break
+                }
+                case "Unbox": {
+                    inst.push(OpCode.UNBOX, node.destReg, node.srcReg)
+                    break
+                }
+                case "Move": {
+                    inst.push(OpCode.MOVE, node.destReg, node.srcReg)
+                    break
+                }
+                default:
+                    let _: never = node;
+            }
+        }
+
+        console.log(cpool, cpool.constants)
+        return new ByteCode(cpool.constants, new Uint32Array(inst), numRegs)
+    }
 }
 
 /** A template for a closure that can then be bound to a scope */
@@ -104,28 +263,16 @@ export class ClosureTemplateIR {
     params: symbol[]; // base (individual param binds)
     remParams: symbol | null; // where the remaining params should be bound too (if any). This implicitly makes a closure variadic as well
     code: Node[]
-    numLocals: number;
+    numRegs: number;
     upvarLocs: UpVarLoc[] // what upvars do we need to capture
 
-    constructor(params: symbol[], remParams: symbol | null, code: Node[], numLocals: number, upvarLocs: UpVarLoc[]) {
+    constructor(params: symbol[], remParams: symbol | null, code: Node[], numRegs: number, upvarLocs: UpVarLoc[]) {
         this.params = params
         this.remParams = remParams
         this.code = code
-        this.numLocals = numLocals
+        this.numRegs = numRegs
         this.upvarLocs = upvarLocs
     }
-}
-
-export class BuiltinFunction {
-    constructor(
-        public name: string,
-        public cb: (args: any[]) => any,
-        public generate: (compiler: Compiler, destReg: number, argRegs: number[]) => void,
-        public assert: (compiler: Compiler, argRegs: number[]) => void,
-    ) {}
-}
-
-const IBUILTINS: Record<symbol, BuiltinFunction> = {
 }
 
 interface CmpOpts {
@@ -152,13 +299,15 @@ export class Compiler {
         const retReg = scope.allocTemp(); // no need to free the temp reg as we return?
         this.#compile(trExpr, {destReg: retReg, isTail: true, nodes, scope})
         nodes.push({t: "Return", reg: retReg})
+        const ir = new IR(nodes)
+        return ir.lower(scope.numRegs)
     }
 
     #compile(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         // Raw values
         if (typeof expr === 'symbol') {
             const res = this.#getVar(expr, opts.scope, opts.destReg)
-            if (res) opts.nodes.push(res)
+            if (res) opts.nodes.push(...res)
             return
         } else if (expr instanceof DottedPair) {
             throw new Error(`bad syntax: illegal use of dotted pair in execution context (consider quoting e.g. ${`'${this.s.stringify(expr)}`})`);
@@ -203,9 +352,6 @@ export class Compiler {
                 case OP_OR:
                     this.#compileOr(expr, opts, syntaxCtx)
                     return
-                case OP_APPLY:
-                    this.#optApply(expr, opts, syntaxCtx)
-                    return
                 // Intrinsic optimizations
                 case OP_ADD:
                 case OP_SUB:
@@ -215,8 +361,17 @@ export class Compiler {
                 case OP_MODULO:
                 case OP_REMAINDER:
                 case OP_LIST:
-                    const int = IBUILTINS[operator]
-                    if(int) this.#optIntrinsicNormal(expr, int, opts, syntaxCtx)
+                case OP_LT:
+                case OP_LTE:
+                case OP_GT:
+                case OP_GTE:
+                case OP_CAR:
+                case OP_CDR:
+                case OP_CONS:
+                case OP_CONTAINS:
+                case OP_MEMBER:
+                    const int = IBUILTINS.findLastIndex(x => x.name === operator)
+                    if(int !== -1) this.#optIntrinsicNormal(expr, int, opts, syntaxCtx)
                     else throw new Error(`internal error: failed to find intrinsic for ${String(operator)}`)
                     return
                 case OP_LET:
@@ -366,14 +521,8 @@ export class Compiler {
         const lambdaNodes: Node[] = []
         const retReg = lambdaScope.allocTemp() // no need to free the temp reg as we return?
         this.#compile(this.#wrapMulti(expr.slice(2)), {...opts, destReg: retReg, isTail: true, nodes: lambdaNodes, scope: lambdaScope })
-        
-        // Only emit return if we need to
-        const lastNode = lambdaNodes.length > 0 ? lambdaNodes[lambdaNodes.length - 1] : null;
-        const isTerminal = lastNode && ["TailCall", "ITailApply", "Return"].includes(lastNode.t);
-        if (!isTerminal) {
-            lambdaNodes.push({t: "Return", reg: retReg})
-        }
-        const template = new ClosureTemplateIR(params, remParams, lambdaNodes, lambdaScope.numLocals, lambdaScope.upvars);
+        lambdaNodes.push({t: "Return", reg: retReg})
+        const template = new ClosureTemplateIR(params, remParams, lambdaNodes, lambdaScope.numRegs, lambdaScope.upvars);
         opts.nodes.push({t: "NewClosure", template: template, destReg: opts.destReg})
     }
 
@@ -397,7 +546,7 @@ export class Compiler {
         // tail expr is the last cond so it gets directly evaluated (if all the and condjumps get through)
         // This inherits the parent's destReg and isTail state so we get free tailcall + value stored in right dest reg
         this.#compile(expr[expr.length - 1], opts)
-        if (opts.nodes[opts.nodes.length - 1].t !== "TailCall" && opts.nodes[opts.nodes.length - 1].t !== "ITailApply") {
+        if (opts.nodes[opts.nodes.length - 1].t !== "TailCall") {
             opts.nodes.push({ t: "Jump", label: endLabel })
         }
         opts.nodes.push({ t: "Label", label: endLabel });
@@ -423,7 +572,7 @@ export class Compiler {
         // tail expr is the last cond so it gets directly evaluated (if all the or condjumps get through)
         // This inherits the parent's destReg and isTail state so we get free tailcall + value stored in right dest reg
         this.#compile(expr[expr.length - 1], opts)
-        if (opts.nodes[opts.nodes.length - 1].t !== "TailCall" && opts.nodes[opts.nodes.length - 1].t !== "ITailApply") {
+        if (opts.nodes[opts.nodes.length - 1].t !== "TailCall") {
             opts.nodes.push({ t: "Jump", label: endLabel })
         }
         opts.nodes.push({ t: "Label", label: endLabel });
@@ -431,7 +580,6 @@ export class Compiler {
     }
 
     // a normal call
-    // TODO: make this slightly faster
     #compileNormalCall(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
         // Try IIFE optimizations
         if(this.#optIIFE(expr, opts)) {
@@ -447,6 +595,7 @@ export class Compiler {
         const startReg = opts.scope.regAlloc.allocBlock(nargs);
         for (let i = 1; i < expr.length; i++) {
             this.#compile(expr[i], { ...opts, destReg: startReg+i-1, isTail: false })
+            opts.nodes.push({t: "Box", destReg: startReg+i-1, srcReg: startReg+i-1}) // we need to box the value always (for now)
         }
 
         if (opts.isTail) {
@@ -481,28 +630,16 @@ export class Compiler {
             const regs: number[] = []
             for(let i = 0; i < params.length; i++) {
                 ensureCanBind(params[i], seen, syntaxCtx || "lambda")
-
-                // The vm guarantees that locals are initially undefined as a default value
-                if (args[i] === undefined) {
-                    continue
-                }
                 const destReg = opts.scope.allocTemp()
                 this.#compile(args[i], { ...opts, destReg: destReg, isTail: false })
                 regs.push(destReg)
             }
 
             opts.scope.enterBlock()
-            // alloc slots for every parameter
+            // alloc slot regs for every parameter
             for(let i = 0; i < params.length; i++) {
-                opts.scope.addLocal(params[i])
-            }
-            // setlocal all of our args in reverse order
-            for(let i = params.length - 1; i >= 0; i--) {
-                if (args[i] === undefined) {
-                    continue 
-                }
-                const res = this.#setVar(params[i], opts.scope, regs[i]) // note to self: setVar calls resolve internally which will then yield the exact slot
-                if(res) opts.nodes.push(res)
+                const slot = opts.scope.addLocal(params[i])
+                opts.nodes.push({ t: "Box", srcReg: regs[i], destReg: slot })
             }
 
             this.#compile(this.#wrapMulti(body), opts)
@@ -515,36 +652,8 @@ export class Compiler {
         }
     }
 
-    /** Optimizes a direct (apply proc elems... rem-arg-lst) to inline INTRINSIC_APPLY */ 
-    #optApply(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
-        if (expr.length < 3) {
-            throw new Error("apply requires at least a procedure and a list");
-        }
-
-        // Push proc
-        const procReg = opts.scope.allocTemp();
-        this.#compile(expr[1], { ...opts, destReg: procReg, isTail: false });
-        // Push args
-        const nargs = expr.length - 2; // expr - Symbol(apply) - proc
-        const startReg = opts.scope.regAlloc.allocBlock(nargs);
-        for(let i = 2; i < expr.length; i++) {
-            this.#compile(expr[i], { ...opts, destReg: startReg+i-2, isTail: false });
-        }
-        // Now we're ready to do a INTRINSIC_APPLY 
-        if (opts.isTail) {
-            opts.nodes.push({t: "ITailApply", nargs, procReg, startReg})
-        } else {
-            const targetReg = opts.destReg === undefined ? opts.scope.allocTemp() : opts.destReg!;
-            opts.nodes.push({t: "IApply", destReg: targetReg, nargs, procReg, startReg})
-            if (opts.destReg === undefined) opts.scope.freeTemp(targetReg);
-        }
-
-        opts.scope.regAlloc.freeBlock(startReg, nargs)
-        opts.scope.freeTemp(procReg)
-    }
-
     /** Optimizes intrinsic ops to a INTRINSIC_ADD/SUB/MUL/DIV */ 
-    #optIntrinsicNormal(expr: any[], int: BuiltinFunction, opts: CmpOpts, syntaxCtx?: string) {
+    #optIntrinsicNormal(expr: any[], builtinIdx: number, opts: CmpOpts, syntaxCtx?: string) {
         // Push args
         const nargs = expr.length - 1; // expr - Symbol(op)
         const startReg = opts.scope.regAlloc.allocBlock(nargs);
@@ -552,11 +661,9 @@ export class Compiler {
             this.#compile(expr[i], { ...opts, destReg: startReg + (i - 1), isTail: false });
         }
 
-        if (opts.destReg !== undefined) {
-            opts.nodes.push({t: "IBuiltin", destReg: opts.destReg, startReg, nargs, f: int})
-        } else {
-            opts.nodes.push({t: "IBuiltinAssert", startReg, nargs, f: int})
-        }
+        const targetReg = opts.destReg === undefined ? opts.scope.allocTemp() : opts.destReg!;
+        opts.nodes.push({t: "IBuiltin", destReg: targetReg, startReg, nargs, builtinIdx})
+        if (opts.destReg === undefined) opts.scope.freeTemp(targetReg);
 
         opts.scope.regAlloc.freeBlock(startReg, nargs)
     }
@@ -567,28 +674,29 @@ export class Compiler {
         return [OP_BEGIN, ...exprs];
     }
 
-    #getVar(varname: symbol, scope: CompilerScope, destReg?: number): Node | null {
+    #getVar(varname: symbol, scope: CompilerScope, destReg?: number): Node[] {
         // Check if we can resolve it to a local/upvar
         const resolved = scope.resolve(varname)
 
         if (resolved.type === 'Local') {
             // If we need to emit a move, then move, otherwise do nothing
-            if (destReg !== undefined && resolved.index != destReg) {
-                return {t: "Move", srcReg: resolved.index, destReg }
+            if (destReg !== undefined) {
+                return [{t: "Unbox", srcReg: resolved.index, destReg }]
             }
-            return null
+            return []
         } 
         
         if (resolved.type === 'Upvar') {
             if (destReg !== undefined) {
-                return {t: "LoadUpvar", upvarIdx: resolved.index, destReg }
+                // right now, we need to load the upvalue in and unbox it
+                return [{t: "LoadUpvar", upvarIdx: resolved.index, destReg }, {t: "Unbox", srcReg: destReg, destReg }]
             }
-            return null
+            return []
         }
 
         // Assume global
-        if (destReg === undefined) return {t: "HasGlobal", sym: varname}
-        return {t: "LoadGlobal", sym: varname, destReg}
+        if (destReg === undefined) return [{t: "HasGlobal", sym: varname}]
+        return [{t: "LoadGlobal", sym: varname, destReg}]
     }
 
     #setVar(varname: symbol, scope: CompilerScope, srcReg: number): Node | null {
@@ -596,8 +704,7 @@ export class Compiler {
         const resolved = scope.resolve(varname)
 
         if (resolved.type === 'Local') {
-            if (srcReg === resolved.index) return null;
-            return { t: "Move", srcReg, destReg: resolved.index }
+            return { t: "SetBox", srcReg, destReg: resolved.index }
         } 
         
         if (resolved.type === 'Upvar') {

@@ -1,282 +1,44 @@
-import { ExposedProps, IProcedure, MissingVarError } from "../common";
+import { ExposedProps, IProcedure, isDeepEqual, MissingVarError, OP_ADD, OP_CAR, OP_CDR, OP_CONS, OP_CONTAINS, OP_DIV, OP_EMPTY, OP_EQ, OP_GT, OP_GTE, OP_LAST, OP_LENGTH, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_NOT, OP_REMAINDER, OP_SUB } from "../common";
 import { isTruthy } from "../common";
 import { Cons } from "../list";
 
 export enum OpCode {
-    // Push a constant from consts to the stack
-    PUSH, 
-    // Push specialization for `true`
-    PUSH__TRUE,
-    // Push specialization for `false`
-    PUSH__FALSE,
-    // Push specialization for `empty list`
-    PUSH__EMPTYLIST,
-    // Push specialization for `void`
-    PUSH__VOID,
-    // Push specialization for all numbers between 0 and 255
-    PUSH__U8,
-    // Negate whatevers at top of stack
+    LOADCONST, 
+    LOADTRUE,
+    LOADFALSE,
+    LOADEMPTYLIST,
+    LOADVOID,
+    LOADU32,
     NEGATE,
-    // Push a duplicate of the top of the stack to top of stack
-    //
-    // Needed so OP_AND/OP_OR can DUP, then JUMPIFFALSE, preserving top of stack after the jump
-    DUP,
-    // Pops out the top argument of the stack
-    POP,
-
-    // Gets/sets variables
-    GETUPVAR, // <upvar idx>
-    SETUPVAR, // <upvar idx>, value on top of stack, *always* pops stack top
-    GETLOCAL, // <slot>
-    SETLOCAL, // <slot>, value on top of stack, *always* pops stack top
-    GETGLOBALS, // <symbol>
-    SETGLOBALS, // <symbol>, value on top of stack, *always* pops stack top
-    // defines the top stack value on the stack on the current scope (DEFINEVAR [varname-idx]), *always* pops stack top
-    DEFINEVAR,
-
-    // Jump if stack top is true, *always* pops stack top
-    JUMPIFTRUE,
-    // Jump if stack top is false, *always* pops stack top
-    JUMPIFFALSE,
-    // Jump unconditionally
-    JUMP,
-    // Call a builtin or custom procedure (CALL nargs)
-    CALL, 
-    // Tail call a builtin or custom procedure (TAILCALL nargs). This reuses/overwrites the existing stack frame instead of creating a new one (like call does)
+    LOADUPVAR,
+    SETUPVAR,
+    LOADGLOBAL,
+    SETGLOBAL,
+    HASGLOBAL,
+    JIF, // jump if false
+    JIT, // jump if true
+    JUMP, // unconditional jump
+    CALL,
     TAILCALL,
-    // Return from function with top value as return value. All other values are cleared from stack       
+    BUILTINCALL,
     RETURN,
-    // Creates a Closure out of a ClosureTemplate (NEWCLOSURE idx) and pushes it to top of stack
     NEWCLOSURE,
-
-    // Intrinsics
-
-    // Given proc followed by nargs arguments pushed to stack followed by nargs in stack, perform a (apply proc args... rem-args-lst)
-    INTRINSIC_APPLY, // non-tail-call (creates its own stack frame)
-    INTRINSIC_TAIL_APPLY, // tail-call (overwrites existing frame)
-
-    // Given n values on stack followed by nargs in stack, adds/subs/muls/divs all of them and pushes the result to stack
-    INTRINSIC_ADD,
-    INTRINSIC_SUB,
-    INTRINSIC_MUL,
-    INTRINSIC_DIV,
-    INTRINSIC_EQ,
-
-    // 2-arg, no nargs
-    INTRINSIC_MODULO, 
-    INTRINSIC_REMAINDER,
-
-    // list, same as add/sub/mul/div in syntax
-    INTRINSIC_LIST,
-
-    // ui-get (1 arg, no nargs)
-    INTRINSIC_UI_GET
+    // may be removed later
+    BOX,
+    UNBOX,
+    SETBOX,
+    // not yet used
+    MOVE
 }
 
 export class ByteCode {
     public constants: any[]
     public inst: Uint32Array
-    public numLocals: number
-    constructor(constants: any[], inst: number[], numLocals: number) {
+    public numReg: number
+    constructor(constants: any[], inst: Uint32Array, numReg: number) {
         this.constants = constants
-        this.inst = new Uint32Array(inst)
-        this.numLocals = numLocals
-    }
-
-    #constToString(s: any): string {
-        if(typeof s === "symbol") {
-            return `'${s.toString()}`
-        } else if (typeof s === "string") {
-            return `"${s.toString()}"`
-        } else if (typeof s === "number") {
-            return `${s}`
-        } else if (typeof s === "boolean") {
-            return `<${s}>`
-        } else if (typeof s === "undefined") {
-            return `#<void>`
-        } else if (Array.isArray(s)) {
-            const r = []
-            for(const elem of s) {
-                r.push(this.#constToString(elem))
-            }
-            return `(${r.join(' ')})`
-        } else {
-            return `<unknown:${s}>`
-        }
-    }
-
-    toString(): string {
-        let ops: string[] = [];
-        let idx = 0;
-        
-        while (idx < this.inst.length) {
-            const lineNum = idx.toString().padStart(4, '0');
-            const opcode = this.inst[idx];
-            let line = `${lineNum}: `;
-
-            switch (opcode) {
-                // 1 arg
-                case OpCode.PUSH:
-                    line += `PUSH ${this.#constToString(this.constants[this.inst[idx + 1]])}`;
-                    idx += 2;
-                    break;
-                case OpCode.PUSH__U8:
-                    line += `PUSH__U8 ${this.inst[idx + 1]}`;
-                    idx += 2;
-                    break;
-                case OpCode.GETUPVAR:
-                    line += `GETUPVAR (slot=${this.inst[idx + 1]})`;
-                    idx += 2;
-                    break;
-                case OpCode.GETLOCAL:
-                    line += `GETLOCAL (slot=${this.inst[idx + 1]})`;
-                    idx += 2;
-                    break;
-                case OpCode.GETGLOBALS:
-                    line += `GETGLOBALS ${this.#constToString(this.constants[this.inst[idx + 1]])}`;
-                    idx += 2;
-                    break;
-                case OpCode.SETUPVAR:
-                    line += `SETUPVAR (slot=${this.inst[idx + 1]})`;
-                    idx += 2;
-                    break;
-                case OpCode.SETLOCAL:
-                    line += `SETLOCAL (slot=${this.inst[idx + 1]})`;
-                    idx += 2;
-                    break;
-                case OpCode.SETGLOBALS:
-                    line += `SETGLOBALS ${this.#constToString(this.constants[this.inst[idx + 1]])}`;
-                    idx += 2;
-                    break;
-                case OpCode.DEFINEVAR:
-                    line += `DEFINEVAR ${this.#constToString(this.constants[this.inst[idx + 1]])}`;
-                    idx += 2;
-                    break;
-                case OpCode.JUMPIFTRUE:
-                    line += `JUMPIFTRUE -> ${this.inst[idx + 1]}`;
-                    idx += 2;
-                    break;
-                case OpCode.JUMPIFFALSE:
-                    line += `JUMPIFFALSE -> ${this.inst[idx + 1]}`;
-                    idx += 2;
-                    break;
-                case OpCode.JUMP:
-                    line += `JUMP -> ${this.inst[idx + 1]}`;
-                    idx += 2;
-                    break;
-                case OpCode.CALL:
-                    line += `CALL (args: ${this.inst[idx + 1]})`;
-                    idx += 2;
-                    break;
-                case OpCode.TAILCALL:
-                    line += `TAILCALL (args: ${this.inst[idx + 1]})`;
-                    idx += 2;
-                    break;
-                case OpCode.NEWCLOSURE:
-                    const tmpl = this.constants[this.inst[idx + 1]] as {params: any[]};
-                    const params = tmpl.params.map(p => p.toString()).join(" ");
-                    line += `NEWCLOSURE <fn(${params})>`;
-                    idx += 2;
-                    break;
-
-                // no arg
-                case OpCode.PUSH__TRUE:
-                    line += `PUSH__TRUE`;
-                    idx += 1;
-                    break;
-                case OpCode.PUSH__FALSE:
-                    line += `PUSH__FALSE`;
-                    idx += 1;
-                    break;
-                case OpCode.PUSH__EMPTYLIST:
-                    line += `PUSH__EMPTYLIST`;
-                    idx += 1;
-                    break;
-                case OpCode.PUSH__VOID:
-                    line += `PUSH__VOID`;
-                    idx += 1;
-                    break;
-                case OpCode.NEGATE:
-                    line += `NEGATE`
-                    idx += 1;
-                    break;
-                case OpCode.DUP:
-                    line += `DUP`;
-                    idx += 1;
-                    break;
-                case OpCode.POP:
-                    line += `POP`;
-                    idx += 1;
-                    break;
-                case OpCode.RETURN:
-                    line += `RETURN`;
-                    idx += 1;
-                    break;
-
-                // vm intrinsics
-                case OpCode.INTRINSIC_APPLY:
-                    line += `INTRINSIC_APPLY`
-                    idx += 1;
-                    break;
-                case OpCode.INTRINSIC_TAIL_APPLY:
-                    line += `INTRINSIC_TAIL_APPLY`
-                    idx += 1;
-                    break;
-                case OpCode.INTRINSIC_ADD:
-                    line += `INTRINSIC_ADD`;
-                    idx += 1
-                    break;
-                case OpCode.INTRINSIC_SUB:
-                    line += `INTRINSIC_SUB`;
-                    idx += 1
-                    break;
-                case OpCode.INTRINSIC_MUL:
-                    line += `INTRINSIC_MUL`;
-                    idx += 1
-                    break;
-                case OpCode.INTRINSIC_DIV:
-                    line += `INTRINSIC_DIV`;
-                    idx += 1
-                    break;
-                case OpCode.INTRINSIC_MODULO:
-                    line += `INTRINSIC_MODULO`
-                    idx += 1
-                    break
-                case OpCode.INTRINSIC_REMAINDER:
-                    line += `INTRINSIC_REMAINDER`
-                    idx += 1
-                    break
-                case OpCode.INTRINSIC_LIST:
-                    line += `INTRINSIC_LIST`
-                    idx += 1
-                    break
-                case OpCode.INTRINSIC_EQ:
-                    line += `INTRINSIC_EQ`
-                    idx += 1
-                    break
-                case OpCode.INTRINSIC_UI_GET:
-                    line += `INTRINSIC_UI_GET`
-                    idx += 1
-                    break
-                default:
-                    line += `UNKNOWN_OPCODE (${opcode})`;
-                    idx += 1;
-                    break;
-            }
-            ops.push(line);
-        }
-        return `NumLocals: ${this.numLocals}\n` + ops.join("\n");
-    }
-
-    deepPrint() {
-        console.log(this.toString(), "\n")
-        for (let i = 0; i < this.constants.length; i++) {
-            const c = this.constants[i]
-            if (c instanceof ClosureTemplate) {
-                console.log(`Const #${i}:\n`)
-                c.code.deepPrint()
-            }
-        }
+        this.inst = inst
+        this.numReg = numReg
     }
 }
 
@@ -299,7 +61,7 @@ export class ClosureTemplate {
 
 /** An actual anima closure bound to a scope */
 export class Closure extends IProcedure {
-    upvars: {value: any}[]
+    upvars: any[]
     constructor(public tmpl: ClosureTemplate) {
         super()
         // Allocate enough space for the upvars from outer scopes
@@ -309,45 +71,319 @@ export class Closure extends IProcedure {
 
 /** 
  * A builtin function. Builtin functions do not have access to their own lexical scope (at least not yet) 
- * 
- * 
- * Unlike normal functions which pop from stack and bind to a new AnimaScope, builtin funcs keep values on
- * stack and just do bytecode replacement
 */
 export class BuiltinFunction extends IProcedure {
-    // number of args needed on stack top, -1 means variadic
-    // if we are in variadic mode, the top of stack will contain 
-    // the number of arguments pushed on the stack
-    nargs: number 
-    bc: ByteCode
-
-    constructor(nargs: number, bc: ByteCode) {
-        super()
-        this.nargs = nargs
-        this.bc = bc
-    }
-}
-
-export class NativeFunction extends IProcedure {
     constructor(
-        public name: string,
-        public nargs: number, // -1 for variadic
-        public cb: (...args: any[]) => any
+        public name: symbol,
+        public cb: (regs: any[], destReg: number, startReg: number, nargs: number) => void,
     ) {
         super()
     }
 }
 
-/** The scope the actual anima engine has/uses */
-class VmScope {
-    public slots: {value: any}[]
-    constructor(numLocals: number) {
-        const slots = new Array(numLocals)
-        for (let i = 0; i < numLocals; i++) {
-            slots[i] = {value: undefined}
+// Stores all of our builtin funcs
+export const IBUILTINS: BuiltinFunction[] = [
+    new BuiltinFunction(OP_ADD, (regs, destReg, startReg, nargs) => {
+        let acc = 0; 
+        for (let i = startReg; i < startReg+nargs; i++) {
+            const val = regs[i]
+            if (typeof val !== "number") throw new Error(`+ requires numbers, but received ${typeof val}`);
+            acc += val
         }
-        this.slots = slots
+        regs[destReg] = acc
+    }),
+    new BuiltinFunction(OP_SUB, (regs, destReg, startReg, nargs) => {
+        if (nargs === 0) throw new Error("- requires at least 1 argument");
+        
+        if (nargs === 1) {
+            const val = regs[startReg];
+            if (typeof val !== "number") throw new Error(`- requires numbers, but received ${typeof val}`);
+            regs[destReg] = -val; 
+            return;
+        }
+
+        let acc = regs[startReg];
+        if (typeof acc !== "number") throw new Error(`- requires numbers, but received ${typeof acc}`);
+        for (let i = startReg + 1; i < startReg+nargs; i++) {
+            const val = regs[i]
+            if (typeof val !== "number") throw new Error(`- requires numbers, but received ${typeof val}`);
+            acc -= val
+        }
+        regs[destReg] = acc
+    }),
+    new BuiltinFunction(OP_MUL, (regs, destReg, startReg, nargs) => {
+        let acc = 1; 
+        for (let i = startReg; i < startReg+nargs; i++) {
+            const val = regs[i]
+            if (typeof val !== "number") throw new Error(`* requires numbers, but received ${typeof val}`);
+            acc *= val
+        }
+        regs[destReg] = acc
+    }),
+    new BuiltinFunction(OP_DIV, (regs, destReg, startReg, nargs) => {
+        if (nargs === 0) throw new Error("/ requires at least 1 argument");
+        
+        if (nargs === 1) {
+            const val = regs[startReg];
+            if (typeof val !== "number") throw new Error(`/ requires numbers, but received ${typeof val}`);
+            if (val === 0) throw new Error("division by zero");
+            regs[destReg] = 1/val; 
+            return;
+        }
+
+        let acc = regs[startReg];
+        if (typeof acc !== "number") throw new Error(`/ requires numbers, but received ${typeof acc}`);
+        for (let i = startReg + 1; i < startReg+nargs; i++) {
+            const val = regs[i]
+            if (typeof val !== "number") throw new Error(`/ requires numbers, but received ${typeof val}`);
+            if (val === 0) throw new Error("division by zero");
+            acc /= val
+        }
+        regs[destReg] = acc
+    }),
+    new BuiltinFunction(OP_MODULO, (regs, destReg, startReg, nargs) => {
+        if(nargs !== 2) throw new Error("modulo requires 2 arguments");
+        const a = regs[startReg] 
+        const b = regs[startReg+1]
+        if (typeof a !== "number" || typeof b !== "number") throw new Error(`modulo: requires numbers, but received ${typeof a}/${typeof b}`);
+        if (b === 0) throw new Error("modulo: division by zero");
+        regs[destReg] = ((a % b) + b) % b
+    }),
+    new BuiltinFunction(OP_REMAINDER, (regs, destReg, startReg, nargs) => {
+        if(nargs !== 2) throw new Error("remainder requires 2 arguments");
+        const a = regs[startReg] 
+        const b = regs[startReg+1]
+        if (typeof a !== "number" || typeof b !== "number") throw new Error(`remainder: requires numbers, but received ${typeof a}/${typeof b}`);
+        if (b === 0) throw new Error("remainder: division by zero");
+        regs[destReg] = a % b
+    }),
+    new BuiltinFunction(OP_LIST, (regs, destReg, startReg, nargs) => {
+        const lst = new Array(nargs)
+        for(let i = 0; i < nargs; i++) {
+            lst[i] = regs[startReg+i]
+        }
+        regs[destReg] = lst
+    }),
+    new BuiltinFunction(OP_EQ, (regs, destReg, startReg, nargs) => {
+        if (nargs === 0) throw new Error("= requires at least 1 argument");
+        
+        let start = regs[startReg];
+        if (typeof start !== "number") throw new Error(`= requires numbers, but received ${typeof start}`);
+        let res = true
+        for (let i = startReg+1; i < startReg+nargs; i++) {
+            const val = regs[i]
+            if (typeof val !== "number") throw new Error(`= requires numbers, but received ${typeof val}`);
+            if (val !== start) {
+                res = false
+                break
+            }
+        }
+        regs[destReg] = res
+    }),
+    new BuiltinFunction(OP_LT, (regs, destReg, startReg, nargs) => {
+        if (nargs === 0) throw new Error("< requires at least 1 argument");
+        
+        let start = regs[startReg];
+        if (typeof start !== "number") throw new Error(`< requires numbers, but received ${typeof start}`);
+        let res = true
+        for (let i = startReg+1; i < startReg+nargs; i++) {
+            const val = regs[i]
+            if (typeof val !== "number") throw new Error(`< requires numbers, but received ${typeof val}`);
+            if (val < start) {
+                res = false
+                break
+            }
+        }
+        regs[destReg] = res
+    }),
+    new BuiltinFunction(OP_LTE, (regs, destReg, startReg, nargs) => {
+        if (nargs === 0) throw new Error("<= requires at least 1 argument");
+        
+        let start = regs[startReg];
+        if (typeof start !== "number") throw new Error(`<= requires numbers, but received ${typeof start}`);
+        let res = true
+        for (let i = startReg+1; i < startReg+nargs; i++) {
+            const val = regs[i]
+            if (typeof val !== "number") throw new Error(`<= requires numbers, but received ${typeof val}`);
+            if (val <= start) {
+                res = false
+                break
+            }
+        }
+        regs[destReg] = res
+    }),
+    new BuiltinFunction(OP_GT, (regs, destReg, startReg, nargs) => {
+        if (nargs === 0) throw new Error("> requires at least 1 argument");
+        
+        let start = regs[startReg];
+        if (typeof start !== "number") throw new Error(`> requires numbers, but received ${typeof start}`);
+        let res = true
+        for (let i = startReg+1; i < startReg+nargs; i++) {
+            const val = regs[i]
+            if (typeof val !== "number") throw new Error(`> requires numbers, but received ${typeof val}`);
+            if (val > start) {
+                res = false
+                break
+            }
+        }
+        regs[destReg] = res
+    }),
+    new BuiltinFunction(OP_GTE, (regs, destReg, startReg, nargs) => {
+        if (nargs === 0) throw new Error(">= requires at least 1 argument");
+        
+        let start = regs[startReg];
+        if (typeof start !== "number") throw new Error(`>= requires numbers, but received ${typeof start}`);
+        let res = true
+        for (let i = startReg+1; i < startReg+nargs; i++) {
+            const val = regs[i]
+            if (typeof val !== "number") throw new Error(`>= requires numbers, but received ${typeof val}`);
+            if (val > start) {
+                res = false
+                break
+            }
+        }
+        regs[destReg] = res
+    }),
+    // list builtins
+    new BuiltinFunction(OP_CAR, (regs, destReg, startReg, nargs) => {
+        if (nargs !== 1) throw new Error("car requires 1 argument");
+        const val = regs[startReg]
+        if (Array.isArray(val)) {
+            if (val.length < 1) throw new Error("car requires a non-empty list");
+            regs[destReg] = val[0];
+        } else if (val instanceof Cons) {
+            regs[destReg] = val.head;
+        } else if (val === null) {
+            throw new Error("car requires a non-empty list");
+        } else {
+            throw new Error("car requires a list");
+        }
+    }),
+    new BuiltinFunction(OP_CDR, (regs, destReg, startReg, nargs) => {
+        if (nargs !== 1) throw new Error("cdr requires 1 argument");
+        const val = regs[startReg]
+        if (Array.isArray(val)) {
+            if (val.length < 1) throw new Error("cdr requires a non-empty list");
+            regs[destReg] = Cons.fromArray(val, 1)
+        } else if (val instanceof Cons) { 
+            regs[destReg] = val.tail
+        } else if (val === null) {
+            throw new Error("cdr requires a non-empty list");
+        } else {
+            throw new Error(`cdr requires a list but got ${val}`);
+        }
+    }),
+    new BuiltinFunction(OP_CONS, (regs, destReg, startReg, nargs) => {
+        if (nargs != 2) throw new Error("cons requires 2 arguments [cons a d]");
+        regs[destReg] = Cons.pair(regs[startReg], regs[startReg+1])
+    }),
+    new BuiltinFunction(OP_LAST, (regs, destReg, startReg, nargs) => {
+        if (nargs != 1) throw new Error("last requires 1 argument");
+        const val = regs[startReg]
+        if (Array.isArray(val)) {
+            if (val.length < 1) throw new Error("last requires a non-empty list");
+            regs[destReg] = val[val.length - 1];
+        } else if (val instanceof Cons) {
+            let last = val.head
+            for(const v of val) {
+                last = v;
+            }
+            regs[destReg] = last
+        } else if (val === null) {
+            throw new Error("last requires a non-empty list");
+        } else {
+            throw new Error("last requires a list");
+        }
+    }),
+    new BuiltinFunction(OP_LENGTH, (regs, destReg, startReg, nargs) => {
+        if (nargs != 1) throw new Error("length requires 1 argument");
+        const val = regs[startReg]
+        if (val === null) {
+            regs[destReg] = 0 // empty list
+            return
+        }
+        // TODO: Add string-length? for strings specifically like scheme does
+        regs[destReg] = (Array.isArray(val) || val instanceof Cons) ? val.length : (typeof val === "string" ? val.length : 0)
+    }),
+    new BuiltinFunction(OP_EMPTY, (regs, destReg, startReg, nargs) => {
+        if (nargs != 1) throw new Error("empty requires 1 argument");
+        const val = regs[startReg]
+        if (val === null) {
+            regs[destReg] = true // empty list
+            return
+        }
+        regs[destReg] = (Array.isArray(val) || val instanceof Cons) ? (val.length == 0) : (typeof val === "string" ? (val.length == 0) : false);
+    }),
+    new BuiltinFunction(OP_CONTAINS, (regs, destReg, startReg, nargs) => {
+        if (nargs != 2) throw new Error("contains? requires 2 arguments");
+        const list = regs[startReg]
+        const item = regs[startReg+1]
+        regs[destReg] = (Array.isArray(list) || list instanceof Cons) ? list.includes(item) : false;
+    }),
+    new BuiltinFunction(OP_MEMBER, (regs, destReg, startReg, nargs) => {
+        if (nargs != 2) throw new Error("member? requires 2 arguments");
+        let list = regs[startReg] as (any[] | Cons | null)
+        const item = regs[startReg+1]
+        if (Array.isArray(list)) {
+            for (let i = 0; i < list.length; i++) {
+                if (isDeepEqual(list[i], item)) {
+                    // create a view of the array starting from i
+                    regs[destReg] = Cons.fromArray(list, i)
+                    return;
+                }
+            }
+            regs[destReg] = false;
+            return;
+        }
+        else if (list === null) {
+            regs[destReg] = false // not a member if empty list
+            return
+        }
+        else if (!(list instanceof Cons)) throw new Error("member? requires the first argument to be a list")
+        list = list as Cons // cast to Cons for type safety
+        let s: Cons | null = list
+        while(s !== null) {
+            if (isDeepEqual(s.head, item)) {
+                regs[destReg] = s
+                return
+            }
+            s = s.tail
+        }
+        regs[destReg] = false
+    }),
+    new BuiltinFunction(OP_NOT, (regs, destReg, startReg, nargs) => {
+        if (nargs != 1) throw new Error("not requires 1 argument");
+        regs[destReg] = !isTruthy(regs[startReg]);
+    })
+]
+
+// Marker for `apply` intrinsic proc
+export class ApplyProc extends IProcedure {}
+
+/** The register block the actual anima engine has/uses */
+class RegBlock {
+    public regs: any[]
+    constructor(numRegs: number) {
+        this.regs = new Array(numRegs).fill(undefined)
     }
+
+    /*box(dest: number, src: number) {
+        this.regs[dest] = [this.regs[src]]
+    }
+    unbox(dest: number, src: number) {
+        this.regs[dest] = this.regs[src][0]
+    }
+    setbox(dest: number, src: number) {
+        this.regs[dest][0] = this.regs[src]
+    }
+    move(dest: number, src: number) {
+        this.regs[dest] = this.regs[src]
+    }*/
+}
+
+// To make life debugging registers easier
+class Box {
+    constructor(public val: any) {}
 }
 
 export class Globals {
@@ -365,9 +401,10 @@ export class Globals {
 class CallFrame {
     constructor(
         public code: ByteCode,
-        public scope: VmScope,
-        public upvars: {value: any}[],
-        public ip: number
+        public regs: RegBlock,
+        public upvars: any[],
+        public ip: number,
+        public retReg: number,
     ) {}
 
     readNext() {
@@ -386,14 +423,16 @@ export class AnimaVM {
     constructor(public steps: number = 0, public maxSteps: number = 0) {}
 
     public evaluate(code: ByteCode, scope: Globals, props?: ExposedProps): any {
-        return this.#evalinner(code, scope, props);
+        // Initial frame
+        let frames: CallFrame[] = [new CallFrame(code, new RegBlock(code.numReg), [], 0, 0)];
+        try {
+            return this.#evalinner(frames, scope, props);
+        } catch (err: any) {
+            console.log(`${err.stack}\n\nFrame #${frames.length-1}\nCurrent Frame IP: ${frames[frames.length-1].ip}`)
+        }
     }
 
-    #evalinner(code: ByteCode, execScope: Globals, props?: ExposedProps): any {
-        // Initial frame and stack
-        let frames: CallFrame[] = [new CallFrame(code, new VmScope(code.numLocals), [], 0)];
-        let stack: any[] = [];
-
+    #evalinner(frames: CallFrame[], execScope: Globals, props?: ExposedProps): any {
         while (frames.length > 0) {
             this.steps++;
             if (this.maxSteps && this.steps > this.maxSteps) {
@@ -401,109 +440,102 @@ export class AnimaVM {
             }
 
             const frame = frames[frames.length - 1];
+            const regs = frame.regs.regs
 
             if (frame.ip >= frame.code.inst.length) {
-                frames.pop();
+                const lf = frames.pop();
+                if (lf) {
+                    frames[frames.length-1].regs.regs[lf.retReg] = false // no return so treat as false implicitly
+                }
                 continue;
             }
 
-            const opcode = frame.readNext()
+            const opcode: OpCode = frame.readNext()
+            console.log(`${OpCode[opcode]} ${regs.join(', ')}`)
             switch (opcode) {
-                // Push
-                case OpCode.PUSH: {
+                // Load
+                case OpCode.LOADCONST: {
+                    const destReg = frame.readNext()
                     const constIdx = frame.readNext()
-                    stack.push(frame.getConst(constIdx));
+                    regs[destReg] = frame.getConst(constIdx);
                     break;
                 }
-                // Push specializations
-                case OpCode.PUSH__TRUE: {
-                    stack.push(true)
+                // Load specializations
+                case OpCode.LOADTRUE: {
+                    const destReg = frame.readNext()
+                    regs[destReg] = true
                     break
                 }
-                case OpCode.PUSH__FALSE: {
-                    stack.push(false)
+                case OpCode.LOADFALSE: {
+                    const destReg = frame.readNext()
+                    regs[destReg] = false
                     break
                 }
-                case OpCode.PUSH__EMPTYLIST: {
-                    stack.push(null) // empty list is null
+                case OpCode.LOADEMPTYLIST: {
+                    const destReg = frame.readNext()
+                    regs[destReg] = null // empty list is null
                     break
                 }
-                case OpCode.PUSH__VOID: {
-                    stack.push(undefined)
+                case OpCode.LOADVOID: {
+                    const destReg = frame.readNext()
+                    regs[destReg] = undefined // #<void> is undefined
                     break
                 }
-                case OpCode.PUSH__U8: {
-                    stack.push(frame.readNext())
+                case OpCode.LOADU32: {
+                    const destReg = frame.readNext()
+                    const u32Val = frame.readNext()
+                    regs[destReg] = u32Val 
                     break
                 }
                 case OpCode.NEGATE: {
-                    const v = stack[stack.length-1]
-                    if (typeof v !== "number") throw new Error("cannot negate non-number")
-                    stack[stack.length-1] = -1*v
+                    const reg = frame.readNext()
+                    if (typeof regs[reg] !== "number") throw new Error("cannot negate non-number")
+                    regs[reg] = -1*regs[reg] 
                     break
                 }
-                case OpCode.DUP: {
-                    stack.push(stack[stack.length-1])
-                    break
-                }
-                case OpCode.POP: {
-                    stack.pop()
-                    break
-                }
-                case OpCode.GETUPVAR: {
-                    const slot = frame.readNext()
-                    stack.push(frame.upvars[slot].value)
-
-                    break
-                }
-                case OpCode.GETLOCAL: {
-                    const slot = frame.readNext()
-                    stack.push(frame.scope.slots[slot].value)
-                    break
-                }
-                case OpCode.GETGLOBALS: {
-                    const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
-                    if (!execScope.data.has(varname)) throw new MissingVarError(`Variable '${String(varname)}' is not defined in the current scope.`)
-                    stack.push(execScope.data.get(varname))
+                case OpCode.LOADUPVAR: {
+                    const destReg = frame.readNext()
+                    const upvarIdx = frame.readNext()
+                    regs[destReg] = frame.upvars[upvarIdx]
                     break
                 }
                 case OpCode.SETUPVAR: {
-                    const slot = frame.readNext()
-                    const val = stack.pop()
-                    frame.upvars[slot].value = val
+                    const srcReg = frame.readNext()
+                    const upvarIdx = frame.readNext()
+                    frame.upvars[upvarIdx] = regs[srcReg]
                     break
                 }
-                case OpCode.SETLOCAL: {
-                    const slot = frame.readNext()
-                    const val = stack.pop()
-                    frame.scope.slots[slot].value = val
-                    break
-                }
-                case OpCode.SETGLOBALS: {
+                case OpCode.LOADGLOBAL: {
+                    const destReg = frame.readNext()
                     const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
-                    const val = stack.pop()
-                    if (execScope.frozen) throw new Error(`Variable '${String(varname)}' cannot be set in a frozen scope.`);
                     if (!execScope.data.has(varname)) throw new MissingVarError(`Variable '${String(varname)}' is not defined in the current scope.`)
-                    execScope.data.set(varname, val)
+                    regs[destReg] = execScope.data.get(varname)
                     break
                 }
-                case OpCode.DEFINEVAR: {
+                case OpCode.SETGLOBAL: {
+                    const srcReg = frame.readNext()
                     const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
-                    const val = stack.pop()
-                    if (execScope.frozen) throw new Error(`Variable '${String(varname)}' cannot be defined in a frozen scope.`);
-                    execScope.data.set(varname, val)
+                    if (execScope.frozen) throw new Error(`Variable '${String(varname)}' cannot be set in a frozen scope.`);
+                    execScope.data.set(varname, regs[srcReg])
                     break
                 }
-                case OpCode.JUMPIFTRUE: {
+                case OpCode.HASGLOBAL: {
+                    const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
+                    if (!execScope.data.has(varname)) throw new MissingVarError(`Variable '${String(varname)}' is not defined in the current scope.`)
+                    break
+                }
+                case OpCode.JIF: {
+                    const condReg = frame.readNext()
                     const jumpIdx = frame.readNext()
-                    if (isTruthy(stack.pop())) {
+                    if (!isTruthy(regs[condReg])) {
                         frame.ip = jumpIdx
                     }
                     break
                 }
-                case OpCode.JUMPIFFALSE: {
+                case OpCode.JIT: {
+                    const condReg = frame.readNext()
                     const jumpIdx = frame.readNext()
-                    if (!isTruthy(stack.pop())) {
+                    if (isTruthy(regs[condReg])) {
                         frame.ip = jumpIdx
                     }
                     break
@@ -514,252 +546,125 @@ export class AnimaVM {
                     break
                 }
 
-                case OpCode.CALL:
-                case OpCode.TAILCALL: {
-                    const isTail = opcode === OpCode.TAILCALL;
+                case OpCode.CALL: {
+                    const proc = regs[frame.readNext()];
+                    const destReg = frame.readNext();
+                    const startReg = frame.readNext();
                     const nargs = frame.readNext();
-
-                    // Extract out the target
-                    const target = stack[stack.length - 1 - nargs];
-                    stack.splice(stack.length - 1 - nargs, 1);
-                    // Dispatch
-                    this.#dispatchCall(target, nargs, isTail, frame, frames, stack);
+                    this.#invoke(proc, frames, frame, regs, destReg, startReg, nargs, false)
                     break;
                 }
+                case OpCode.TAILCALL: {
+                    const proc = regs[frame.readNext()];
+                    const startReg = frame.readNext();
+                    const nargs = frame.readNext();
+                    // Note: we reuse the frames existing return reg for tailcall's
+                    this.#invoke(proc, frames, frame, regs, frame.retReg, startReg, nargs, true);
+                    break;
+                }
+                case OpCode.BUILTINCALL: {
+                    const proc = IBUILTINS[frame.readNext()];
+                    const destReg = frame.readNext();
+                    const startReg = frame.readNext();
+                    const nargs = frame.readNext();
+                    proc.cb(regs, destReg, startReg, nargs)
+                    break
+                }
                 case OpCode.NEWCLOSURE: {
-                    const template = frame.getConst(frame.readNext()) as ClosureTemplate
+                    const destReg = frame.readNext()
+                    const tidx = frame.readNext()
+                    const template = frame.getConst(tidx) as ClosureTemplate
+                    if (!template) {
+                        throw new Error(`NEWCLOSURE: Template at index ${tidx} is undefined! 
+                                        Available constants: ${JSON.stringify(frame.code.constants)}`);
+                    }
                     const closure = new Closure(template)
                     // Copy over upvalues
                     for (let i = 0; i < template.upvarLocs.length; i++) {
                         const loc = template.upvarLocs[i]
                         if (loc.local) {
-                            closure.upvars[i] = frame.scope.slots[loc.index];
+                            closure.upvars[i] = regs[loc.index];
                         } else {
                             // Grab from the current frame's upvars
                             closure.upvars[i] = frame.upvars[loc.index];
                         }
                     }
-                    stack.push(closure);
+                    regs[destReg] = closure
                     break;
                 }
                 case OpCode.RETURN: {
-                    frames.pop()
+                    const retVal = regs[frame.readNext()]; 
+                    const finishedFrame = frames.pop();    
+                    
+                    if (frames.length > 0 && finishedFrame) {
+                        const callerFrame = frames[frames.length - 1];
+                        callerFrame.regs.regs[finishedFrame.retReg] = retVal;
+                    }
+                    if (frames.length === 0) return retVal // return retVal back to js
+                    break; // back to loop start
+                }
+                case OpCode.BOX: {
+                    const destReg = frame.readNext();
+                    const srcReg = frame.readNext();
+                    regs[destReg] = new Box(regs[srcReg])
                     break
                 }
-                case OpCode.INTRINSIC_APPLY:
-                case OpCode.INTRINSIC_TAIL_APPLY: {
-                    const isTail = opcode === OpCode.INTRINSIC_TAIL_APPLY;
-                    
-                    const applyArgCount = stack.pop();
-                    const listArg = stack.pop();
-                    
-                    const standardArgs = [];
-                    for (let i = 0; i < applyArgCount - 1; i++) {
-                        standardArgs.push(stack.pop());
-                    }
-                    standardArgs.reverse(); 
-                    
-                    // Extract out target
-                    const target = stack.pop();
-                    
-                    // Flatten the final list
-                    const finalArgs = [...standardArgs];
-                    if (Array.isArray(listArg) || listArg instanceof Cons) {
-                        finalArgs.push(...listArg);
-                    } else if (listArg === null) {
-                        // Empty list
-                    } else {
-                        throw new Error(`apply: last argument must be a list but got ${listArg}`);
-                    }
-                    
-                    // Push flattened args to stack
-                    for (const arg of finalArgs) {
-                        stack.push(arg);
-                    }
-
-                    // Dispatch
-                    this.#dispatchCall(target, finalArgs.length, isTail, frame, frames, stack);
-                    break;
-                }
-                case OpCode.INTRINSIC_ADD: {
-                    const nargs = stack.pop() as number;
-                    let acc = 0; 
-                    for (let i = 0; i < nargs; i++) {
-                        const val = stack[stack.length - nargs + i]
-                        if (typeof val !== "number") throw new Error(`+ requires numbers, but received ${typeof val}`);
-                        acc += val
-                    }
-                    stack.length -= nargs
-                    stack.push(acc)
-                    break;
-                }
-                case OpCode.INTRINSIC_SUB: {
-                    const nargs = stack.pop() as number;
-                    if (nargs === 0) throw new Error("- requires at least 1 argument");
-                    
-                    if (nargs === 1) {
-                        const val = stack[stack.length - 1];
-                        if (typeof val !== "number") throw new Error(`- requires numbers, but received ${typeof val}`);
-                        stack[stack.length - 1] = -val; 
-                        break;
-                    }
-
-                    let acc = stack[stack.length - nargs];
-                    if (typeof acc !== "number") throw new Error(`- requires numbers, but received ${typeof acc}`);
-                    for (let i = 1; i < nargs; i++) {
-                        const val = stack[stack.length - nargs + i]
-                        if (typeof val !== "number") throw new Error(`- requires numbers, but received ${typeof val}`);
-                        acc -= val
-                    }
-                    stack.length -= nargs
-                    stack.push(acc)
+                case OpCode.UNBOX: {
+                    const destReg = frame.readNext();
+                    const srcReg = frame.readNext();
+                    console.log("Unboxing", regs[srcReg], regs[srcReg].val)
+                    regs[destReg] = (regs[srcReg] as Box).val
                     break
                 }
-                case OpCode.INTRINSIC_MUL: {
-                    const nargs = stack.pop() as number;
-                    let acc = 1; 
-                    for (let i = 0; i < nargs; i++) {
-                        const val = stack[stack.length - nargs + i]
-                        if (typeof val !== "number") throw new Error(`* requires numbers, but received ${typeof val}`);
-                        acc *= val
-                    }
-                    stack.length -= nargs
-                    stack.push(acc)
-                    break;
-                }
-                case OpCode.INTRINSIC_DIV: {
-                    const nargs = stack.pop() as number;
-                    if (nargs === 0) throw new Error("/ requires at least 1 argument");
-                    
-                    if (nargs === 1) {
-                        const val = stack[stack.length - 1];
-                        if (typeof val !== "number") throw new Error(`/ requires numbers, but received ${typeof val}`);
-                        if (val === 0) throw new Error("division by zero");
-                        stack[stack.length - 1] = 1/val; 
-                        break;
-                    }
-
-                    let acc = stack[stack.length - nargs];
-                    if (typeof acc !== "number") throw new Error(`/ requires numbers, but received ${typeof acc}`);
-                    for (let i = 1; i < nargs; i++) {
-                        const val = stack[stack.length - nargs + i]
-                        if (typeof val !== "number") throw new Error(`/ requires numbers, but received ${typeof val}`);
-                        if (val === 0) throw new Error("/: division by zero")
-                        acc /= val
-                    }
-                    stack.length -= nargs
-                    stack.push(acc)
+                case OpCode.SETBOX: {
+                    const destReg = frame.readNext();
+                    const srcReg = frame.readNext();
+                    (regs[destReg] as Box).val = regs[srcReg]
                     break
                 }
-                case OpCode.INTRINSIC_MODULO: {
-                    const a = stack[stack.length-2]
-                    const b = stack[stack.length-1]
-                    if (typeof a !== "number" || typeof b !== "number") throw new Error(`modulo: requires numbers, but received ${typeof a}/${typeof b}`);
-                    if (b === 0) throw new Error("modulo: division by zero");
-                    stack.pop()
-                    stack[stack.length-1] = ((a % b) + b) % b
+                case OpCode.MOVE: {
+                    const destReg = frame.readNext();
+                    const srcReg = frame.readNext();
+                    regs[destReg] = regs[srcReg]
                     break
                 }
-                case OpCode.INTRINSIC_REMAINDER: {
-                    const a = stack[stack.length-2]
-                    const b = stack[stack.length-1]
-                    if (typeof a !== "number" || typeof b !== "number") throw new Error(`remainder: requires numbers, but received ${typeof a}/${typeof b}`);
-                    if (b === 0) throw new Error("remainder: division by zero");
-                    stack.pop()
-                    stack[stack.length-1] = a % b
-                    break
-                }
-                case OpCode.INTRINSIC_LIST: {
-                    const nargs = stack.pop() as number;
-                    const lst = stack.splice(stack.length - nargs, nargs);
-                    stack.push(lst);
-                    break
-                }
-                case OpCode.INTRINSIC_EQ: {
-                    const nargs = stack.pop() as number;
-                    if (nargs === 0) throw new Error("= requires at least 1 argument");
-                    
-                    let top = stack[stack.length - nargs];
-                    if (typeof top !== "number") throw new Error(`= requires numbers, but received ${typeof top}`);
-                    let res = true
-                    for (let i = 1; i < nargs; i++) {
-                        const val = stack[stack.length - nargs + i]
-                        if (typeof val !== "number") throw new Error(`= requires numbers, but received ${typeof val}`);
-                        if (val != top) {
-                            res = false
-                            break
-                        }
-                    }
-                    stack.length -= nargs
-                    stack.push(res)
-                    break
-                }
-                case OpCode.INTRINSIC_UI_GET: {
-                    let varname = stack.pop()
-                    if (typeof varname !== "symbol") throw new Error(`ui-get expected symbol, but received ${typeof varname}`);
-                    if (props === undefined) {
-                        stack.push(undefined)
-                    } else {
-                        const prop = Symbol.keyFor(varname) || varname.description
-                        if (!prop) throw new Error(`internal error: ui-get expected string-able symbol but symbol not stringable`)
-                        stack.push(props.get(prop))
-                    }
-                    break
-                }
+                default:
+                    let _: never = opcode;
             }
         }
-        
-        if (stack.length > 1) {
-            console.error(`Stack leak detected: ${stack.length} elems instead of 1, stack: ${stack}`)
-        }
-        if (stack.length > 0) return stack.pop()
-        return undefined
     }
 
-    /**
-     * Note: stack must contain top narg elements in correct order (with arg0 at bottom and argN at top) with target already removed
-     * @param target    The target procedure to execute (BuiltinFunction | NativeFunction | Closure).
-     * @param nargs     The exact number of arguments currently sitting on top of the stack.
-     * @param isTail    Whether to overwrite the current frame (TCO) instead of pushing a new one.
-     * @param frame     The current active call frame.
-     * @param frames    Reference to the global VM call stack.
-     * @param stack     Reference to the global VM data/evaluation stack.
-     */
-    #dispatchCall(
-        target: any, 
-        nargs: number, 
-        isTail: boolean, 
-        frame: CallFrame, 
-        frames: CallFrame[], 
-        stack: any[], 
-    ) {
-        const stackBase = stack.length - nargs; // where does stack start
-        if (target instanceof BuiltinFunction) {
-            if (target.nargs !== -1 && nargs !== target.nargs) {
-                throw new Error(`Builtin expected ${target.nargs} args, got ${nargs}`);
-            }
-            
-            if (target.nargs === -1) stack.push(nargs);
-
-            // BuiltinFunction's reuse existing scope and upvars
+    #invoke(proc: any, frames: CallFrame[], frame: CallFrame, regs: any[], destReg: number, startReg: number, nargs: number, isTail: boolean): void {
+        if (proc instanceof BuiltinFunction) {
+            // Easy case: we have a builtin function!
+            proc.cb(regs, destReg, startReg, nargs)
             if (isTail) {
-                frame.code = target.bc;
-                frame.ip = 0; 
+                frames.pop()
+                if(frames.length > 0) {
+                    frames[frames.length-1].regs.regs[frame.retReg] = regs[destReg]
+                }
+            }
+        } else if (proc instanceof ApplyProc) {
+            const actualProc = regs[startReg];
+
+            // create a virtual set of registers to hold the arguments and copy args to it
+            const actualArgs = [];
+            for (let i = 1; i < nargs - 1; i++) {
+                actualArgs.push(regs[startReg + i]);
+            }
+            const finalArg = regs[startReg + nargs - 1]
+            if (Array.isArray(finalArg) || finalArg instanceof Cons) {
+                actualArgs.push(...finalArg);
+            } else if (finalArg === null) {
+                // Empty list
             } else {
-                frames.push(new CallFrame(target.bc, frame.scope, frame.upvars, 0));
+                throw new Error(`apply: last argument must be a list but got ${String(finalArg)}`);
             }
-        } else if (target instanceof NativeFunction) {
-            if (target.nargs !== -1 && target.nargs !== nargs) {
-                throw new Error(`${target.name}: expected ${target.nargs} args, got ${nargs}`);
-            }
-            
-            const args = nargs > 0 ? stack.slice(stackBase) : [];
-            stack.length = stackBase;
-            
-            stack.push(target.cb(...args));
-            if (isTail) frames.pop();
-        } else if (target instanceof Closure) {
-            const template = target.tmpl;
+            this.#invoke(actualProc, frames, frame, actualArgs, destReg, 0, actualArgs.length, isTail)
+            if (!isTail) regs[destReg] = actualArgs[destReg] // copy return value
+            return
+        } else if (proc instanceof Closure) {
+            const template = proc.tmpl;
             const arity = template.params.length; // number of required args
             if (template.remParams !== null) {
                 // variadic
@@ -771,35 +676,35 @@ export class AnimaVM {
                     throw new Error(`expected exactly ${arity} args, got ${nargs}`);
                 }
             }
-    
-            // Bind args
-            const callScope = new VmScope(template.code.numLocals);
-            
+
+            const closureRegs = new RegBlock(template.code.numReg)
+
             // required
             for (let i = 0; i < arity; i++) {
-                callScope.slots[i].value = stack[stackBase + i];
-            }
-            // variadic
-            if (template.remParams !== null) {
-                const restArgs = [];
-                for (let i = arity; i < nargs; i++) {
-                    restArgs.push(stack[stackBase + i]);
-                }
-                callScope.slots[arity].value = restArgs;
+                closureRegs.regs[i] = regs[startReg+i]
             }
 
-            stack.length = stackBase
+            // variadic
+            if (template.remParams !== null) {
+                const restArgs = new Array(nargs-arity);
+                for (let i = 0; i < restArgs.length; i++) {
+                    restArgs[i] = regs[startReg + arity + i];
+                }
+                closureRegs.regs[arity] = restArgs
+            }
+
             if (isTail) {
                 // Reuse existing frame (TCO)
                 frame.code = template.code;
-                frame.upvars = target.upvars
-                frame.scope = callScope
+                frame.upvars = proc.upvars
+                frame.regs = closureRegs
                 frame.ip = 0; 
+                frame.retReg = destReg;
             } else {
-                frames.push(new CallFrame(template.code, callScope, target.upvars, 0));
+                frames.push(new CallFrame(template.code, closureRegs, proc.upvars, 0, destReg));
             }
         } else {
-            throw new Error(`Attempted to call a non-procedure: ${String(target)}`);
+            throw new Error(`Attempted to call a non-procedure: ${String(proc)}`);
         }
     }
 }

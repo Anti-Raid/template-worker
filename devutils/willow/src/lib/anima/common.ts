@@ -87,7 +87,8 @@ export const OP_CDR      = Symbol.for("cdr");
 export const OP_LAST     = Symbol.for("last");
 export const OP_LENGTH   = Symbol.for("length");
 export const OP_EMPTY    = Symbol.for("empty?")
-export const OP_CONTAINS = Symbol.for("contains");
+export const OP_CONTAINS = Symbol.for("contains?");
+export const OP_MEMBER   = Symbol.for("member?");
 export const OP_MAP      = Symbol.for("map")
 export const OP_APPLY    = Symbol.for("apply")
 
@@ -136,7 +137,7 @@ export const BUILTINS_OPS = new Set([
     OP_LAST,
     OP_LENGTH,
     OP_EMPTY,
-    OP_CONTAINS,
+    OP_MEMBER,
     OP_MAP,
     OP_APPLY,
 
