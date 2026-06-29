@@ -2,8 +2,8 @@ import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_ADD, 
 import { AnimaTransformer } from "../syntax-transformer";
 import { AstAnalysis } from "./analysis";
 import { AnalysisScope, CompilerScope } from "./scope";
-import { ByteCode, ClosureTemplate, IBUILTINS, OpCode, type UpVarLoc } from "./vm";
-import { IR, type Node, JumpLabel, type JumpCond, ClosureTemplateIR } from "./ir"
+import { IBUILTINS } from "./vm";
+import { IR, type Node, JumpLabel, ClosureTemplateIR } from "./ir"
 
 interface CmpOpts {
     destReg?: number // where to store dest reg
@@ -117,6 +117,9 @@ export class Compiler {
                     const int = IBUILTINS.findLastIndex(x => x.name === operator)
                     if(int !== -1) this.#optIntrinsicNormal(expr, int, opts, syntaxCtx)
                     else throw new Error(`internal error: failed to find intrinsic for ${String(operator)}`)
+                    return
+                case OP_APPLY:
+                    this.#optApply(expr, opts)
                     return
                 case OP_LET:
                 case OP_LETSTAR:
@@ -350,6 +353,26 @@ export class Compiler {
 
         opts.scope.regAlloc.freeBlock(startReg, nargs)
         opts.scope.freeTemp(procReg)
+    }
+
+    // apply blocks can be optimized to either APPLYCALL or APPLYTAILCALL
+    #optApply(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
+        // Push all arguments to a contiguous reg block
+        const nargs = expr.length-1 // [apply a b c]
+        const startReg = opts.scope.regAlloc.allocBlock(nargs);
+        for (let i = 1; i < expr.length; i++) {
+            this.#compile(expr[i], { ...opts, destReg: startReg+i-1, isTail: false })
+        }
+
+        if (opts.isTail) {
+            opts.nodes.push({t: "ApplyTailCall", nargs, startReg})
+        } else {
+            const targetReg = opts.destReg === undefined ? opts.scope.allocTemp() : opts.destReg!;
+            opts.nodes.push({t: "ApplyCall", destReg: targetReg, nargs, startReg})
+            if (opts.destReg === undefined) opts.scope.freeTemp(targetReg);
+        }
+
+        opts.scope.regAlloc.freeBlock(startReg, nargs)
     }
 
     #optIIFE(expr: any[], opts: CmpOpts, syntaxCtx?: string): boolean {

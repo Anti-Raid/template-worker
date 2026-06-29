@@ -21,6 +21,8 @@ export enum OpCode {
     CALL,
     TAILCALL,
     BUILTINCALL,
+    APPLYCALL,
+    APPLYTAILCALL,
     RETURN,
     NEWCLOSURE,
     // may be removed later
@@ -75,7 +77,7 @@ export class Closure extends IProcedure {
 export class BuiltinFunction extends IProcedure {
     constructor(
         public name: symbol,
-        public cb: (regs: any[], destReg: number, startReg: number, nargs: number) => void,
+        public cb: (regs: any[], startReg: number, nargs: number) => any,
     ) {
         super()
     }
@@ -83,23 +85,22 @@ export class BuiltinFunction extends IProcedure {
 
 // Stores all of our builtin funcs
 export const IBUILTINS: BuiltinFunction[] = [
-    new BuiltinFunction(OP_ADD, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_ADD, (regs, startReg, nargs) => {
         let acc = 0; 
         for (let i = startReg; i < startReg+nargs; i++) {
             const val = regs[i]
             if (typeof val !== "number") throw new Error(`+ requires numbers, but received ${typeof val}`);
             acc += val
         }
-        regs[destReg] = acc
+        return acc
     }),
-    new BuiltinFunction(OP_SUB, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_SUB, (regs, startReg, nargs) => {
         if (nargs === 0) throw new Error("- requires at least 1 argument");
         
         if (nargs === 1) {
             const val = regs[startReg];
             if (typeof val !== "number") throw new Error(`- requires numbers, but received ${typeof val}`);
-            regs[destReg] = -val; 
-            return;
+            return -val; 
         }
 
         let acc = regs[startReg];
@@ -109,26 +110,25 @@ export const IBUILTINS: BuiltinFunction[] = [
             if (typeof val !== "number") throw new Error(`- requires numbers, but received ${typeof val}`);
             acc -= val
         }
-        regs[destReg] = acc
+        return acc
     }),
-    new BuiltinFunction(OP_MUL, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_MUL, (regs, startReg, nargs) => {
         let acc = 1; 
         for (let i = startReg; i < startReg+nargs; i++) {
             const val = regs[i]
             if (typeof val !== "number") throw new Error(`* requires numbers, but received ${typeof val}`);
             acc *= val
         }
-        regs[destReg] = acc
+        return acc
     }),
-    new BuiltinFunction(OP_DIV, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_DIV, (regs, startReg, nargs) => {
         if (nargs === 0) throw new Error("/ requires at least 1 argument");
         
         if (nargs === 1) {
             const val = regs[startReg];
             if (typeof val !== "number") throw new Error(`/ requires numbers, but received ${typeof val}`);
             if (val === 0) throw new Error("division by zero");
-            regs[destReg] = 1/val; 
-            return;
+            return 1/val; 
         }
 
         let acc = regs[startReg];
@@ -139,32 +139,32 @@ export const IBUILTINS: BuiltinFunction[] = [
             if (val === 0) throw new Error("division by zero");
             acc /= val
         }
-        regs[destReg] = acc
+        return acc
     }),
-    new BuiltinFunction(OP_MODULO, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_MODULO, (regs, startReg, nargs) => {
         if(nargs !== 2) throw new Error("modulo requires 2 arguments");
         const a = regs[startReg] 
         const b = regs[startReg+1]
         if (typeof a !== "number" || typeof b !== "number") throw new Error(`modulo: requires numbers, but received ${typeof a}/${typeof b}`);
         if (b === 0) throw new Error("modulo: division by zero");
-        regs[destReg] = ((a % b) + b) % b
+        return ((a % b) + b) % b
     }),
-    new BuiltinFunction(OP_REMAINDER, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_REMAINDER, (regs, startReg, nargs) => {
         if(nargs !== 2) throw new Error("remainder requires 2 arguments");
         const a = regs[startReg] 
         const b = regs[startReg+1]
         if (typeof a !== "number" || typeof b !== "number") throw new Error(`remainder: requires numbers, but received ${typeof a}/${typeof b}`);
         if (b === 0) throw new Error("remainder: division by zero");
-        regs[destReg] = a % b
+        return a % b
     }),
-    new BuiltinFunction(OP_LIST, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_LIST, (regs, startReg, nargs) => {
         const lst = new Array(nargs)
         for(let i = 0; i < nargs; i++) {
             lst[i] = regs[startReg+i]
         }
-        regs[destReg] = lst
+        return lst
     }),
-    new BuiltinFunction(OP_EQ, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_EQ, (regs, startReg, nargs) => {
         if (nargs === 0) throw new Error("= requires at least 1 argument");
         
         let start = regs[startReg];
@@ -178,9 +178,9 @@ export const IBUILTINS: BuiltinFunction[] = [
                 break
             }
         }
-        regs[destReg] = res
+        return res
     }),
-    new BuiltinFunction(OP_EQ_PTR1, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_EQ_PTR1, (regs, startReg, nargs) => {
         if (nargs === 0) throw new Error("eq? requires at least 1 argument");
         
         let start = regs[startReg];
@@ -192,9 +192,9 @@ export const IBUILTINS: BuiltinFunction[] = [
                 break
             }
         }
-        regs[destReg] = res
+        return res
     }),
-    new BuiltinFunction(OP_EQ_DEEP1, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_EQ_DEEP1, (regs, startReg, nargs) => {
         if (nargs === 0) throw new Error("equal? requires at least 1 argument");
         
         let start = regs[startReg];
@@ -206,9 +206,9 @@ export const IBUILTINS: BuiltinFunction[] = [
                 break
             }
         }
-        regs[destReg] = res
+        return res
     }),
-    new BuiltinFunction(OP_LT, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_LT, (regs, startReg, nargs) => {
         if (nargs === 0) throw new Error("< requires at least 1 argument");
         
         let start = regs[startReg];
@@ -222,9 +222,9 @@ export const IBUILTINS: BuiltinFunction[] = [
                 break
             }
         }
-        regs[destReg] = res
+        return res
     }),
-    new BuiltinFunction(OP_LTE, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_LTE, (regs, startReg, nargs) => {
         if (nargs === 0) throw new Error("<= requires at least 1 argument");
         
         let start = regs[startReg];
@@ -238,9 +238,9 @@ export const IBUILTINS: BuiltinFunction[] = [
                 break
             }
         }
-        regs[destReg] = res
+        return res
     }),
-    new BuiltinFunction(OP_GT, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_GT, (regs, startReg, nargs) => {
         if (nargs === 0) throw new Error("> requires at least 1 argument");
         
         let start = regs[startReg];
@@ -254,9 +254,9 @@ export const IBUILTINS: BuiltinFunction[] = [
                 break
             }
         }
-        regs[destReg] = res
+        return res
     }),
-    new BuiltinFunction(OP_GTE, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_GTE, (regs, startReg, nargs) => {
         if (nargs === 0) throw new Error(">= requires at least 1 argument");
         
         let start = regs[startReg];
@@ -270,85 +270,83 @@ export const IBUILTINS: BuiltinFunction[] = [
                 break
             }
         }
-        regs[destReg] = res
+        return res
     }),
     // list builtins
-    new BuiltinFunction(OP_CAR, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_CAR, (regs, startReg, nargs) => {
         if (nargs !== 1) throw new Error("car requires 1 argument");
         const val = regs[startReg]
         if (Array.isArray(val)) {
             if (val.length < 1) throw new Error("car requires a non-empty list");
-            regs[destReg] = val[0];
+            return val[0];
         } else if (val instanceof Cons) {
-            regs[destReg] = val.head;
+            return val.head;
         } else if (val === null) {
             throw new Error("car requires a non-empty list");
         } else {
             throw new Error("car requires a list");
         }
     }),
-    new BuiltinFunction(OP_CDR, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_CDR, (regs, startReg, nargs) => {
         if (nargs !== 1) throw new Error("cdr requires 1 argument");
         const val = regs[startReg]
         if (Array.isArray(val)) {
             if (val.length < 1) throw new Error("cdr requires a non-empty list");
-            regs[destReg] = Cons.fromArray(val, 1)
+            return Cons.fromArray(val, 1)
         } else if (val instanceof Cons) { 
-            regs[destReg] = val.tail
+            return val.tail
         } else if (val === null) {
             throw new Error("cdr requires a non-empty list");
         } else {
             throw new Error(`cdr requires a list but got ${val}`);
         }
     }),
-    new BuiltinFunction(OP_CONS, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_CONS, (regs, startReg, nargs) => {
         if (nargs != 2) throw new Error("cons requires 2 arguments [cons a d]");
-        regs[destReg] = Cons.pair(regs[startReg], regs[startReg+1])
+        return Cons.pair(regs[startReg], regs[startReg+1])
     }),
-    new BuiltinFunction(OP_LAST, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_LAST, (regs, startReg, nargs) => {
         if (nargs != 1) throw new Error("last requires 1 argument");
         const val = regs[startReg]
         if (Array.isArray(val)) {
             if (val.length < 1) throw new Error("last requires a non-empty list");
-            regs[destReg] = val[val.length - 1];
+            return val[val.length - 1];
         } else if (val instanceof Cons) {
             let last = val.head
             for(const v of val) {
                 last = v;
             }
-            regs[destReg] = last
+            return last
         } else if (val === null) {
             throw new Error("last requires a non-empty list");
         } else {
             throw new Error("last requires a list");
         }
     }),
-    new BuiltinFunction(OP_LENGTH, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_LENGTH, (regs, startReg, nargs) => {
         if (nargs != 1) throw new Error("length requires 1 argument");
         const val = regs[startReg]
         if (val === null) {
-            regs[destReg] = 0 // empty list
-            return
+            return 0 // empty list
         }
         // TODO: Add string-length? for strings specifically like scheme does
-        regs[destReg] = (Array.isArray(val) || val instanceof Cons) ? val.length : (typeof val === "string" ? val.length : 0)
+        return (Array.isArray(val) || val instanceof Cons) ? val.length : (typeof val === "string" ? val.length : 0)
     }),
-    new BuiltinFunction(OP_EMPTY, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_EMPTY, (regs, startReg, nargs) => {
         if (nargs != 1) throw new Error("empty requires 1 argument");
         const val = regs[startReg]
         if (val === null) {
-            regs[destReg] = true // empty list
-            return
+            return true // empty list
         }
-        regs[destReg] = (Array.isArray(val) || val instanceof Cons) ? (val.length == 0) : (typeof val === "string" ? (val.length == 0) : false);
+        return (Array.isArray(val) || val instanceof Cons) ? (val.length == 0) : (typeof val === "string" ? (val.length == 0) : false);
     }),
-    new BuiltinFunction(OP_CONTAINS, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_CONTAINS, (regs, startReg, nargs) => {
         if (nargs != 2) throw new Error("contains? requires 2 arguments");
         const list = regs[startReg]
         const item = regs[startReg+1]
-        regs[destReg] = (Array.isArray(list) || list instanceof Cons) ? list.includes(item) : false;
+        return (Array.isArray(list) || list instanceof Cons) ? list.includes(item) : false;
     }),
-    new BuiltinFunction(OP_MEMBER, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_MEMBER, (regs, startReg, nargs) => {
         if (nargs != 2) throw new Error("member? requires 2 arguments");
         let list = regs[startReg] as (any[] | Cons | null)
         const item = regs[startReg+1]
@@ -356,63 +354,44 @@ export const IBUILTINS: BuiltinFunction[] = [
             for (let i = 0; i < list.length; i++) {
                 if (isDeepEqual(list[i], item)) {
                     // create a view of the array starting from i
-                    regs[destReg] = Cons.fromArray(list, i)
-                    return;
+                    return Cons.fromArray(list, i)
                 }
             }
-            regs[destReg] = false;
-            return;
+            return false;
         }
         else if (list === null) {
-            regs[destReg] = false // not a member if empty list
-            return
+            return false // not a member if empty list
         }
         else if (!(list instanceof Cons)) throw new Error("member? requires the first argument to be a list")
         list = list as Cons // cast to Cons for type safety
         let s: Cons | null = list
         while(s !== null) {
             if (isDeepEqual(s.head, item)) {
-                regs[destReg] = s
-                return
+                return s
             }
             s = s.tail
         }
-        regs[destReg] = false
+        return false
     }),
-    new BuiltinFunction(OP_NOT, (regs, destReg, startReg, nargs) => {
+    new BuiltinFunction(OP_NOT, (regs, startReg, nargs) => {
         if (nargs != 1) throw new Error("not requires 1 argument");
-        regs[destReg] = !isTruthy(regs[startReg]);
+        return !isTruthy(regs[startReg]);
     })
 ]
 
 // Marker for `apply` intrinsic proc
 export class ApplyProc extends IProcedure {}
+export const APPLY_PROC = new ApplyProc()
 
-/** The register block the actual anima engine has/uses */
-class RegBlock {
-    public regs: any[]
-    constructor(numRegs: number) {
-        this.regs = new Array(numRegs).fill(undefined)
-    }
-
-    /*box(dest: number, src: number) {
-        this.regs[dest] = [this.regs[src]]
-    }
-    unbox(dest: number, src: number) {
-        this.regs[dest] = this.regs[src][0]
-    }
-    setbox(dest: number, src: number) {
-        this.regs[dest][0] = this.regs[src]
-    }
-    move(dest: number, src: number) {
-        this.regs[dest] = this.regs[src]
-    }*/
+const createRegs = (numRegs: number) => {
+    return new Array(numRegs).fill(undefined)
 }
 
 const regOut = (reg: any): any => {
     if (reg instanceof Box) return `Box<${regOut(reg.val)}>`
     if (reg instanceof Closure) return `Closure<${reg.tmpl.params.map(x => x.description).join(", ")}>`
     if (typeof reg === "symbol") return `${reg.description || '<symbol>'}`
+    if (reg === undefined) return '#<void>'
     return JSON.stringify(reg)
 }
 
@@ -435,11 +414,12 @@ export class Globals {
 
 class CallFrame {
     constructor(
+        public parent: CallFrame | null,
+        public continuation: ((result: any) => void) | null,
         public code: ByteCode,
-        public regs: RegBlock,
+        public regs: any[],
         public upvars: any[],
-        public ip: number,
-        public retReg: number,
+        public ip: number
     ) {}
 
     readNext() {
@@ -459,34 +439,41 @@ export class AnimaVM {
 
     public evaluate(code: ByteCode, scope: Globals, props?: ExposedProps): any {
         // Initial frame
-        let frames: CallFrame[] = [new CallFrame(code, new RegBlock(code.numReg), [], 0, 0)];
+        let frame: CallFrame = new CallFrame(null, null, code, createRegs(code.numReg), [], 0);
         try {
-            return this.#evalinner(frames, scope, props);
+            return this.#evalinner(frame, scope, props);
         } catch (err: any) {
-            console.log(`${err.stack}\n\nFrame #${frames.length-1}\nCurrent Frame IP: ${frames[frames.length-1].ip}`)
+            console.log(`${err.stack}\n\nCurrent Frame IP: ${frame.ip}`)
         }
     }
 
-    #evalinner(frames: CallFrame[], execScope: Globals, props?: ExposedProps): any {
-        while (frames.length > 0) {
+    #evalinner(initialFrame: CallFrame, execScope: Globals, props?: ExposedProps): any {
+        let frame: CallFrame | null = initialFrame
+        while (frame) {
             this.steps++;
             if (this.maxSteps && this.steps > this.maxSteps) {
                 throw new Error(`Script ran for more than ${this.maxSteps} instructions.`);
             }
 
-            const frame = frames[frames.length - 1];
-            const regs = frame.regs.regs
+            const regs = frame.regs
 
             if (frame.ip >= frame.code.inst.length) {
-                const lf = frames.pop();
-                if (lf) {
-                    frames[frames.length-1].regs.regs[lf.retReg] = false // no return so treat as false implicitly
-                }
+                if (frame.continuation) frame.continuation(false); // no return so treat as false implicitly
+                frame = frame.parent
+                if (frame === null) return false
                 continue;
             }
 
+            if (frame.ip < 0) {
+                const retVal = regs[-1-frame.ip]
+                if (frame.continuation) frame.continuation(retVal)
+                frame = frame.parent;
+                if (frame === null) return retVal;
+                continue; // back to loop start
+            }
+
             const opcode: OpCode = frame.readNext()
-            //console.log(`${OpCode[opcode]} ${regs.map(r => regOut(r)).join(', ')}`)
+            console.log(`${OpCode[opcode]} ${regs.map(r => regOut(r)).join(', ')}`)
             switch (opcode) {
                 // Load
                 case OpCode.LOADCONST: {
@@ -588,15 +575,14 @@ export class AnimaVM {
                     const destReg = frame.readNext();
                     const startReg = frame.readNext();
                     const nargs = frame.readNext();
-                    this.#invoke(proc, frames, frame, regs, destReg, startReg, nargs, false)
+                    frame = this.#invoke(proc, frame, regs, destReg, startReg, nargs, frame.continuation)
                     break;
                 }
                 case OpCode.TAILCALL: {
                     const proc = regs[frame.readNext()];
                     const startReg = frame.readNext();
                     const nargs = frame.readNext();
-                    // Note: we reuse the frames existing return reg for tailcall's
-                    this.#invoke(proc, frames, frame, regs, frame.retReg, startReg, nargs, true);
+                    this.#invoke(proc, frame, regs, null, startReg, nargs, frame.continuation);
                     break;
                 }
                 case OpCode.BUILTINCALL: {
@@ -604,8 +590,22 @@ export class AnimaVM {
                     const destReg = frame.readNext();
                     const startReg = frame.readNext();
                     const nargs = frame.readNext();
-                    proc.cb(regs, destReg, startReg, nargs)
+                    frame.regs[destReg] = proc.cb(regs, startReg, nargs)
                     break
+                }
+                case OpCode.APPLYCALL: {
+                    const destReg = frame.readNext();
+                    const startReg = frame.readNext();
+                    const nargs = frame.readNext();
+                    frame = this.#invoke(APPLY_PROC, frame, regs, destReg, startReg, nargs, frame.continuation)
+                    break
+                }
+                case OpCode.APPLYTAILCALL: {
+                    const startReg = frame.readNext();
+                    const nargs = frame.readNext();
+                    // Note: we reuse the frames existing return reg for tailcall's
+                    frame = this.#invoke(APPLY_PROC, frame, regs, null, startReg, nargs, frame.continuation);
+                    break;
                 }
                 case OpCode.NEWCLOSURE: {
                     const destReg = frame.readNext()
@@ -627,13 +627,9 @@ export class AnimaVM {
                 }
                 case OpCode.RETURN: {
                     const retVal = regs[frame.readNext()]; 
-                    const finishedFrame = frames.pop();    
-                    
-                    if (frames.length > 0 && finishedFrame) {
-                        const callerFrame = frames[frames.length - 1];
-                        callerFrame.regs.regs[finishedFrame.retReg] = retVal;
-                    }
-                    if (frames.length === 0) return retVal // return retVal back to js
+                    if (frame.continuation) frame.continuation(retVal)
+                    frame = frame.parent;
+                    if (frame === null) return retVal;
                     break; // back to loop start
                 }
                 case OpCode.BOX: {
@@ -666,15 +662,17 @@ export class AnimaVM {
         }
     }
 
-    #invoke(proc: any, frames: CallFrame[], frame: CallFrame, regs: any[], destReg: number, startReg: number, nargs: number, isTail: boolean): void {
+    // Note: if destReg is not set, we treat it as a tailcall
+    #invoke(proc: any, frame: CallFrame, regs: any[], destReg: number | null, startReg: number, nargs: number, continuation: ((result: any) => void) | null): CallFrame | null {
+        console.log("Applying closure with regs:", regs);
         if (proc instanceof BuiltinFunction) {
-            // Easy case: we have a builtin function!
-            proc.cb(regs, destReg, startReg, nargs)
-            if (isTail) {
-                frames.pop()
-                if(frames.length > 0) {
-                    frames[frames.length-1].regs.regs[frame.retReg] = regs[destReg]
-                }
+            const retVal = proc.cb(regs, startReg, nargs)
+            if (destReg !== null) {
+                frame.regs[destReg] = retVal;
+                return frame;
+            } else {
+                if (continuation) continuation(retVal);
+                return frame.parent; 
             }
         } else if (proc instanceof ApplyProc) {
             const actualProc = regs[startReg];
@@ -692,51 +690,68 @@ export class AnimaVM {
             } else {
                 throw new Error(`apply: last argument must be a list but got ${String(finalArg)}`);
             }
-            this.#invoke(actualProc, frames, frame, actualArgs, destReg, 0, actualArgs.length, isTail)
-            if (!isTail) regs[destReg] = actualArgs[destReg] // copy return value
-            return
+
+            const cont = (destReg !== null) ? (val: any) => {
+                frame.regs[destReg] = val;
+            } : frame.continuation
+            
+            return this.#invoke(actualProc, frame, actualArgs, destReg, 0, actualArgs.length, cont)
         } else if (proc instanceof Closure) {
             const template = proc.tmpl;
-            const arity = template.params.length; // number of required args
-            if (template.remParams !== null) {
-                // variadic
-                if (nargs < arity) {
-                    throw new Error(`expected at least ${arity} args, got ${nargs}`);
-                }
-            } else {
-                if (nargs !== arity) {
-                    throw new Error(`expected exactly ${arity} args, got ${nargs}`);
-                }
-            }
-
-            const closureRegs = new RegBlock(template.code.numReg)
-
-            // required
-            for (let i = 0; i < arity; i++) {
-                closureRegs.regs[i] = regs[startReg+i]
-            }
-
-            // variadic
-            if (template.remParams !== null) {
-                const restArgs = new Array(nargs-arity);
-                for (let i = 0; i < restArgs.length; i++) {
-                    restArgs[i] = regs[startReg + arity + i];
-                }
-                closureRegs.regs[arity] = restArgs
-            }
+            const isTail = (destReg === null);
+            const pregs = this.#createClosureArg(proc, nargs, regs, startReg)
 
             if (isTail) {
-                // Reuse existing frame (TCO)
+                // TCO: Reuse existing frame
                 frame.code = template.code;
-                frame.upvars = proc.upvars
-                frame.regs = closureRegs
-                frame.ip = 0; 
-                frame.retReg = destReg;
+                frame.upvars = proc.upvars;
+                frame.regs = pregs;
+                frame.ip = 0;
+                // Retain existing continuation for tail-call tunneling
+                return frame;
             } else {
-                frames.push(new CallFrame(template.code, closureRegs, proc.upvars, 0, destReg));
-            }
+                const nframe = new CallFrame(frame, continuation, template.code, pregs, proc.upvars, 0);
+                nframe.continuation = (destReg !== null) ? (val) => {
+                    frame.regs[destReg] = val;
+                } : continuation
+                
+                return nframe;
+            }        
         } else {
             throw new Error(`Attempted to call a non-procedure: ${String(proc)}`);
         }
+    }
+
+    #createClosureArg(proc: Closure, nargs: number, args: any[], startOffset: number) {
+        const template = proc.tmpl;
+        const arity = template.params.length; // number of required args
+        if (template.remParams !== null) {
+            // variadic
+            if (nargs < arity) {
+                throw new Error(`expected at least ${arity} args, got ${nargs}`);
+            }
+        } else {
+            if (nargs !== arity) {
+                throw new Error(`expected exactly ${arity} args, got ${nargs}`);
+            }
+        }
+
+        const closureRegs = createRegs(template.code.numReg)
+
+        // required
+        for (let i = 0; i < arity; i++) {
+            closureRegs[i] = args[startOffset+i]
+        }
+
+        // variadic
+        if (template.remParams !== null) {
+            const restArgs = new Array(nargs-arity);
+            for (let i = 0; i < restArgs.length; i++) {
+                restArgs[i] = args[startOffset + arity + i];
+            }
+            closureRegs[arity] = restArgs
+        }
+
+        return closureRegs
     }
 }

@@ -116,6 +116,23 @@ const stringifyInst = (inst: ByteCode): string[] => {
                 idx += 3;
                 break;
 
+            case OpCode.APPLYCALL: {
+                const destReg = inst.inst[idx + 1]
+                const startReg = inst.inst[idx + 2];
+                const nargs = inst.inst[idx + 3];
+                line += `${padOp("APPLYTAILCALL")} dest=${destReg} start=r${startReg}, nargs=${nargs}`;
+                idx += 4;
+                break;
+            }
+
+            case OpCode.APPLYTAILCALL: {
+                const startReg = inst.inst[idx + 1];
+                const nargs = inst.inst[idx + 2];
+                line += `${padOp("APPLYTAILCALL")} start=r${startReg}, nargs=${nargs}`;
+                idx += 3;
+                break;
+            }
+
             case OpCode.TAILCALL: {
                 const proc = inst.inst[idx + 1];
                 const startReg = inst.inst[idx + 2];

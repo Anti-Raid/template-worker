@@ -60,6 +60,16 @@ export type Node = {
     startReg: number,
     nargs: number,
 } | {
+    t: "ApplyCall",
+    destReg: number, // ret value is stored in destReg
+    startReg: number,
+    nargs: number,
+} | {
+    t: "ApplyTailCall",
+    // does not return to caller so no ret value needed
+    startReg: number,
+    nargs: number,
+} | {
     t: "Return",
     reg: number
 } | {
@@ -289,6 +299,14 @@ export class IR {
                 }
                 case "TailCall": {
                     inst.push(OpCode.TAILCALL, node.procReg, node.startReg, node.nargs)
+                    break
+                }
+                case "ApplyCall": {
+                    inst.push(OpCode.APPLYCALL, node.destReg, node.startReg, node.nargs)
+                    break
+                }
+                case "ApplyTailCall": {
+                    inst.push(OpCode.APPLYTAILCALL, node.startReg, node.nargs)
                     break
                 }
                 case "IBuiltin": {
