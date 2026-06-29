@@ -3,23 +3,18 @@ import { deepPrint } from "./utils";
 import { AnimaVM, Globals } from "./vm";
 
 const code = `
-(define union
-    (lambda (a b)
-        (define (in a rst) 
-        (cond 
-            [(empty? rst) #f]
-            [(equal? a (car rst)) #t]
-            [else (in a (cdr rst))]))
+(define (make-account initial)
+  (let ((balance initial))
+    (define (withdraw amount)
+      (set! balance (- balance amount))
+      balance)
+    (define (deposit amount)
+      (set! balance (+ balance amount))
+      balance)
+    (withdraw 10)
+    (deposit 50)))
 
-        (cond
-        ; if either set is empty, the other one if the union
-        [(empty? a) b]
-        [(empty? b) a]
-        ; if b is in a, skip it
-        [(in (car b) a) (union a (cdr b))]
-        [else (cons (car b) (union a (cdr b)))])))
-        
-    (list (equal? (union '(a b d e f h j) '(f c e g a)) '(c g a b d e f h j)))
+(make-account 100)
 `
 
 const c = new Compiler()

@@ -150,40 +150,54 @@ export class AnimaTransformer {
         }
     }
 
+    #removeBegin(expr: any[]) {
+        const newExpr: any[] = [];
+        
+        for (const exp of expr) {
+            if (Array.isArray(exp) && exp[0] === OP_BEGIN) {
+                const beginContents = exp.slice(1);
+                newExpr.push(...this.#removeBegin(beginContents));
+            } else {
+                newExpr.push(exp);
+            }
+        }
+        
+        return newExpr;
+    }
+
     #transformLambda(expr: any[]) {
         if(expr.length < 3) {
             throw new Error(`lambda must be in format ["lambda", [bind-args...], body...] but only have ${expr.length-1} arguments`)
         }
 
         const args = expr[1]
-        const rawBody = expr.slice(2)
+        const rawBody = this.#removeBegin(expr.slice(2))
+        
+        if (rawBody.length === 0) throw new Error("lambda body must contain at least one expression")
 
-        const internalDefines: any[][] = []
+        const defines: any[][] = []
         const body: any[] = []
-        let isAtTop = true
 
         for (let stmt of rawBody) {
             if (Array.isArray(stmt) && stmt[0] === OP_DEFINE) {
-                if (!isAtTop) throw new Error(`Internal define (${expr}) can only exist at the top-level of a lambda`)
                 const [normalizedStmt] = this.#transformDefineComplex(stmt);
-                internalDefines.push(normalizedStmt)
-                continue
+                const name = normalizedStmt[1];
+                const value = normalizedStmt[2];
+                defines.push([name, undefined]);
+                body.push([OP_SET, name, value]);
+            } else {
+                body.push(stmt);
             }
-            isAtTop = false
-            body.push(stmt)
         }
 
         // If no defines to transform, just return the transformed body
-        if (internalDefines.length === 0) {
+        if (defines.length === 0) {
             const transformedBody = body.map(b => this.#transform(b, "lambda"));
             return [OP_LAMBDA, args, ...transformedBody];
         }
         
-        // Extract the names and values from the [OP_DEFINE, name, value] nodes
-        // 
-        // Then wrap in a letrec which will then be processed into a lambda with set!'s
-        const letrecBindings = internalDefines.map(def => [def[1], def[2]])
-        const letrecExpr = [OP_LETREC, letrecBindings, ...body]
+        // Wrap in a letrec which will then be processed into a lambda with set!'s
+        const letrecExpr = [OP_LETREC, defines, ...body]
         const desugaredBody = this.#transform(letrecExpr, "lambda")
 
         return [OP_LAMBDA, args, desugaredBody]

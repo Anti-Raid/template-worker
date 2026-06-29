@@ -302,11 +302,14 @@ export class Compiler {
 
     constructor() {}
 
-    compile(s: string) {
+    compile(s: string, implicitIife: boolean = true) {
         const ast = new ASP(s, true).parse()
 
+        // Step 0 is to make the whole thing an implicit IIFE
+        const astIIfe = implicitIife ? [[OP_LAMBDA, [], ast]] : ast
+
         // Step 1 is to apply the syntax transformation of cond/let/let*/letrec into simple form
-        let trExpr = this.t.transform(ast)
+        let trExpr = this.t.transform(astIIfe)
         // Step 2 is to analyze our variables so we know what to box and what not to box
         let analyzer = new AstAnalysis()
         const ascope = analyzer.analyze(trExpr)

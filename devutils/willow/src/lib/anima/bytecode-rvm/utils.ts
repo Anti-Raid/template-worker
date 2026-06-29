@@ -112,7 +112,7 @@ const stringifyInst = (inst: ByteCode): string[] => {
 
             case OpCode.JIF:
             case OpCode.JIT:
-                line += `${padOp(OpCode[opcode])} r${inst.inst[idx + 1]} #${inst.inst[idx + 2]}`;
+                line += `${padOp(OpCode[opcode])} r${inst.inst[idx + 1]}, #${inst.inst[idx + 2]}`;
                 idx += 3;
                 break;
 
