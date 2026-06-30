@@ -5,7 +5,7 @@ export type Resolve = { type: "Global" } | { type: "Local", index: number } | { 
 export class VariableMetadata {
     mutable: boolean = false; // is this variable mutated in this scope or not
     isCaptured: boolean = false; // is the variable captured in this scope or not
-    get isBoxed() { return this.isCaptured && this.mutable }
+    get isBoxed() { return this.isCaptured || this.mutable }
 }
 
 export class AnalysisScope {

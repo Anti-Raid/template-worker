@@ -376,12 +376,20 @@ export const IBUILTINS: BuiltinFunction[] = [
     new BuiltinFunction(OP_NOT, (regs, startReg, nargs) => {
         if (nargs != 1) throw new Error("not requires 1 argument");
         return !isTruthy(regs[startReg]);
+    }),
+    new BuiltinFunction(Symbol.for("display"), (regs, startReg, nargs) => {
+        if (nargs != 1) throw new Error("display requires 1 argument");
+        console.log(regs[startReg])
+        return undefined
     })
 ]
 
 // Marker for `apply` intrinsic proc
 export class ApplyProc extends IProcedure {}
+// Marker for `call/cc` intrinsic proc
+export class CallCCProc extends IProcedure {}
 export const APPLY_PROC = new ApplyProc()
+export const CALLCC_PROC = new CallCCProc()
 
 const createRegs = (numRegs: number) => {
     return new Array(numRegs).fill(undefined)
@@ -392,7 +400,8 @@ const regOut = (reg: any): any => {
     if (reg instanceof Closure) return `Closure<${reg.tmpl.params.map(x => x.description).join(", ")}>`
     if (typeof reg === "symbol") return `${reg.description || '<symbol>'}`
     if (reg === undefined) return '#<void>'
-    return JSON.stringify(reg)
+    if (typeof reg !== "object") return `${reg}`
+    return `<object ${Object.keys(reg)}>`
 }
 
 // To make life debugging registers easier
@@ -412,14 +421,16 @@ export class Globals {
     }
 }
 
+type Continuation = { type: 'RUNNING'; frame: CallFrame; parent: Continuation | null, destReg?: number }
+| { type: "TERMINAL", value: any }
+
 class CallFrame {
     constructor(
-        public parent: CallFrame | null,
-        public continuation: ((result: any) => void) | null,
         public code: ByteCode,
         public regs: any[],
         public upvars: any[],
-        public ip: number
+        public ip: number,
+        public id: number,
     ) {}
 
     readNext() {
@@ -432,48 +443,41 @@ class CallFrame {
     getConst(idx: number) {
         return this.code.constants[idx]
     }
+
+    copy(): CallFrame {
+        return new CallFrame(this.code, [...this.regs], [...this.upvars], this.ip, this.id)
+    }
 }
 
 export class AnimaVM {
     constructor(public steps: number = 0, public maxSteps: number = 0) {}
 
-    public evaluate(code: ByteCode, scope: Globals, props?: ExposedProps): any {
+    public evaluate(code: ByteCode, scope: Globals): any {
         // Initial frame
-        let frame: CallFrame = new CallFrame(null, null, code, createRegs(code.numReg), [], 0);
+        let frame: CallFrame = new CallFrame(code, createRegs(code.numReg), [], 0, 0);
         try {
-            return this.#evalinner(frame, scope, props);
+            return this.#execnext(frame, scope);
         } catch (err: any) {
             console.log(`${err.stack}\n\nCurrent Frame IP: ${frame.ip}`)
         }
     }
 
-    #evalinner(initialFrame: CallFrame, execScope: Globals, props?: ExposedProps): any {
-        let frame: CallFrame | null = initialFrame
-        while (frame) {
+    #execnext(initialFrame: CallFrame, execScope: Globals) {
+        let cont: Continuation = { type: 'RUNNING', frame: initialFrame, parent: null };
+        while(cont.type === 'RUNNING') {
             this.steps++;
             if (this.maxSteps && this.steps > this.maxSteps) {
                 throw new Error(`Script ran for more than ${this.maxSteps} instructions.`);
             }
 
+            const frame: CallFrame = cont.frame
             const regs = frame.regs
-
             if (frame.ip >= frame.code.inst.length) {
-                if (frame.continuation) frame.continuation(false); // no return so treat as false implicitly
-                frame = frame.parent
-                if (frame === null) return false
-                continue;
-            }
-
-            if (frame.ip < 0) {
-                const retVal = regs[-1-frame.ip]
-                if (frame.continuation) frame.continuation(retVal)
-                frame = frame.parent;
-                if (frame === null) return retVal;
-                continue; // back to loop start
+                throw new Error(`internal error: ${frame.ip} >= ${frame.code.inst.length}`)
             }
 
             const opcode: OpCode = frame.readNext()
-            console.log(`${OpCode[opcode]} ${regs.map(r => regOut(r)).join(', ')}`)
+            console.log(`[Frame #${frame.id}]: ${OpCode[opcode]} ${regs.map(r => regOut(r)).join(', ')}`)
             switch (opcode) {
                 // Load
                 case OpCode.LOADCONST: {
@@ -569,44 +573,6 @@ export class AnimaVM {
                     frame.ip = jumpIdx
                     break
                 }
-
-                case OpCode.CALL: {
-                    const proc = regs[frame.readNext()];
-                    const destReg = frame.readNext();
-                    const startReg = frame.readNext();
-                    const nargs = frame.readNext();
-                    frame = this.#invoke(proc, frame, regs, destReg, startReg, nargs, frame.continuation)
-                    break;
-                }
-                case OpCode.TAILCALL: {
-                    const proc = regs[frame.readNext()];
-                    const startReg = frame.readNext();
-                    const nargs = frame.readNext();
-                    this.#invoke(proc, frame, regs, null, startReg, nargs, frame.continuation);
-                    break;
-                }
-                case OpCode.BUILTINCALL: {
-                    const proc = IBUILTINS[frame.readNext()];
-                    const destReg = frame.readNext();
-                    const startReg = frame.readNext();
-                    const nargs = frame.readNext();
-                    frame.regs[destReg] = proc.cb(regs, startReg, nargs)
-                    break
-                }
-                case OpCode.APPLYCALL: {
-                    const destReg = frame.readNext();
-                    const startReg = frame.readNext();
-                    const nargs = frame.readNext();
-                    frame = this.#invoke(APPLY_PROC, frame, regs, destReg, startReg, nargs, frame.continuation)
-                    break
-                }
-                case OpCode.APPLYTAILCALL: {
-                    const startReg = frame.readNext();
-                    const nargs = frame.readNext();
-                    // Note: we reuse the frames existing return reg for tailcall's
-                    frame = this.#invoke(APPLY_PROC, frame, regs, null, startReg, nargs, frame.continuation);
-                    break;
-                }
                 case OpCode.NEWCLOSURE: {
                     const destReg = frame.readNext()
                     const tidx = frame.readNext()
@@ -624,13 +590,6 @@ export class AnimaVM {
                     }
                     regs[destReg] = closure
                     break;
-                }
-                case OpCode.RETURN: {
-                    const retVal = regs[frame.readNext()]; 
-                    if (frame.continuation) frame.continuation(retVal)
-                    frame = frame.parent;
-                    if (frame === null) return retVal;
-                    break; // back to loop start
                 }
                 case OpCode.BOX: {
                     const destReg = frame.readNext();
@@ -656,33 +615,91 @@ export class AnimaVM {
                     regs[destReg] = regs[srcReg]
                     break
                 }
+                case OpCode.RETURN: {
+                    const reg = frame.readNext()
+                    const retVal = frame.regs[reg];
+                    if (cont.parent === null) {
+                        cont = { type: 'TERMINAL', value: retVal };
+                    } else {
+                        const parent: Continuation = cont.parent;
+                        if (parent.type === "RUNNING" && parent.destReg !== undefined) {
+                            parent.frame.regs[parent.destReg] = retVal;
+                        }
+                        cont = parent; // Jump back to the parent continuation
+                    }
+                    break;               
+                }
+                case OpCode.CALL: {
+                    const proc = regs[frame.readNext()];
+                    const destReg = frame.readNext();
+                    const startReg = frame.readNext();
+                    const nargs = frame.readNext();
+                    cont = this.#invoke(proc, cont, frame, regs, destReg, startReg, nargs)
+                    break;
+                }
+                case OpCode.TAILCALL: {
+                    const proc = regs[frame.readNext()];
+                    const startReg = frame.readNext();
+                    const nargs = frame.readNext();
+                    cont = this.#invoke(proc, cont, frame, regs, undefined, startReg, nargs);
+                    break;
+                }
+                case OpCode.BUILTINCALL: {
+                    const proc = IBUILTINS[frame.readNext()];
+                    const destReg = frame.readNext();
+                    const startReg = frame.readNext();
+                    const nargs = frame.readNext();
+                    cont = this.#invoke(proc, cont, frame, regs, destReg, startReg, nargs)
+                    break
+                }
+                case OpCode.APPLYCALL: {
+                    const destReg = frame.readNext();
+                    const startReg = frame.readNext();
+                    const nargs = frame.readNext();
+                    cont = this.#invoke(APPLY_PROC, cont, frame, regs, destReg, startReg, nargs)
+                    break
+                }
+                case OpCode.APPLYTAILCALL: {
+                    const startReg = frame.readNext();
+                    const nargs = frame.readNext();
+                    // Note: we reuse the frames existing return reg for tailcall's
+                    cont = this.#invoke(APPLY_PROC, cont, frame, regs, undefined, startReg, nargs);
+                    break;
+                }
                 default:
                     let _: never = opcode;
             }
         }
+
+        return cont.value
     }
 
     // Note: if destReg is not set, we treat it as a tailcall
-    #invoke(proc: any, frame: CallFrame, regs: any[], destReg: number | null, startReg: number, nargs: number, continuation: ((result: any) => void) | null): CallFrame | null {
-        console.log("Applying closure with regs:", regs);
+    #invoke(
+        proc: any, 
+        cont: Continuation,
+        callerFrame: CallFrame, 
+        callerArgs: any[], 
+        destReg: number | undefined, 
+        startReg: number, 
+        nargs: number
+    ): Continuation {
+        if (cont.type !== "RUNNING") throw new Error("internal error: cannot invoke function using non-running cont")
         if (proc instanceof BuiltinFunction) {
-            const retVal = proc.cb(regs, startReg, nargs)
-            if (destReg !== null) {
-                frame.regs[destReg] = retVal;
-                return frame;
-            } else {
-                if (continuation) continuation(retVal);
-                return frame.parent; 
+            const retVal = proc.cb(callerArgs, startReg, nargs)
+            if (destReg !== undefined) {
+                callerFrame.regs[destReg] = retVal
             }
+            return cont // no change to continuation needed
         } else if (proc instanceof ApplyProc) {
-            const actualProc = regs[startReg];
+            const actualProc = callerArgs[startReg];
 
             // create a virtual set of registers to hold the arguments and copy args to it
             const actualArgs = [];
             for (let i = 1; i < nargs - 1; i++) {
-                actualArgs.push(regs[startReg + i]);
+                actualArgs.push(callerArgs[startReg + i]);
             }
-            const finalArg = regs[startReg + nargs - 1]
+            const finalArg = callerArgs[startReg + nargs - 1]
             if (Array.isArray(finalArg) || finalArg instanceof Cons) {
                 actualArgs.push(...finalArg);
             } else if (finalArg === null) {
@@ -690,36 +707,65 @@ export class AnimaVM {
             } else {
                 throw new Error(`apply: last argument must be a list but got ${String(finalArg)}`);
             }
-
-            const cont = (destReg !== null) ? (val: any) => {
-                frame.regs[destReg] = val;
-            } : frame.continuation
             
-            return this.#invoke(actualProc, frame, actualArgs, destReg, 0, actualArgs.length, cont)
+            return this.#invoke(actualProc, cont, callerFrame, actualArgs, destReg, 0, actualArgs.length)
+        } else if (proc instanceof CallCCProc) {
+            if (nargs !== 1) throw new Error(`call/cc expected one argument \`lambda\``)
+
+            let capturedCont: Continuation; 
+            if (destReg === undefined) {
+                capturedCont = cont.parent !== null 
+                ? this.#copyCont(cont.parent)
+                : { type: 'TERMINAL', value: undefined };
+            } else {
+                capturedCont = {
+                    type: 'RUNNING',
+                    frame: callerFrame.copy(), // Deep copy of the registers and IP
+                    parent: cont.parent ? this.#copyCont(cont.parent) : null,
+                    destReg: destReg
+                }
+            }
+            const k = new ContinuationClosure(capturedCont);
+            return this.#invoke(callerArgs[startReg], cont, callerFrame, [k], destReg, 0, 1)
+        } else if (proc instanceof ContinuationClosure) {
+            if (nargs !== 1) throw new Error(`continuation expected one argument \`val\``)
+            const value = callerArgs[startReg];
+            if (proc.capturedCont.type === "TERMINAL") {
+                return { type: 'TERMINAL', value: value };
+            }
+
+            const restoredCont: Continuation = this.#copyCont(proc.capturedCont);
+            if (restoredCont.type !== "RUNNING") throw new Error("internal error: cannot invoke continuation on non-running cont")
+            if (restoredCont.destReg !== undefined) {
+                restoredCont.frame.regs[restoredCont.destReg] = value;
+            }
+            const nextOpcode = restoredCont.frame.code.inst[restoredCont.frame.ip];
+            return restoredCont
         } else if (proc instanceof Closure) {
             const template = proc.tmpl;
-            const isTail = (destReg === null);
-            const pregs = this.#createClosureArg(proc, nargs, regs, startReg)
-
-            if (isTail) {
-                // TCO: Reuse existing frame
-                frame.code = template.code;
-                frame.upvars = proc.upvars;
-                frame.regs = pregs;
-                frame.ip = 0;
-                // Retain existing continuation for tail-call tunneling
-                return frame;
-            } else {
-                const nframe = new CallFrame(frame, continuation, template.code, pregs, proc.upvars, 0);
-                nframe.continuation = (destReg !== null) ? (val) => {
-                    frame.regs[destReg] = val;
-                } : continuation
-                
-                return nframe;
-            }        
+            const pregs = this.#createClosureArg(proc, nargs, callerArgs, startReg)
+            const parentCont = (destReg === undefined) ? cont.parent : {
+                type: 'RUNNING',
+                frame: callerFrame,
+                parent: cont.parent,
+                destReg: destReg 
+            } as Continuation | null;
+            const nextFrame = new CallFrame(template.code, pregs, proc.upvars, 0, callerFrame.id+1);
+            return { type: 'RUNNING', frame: nextFrame, parent: parentCont };
         } else {
             throw new Error(`Attempted to call a non-procedure: ${String(proc)}`);
         }
+    }
+
+    #copyCont(cont: Continuation): Continuation {
+        if (cont.type === "TERMINAL") return { type: "TERMINAL", value: cont.value };
+        
+        return {
+            type: "RUNNING",
+            frame: cont.frame.copy(),             // Deep copies regs and IP
+            parent: cont.parent ? this.#copyCont(cont.parent) : null,  // Recursively copies the rest of the stack!
+            destReg: cont.destReg
+        };
     }
 
     #createClosureArg(proc: Closure, nargs: number, args: any[], startOffset: number) {
@@ -753,5 +799,11 @@ export class AnimaVM {
         }
 
         return closureRegs
+    }
+}
+
+class ContinuationClosure extends IProcedure {
+    constructor(public capturedCont: Continuation) {
+        super()
     }
 }

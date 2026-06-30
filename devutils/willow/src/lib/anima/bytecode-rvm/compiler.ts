@@ -22,7 +22,7 @@ export class Compiler {
 
     constructor() {}
 
-    compile(s: string, implicitIife: boolean = true) {
+    compile(s: string, implicitIife: boolean = false) {
         const ast = new ASP(s, true).parse()
 
         // Step 0 is to make the whole thing an implicit IIFE
@@ -225,7 +225,8 @@ export class Compiler {
         const lambdaScope = new CompilerScope(opts.scope)
         const ascope = opts.analyzer.scopeMap.get(expr)
         if (!ascope) throw new Error(`internal error: could not find ascope for expr ${expr}`)
-    
+        ascope.dbgPrint()
+
         let params: symbol[] = []
         let remParams: symbol | null = null
         if (Array.isArray(expr[1])) {
@@ -240,6 +241,7 @@ export class Compiler {
         } else {
             throw new Error(`${syntaxCtx || "lambda"} arguments must be a symbol (to bind all as a list to said symbol) or a list`);
         }
+        const lambdaNodes: Node[] = []
 
         // Validate params and remParams here
         const seen = new Set<symbol>();
@@ -249,7 +251,7 @@ export class Compiler {
 
             const inf = ascope.getVarinfo(params[i])
             if(!inf) throw new Error("Could not fetch varinfo")
-            if(inf.isBoxed) opts.nodes.push({t: "Box", destReg: reg, srcReg: reg})
+            if(inf.isBoxed) lambdaNodes.push({t: "Box", destReg: reg, srcReg: reg})
         }
         if (remParams) {
             ensureCanBind(remParams, seen, syntaxCtx || "lambda")
@@ -257,14 +259,13 @@ export class Compiler {
 
             const inf = ascope.getVarinfo(remParams)
             if(!inf) throw new Error("Could not fetch varinfo")
-            if(inf.isBoxed) opts.nodes.push({t: "Box", destReg: reg, srcReg: reg})
+            if(inf.isBoxed) lambdaNodes.push({t: "Box", destReg: reg, srcReg: reg})
         }
 
         // Once we've verified the syntax, we can then drop the entire lambda if its not actually needed
         if (opts.destReg === undefined) return
 
         // Compile lambda body
-        const lambdaNodes: Node[] = []
         const retReg = lambdaScope.allocTemp() // no need to free the temp reg as we return?
         this.#compile(this.#wrapMulti(expr.slice(2)), {...opts, destReg: retReg, isTail: true, nodes: lambdaNodes, scope: lambdaScope, ascope })
         lambdaNodes.push({t: "Return", reg: retReg})
@@ -328,9 +329,9 @@ export class Compiler {
     // a normal call
     #compileNormalCall(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
         // Try IIFE optimizations
-        if(this.#optIIFE(expr, opts)) {
-            return
-        }
+        //if(this.#optIIFE(expr, opts)) {
+        //    return
+        //}
 
         // We need to compile the proc and place it on its own tempval
         const procReg = opts.scope.allocTemp();
@@ -442,6 +443,7 @@ export class Compiler {
     #getVar(varname: symbol, opts: CmpOpts, destReg?: number): Node[] {
         // Check if we can resolve it to a local/upvar
         const resolved = opts.scope.resolve(varname)
+        console.log(resolved)
 
         if (resolved.type === 'Local') {
             const aresolved = opts.ascope.getVarinfo(varname)

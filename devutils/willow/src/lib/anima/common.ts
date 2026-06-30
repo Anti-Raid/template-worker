@@ -113,6 +113,9 @@ export const OP_DIV    = Symbol.for("/");
 export const OP_MODULO = Symbol.for("modulo");
 export const OP_REMAINDER = Symbol.for("remainder")
 
+// Super cursed function
+export const OP_CALL_CC = Symbol.for("call/cc")
+
 // Misc
 export const OP_UI_GET = Symbol.for("ui-get")
 

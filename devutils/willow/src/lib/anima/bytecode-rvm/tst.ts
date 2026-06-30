@@ -1,30 +1,51 @@
-import { OP_APPLY } from "../common";
+import { OP_APPLY, OP_CALL_CC } from "../common";
 import { Compiler } from "./compiler";
 import { deepPrint } from "./utils";
-import { AnimaVM, APPLY_PROC, Globals, IBUILTINS } from "./vm";
+import { AnimaVM, APPLY_PROC, CALLCC_PROC, Globals, IBUILTINS } from "./vm";
 
-const code = `
-;(define (my-foo x y z) (list (+ x y z)))
-;(define f (apply my-foo 1 (list 2 3)))
+const stmts = [
+  `(define saved-cont #f)`,
+  `(define (test-time-travel)
+  (let ((x 0))
+    (call/cc (lambda (k) (set! saved-cont k)))
+    (set! x (+ x 1))
+    x))`,
+  `(test-time-travel)`,
+  `(saved-cont 'whatever) (saved-cont 'whatever)`
+]
 
-;(apply my-foo 1 (list 2 3))
-;(apply my-foo (list 1 2 3))
-(+ (apply + (list 1 2 3)) 123)
-;(list 1 2 3)
-;(+ 1 2 3)
-`
+/*const code = `
+(define (test-shadowing)
+  (let ((x 100))
+    (let ((x 20))
+      (let ((f (lambda () x)))
+        (let ((x 50))
+          (f)))))) ; f should still return 20, not 50 or 100
+
+(test-shadowing)`*/
+/*const code = `
+(begin
+                  (define (loop n)
+                    (if (= n 0)
+                        "survived!"
+                        (loop (- n 1))))
+                  (loop 15000))`*/
 
 const GLOBALS = new Globals(new Map())
 for(const builtin of IBUILTINS) {
   GLOBALS.data.set(builtin.name, builtin)
 }
 GLOBALS.data.set(OP_APPLY, APPLY_PROC)
+GLOBALS.data.set(OP_CALL_CC, CALLCC_PROC)
+
 
 const c = new Compiler()
-const bc = c.compile(code)
+for (const code of stmts) {
+  const bc = c.compile(code)
 
-console.log(deepPrint(bc))
-const t1 = performance.now()
-const retv = new AnimaVM().evaluate(bc, GLOBALS)
-const t2 = performance.now()
-console.log(retv, t2-t1)
+  console.log(deepPrint(bc))
+  const t1 = performance.now()
+  const retv = new AnimaVM().evaluate(bc, GLOBALS)
+  const t2 = performance.now()
+  console.log(retv, t2-t1)
+}
