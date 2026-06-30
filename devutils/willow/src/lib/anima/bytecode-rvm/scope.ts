@@ -2,18 +2,31 @@ import type { UpVarLoc } from "./vm";
 
 export type Resolve = { type: "Global" } | { type: "Local", index: number } | { type: "Upvar", index: number }
 
+export class BoolRef {
+    constructor(public val: boolean = false) {}
+}
+
 export class VariableMetadata {
-    mutable: boolean = false; // is this variable mutated in this scope or not
-    isCaptured: boolean = false; // is the variable captured in this scope or not
-    get isBoxed() { return this.isCaptured || this.mutable }
+    get isBoxed() { 
+        if (this.callCCEnabled.val) {
+            // We have to box everything that is either captured or mutable
+            return (this.isCaptured || this.mutable)
+        }
+        // We only have to box if its captured and mutable
+        return (this.isCaptured && this.mutable)
+    }
+
+    constructor(public callCCEnabled: BoolRef, public mutable: boolean = false, public isCaptured: boolean = false, ) {}
 }
 
 export class AnalysisScope {
     #vals = new Map<symbol, VariableMetadata>()
     outer: AnalysisScope | null;
+    callCCEnabled: BoolRef
 
-    constructor(outer: AnalysisScope | null) {
+    constructor(outer: AnalysisScope | null, callCCEnabled: BoolRef) {
         this.outer = outer;
+        this.callCCEnabled = callCCEnabled
     }
 
     dbgPrint() {
@@ -23,7 +36,7 @@ export class AnalysisScope {
     }
 
     define(sym: symbol) {
-        this.#vals.set(sym, new VariableMetadata());
+        this.#vals.set(sym, new VariableMetadata(this.callCCEnabled));
     }
 
     getVarinfo(sym: symbol): VariableMetadata | null {

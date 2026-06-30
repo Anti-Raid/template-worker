@@ -22,7 +22,7 @@ export class Compiler {
 
     constructor() {}
 
-    compile(s: string, implicitIife: boolean = false) {
+    compile(s: string, implicitIife: boolean = false, callCCEnabled = false) {
         const ast = new ASP(s, true).parse()
 
         // Step 0 is to make the whole thing an implicit IIFE
@@ -32,14 +32,14 @@ export class Compiler {
         let trExpr = this.t.transform(astIIfe)
         // Step 2 is to analyze our variables so we know what to box and what not to box
         let analyzer = new AstAnalysis()
-        const ascope = analyzer.analyze(trExpr)
+        const ascope = analyzer.analyze(trExpr, callCCEnabled)
 
         const scope = new CompilerScope(null)
         const nodes: Node[] = []
         const retReg = scope.allocTemp(); // no need to free the temp reg as we return?
         this.#compile(trExpr, {destReg: retReg, isTail: true, nodes, scope, ascope, analyzer})
         nodes.push({t: "Return", reg: retReg})
-        const ir = new IR(nodes)
+        const ir = new IR(nodes, callCCEnabled)
         return ir.lower(scope.numRegs)
     }
 
@@ -329,9 +329,9 @@ export class Compiler {
     // a normal call
     #compileNormalCall(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
         // Try IIFE optimizations
-        //if(this.#optIIFE(expr, opts)) {
-        //    return
-        //}
+        if(this.#optIIFE(expr, opts)) {
+            return
+        }
 
         // We need to compile the proc and place it on its own tempval
         const procReg = opts.scope.allocTemp();
@@ -379,9 +379,10 @@ export class Compiler {
     #optIIFE(expr: any[], opts: CmpOpts, syntaxCtx?: string): boolean {
         // if we have a non-variadic IIFE ((lambda (params...) body) args...), then we can optimize it down
         // to BLOCK/ENDBLOCK instead of doing a whole function call
-        //
-        // TODO: add a thing to transformer etc to track down call/cc calls so we can bail out if we see a call/cc
-        // call. Not important right now though as we don't support call/cc
+        if (opts.ascope.callCCEnabled.val) {
+            return false // we can never perform this w/ call/cc
+        }
+        console.log("Applying IIFE")
         const first = expr[0]
         if (Array.isArray(first) && first[0] === OP_LAMBDA && Array.isArray(first[1])) {
             const ascope = opts.analyzer.scopeMap.get(first)

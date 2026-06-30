@@ -142,7 +142,7 @@ export class ConstPool {
 }
 
 export class IR {
-    constructor(public nodes: Node[]) {}
+    constructor(public nodes: Node[], public callCCEnabled: boolean) {}
 
     #nodeOverwritesDestReg(node: Node) {
         if(node.t === "Move" || node.t === "LoadValue" || node.t === "Box" || node.t === "Unbox" || node.t === "Call") {
@@ -318,7 +318,7 @@ export class IR {
                     break
                 }
                 case "NewClosure": {
-                    const closureBc = new IR(node.template.code).lower(node.template.numRegs)
+                    const closureBc = new IR(node.template.code, this.callCCEnabled).lower(node.template.numRegs)
                     const ctidx = cpool.mutPush(new ClosureTemplate(node.template.params, node.template.remParams, closureBc, node.template.upvarLocs))
                     //console.log(ctidx, cpool.constants)
                     inst.push(OpCode.NEWCLOSURE, node.destReg, ctidx)
@@ -352,7 +352,7 @@ export class IR {
             inst[jump] = resolvedOffset
         }
 
-        return new ByteCode(cpool.constants, new Uint32Array(inst), numRegs)
+        return new ByteCode(cpool.constants, new Uint32Array(inst), numRegs, this.callCCEnabled)
     }
 }
 

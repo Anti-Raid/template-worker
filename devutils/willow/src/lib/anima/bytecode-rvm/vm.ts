@@ -37,10 +37,12 @@ export class ByteCode {
     public constants: any[]
     public inst: Uint32Array
     public numReg: number
-    constructor(constants: any[], inst: Uint32Array, numReg: number) {
+    public supportsCallCC: boolean
+    constructor(constants: any[], inst: Uint32Array, numReg: number, supportsCallCC: boolean) {
         this.constants = constants
         this.inst = inst
         this.numReg = numReg
+        this.supportsCallCC = supportsCallCC
     }
 }
 
@@ -719,6 +721,7 @@ export class AnimaVM {
             console.log("APPLY", actualProc, actualArgs)
             return this.#invoke(actualProc, cont, callerFrame, actualArgs, destReg, 0, actualArgs.length)
         } else if (proc instanceof CallCCProc) {
+            if (!callerFrame.code.supportsCallCC) throw new Error("call/cc is disabled in this environment")
             if (nargs !== 1) throw new Error(`call/cc expected one argument \`lambda\``)
 
             let capturedCont: Continuation; 
@@ -737,6 +740,7 @@ export class AnimaVM {
             const k = new ContinuationClosure(capturedCont);
             return this.#invoke(callerArgs[startReg], cont, callerFrame, [k], destReg, 0, 1)
         } else if (proc instanceof ContinuationClosure) {
+            if (!callerFrame.code.supportsCallCC) throw new Error("call/cc is disabled in this environment")
             if (nargs !== 1) throw new Error(`continuation expected one argument \`val\``)
             const value = callerArgs[startReg];
             if (proc.capturedCont.type === "TERMINAL") {
