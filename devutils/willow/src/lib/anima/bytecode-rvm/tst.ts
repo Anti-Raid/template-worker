@@ -4,14 +4,16 @@ import { deepPrint } from "./utils";
 import { AnimaVM, APPLY_PROC, CALLCC_PROC, Globals, IBUILTINS } from "./vm";
 
 const stmts = [
-  `(define saved-cont #f)`,
-  `(define (test-time-travel)
-  (let ((x 0))
-    (call/cc (lambda (k) (set! saved-cont k)))
-    (set! x (+ x 1))
-    x))`,
-  `(test-time-travel)`,
-  `(saved-cont 'whatever) (saved-cont 'whatever)`
+  `(define saved-cont #f)
+(define (test-cont)
+  (display "A ")
+  (call/cc
+   (lambda (k)
+     (set! saved-cont k) ; Captures state after "A "
+     (display "B ")))
+  (display "C "))`,
+  `(test-cont)`,
+  `(saved-cont '())`
 ]
 
 /*const code = `

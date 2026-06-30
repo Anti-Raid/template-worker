@@ -400,6 +400,7 @@ const regOut = (reg: any): any => {
     if (reg instanceof Closure) return `Closure<${reg.tmpl.params.map(x => x.description).join(", ")}>`
     if (typeof reg === "symbol") return `${reg.description || '<symbol>'}`
     if (reg === undefined) return '#<void>'
+    if (reg === null) return `()`
     if (typeof reg !== "object") return `${reg}`
     return `<object ${Object.keys(reg)}>`
 }
@@ -477,7 +478,7 @@ export class AnimaVM {
             }
 
             const opcode: OpCode = frame.readNext()
-            console.log(`[Frame #${frame.id}]: ${OpCode[opcode]} ${regs.map(r => regOut(r)).join(', ')}`)
+            //console.log(`[Frame #${frame.id}]: ${OpCode[opcode]} ${regs.map(r => regOut(r)).join(', ')}`)
             switch (opcode) {
                 // Load
                 case OpCode.LOADCONST: {
@@ -689,6 +690,14 @@ export class AnimaVM {
             const retVal = proc.cb(callerArgs, startReg, nargs)
             if (destReg !== undefined) {
                 callerFrame.regs[destReg] = retVal
+            } else {
+                if (cont.parent === null) return { type: 'TERMINAL', value: retVal };
+                
+                const parent = cont.parent;
+                if (parent.type === "RUNNING" && parent.destReg !== undefined) {
+                    parent.frame.regs[parent.destReg] = retVal;
+                }
+                return parent;
             }
             return cont // no change to continuation needed
         } else if (proc instanceof ApplyProc) {
@@ -707,7 +716,7 @@ export class AnimaVM {
             } else {
                 throw new Error(`apply: last argument must be a list but got ${String(finalArg)}`);
             }
-            
+            console.log("APPLY", actualProc, actualArgs)
             return this.#invoke(actualProc, cont, callerFrame, actualArgs, destReg, 0, actualArgs.length)
         } else if (proc instanceof CallCCProc) {
             if (nargs !== 1) throw new Error(`call/cc expected one argument \`lambda\``)
@@ -739,7 +748,6 @@ export class AnimaVM {
             if (restoredCont.destReg !== undefined) {
                 restoredCont.frame.regs[restoredCont.destReg] = value;
             }
-            const nextOpcode = restoredCont.frame.code.inst[restoredCont.frame.ip];
             return restoredCont
         } else if (proc instanceof Closure) {
             const template = proc.tmpl;
