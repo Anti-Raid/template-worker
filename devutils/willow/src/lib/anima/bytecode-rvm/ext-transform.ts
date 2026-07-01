@@ -10,9 +10,39 @@ export class AstCps {
         return this.#transform(ast)
     }
     #transform(expr: any) {
-        return T(expr, initialCont, new Map())
+        let transformed = T(expr, initialCont, new Map())
+        let changed = true
+        while(changed) {
+            const astStr = new ASTStringifier().stringify(transformed)
+            console.log("transform", astStr)
+
+            const changedRef = {val: false}
+            transformed = etaReduce(transformed, changedRef)
+            changed = changedRef.val
+            console.log("transformed", changed)
+        }
+
+        return transformed
     }
 }
+
+// OPTIMIZATION: (lambda (v) (k v)) -> k
+//
+// while the current cps transform does try to eliminate as much as possible
+// already, its not perfect
+const etaReduce = (node: any, changed: {val: boolean}): any => {
+    // Reduce inners first
+    if (Array.isArray(node)) {
+        node = node.map((node) => etaReduce(node, changed));
+    }
+
+    if (Array.isArray(node) && node[0] === OP_LAMBDA && node[1].length === 1 && Array.isArray(node[2]) && node[2].length === 2 && node[2][1] === node[1][0]) {
+        changed.val = true
+        return node[2][0];
+    }
+
+    return node;
+};
 
 const CONT_TGT = Symbol("tgt")
 const makeContFunc = (cont: any): ((val: any) => any) => {
@@ -264,7 +294,7 @@ console.log("Started")
 const t1 = performance.now()
 const baseAst = new ASP(simpleProg, true).parse()
 const synTrans = new AnimaTransformer().transform(baseAst)
-const synTransStr = new ASTStringifier().stringify(synTrans)
+//const synTransStr = new ASTStringifier().stringify(synTrans)
 //console.log(synTransStr)
 const cpsTrans = new AstCps().transform(synTrans)
 const astStr = new ASTStringifier().stringify(cpsTrans)

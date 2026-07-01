@@ -2,7 +2,7 @@ import { APPLY_PROC_IDX, BUILTINS_START, ClosureTemplate, IBUILTINS, OpCode, typ
 
 const constToString = (s: any): string => {
     if(typeof s === "symbol") {
-        return `'${s.toString()}`
+        return `${s.description || String(s)}`
     } else if (typeof s === "string") {
         return `"${s.toString()}"`
     } else if (typeof s === "number") {
@@ -18,7 +18,7 @@ const constToString = (s: any): string => {
         }
         return `(${r.join(' ')})`
     } else if (s instanceof ClosureTemplate) {
-        return `fn(${s.params.map(x => String(x)).join(', ')})`
+        return `fn(${s.params.map(x => constToString(x)).join(', ')}${s.remParams ? ` . ${constToString(s.remParams)}` : ""})`
     } {
         return `<unknown:${s}>`
     }
