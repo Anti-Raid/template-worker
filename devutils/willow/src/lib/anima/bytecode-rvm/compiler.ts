@@ -329,9 +329,9 @@ export class Compiler {
     // a normal call
     #compileNormalCall(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
         // Try IIFE optimizations
-        //if(this.#optIIFE(expr, opts)) {
-        //    return
-        //}
+        if(this.#optIIFE(expr, opts)) {
+            return
+        }
 
         // We need to compile the proc and place it on its own tempval
         const procReg = opts.scope.allocTemp();
@@ -395,24 +395,35 @@ export class Compiler {
                 throw new Error(`expected exactly ${params.length} args, got ${args.length}`);
             }
             
-            // Bind all arguments 
-            const seen = new Set<symbol>();
+            // Bind all arguments outside new block scope
+            const argRegs: number[] = [];
+            for(let i = 0; i < args.length; i++) {
+                const tempReg = opts.scope.allocTemp();
+                this.#compile(args[i], { ...opts, destReg: tempReg, isTail: false });
+                argRegs.push(tempReg);
+            }
+
+            // Now enter block
             opts.scope.enterBlock()
+            const seen = new Set<symbol>();
             for(let i = 0; i < params.length; i++) {
                 ensureCanBind(params[i], seen, syntaxCtx || "lambda")
                 const inf = ascope.getVarinfo(params[i]);
                 if(!inf) throw new Error("Could not fetch varinfo")
                 
-                const destReg = opts.scope.addLocal(params[i])
-                this.#compile(args[i], { ...opts, destReg: destReg, isTail: false, ascope })
-                if(inf && inf.isBoxed) {
-                    opts.nodes.push({ t: "Box", srcReg: destReg, destReg })
+                const destReg = opts.scope.addLocal(params[i])            
+                if(inf.isBoxed) {
+                    opts.nodes.push({ t: "Box", srcReg: argRegs[i], destReg });
+                } else {
+                    opts.nodes.push({ t: "Move", srcReg: argRegs[i], destReg });
                 }
             }
 
             this.#compile(this.#wrapMulti(body), {...opts, ascope})
             opts.scope.exitBlock()
-
+            for (const reg of argRegs) {
+                opts.scope.freeTemp(reg);
+            }
             return true
         } else {
             return false
