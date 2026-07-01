@@ -365,6 +365,7 @@ export class ASP {
             if (token === '#t') return true;
             if (token === '#f') return false;
             if (token === 'null') return null;
+            if (token === '<#void>') return undefined;
 
             // Numbers
             const num = Number(token);

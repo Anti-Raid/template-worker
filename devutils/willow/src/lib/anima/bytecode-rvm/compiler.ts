@@ -329,9 +329,9 @@ export class Compiler {
     // a normal call
     #compileNormalCall(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
         // Try IIFE optimizations
-        if(this.#optIIFE(expr, opts)) {
-            return
-        }
+        //if(this.#optIIFE(expr, opts)) {
+        //    return
+        //}
 
         // We need to compile the proc and place it on its own tempval
         const procReg = opts.scope.allocTemp();
