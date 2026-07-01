@@ -1,4 +1,4 @@
-import { ClosureTemplate, IBUILTINS, OpCode, type ByteCode } from "./vm"
+import { APPLY_PROC_IDX, BUILTINS_START, ClosureTemplate, IBUILTINS, OpCode, type ByteCode } from "./vm"
 
 const constToString = (s: any): string => {
     if(typeof s === "symbol") {
@@ -116,39 +116,23 @@ const stringifyInst = (inst: ByteCode): string[] => {
                 idx += 3;
                 break;
 
-            case OpCode.APPLYCALL: {
-                const destReg = inst.inst[idx + 1]
-                const startReg = inst.inst[idx + 2];
-                const nargs = inst.inst[idx + 3];
-                line += `${padOp("APPLYTAILCALL")} dest=${destReg} start=r${startReg}, nargs=${nargs}`;
-                idx += 4;
-                break;
-            }
-
-            case OpCode.APPLYTAILCALL: {
-                const startReg = inst.inst[idx + 1];
-                const nargs = inst.inst[idx + 2];
-                line += `${padOp("APPLYTAILCALL")} start=r${startReg}, nargs=${nargs}`;
-                idx += 3;
-                break;
-            }
-
             case OpCode.TAILCALL: {
                 const proc = inst.inst[idx + 1];
                 const startReg = inst.inst[idx + 2];
                 const nargs = inst.inst[idx + 3];
-                line += `${padOp("TAILCALL")} r${proc}, start=r${startReg}, nargs=${nargs}`;
+                const procStr = (proc === APPLY_PROC_IDX) ? "apply" : (proc < BUILTINS_START) ? `r${proc}` : `builtin(${String(IBUILTINS[proc-BUILTINS_START].name)})`
+                line += `${padOp("TAILCALL")} ${procStr}, start=r${startReg}, nargs=${nargs}`;
                 idx += 4;
                 break;
             }
 
-            case OpCode.CALL:
-            case OpCode.BUILTINCALL: {
+            case OpCode.CALL: {
                 const proc = inst.inst[idx + 1];
                 const destReg = inst.inst[idx + 2];
                 const startReg = inst.inst[idx + 3];
                 const nargs = inst.inst[idx + 4];
-                line += `${padOp(OpCode[opcode])} ${opcode === OpCode.CALL ? `r${proc}` : `builtin(${String(IBUILTINS[proc].name)})`}, dest=r${destReg}, start=r${startReg}, nargs=${nargs}`;
+                const procStr = (proc === APPLY_PROC_IDX) ? "apply" : (proc < BUILTINS_START) ? `r${proc}` : `builtin(${String(IBUILTINS[proc-BUILTINS_START].name)})`
+                line += `${padOp(OpCode[opcode])} ${procStr}, dest=r${destReg}, start=r${startReg}, nargs=${nargs}`;
                 idx += 5;
                 break;
             }

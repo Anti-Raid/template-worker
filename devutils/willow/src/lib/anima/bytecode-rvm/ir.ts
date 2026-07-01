@@ -1,4 +1,4 @@
-import { ByteCode, ClosureTemplate, OpCode, type UpVarLoc } from "./vm";
+import { APPLY_PROC_IDX, BUILTINS_START, ByteCode, ClosureTemplate, OpCode, type UpVarLoc } from "./vm";
 
 export class JumpLabel {
     public id: number;
@@ -81,6 +81,12 @@ export type Node = {
     t: "IBuiltin",
     builtinIdx: number,
     destReg: number,
+    startReg: number,
+    nargs: number
+} | {
+    // A call to a builtin function
+    t: "IBuiltinTail",
+    builtinIdx: number,
     startReg: number,
     nargs: number
 } | {
@@ -302,17 +308,21 @@ export class IR {
                     break
                 }
                 case "ApplyCall": {
-                    inst.push(OpCode.APPLYCALL, node.destReg, node.startReg, node.nargs)
+                    inst.push(OpCode.CALL, APPLY_PROC_IDX, node.destReg, node.startReg, node.nargs)
                     break
                 }
                 case "ApplyTailCall": {
-                    inst.push(OpCode.APPLYTAILCALL, node.startReg, node.nargs)
+                    inst.push(OpCode.TAILCALL, APPLY_PROC_IDX, node.startReg, node.nargs)
                     break
                 }
                 case "IBuiltin": {
-                    inst.push(OpCode.BUILTINCALL, node.builtinIdx, node.destReg, node.startReg, node.nargs)
+                    inst.push(OpCode.CALL, BUILTINS_START+node.builtinIdx, node.destReg, node.startReg, node.nargs)
                     break
                 }
+                case "IBuiltinTail": {
+                    inst.push(OpCode.TAILCALL, BUILTINS_START+node.builtinIdx, node.startReg, node.nargs)
+                    break
+                }   
                 case "Return": {
                     inst.push(OpCode.RETURN, node.reg)
                     break

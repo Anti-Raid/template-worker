@@ -10,9 +10,24 @@ export class AstCps {
         return this.#transform(ast)
     }
     #transform(expr: any) {
-        return T(expr, Symbol.for("k"), new Map())
+        return T(expr, initialCont, new Map())
     }
 }
+
+const CONT_TGT = Symbol("tgt")
+const makeContFunc = (cont: any): ((val: any) => any) => {
+    // OPTIMIZATION: (lambda (v) (k v)) is equivalent to k
+    // letting us avoid the lambda altogether (and so on for chains of makeContFunc)
+    //
+    // CITATION: Claude for the tag functions trick
+    const actualCont = (cont as any)[CONT_TGT] !== undefined ? (cont as any)[CONT_TGT] : cont;
+    const f = ((v: any) => [actualCont, v]);
+    (f as any)[CONT_TGT] = actualCont 
+    return f
+} 
+
+const INITIAL_K = Symbol.for("k")
+const initialCont = makeContFunc(INITIAL_K) 
 
 const wrapMulti = (exprs: any[]) => {
     if (exprs.length === 0) return []; 
@@ -20,18 +35,27 @@ const wrapMulti = (exprs: any[]) => {
     return [OP_BEGIN, ...exprs];
 }
 
-const T = (e: any, k: any, env: Map<symbol, symbol>): any => {
+const makeDynamicCont = (k: (v: any) => any): any => {
+    if ((k as any)[CONT_TGT] !== undefined) {
+        return (k as any)[CONT_TGT]; 
+    }
+
+    const v = symGen("v");
+    return [OP_LAMBDA, [v], k(v)];
+};
+
+const T = (e: any, k: (v: any) => any, env: Map<symbol, symbol>): any => {
     // T(x, k) = k(x)
     if (isConstOrVar(e)) {
         if (typeof e === "symbol") {
             const convE = env.has(e) ? env.get(e) : e
-            return [k, convE]
+            return k(convE)
         }
-        return [k, e]
+        return k(e)
     }
     // basically another 'literal'
     if (e[0] === OP_QUOTE) {
-        return [k, e[1]];
+        return k(e[1]);
     }
 
     if (e[0] === OP_IF) {
@@ -40,20 +64,18 @@ const T = (e: any, k: any, env: Map<symbol, symbol>): any => {
         const cons = e[2];
         const alt = e[3];
     
-        // We reuse the same `k` for both branches
-        const cond_val = symGen("cond_val");
-        
-        return T(cond, [
-            OP_LAMBDA, 
-            [cond_val],
-            [OP_IF, cond_val, T(cons, k, env), T(alt, k, env)]
-        ], env);
+        // We reuse the same `k` for both branches so to avoid duplicating `k`:
+        const dynKAst = makeDynamicCont(k); 
+        const dynKFunc = makeContFunc(dynKAst)
+        return T(cond, (cond_val) => {
+            return [OP_IF, cond_val, T(cons, dynKFunc, env), T(alt, dynKFunc, env)];
+        }, env);
     } else if (e[0] === OP_BEGIN) {
         // handle begin here
         const exprs = e.slice(1);
         
         // Edge case: (begin) evaluates to void/null
-        if (exprs.length === 0) return [k, []]; 
+        if (exprs.length === 0) return k([]) 
 
         // Helper to sequence the expressions
         const cpsBegin = (exps: any[]): any => {
@@ -62,12 +84,10 @@ const T = (e: any, k: any, env: Map<symbol, symbol>): any => {
                 return T(exps[0], k, env);
             }
             
-            const dummy_sym = symGen("dk"); // dummy cont
-            return T(exps[0], [
-                OP_LAMBDA, 
-                [dummy_sym], 
-                cpsBegin(exps.slice(1))
-            ], env);
+            // the rest get dummy conts
+            return T(exps[0], (_) => {
+                return cpsBegin(exps.slice(1));
+            }, env);
         };
         
         return cpsBegin(exprs)
@@ -84,10 +104,10 @@ const T = (e: any, k: any, env: Map<symbol, symbol>): any => {
                 throw new Error(`lambda parameter must be a symbol, but received ${typeof argSym}: ${String(argSym)}`);
             }
 
-            const argName = argSym.description || "la"; 
-            const uniqueSym = symGen(argName);
-            lambdaEnv.set(argSym, uniqueSym); 
-            return uniqueSym;
+            const argName = argSym.description || "la"
+            const uniqueSym = symGen(argName)
+            lambdaEnv.set(argSym, uniqueSym) 
+            return uniqueSym
         }
 
         if (Array.isArray(args)) {
@@ -105,78 +125,63 @@ const T = (e: any, k: any, env: Map<symbol, symbol>): any => {
         } else if (typeof args === "symbol") {
             // (lambda args ...) becomes a dotted pair too such as (lambda (kl . args) ...)
             const mappedArg = mapArgs(args)
-            new_args = new DottedPair([k_sym], mappedArg);
+            new_args = new DottedPair([k_sym], mappedArg)
         } else {
             throw new Error("internal error: cannot transform lambda with symbol(args) to CPS")
         }
 
-        return [k, [OP_LAMBDA, new_args, T(body, k_sym, lambdaEnv)]];
+        const bodyCPS = T(body, makeContFunc(k_sym), lambdaEnv)
+        return k([OP_LAMBDA, new_args, bodyCPS])
     } else if (e[0] === OP_DEFINE) {
         const sym = e[1];
-        const expr = e[2];
-        
-        const val_sym = symGen("d");
-        
-        // Transform RHS
-        return T(expr, [
-            OP_LAMBDA,
-            [val_sym],
-            [OP_BEGIN, 
-                [OP_DEFINE, sym, val_sym], 
-                [k, undefined] // The return value of `define` is void
-            ]
-        ], env);
+        const expr = e[2];     
+        return T(expr, (val_sym) => {
+            return [OP_BEGIN, [OP_DEFINE, sym, val_sym], k(undefined)];
+        }, env);
     } else if (e[0] === OP_SET) {
         const sym = e[1];
         const expr = e[2];
-        
         const key_sym = env.has(sym) ? env.get(sym) : sym;
-        const val_sym = symGen("s");
-        
-        // Transform RHS
-        return T(expr, [
-            OP_LAMBDA,
-            [val_sym],
-            [OP_BEGIN, 
-                [OP_SET, key_sym, val_sym], 
-                [k, undefined] // The return value of `define` is void
-            ]
-        ], env);
+        return T(expr, (val_sym) => {
+            return [OP_BEGIN, [OP_SET, key_sym, val_sym], k(undefined)];
+        }, env);
     } else if (e[0] === OP_AND) {
         const exprs = e.slice(1);
         
-        if (exprs.length === 0) return [k, true];      // (and) evaluates to #t
+        if (exprs.length === 0) return k(true);      // (and) evaluates to #t
         if (exprs.length === 1) return T(exprs[0], k, env); // (and e) evaluates to e
         
         const first = exprs[0];
         const rest = [OP_AND, ...exprs.slice(1)];
-        const val_sym = symGen("and_val");
         
-        return T(first, [
-            OP_LAMBDA,
-            [val_sym],
-            [OP_IF, val_sym, T(rest, k, env), [k, val_sym]] // if true, evaluate the rest with k, otherwise short-circuit and pass the falsy value directly to k.
-        ], env);
+        const dynKAst = makeDynamicCont(k);
+        const dynKFunc = makeContFunc(dynKAst);
+
+        return T(first, (val_sym) => {
+            // if true, evaluate the rest with k, otherwise short-circuit and pass the falsy value directly to k.
+            return [OP_IF, val_sym, T(rest, dynKFunc, env), dynKFunc(val_sym)]
+        }, env)
     } else if (e[0] === OP_OR) {
         const exprs = e.slice(1);
         
-        if (exprs.length === 0) return [k, false];     // (or) evaluates to #f
+        if (exprs.length === 0) return k(false);     // (or) evaluates to #f
         if (exprs.length === 1) return T(exprs[0], k, env); // (or e) evaluates to e
         
         const first = exprs[0];
-        const rest = [OP_OR, ...exprs.slice(1)];
-        const val_sym = symGen("or_val");
-        
-        return T(first, [
-            OP_LAMBDA,
-            [val_sym],
-            [OP_IF, val_sym, [k, val_sym], T(rest, k, env)] // opposite of AND
-        ], env);
+        const rest = [OP_OR, ...exprs.slice(1)];        
+        const dynKAst = makeDynamicCont(k);
+        const dynKFunc = makeContFunc(dynKAst);
+
+        return T(first, (val_sym) => {
+            // if false, evaluate the rest with k, otherwise short-circuit and pass the turthy value directly to k.
+            return [OP_IF, val_sym, dynKFunc(val_sym), T(rest, dynKFunc, env)]
+        }, env)
     }
 
     // func call expansion, puts k at the start of the cps list
     return cpsList(e, env, (evaluated_exprs) => {
-        return [evaluated_exprs[0], k, ...evaluated_exprs.slice(1)]; 
+        const dynK = makeDynamicCont(k);
+        return [evaluated_exprs[0], dynK, ...evaluated_exprs.slice(1)]; 
     });
 }
 
@@ -215,12 +220,9 @@ const cpsList = (exprs: any[], env: Map<symbol, symbol>, buildApplication: (vals
     }
     
     // Otherwise, transform the first expression, and in its continuation, do the rest
-    const val_sym = symGen("val");
-    return T(first, [
-        OP_LAMBDA, 
-        [val_sym], 
-        cpsList(rest, env, (rest_vals) => buildApplication([val_sym, ...rest_vals]))
-    ], env);
+    return T(first, (val_sym) => {
+        return cpsList(rest, env, (rest_vals) => buildApplication([val_sym, ...rest_vals]))
+    }, env)
 };
 
 let n = 0
@@ -258,6 +260,7 @@ const simpleProg = `(define (make-counter)
   (counter-a) ; 2
   (counter-b) ; 1 (Should be completely independent)
   (counter-a))`
+console.log("Started")
 const t1 = performance.now()
 const baseAst = new ASP(simpleProg, true).parse()
 const synTrans = new AnimaTransformer().transform(baseAst)

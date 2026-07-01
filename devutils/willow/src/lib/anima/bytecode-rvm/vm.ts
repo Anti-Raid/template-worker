@@ -1,6 +1,9 @@
-import { ExposedProps, IProcedure, isDeepEqual, MissingVarError, OP_ADD, OP_CAR, OP_CDR, OP_CONS, OP_CONTAINS, OP_DIV, OP_EMPTY, OP_EQ, OP_EQ_DEEP1, OP_EQ_PTR1, OP_GT, OP_GTE, OP_LAST, OP_LENGTH, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_NOT, OP_REMAINDER, OP_SUB } from "../common";
+import { IProcedure, isDeepEqual, MissingVarError, OP_ADD, OP_CAR, OP_CDR, OP_CONS, OP_CONTAINS, OP_DIV, OP_EMPTY, OP_EQ, OP_EQ_DEEP1, OP_EQ_PTR1, OP_GT, OP_GTE, OP_LAST, OP_LENGTH, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_NOT, OP_REMAINDER, OP_SUB } from "../common";
 import { isTruthy } from "../common";
 import { Cons } from "../list";
+
+export const BUILTINS_START = 2**31
+export const APPLY_PROC_IDX = 2**32 - 1
 
 export enum OpCode {
     LOADCONST, 
@@ -20,9 +23,6 @@ export enum OpCode {
     JUMP, // unconditional jump
     CALL,
     TAILCALL,
-    BUILTINCALL,
-    APPLYCALL,
-    APPLYTAILCALL,
     RETURN,
     NEWCLOSURE,
     // may be removed later
@@ -633,7 +633,8 @@ export class AnimaVM {
                     break;               
                 }
                 case OpCode.CALL: {
-                    const proc = regs[frame.readNext()];
+                    const procIdx = frame.readNext()
+                    const proc = (procIdx === APPLY_PROC_IDX) ? APPLY_PROC : (procIdx < BUILTINS_START) ? regs[frame.readNext()] : IBUILTINS[procIdx - BUILTINS_START];
                     const destReg = frame.readNext();
                     const startReg = frame.readNext();
                     const nargs = frame.readNext();
@@ -641,32 +642,11 @@ export class AnimaVM {
                     break;
                 }
                 case OpCode.TAILCALL: {
-                    const proc = regs[frame.readNext()];
+                    const procIdx = frame.readNext()
+                    const proc = (procIdx === APPLY_PROC_IDX) ? APPLY_PROC : (procIdx < BUILTINS_START) ? regs[frame.readNext()] : IBUILTINS[procIdx - BUILTINS_START];
                     const startReg = frame.readNext();
                     const nargs = frame.readNext();
                     cont = this.#invoke(proc, cont, frame, regs, undefined, startReg, nargs);
-                    break;
-                }
-                case OpCode.BUILTINCALL: {
-                    const proc = IBUILTINS[frame.readNext()];
-                    const destReg = frame.readNext();
-                    const startReg = frame.readNext();
-                    const nargs = frame.readNext();
-                    cont = this.#invoke(proc, cont, frame, regs, destReg, startReg, nargs)
-                    break
-                }
-                case OpCode.APPLYCALL: {
-                    const destReg = frame.readNext();
-                    const startReg = frame.readNext();
-                    const nargs = frame.readNext();
-                    cont = this.#invoke(APPLY_PROC, cont, frame, regs, destReg, startReg, nargs)
-                    break
-                }
-                case OpCode.APPLYTAILCALL: {
-                    const startReg = frame.readNext();
-                    const nargs = frame.readNext();
-                    // Note: we reuse the frames existing return reg for tailcall's
-                    cont = this.#invoke(APPLY_PROC, cont, frame, regs, undefined, startReg, nargs);
                     break;
                 }
                 default:

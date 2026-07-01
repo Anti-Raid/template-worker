@@ -268,7 +268,9 @@ export class Compiler {
         // Compile lambda body
         const retReg = lambdaScope.allocTemp() // no need to free the temp reg as we return?
         this.#compile(this.#wrapMulti(expr.slice(2)), {...opts, destReg: retReg, isTail: true, nodes: lambdaNodes, scope: lambdaScope, ascope })
-        lambdaNodes.push({t: "Return", reg: retReg})
+        if (lambdaNodes.length === 0 || !["TailCall", "ApplyTailCall"].includes(lambdaNodes[lambdaNodes.length-1].t)) {
+            lambdaNodes.push({t: "Return", reg: retReg})
+        }
         const template = new ClosureTemplateIR(params, remParams, lambdaNodes, lambdaScope.numRegs, lambdaScope.upvars);
         opts.nodes.push({t: "NewClosure", template: template, destReg: opts.destReg})
     }
@@ -439,9 +441,13 @@ export class Compiler {
             this.#compile(expr[i], { ...opts, destReg: startReg + (i - 1), isTail: false });
         }
 
-        const targetReg = opts.destReg === undefined ? opts.scope.allocTemp() : opts.destReg!;
-        opts.nodes.push({t: "IBuiltin", destReg: targetReg, startReg, nargs, builtinIdx})
-        if (opts.destReg === undefined) opts.scope.freeTemp(targetReg);
+        if (opts.isTail) {
+            opts.nodes.push({t: "IBuiltinTail", startReg, nargs, builtinIdx})
+        } else {
+            const targetReg = opts.destReg === undefined ? opts.scope.allocTemp() : opts.destReg!;
+            opts.nodes.push({t: "IBuiltin", destReg: targetReg, startReg, nargs, builtinIdx})
+            if (opts.destReg === undefined) opts.scope.freeTemp(targetReg);
+        }
 
         opts.scope.regAlloc.freeBlock(startReg, nargs)
     }
