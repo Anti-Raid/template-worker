@@ -543,3 +543,9 @@ export const unpackLambdaExprArgs = (expr: any, ctx?: string): UnpackedLambdaArg
 
     return { params, remParams }
 }
+
+export const wrapMulti = (exprs: any[]) => {
+    if (exprs.length === 0) return []; 
+    if (exprs.length === 1) return exprs[0];
+    return [OP_BEGIN, ...exprs];
+}

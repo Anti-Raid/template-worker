@@ -1,4 +1,4 @@
-import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_ADD, OP_AND, OP_APPLY, OP_BEGIN, OP_CAR, OP_CDR, OP_COND, OP_CONS, OP_CONTAINS, OP_DEFINE, OP_DIV, OP_EMPTY, OP_EQ, OP_EQ_DEEP1, OP_EQ_PTR1, OP_GT, OP_GTE, OP_IF, OP_LAMBDA, OP_LENGTH, OP_LET, OP_LETREC, OP_LETSTAR, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_OR, OP_QUOTE, OP_REMAINDER, OP_SET, OP_SUB, unpackLambdaExprArgs } from "../common";
+import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_ADD, OP_AND, OP_APPLY, OP_BEGIN, OP_CAR, OP_CDR, OP_COND, OP_CONS, OP_CONTAINS, OP_DEFINE, OP_DIV, OP_EMPTY, OP_EQ, OP_EQ_DEEP1, OP_EQ_PTR1, OP_GT, OP_GTE, OP_IF, OP_LAMBDA, OP_LENGTH, OP_LET, OP_LETREC, OP_LETSTAR, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_OR, OP_QUOTE, OP_REMAINDER, OP_SET, OP_SUB, unpackLambdaExprArgs, wrapMulti } from "../common";
 import { AnimaTransformer } from "../syntax-transformer";
 import { AstAnalysis } from "./analysis";
 import { AnalysisScope, CompilerScope } from "./scope";
@@ -250,7 +250,7 @@ export class Compiler {
 
         // Compile lambda body
         const retReg = lambdaScope.allocTemp() // no need to free the temp reg as we return?
-        this.#compile(this.#wrapMulti(expr.slice(2)), {...opts, destReg: retReg, isTail: true, nodes: lambdaNodes, scope: lambdaScope, ascope })
+        this.#compile(wrapMulti(expr.slice(2)), {...opts, destReg: retReg, isTail: true, nodes: lambdaNodes, scope: lambdaScope, ascope })
         if (lambdaNodes.length === 0 || !["TailCall", "ApplyTailCall"].includes(lambdaNodes[lambdaNodes.length-1].t)) {
             lambdaNodes.push({t: "Return", reg: retReg})
         }
@@ -404,7 +404,7 @@ export class Compiler {
                 }
             }
 
-            this.#compile(this.#wrapMulti(body), {...opts, ascope})
+            this.#compile(wrapMulti(body), {...opts, ascope})
             opts.scope.exitBlock()
             for (const reg of argRegs) {
                 opts.scope.freeTemp(reg);
@@ -433,12 +433,6 @@ export class Compiler {
         }
 
         opts.scope.regAlloc.freeBlock(startReg, nargs)
-    }
-
-    #wrapMulti = (exprs: any[]) => {
-        if (exprs.length === 0) return []; 
-        if (exprs.length === 1) return exprs[0];
-        return [OP_BEGIN, ...exprs];
     }
 
     #getVar(varname: symbol, opts: CmpOpts, destReg?: number): Node[] {
