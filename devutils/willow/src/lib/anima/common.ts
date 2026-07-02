@@ -514,3 +514,32 @@ export const ensureCanBind = (param: any, seen: Set<symbol> | undefined, syntaxC
         throw new Error(`${String(param)}: cannot shadow builtin procedure`)
     }
 }
+
+export type UnpackedLambdaArgs = { params: symbol[], remParams: symbol | null }
+export const unpackLambdaExprArgs = (expr: any, ctx?: string): UnpackedLambdaArgs => {
+    let params: symbol[] = []
+    let remParams: symbol | null = null
+    if (Array.isArray(expr[1])) {
+        params = expr[1]
+    } else if (expr[1] instanceof DottedPair) {
+        // Bind params to items and remParam to remParams
+        params = expr[1].items
+        remParams = expr[1].rest
+    } else if (typeof expr[1] === "symbol") {
+        // Then all args must be bound to remparams
+        remParams = expr[1]
+    } else {
+        throw new Error(`${ctx || "lambda"} arguments must be a symbol (to bind all as a list to said symbol) or a list`);
+    }
+
+    // Validate params and remParams here
+    const seen = new Set<symbol>();
+    for(let i = 0; i < params.length; i++) {
+        ensureCanBind(params[i], seen, ctx || "lambda")
+    }
+    if (remParams) {
+        ensureCanBind(remParams, seen, ctx || "lambda")
+    }
+
+    return { params, remParams }
+}

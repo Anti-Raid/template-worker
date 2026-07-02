@@ -1,4 +1,4 @@
-import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_ADD, OP_AND, OP_APPLY, OP_BEGIN, OP_CAR, OP_CDR, OP_COND, OP_CONS, OP_CONTAINS, OP_DEFINE, OP_DIV, OP_EMPTY, OP_EQ, OP_EQ_DEEP1, OP_EQ_PTR1, OP_GT, OP_GTE, OP_IF, OP_LAMBDA, OP_LENGTH, OP_LET, OP_LETREC, OP_LETSTAR, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_OR, OP_QUOTE, OP_REMAINDER, OP_SET, OP_SUB } from "../common";
+import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_ADD, OP_AND, OP_APPLY, OP_BEGIN, OP_CAR, OP_CDR, OP_COND, OP_CONS, OP_CONTAINS, OP_DEFINE, OP_DIV, OP_EMPTY, OP_EQ, OP_EQ_DEEP1, OP_EQ_PTR1, OP_GT, OP_GTE, OP_IF, OP_LAMBDA, OP_LENGTH, OP_LET, OP_LETREC, OP_LETSTAR, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_OR, OP_QUOTE, OP_REMAINDER, OP_SET, OP_SUB, unpackLambdaExprArgs } from "../common";
 import { AnimaTransformer } from "../syntax-transformer";
 import { AstAnalysis } from "./analysis";
 import { AnalysisScope, CompilerScope } from "./scope";
@@ -227,26 +227,10 @@ export class Compiler {
         if (!ascope) throw new Error(`internal error: could not find ascope for expr ${expr}`)
         ascope.dbgPrint()
 
-        let params: symbol[] = []
-        let remParams: symbol | null = null
-        if (Array.isArray(expr[1])) {
-            params = expr[1]
-        } else if (expr[1] instanceof DottedPair) {
-            // Bind params to items and remParam to remParams
-            params = expr[1].items
-            remParams = expr[1].rest
-        } else if (typeof expr[1] === "symbol") {
-            // Then all args must be bound to remparams
-            remParams = expr[1]
-        } else {
-            throw new Error(`${syntaxCtx || "lambda"} arguments must be a symbol (to bind all as a list to said symbol) or a list`);
-        }
+        const { params, remParams } = unpackLambdaExprArgs(expr, syntaxCtx)
         const lambdaNodes: Node[] = []
 
-        // Validate params and remParams here
-        const seen = new Set<symbol>();
         for(let i = 0; i < params.length; i++) {
-            ensureCanBind(params[i], seen, syntaxCtx || "lambda")
             const reg = lambdaScope.addLocal(params[i])
 
             const inf = ascope.getVarinfo(params[i])
@@ -254,7 +238,6 @@ export class Compiler {
             if(inf.isBoxed) lambdaNodes.push({t: "Box", destReg: reg, srcReg: reg})
         }
         if (remParams) {
-            ensureCanBind(remParams, seen, syntaxCtx || "lambda")
             const reg = lambdaScope.addLocal(remParams)
 
             const inf = ascope.getVarinfo(remParams)

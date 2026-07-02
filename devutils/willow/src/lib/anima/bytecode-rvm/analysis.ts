@@ -3,7 +3,6 @@ import {
   DottedPair,
   OP_LAMBDA,
   OP_SET,
-  OP_CALL_CC
 } from "../common";
 import { AnalysisScope, BoolRef } from "./scope";
 
