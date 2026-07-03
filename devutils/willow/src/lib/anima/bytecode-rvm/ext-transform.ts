@@ -84,7 +84,9 @@ const T = (e: any, k: (v: any) => any, env: Map<symbol, symbol>, srcMap: SrcMap)
         const dynKAst = makeDynamicCont(srcMap, e, k); 
         const dynKFunc = makeContFunc(dynKAst)
         return T(cond, (cond_val) => {
-            return [OP_IF, cond_val, T(cons, dynKFunc, env, srcMap), T(alt, dynKFunc, env, srcMap)];
+            const conv = [OP_IF, cond_val, T(cons, dynKFunc, env, srcMap), T(alt, dynKFunc, env, srcMap)]
+            tag(srcMap, conv, e)
+            return conv
         }, env, srcMap);
     } else if (e[0] === OP_BEGIN) {
         // handle begin here
@@ -153,14 +155,18 @@ const T = (e: any, k: (v: any) => any, env: Map<symbol, symbol>, srcMap: SrcMap)
         const sym = e[1];
         const expr = e[2];     
         return T(expr, (val_sym) => {
-            return [OP_BEGIN, [OP_DEFINE, sym, val_sym], k(undefined)];
+            const conv = [OP_BEGIN, [OP_DEFINE, sym, val_sym], k(undefined)]
+            tag(srcMap, conv, e)
+            return conv
         }, env, srcMap);
     } else if (e[0] === OP_SET) {
         const sym = e[1];
         const expr = e[2];
         const key_sym = env.has(sym) ? env.get(sym) : sym;
         return T(expr, (val_sym) => {
-            return [OP_BEGIN, [OP_SET, key_sym, val_sym], k(undefined)];
+            const conv = [OP_BEGIN, [OP_SET, key_sym, val_sym], k(undefined)]
+            tag(srcMap, conv, e)
+            return conv
         }, env, srcMap);
     } else if (e[0] === OP_AND) {
         const exprs = e.slice(1);
@@ -176,7 +182,9 @@ const T = (e: any, k: (v: any) => any, env: Map<symbol, symbol>, srcMap: SrcMap)
 
         return T(first, (val_sym) => {
             // if true, evaluate the rest with k, otherwise short-circuit and pass the falsy value directly to k.
-            return [OP_IF, val_sym, T(rest, dynKFunc, env, srcMap), dynKFunc(val_sym)]
+            const conv = [OP_IF, val_sym, T(rest, dynKFunc, env, srcMap), dynKFunc(val_sym)]
+            tag(srcMap, conv, e)
+            return conv
         }, env, srcMap)
     } else if (e[0] === OP_OR) {
         const exprs = e.slice(1);
@@ -191,7 +199,9 @@ const T = (e: any, k: (v: any) => any, env: Map<symbol, symbol>, srcMap: SrcMap)
 
         return T(first, (val_sym) => {
             // if false, evaluate the rest with k, otherwise short-circuit and pass the turthy value directly to k.
-            return [OP_IF, val_sym, dynKFunc(val_sym), T(rest, dynKFunc, env, srcMap)]
+            const conv = [OP_IF, val_sym, dynKFunc(val_sym), T(rest, dynKFunc, env, srcMap)]
+            tag(srcMap, conv, e)
+            return conv
         }, env, srcMap)
     }
 
@@ -284,6 +294,7 @@ const simpleProg = `(define fact
 (if (zero? n)
 1
 (* n (fact (- n 1))))))`
+/*const simpleProg = `(and #f #t)`*/
 console.log("Started")
 const t1 = performance.now()
 const baseAst = new ASP(simpleProg, true).parse()
