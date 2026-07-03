@@ -3,15 +3,16 @@ import {
   DottedPair,
   OP_LAMBDA,
   OP_SET,
+  OP_CONT,
 } from "../common";
-import { AnalysisScope, BoolRef } from "./scope";
+import { AnalysisScope } from "./scope";
 
 // Analyzes a fully transformed AST to handle scoping prior to actual compilation. This lets us avoid boxing of primitives
 export class AstAnalysis {
     scopeMap = new WeakMap<any[], AnalysisScope>();
     
-    analyze(ast: any[], callCCEnabled: boolean) {
-        const baseScope = new AnalysisScope(null, new BoolRef(callCCEnabled))
+    analyze(ast: any[]) {
+        const baseScope = new AnalysisScope(null)
         this.scopeMap.set(ast, baseScope)
         this.visit(ast, baseScope);
         return baseScope
@@ -43,10 +44,11 @@ export class AstAnalysis {
             case OP_QUOTE:
                 return // don't touch quoted
             case OP_LAMBDA:
+            case OP_CONT:
                 const params = ast[1];
                 const body = ast.slice(2);
                 
-                const lambdaScope = new AnalysisScope(scope, scope.callCCEnabled);
+                const lambdaScope = new AnalysisScope(scope);
                 
                 for (const p of params) {
                     lambdaScope.define(p); 

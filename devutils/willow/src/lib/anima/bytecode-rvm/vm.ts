@@ -37,12 +37,10 @@ export class ByteCode {
     public constants: any[]
     public inst: Uint32Array
     public numReg: number
-    public supportsCallCC: boolean
-    constructor(constants: any[], inst: Uint32Array, numReg: number, supportsCallCC: boolean) {
+    constructor(constants: any[], inst: Uint32Array, numReg: number) {
         this.constants = constants
         this.inst = inst
         this.numReg = numReg
-        this.supportsCallCC = supportsCallCC
     }
 }
 
@@ -388,10 +386,7 @@ export const IBUILTINS: BuiltinFunction[] = [
 
 // Marker for `apply` intrinsic proc
 export class ApplyProc extends IProcedure {}
-// Marker for `call/cc` intrinsic proc
-export class CallCCProc extends IProcedure {}
 export const APPLY_PROC = new ApplyProc()
-export const CALLCC_PROC = new CallCCProc()
 
 const createRegs = (numRegs: number) => {
     return new Array(numRegs).fill(undefined)
@@ -700,39 +695,6 @@ export class AnimaVM {
             }
             console.log("APPLY", actualProc, actualArgs)
             return this.#invoke(actualProc, cont, callerFrame, actualArgs, destReg, 0, actualArgs.length)
-        } else if (proc instanceof CallCCProc) {
-            if (!callerFrame.code.supportsCallCC) throw new Error("call/cc is disabled in this environment")
-            if (nargs !== 1) throw new Error(`call/cc expected one argument \`lambda\``)
-
-            let capturedCont: Continuation; 
-            if (destReg === undefined) {
-                capturedCont = cont.parent !== null 
-                ? this.#copyCont(cont.parent)
-                : { type: 'TERMINAL', value: undefined };
-            } else {
-                capturedCont = {
-                    type: 'RUNNING',
-                    frame: callerFrame.copy(), // Deep copy of the registers and IP
-                    parent: cont.parent ? this.#copyCont(cont.parent) : null,
-                    destReg: destReg
-                }
-            }
-            const k = new ContinuationClosure(capturedCont);
-            return this.#invoke(callerArgs[startReg], cont, callerFrame, [k], destReg, 0, 1)
-        } else if (proc instanceof ContinuationClosure) {
-            if (!callerFrame.code.supportsCallCC) throw new Error("call/cc is disabled in this environment")
-            if (nargs !== 1) throw new Error(`continuation expected one argument \`val\``)
-            const value = callerArgs[startReg];
-            if (proc.capturedCont.type === "TERMINAL") {
-                return { type: 'TERMINAL', value: value };
-            }
-
-            const restoredCont: Continuation = this.#copyCont(proc.capturedCont);
-            if (restoredCont.type !== "RUNNING") throw new Error("internal error: cannot invoke continuation on non-running cont")
-            if (restoredCont.destReg !== undefined) {
-                restoredCont.frame.regs[restoredCont.destReg] = value;
-            }
-            return restoredCont
         } else if (proc instanceof Closure) {
             const template = proc.tmpl;
             const pregs = this.#createClosureArg(proc, nargs, callerArgs, startReg)

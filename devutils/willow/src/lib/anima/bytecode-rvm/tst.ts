@@ -1,14 +1,14 @@
 import { OP_APPLY, OP_CALL_CC } from "../common";
 import { Compiler } from "./compiler";
 import { deepPrint } from "./utils";
-import { AnimaVM, APPLY_PROC, CALLCC_PROC, Globals, IBUILTINS } from "./vm";
+import { AnimaVM, APPLY_PROC, Globals, IBUILTINS } from "./vm";
 
-const stmts = [
-  `(let* ((yin (call/cc (lambda (cc) cc)))
-       (yang (call/cc (lambda (cc) cc))))
-  (yin yang))
-`
-]
+const stmts = [`(begin
+                  (define (loop n)
+                    (if (= n 0)
+                        "survived!"
+                        (loop (- n 1))))
+                  (loop 15000))`]
 
 /*const code = `
 (define (test-shadowing)
@@ -32,7 +32,6 @@ for(const builtin of IBUILTINS) {
   GLOBALS.data.set(builtin.name, builtin)
 }
 GLOBALS.data.set(OP_APPLY, APPLY_PROC)
-GLOBALS.data.set(OP_CALL_CC, CALLCC_PROC)
 
 
 const c = new Compiler()

@@ -113,6 +113,11 @@ export const OP_DIV    = Symbol.for("/");
 export const OP_MODULO = Symbol.for("modulo");
 export const OP_REMAINDER = Symbol.for("remainder")
 
+// Continuation (IR only)
+//
+// Note: this is interna
+export const OP_CONT = Symbol("<cont>");
+
 // Super cursed function
 export const OP_CALL_CC = Symbol.for("call/cc")
 

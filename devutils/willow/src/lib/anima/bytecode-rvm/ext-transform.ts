@@ -1,4 +1,4 @@
-import { ASP, ASTStringifier, DottedPair, OP_AND, OP_BEGIN, OP_DEFINE, OP_IF, OP_LAMBDA, OP_OR, OP_QUOTE, OP_SET, wrapMulti } from "../common";
+import { ASP, ASTStringifier, DottedPair, OP_AND, OP_BEGIN, OP_CONT, OP_DEFINE, OP_IF, OP_LAMBDA, OP_OR, OP_QUOTE, OP_SET, wrapMulti } from "../common";
 import { AnimaTransformer } from "../syntax-transformer";
 import { Compiler } from "./compiler";
 import { deepPrint } from "./utils";
@@ -47,7 +47,7 @@ const makeDynamicCont = (srcMap: SrcMap, origNode: any, k: (v: any) => any): any
     }
 
     const v = symGen("v");
-    const dynLambda = [OP_LAMBDA, [v], k(v)];
+    const dynLambda = [OP_CONT, [v], k(v)];
     tag(srcMap, dynLambda, origNode)
     return dynLambda
 }
@@ -295,5 +295,5 @@ const astStr = new ASTStringifier().stringify(cpsTrans)
 const t2 = performance.now()
 console.log(astStr)
 console.log(`Took ${t2 - t1} ms`)
-const bc = new Compiler().compile(astStr)
+const bc = new Compiler().compileAst(cpsTrans)
 console.log(deepPrint(bc))

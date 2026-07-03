@@ -1,4 +1,4 @@
-import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_ADD, OP_AND, OP_APPLY, OP_BEGIN, OP_CAR, OP_CDR, OP_COND, OP_CONS, OP_CONTAINS, OP_DEFINE, OP_DIV, OP_EMPTY, OP_EQ, OP_EQ_DEEP1, OP_EQ_PTR1, OP_GT, OP_GTE, OP_IF, OP_LAMBDA, OP_LENGTH, OP_LET, OP_LETREC, OP_LETSTAR, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_OR, OP_QUOTE, OP_REMAINDER, OP_SET, OP_SUB, unpackLambdaExprArgs, wrapMulti } from "../common";
+import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_ADD, OP_AND, OP_APPLY, OP_BEGIN, OP_CAR, OP_CDR, OP_COND, OP_CONS, OP_CONT, OP_CONTAINS, OP_DEFINE, OP_DIV, OP_EMPTY, OP_EQ, OP_EQ_DEEP1, OP_EQ_PTR1, OP_GT, OP_GTE, OP_IF, OP_LAMBDA, OP_LENGTH, OP_LET, OP_LETREC, OP_LETSTAR, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_OR, OP_QUOTE, OP_REMAINDER, OP_SET, OP_SUB, unpackLambdaExprArgs, wrapMulti } from "../common";
 import { AnimaTransformer } from "../syntax-transformer";
 import { AstAnalysis } from "./analysis";
 import { AnalysisScope, CompilerScope } from "./scope";
@@ -22,9 +22,12 @@ export class Compiler {
 
     constructor() {}
 
-    compile(s: string, implicitIife: boolean = false, callCCEnabled = false) {
+    compile(s: string, implicitIife: boolean = false) {
         const ast = new ASP(s, true).parse()
+        return this.compileAst(ast, implicitIife)
+    }
 
+    compileAst(ast: any, implicitIife: boolean = false) {
         // Step 0 is to make the whole thing an implicit IIFE
         const astIIfe = implicitIife ? [[OP_LAMBDA, [], ast]] : ast
 
@@ -32,14 +35,14 @@ export class Compiler {
         let trExpr = this.t.transform(astIIfe)
         // Step 2 is to analyze our variables so we know what to box and what not to box
         let analyzer = new AstAnalysis()
-        const ascope = analyzer.analyze(trExpr, callCCEnabled)
+        const ascope = analyzer.analyze(trExpr)
 
         const scope = new CompilerScope(null)
         const nodes: Node[] = []
         const retReg = scope.allocTemp(); // no need to free the temp reg as we return?
         this.#compile(trExpr, {destReg: retReg, isTail: true, nodes, scope, ascope, analyzer})
         nodes.push({t: "Return", reg: retReg})
-        const ir = new IR(nodes, callCCEnabled)
+        const ir = new IR(nodes)
         return ir.lower(scope.numRegs)
     }
 
@@ -84,6 +87,7 @@ export class Compiler {
                     this.#compileSet(expr, opts, syntaxCtx)
                     return
                 case OP_LAMBDA:
+                case OP_CONT:
                     this.#compileLambda(expr, opts, syntaxCtx)
                     return
                 case OP_AND:
@@ -364,12 +368,9 @@ export class Compiler {
     #optIIFE(expr: any[], opts: CmpOpts, syntaxCtx?: string): boolean {
         // if we have a non-variadic IIFE ((lambda (params...) body) args...), then we can optimize it down
         // to BLOCK/ENDBLOCK instead of doing a whole function call
-        if (opts.ascope.callCCEnabled.val) {
-            return false // we can never perform this w/ call/cc
-        }
-        console.log("Applying IIFE")
         const first = expr[0]
-        if (Array.isArray(first) && first[0] === OP_LAMBDA && Array.isArray(first[1])) {
+        if (Array.isArray(first) && (first[0] === OP_LAMBDA || first[0] === OP_CONT) && Array.isArray(first[1])) {
+            console.log("Applying IIFE")
             const ascope = opts.analyzer.scopeMap.get(first)
             if (!ascope) throw new Error(`internal error: could not find ascope for expr ${first}`)
 
