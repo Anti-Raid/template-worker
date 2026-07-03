@@ -441,10 +441,6 @@ class CallFrame {
     getConst(idx: number) {
         return this.code.constants[idx]
     }
-
-    copy(): CallFrame {
-        return new CallFrame(this.code, [...this.regs], [...this.upvars], this.ip, this.id)
-    }
 }
 
 export class AnimaVM {
@@ -711,17 +707,6 @@ export class AnimaVM {
         }
     }
 
-    #copyCont(cont: Continuation): Continuation {
-        if (cont.type === "TERMINAL") return { type: "TERMINAL", value: cont.value };
-        
-        return {
-            type: "RUNNING",
-            frame: cont.frame.copy(),             // Deep copies regs and IP
-            parent: cont.parent ? this.#copyCont(cont.parent) : null,  // Recursively copies the rest of the stack!
-            destReg: cont.destReg
-        };
-    }
-
     #createClosureArg(proc: Closure, nargs: number, args: any[], startOffset: number) {
         const template = proc.tmpl;
         const arity = template.params.length; // number of required args
@@ -753,11 +738,5 @@ export class AnimaVM {
         }
 
         return closureRegs
-    }
-}
-
-class ContinuationClosure extends IProcedure {
-    constructor(public capturedCont: Continuation) {
-        super()
     }
 }
