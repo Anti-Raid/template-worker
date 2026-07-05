@@ -2,7 +2,7 @@ import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_ADD, 
 import { AnimaTransformer } from "../syntax-transformer";
 import { AstAnalysis } from "./analysis";
 import { AnalysisScope, CompilerScope } from "./scope";
-import { IBUILTINS } from "./vm";
+import { AnimaVM, Closure, Globals, IBUILTINS } from "./vm";
 import { IR, type Node, JumpLabel, ClosureTemplateIR } from "./ir"
 
 interface CmpOpts {
@@ -19,15 +19,31 @@ interface CmpOpts {
 export class Compiler {
     s = new ASTStringifier()
     t = new AnimaTransformer()
+    cvm: AnimaVM
 
-    constructor() {}
-
-    compile(s: string, implicitIife: boolean = false) {
-        const ast = new ASP(s, true).parse()
-        return this.compileAst(ast, implicitIife)
+    constructor(stepsForClosureGen?: number, maxStepsForClosureGen?: number) {
+        this.cvm = new AnimaVM(stepsForClosureGen, maxStepsForClosureGen)
     }
 
-    compileAst(ast: any, implicitIife: boolean = false) {
+    compile(s: string, args: any[] | DottedPair, globals: Globals) {
+        const bast = new ASP(s, true).parse()
+        return this.compileAst(bast, args, globals)
+    }
+
+    compileAst(bast: any, args: any[] | DottedPair, globals: Globals) {
+        const ast = [OP_LAMBDA, args, bast]
+        const bc = this.compileRawAst(ast)
+        const res = this.cvm.evaluate(bc, globals)
+        if (!(res instanceof Closure)) throw new Error("internal error: compileToClosure did not return a closure")
+        return res
+    }
+
+    compileRaw(s: string, implicitIife: boolean = false) {
+        const ast = new ASP(s, true).parse()
+        return this.compileRawAst(ast, implicitIife)
+    }
+
+    compileRawAst(ast: any, implicitIife: boolean = false) {
         // Step 0 is to make the whole thing an implicit IIFE
         const astIIfe = implicitIife ? [[OP_LAMBDA, [], ast]] : ast
 
@@ -41,7 +57,9 @@ export class Compiler {
         const nodes: Node[] = []
         const retReg = scope.allocTemp(); // no need to free the temp reg as we return?
         this.#compile(trExpr, {destReg: retReg, isTail: true, nodes, scope, ascope, analyzer})
-        nodes.push({t: "Return", reg: retReg})
+        if (!this.#nodesEndsInRet(nodes)) {
+            nodes.push({t: "Return", reg: retReg})
+        }
         const ir = new IR(nodes)
         return ir.lower(scope.numRegs)
     }
@@ -255,11 +273,20 @@ export class Compiler {
         // Compile lambda body
         const retReg = lambdaScope.allocTemp() // no need to free the temp reg as we return?
         this.#compile(wrapMulti(expr.slice(2)), {...opts, destReg: retReg, isTail: true, nodes: lambdaNodes, scope: lambdaScope, ascope })
-        if (lambdaNodes.length === 0 || !["TailCall", "ApplyTailCall"].includes(lambdaNodes[lambdaNodes.length-1].t)) {
+        if (!this.#nodesEndsInRet(lambdaNodes)) {
             lambdaNodes.push({t: "Return", reg: retReg})
         }
         const template = new ClosureTemplateIR(params, remParams, lambdaNodes, lambdaScope.numRegs, lambdaScope.upvars);
         opts.nodes.push({t: "NewClosure", template: template, destReg: opts.destReg})
+    }
+
+    #nodesEndsInRet(nodes: Node[]) {
+        if (nodes.length === 0) return false // we need a return if nodes.length === 0
+        const lastNode = nodes[nodes.length-1]
+        if (lastNode.t === "TailCall" || lastNode.t === "ApplyTailCall" || lastNode.t === "IBuiltinTail" || lastNode.t === "Return") {
+            return true // all of these ops alr return
+        }
+        return false
     }
 
     #compileAnd(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
@@ -439,7 +466,7 @@ export class Compiler {
     #getVar(varname: symbol, opts: CmpOpts, destReg?: number): Node[] {
         // Check if we can resolve it to a local/upvar
         const resolved = opts.scope.resolve(varname)
-        console.log(resolved)
+        //console.log(resolved)
 
         if (resolved.type === 'Local') {
             const aresolved = opts.ascope.getVarinfo(varname)

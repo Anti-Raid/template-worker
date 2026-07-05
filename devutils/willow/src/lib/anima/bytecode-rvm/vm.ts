@@ -417,6 +417,11 @@ export class Globals {
         });
         return new Globals(map, frozen);
     }
+
+    get(varname: symbol) {
+        if (!this.data.has(varname)) throw new MissingVarError(`Variable '${String(varname)}' is not defined in the current scope.`)
+       return this.data.get(varname)
+    }
 }
 
 type Continuation = { type: 'RUNNING'; frame: CallFrame; parent: Continuation | null, destReg?: number }
@@ -449,6 +454,17 @@ export class AnimaVM {
     public evaluate(code: ByteCode, scope: Globals): any {
         // Initial frame
         let frame: CallFrame = new CallFrame(code, createRegs(code.numReg), [], 0, 0);
+        try {
+            return this.#execnext(frame, scope);
+        } catch (err: any) {
+            console.log(`${err.stack}\n\nCurrent Frame IP: ${frame.ip}`)
+        }
+    }
+
+    public evaluateClosure(code: Closure, scope: Globals, args: any[]): any {
+        // Initial frame
+        const cargs = this.#createClosureArg(code, args.length, args, 0)
+        let frame: CallFrame = new CallFrame(code.tmpl.code, cargs, code.upvars, 0, 0);
         try {
             return this.#execnext(frame, scope);
         } catch (err: any) {
@@ -625,7 +641,7 @@ export class AnimaVM {
                 }
                 case OpCode.CALL: {
                     const procIdx = frame.readNext()
-                    const proc = (procIdx === APPLY_PROC_IDX) ? APPLY_PROC : (procIdx < BUILTINS_START) ? regs[frame.readNext()] : IBUILTINS[procIdx - BUILTINS_START];
+                    const proc = (procIdx === APPLY_PROC_IDX) ? APPLY_PROC : (procIdx < BUILTINS_START) ? regs[procIdx] : IBUILTINS[procIdx - BUILTINS_START];
                     const destReg = frame.readNext();
                     const startReg = frame.readNext();
                     const nargs = frame.readNext();
@@ -634,7 +650,7 @@ export class AnimaVM {
                 }
                 case OpCode.TAILCALL: {
                     const procIdx = frame.readNext()
-                    const proc = (procIdx === APPLY_PROC_IDX) ? APPLY_PROC : (procIdx < BUILTINS_START) ? regs[frame.readNext()] : IBUILTINS[procIdx - BUILTINS_START];
+                    const proc = (procIdx === APPLY_PROC_IDX) ? APPLY_PROC : (procIdx < BUILTINS_START) ? regs[procIdx] : IBUILTINS[procIdx - BUILTINS_START];
                     const startReg = frame.readNext();
                     const nargs = frame.readNext();
                     cont = this.#invoke(proc, cont, frame, regs, undefined, startReg, nargs);
@@ -689,7 +705,6 @@ export class AnimaVM {
             } else {
                 throw new Error(`apply: last argument must be a list but got ${String(finalArg)}`);
             }
-            console.log("APPLY", actualProc, actualArgs)
             return this.#invoke(actualProc, cont, callerFrame, actualArgs, destReg, 0, actualArgs.length)
         } else if (proc instanceof Closure) {
             const template = proc.tmpl;

@@ -1,5 +1,6 @@
 import { ASP, ASTStringifier, DottedPair, OP_AND, OP_BEGIN, OP_CONT, OP_DEFINE, OP_IF, OP_LAMBDA, OP_OR, OP_QUOTE, OP_SET, wrapMulti } from "../common";
 import { AnimaTransformer } from "../syntax-transformer";
+import { AstAnalysis, ContifyAnalyzer } from "./analysis";
 import { Compiler } from "./compiler";
 import { deepPrint } from "./utils";
 
@@ -63,7 +64,7 @@ const T = (e: any, k: (v: any) => any, env: Map<symbol, symbol>, srcMap: SrcMap)
     }
     // basically another 'literal'
     if (e[0] === OP_QUOTE) {
-        return k(e[1]);
+        return k(e);
     }
 
     if (typeof e[0] === "symbol" && env.has(e[0])) {
@@ -289,11 +290,8 @@ const symGen = (base: string) => {
   (counter-b) ; 1 (Should be completely independent)
   (counter-a))
 */
-const simpleProg = `(define fact
-(lambda (n)
-(if (zero? n)
-1
-(* n (fact (- n 1))))))`
+const simpleProg = `(define (double-abs a) (* (if (< a 0) (- 0 a) a) 2))
+`
 /*const simpleProg = `(and #f #t)`*/
 console.log("Started")
 const t1 = performance.now()
@@ -306,5 +304,10 @@ const astStr = new ASTStringifier().stringify(cpsTrans)
 const t2 = performance.now()
 console.log(astStr)
 console.log(`Took ${t2 - t1} ms`)
-const bc = new Compiler().compileAst(cpsTrans)
+
+let analyzer = new AstAnalysis()
+const ascope = analyzer.analyze(cpsTrans)
+const cpsAnalyzed = new ContifyAnalyzer(ascope).analyze(cpsTrans)
+console.log(cpsAnalyzed)
+const bc = new Compiler().compileRawAst(cpsTrans)
 console.log(deepPrint(bc))

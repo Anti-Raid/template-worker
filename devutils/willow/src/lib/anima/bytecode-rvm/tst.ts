@@ -36,7 +36,7 @@ GLOBALS.data.set(OP_APPLY, APPLY_PROC)
 
 const c = new Compiler()
 for (const code of stmts) {
-  const bc = c.compile(code)
+  const bc = c.compileRaw(code)
 
   console.log(deepPrint(bc))
   const t1 = performance.now()

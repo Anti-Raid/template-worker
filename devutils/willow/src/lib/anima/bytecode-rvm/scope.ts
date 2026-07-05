@@ -18,7 +18,7 @@ export class AnalysisScope {
 
     dbgPrint() {
         for(const [sym, md] of this.#vals.entries()) {
-            console.log(JSON.stringify({sym: sym.description, md}))
+            console.debug(JSON.stringify({sym: sym.description, md}))
         }
     }
 
