@@ -40,7 +40,7 @@ for (const code of stmts) {
 
   console.log(deepPrint(bc))
   const t1 = performance.now()
-  const retv = new AnimaVM().evaluate(bc, GLOBALS)
+  const retv = new AnimaVM().evaluateRaw(bc, GLOBALS)
   const t2 = performance.now()
   console.log(retv, t2-t1)
 }

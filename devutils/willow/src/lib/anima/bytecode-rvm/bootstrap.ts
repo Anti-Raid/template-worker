@@ -93,10 +93,10 @@ const PRELUDE = `
 const bootstrapVM = new AnimaVM();
 const bootstrapComp = new Compiler()
 const PRELUDE_BC = bootstrapComp.compileRaw(PRELUDE)
-bootstrapVM.evaluate(PRELUDE_BC, privScope)
+bootstrapVM.evaluateRaw(PRELUDE_BC, privScope)
 
 
-const publicScope = Globals.newWith({}, false); 
+export const publicScope = Globals.newWith({}, false); 
 for (const [sym, value] of privScope.data.entries()) {
     const symName = Symbol.keyFor(sym) || sym.description || "%Unknown";
     
@@ -104,8 +104,4 @@ for (const [sym, value] of privScope.data.entries()) {
     if (symName.startsWith("$")) {
         publicScope.data.set(Symbol.for(symName.replace('$', '')), value);
     }
-}
-
-export function createScope(): Globals {
-    return publicScope
 }

@@ -451,7 +451,7 @@ class CallFrame {
 export class AnimaVM {
     constructor(public steps: number = 0, public maxSteps: number = 0) {}
 
-    public evaluate(code: ByteCode, scope: Globals): any {
+    public evaluateRaw(code: ByteCode, scope: Globals): any {
         // Initial frame
         let frame: CallFrame = new CallFrame(code, createRegs(code.numReg), [], 0, 0);
         try {

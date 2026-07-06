@@ -25,15 +25,15 @@ export class Compiler {
         this.cvm = new AnimaVM(stepsForClosureGen, maxStepsForClosureGen)
     }
 
-    compile(s: string, args: any[] | DottedPair, globals: Globals) {
+    compileToClosure(s: string, args: any[] | DottedPair, globals: Globals) {
         const bast = new ASP(s, true).parse()
-        return this.compileAst(bast, args, globals)
+        return this.compileAstToClosure(bast, args, globals)
     }
 
-    compileAst(bast: any, args: any[] | DottedPair, globals: Globals) {
+    compileAstToClosure(bast: any, args: any[] | DottedPair, globals: Globals) {
         const ast = [OP_LAMBDA, args, bast]
         const bc = this.compileRawAst(ast)
-        const res = this.cvm.evaluate(bc, globals)
+        const res = this.cvm.evaluateRaw(bc, globals) // Use the VM to create the closure
         if (!(res instanceof Closure)) throw new Error("internal error: compileToClosure did not return a closure")
         return res
     }
