@@ -244,6 +244,75 @@ describe('Anima', () => {
             expect(() => run(script)).toThrow(MissingVarError);
         });
     })
+
+    describe('Try/Catch', () => {
+        it('basic try-catch', () => {
+            expect(run("(try (lambda () + abc) '())")).toContain("Variable 'Symbol(abc)' is not defined");
+            expect(run(`
+                (define x (lambda ()
+                    (try (lambda (a) + abc) '(1)))) 
+                (x)
+            `)).toContain("Variable 'Symbol(abc)' is not defined");
+            expect(run(`(try / 1 0 '())`)).toContain("division by zero");
+            expect(run(`
+                (define x (lambda ()
+                    (try (lambda (a) (/ 1 0)) '(1)))) 
+                (x)
+            `)).toContain("division by zero");
+            expect(run(`
+;; A function that loops 100000 times using tail calls, then crashes
+(define (deep-dive n)
+  (if (= n 0)
+      (error "Hit rock bottom")
+      (deep-dive (- n 1))))
+
+;; Wrap it in a single try block
+(try deep-dive 100000 '()) 
+            `)).toContain("Hit rock bottom")
+
+            expect(run(`
+(define (level-1)
+  (error "Level 1 failure"))
+
+(define (level-2)
+  (let ((res (try level-1 '())))
+    (if (error? res)
+        (error "Escalated to Level 2") ;; Throwing from inside error-handling logic!
+        "Success")))
+
+(try level-2 '())
+        `)).toContain("Escalated to Level 2")
+
+            expect(run(`
+(define (risky-math a b c)
+  (if (= c 0)
+      (error "Div by zero")
+      (/ (+ a b) c)))
+
+;; Using apply inside a try!
+(define result (try apply risky-math '(10 20 0) '()))
+result
+        `)).toContain("Div by zero")
+
+            expect(run(`
+(define (ping n)
+  (if (= n 0)
+      (error "Ping Crash!")
+      ;; Ping wraps its call to pong in a try block
+      (try (lambda () (pong (- n 1))) '())))
+
+(define (pong n)
+  (if (= n 0)
+      (error "Pong Crash!")
+      ;; Pong does a standard tail-call to ping
+      (ping (- n 1))))
+
+;; Start the rally!
+(define result (ping 1000))        
+result
+    `)).toContain("Ping Crash!")
+        });
+    })
 })
 
 describe("isDeepEqual: Improper Lists (Dotted Pairs)", () => {

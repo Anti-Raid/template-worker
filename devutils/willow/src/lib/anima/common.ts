@@ -64,6 +64,10 @@ export class ExposedProps {
     }
 }
 
+export class ErrorObject {
+    constructor(public error: any) {}
+}
+
 // Special Forms
 export const OP_DEFINE = Symbol.for("define");
 export const OP_SET    = Symbol.for("set!")
@@ -91,6 +95,7 @@ export const OP_CONTAINS = Symbol.for("contains?");
 export const OP_MEMBER   = Symbol.for("member?");
 export const OP_MAP      = Symbol.for("map")
 export const OP_APPLY    = Symbol.for("apply")
+export const OP_TRY      = Symbol.for("try")
 
 // Logic & Type Checking
 export const OP_NOT      = Symbol.for("not");
@@ -147,6 +152,7 @@ export const BUILTINS_OPS = new Set([
     OP_MEMBER,
     OP_MAP,
     OP_APPLY,
+    OP_TRY,
 
     // Logic & Type Checking
     OP_NOT,
@@ -464,6 +470,11 @@ export class ASTStringifier {
         // Procs
         if (ast instanceof IProcedure) {
             return `<procedure>`;
+        }
+
+        // Errors
+        if (ast instanceof ErrorObject) {
+            return `<error: ${ast.error?.message}>`
         }
 
         // Undefined

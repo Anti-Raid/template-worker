@@ -2,7 +2,7 @@ import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_ADD, 
 import { AnimaTransformer } from "../syntax-transformer";
 import { AstAnalysis } from "./analysis";
 import { AnalysisScope, CompilerScope } from "./scope";
-import { AnimaVM, Closure, Globals, IBUILTINS } from "./vm";
+import { AnimaVM, IBUILTINS } from "./vm";
 import { IR, type Node, JumpLabel, ClosureTemplateIR } from "./ir"
 
 interface CmpOpts {
@@ -25,30 +25,14 @@ export class Compiler {
         this.#cvm = new AnimaVM(stepsForClosureGen, maxStepsForClosureGen)
     }
 
-    compileToClosure(s: string, args: any[] | DottedPair, globals: Globals) {
-        const bast = new ASP(s, true).parse()
-        return this.compileAstToClosure(bast, args, globals)
-    }
-
-    compileAstToClosure(bast: any, args: any[] | DottedPair, globals: Globals) {
-        const ast = [OP_LAMBDA, args, bast]
-        const bc = this.compileRawAst(ast)
-        const res = this.#cvm.evaluateRaw(bc, globals) // Use the VM to create the closure
-        if (!(res instanceof Closure)) throw new Error("internal error: compileToClosure did not return a closure")
-        return res
-    }
-
-    compileRaw(s: string, implicitIife: boolean = false) {
+    compileRaw(s: string) {
         const ast = new ASP(s, true).parse()
-        return this.compileRawAst(ast, implicitIife)
+        return this.compileRawAst(ast)
     }
 
-    compileRawAst(ast: any, implicitIife: boolean = false) {
-        // Step 0 is to make the whole thing an implicit IIFE
-        const astIIfe = implicitIife ? [[OP_LAMBDA, [], ast]] : ast
-
+    compileRawAst(ast: any) {
         // Step 1 is to apply the syntax transformation of cond/let/let*/letrec into simple form
-        let trExpr = this.#t.transform(astIIfe)
+        let trExpr = this.#t.transform(ast)
         // Step 2 is to analyze our variables so we know what to box and what not to box
         let analyzer = new AstAnalysis()
         const ascope = analyzer.analyze(trExpr)
@@ -60,8 +44,8 @@ export class Compiler {
         if (!this.#nodesEndsInRet(nodes)) {
             nodes.push({t: "Return", reg: retReg})
         }
-        const ir = new IR(nodes)
-        return ir.lower(scope.numRegs)
+        const ir = new IR(false)
+        return ir.lower(nodes, scope.numRegs)
     }
 
     #compile(expr: any, opts: CmpOpts, syntaxCtx?: string) {

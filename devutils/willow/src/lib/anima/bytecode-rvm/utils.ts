@@ -95,12 +95,12 @@ const stringifyInst = (inst: ByteCode): string[] => {
 
             case OpCode.LOADGLOBAL:
             case OpCode.SETGLOBAL: {
-                line += `${padOp(OpCode[opcode])} r${inst.inst[idx + 1]}, globalIdx(${constToString(inst.constants[inst.inst[idx + 2]])})`;
+                line += `${padOp(OpCode[opcode])} r${inst.inst[idx + 1]}, global(${constToString(inst.constants[inst.inst[idx + 2]])})`;
                 idx += 3;
                 break;
             }
             case OpCode.HASGLOBAL: {
-                line += `${padOp(OpCode[opcode])} globalIdx(${constToString(inst.constants[inst.inst[idx + 1]])})`;
+                line += `${padOp(OpCode[opcode])} global(${constToString(inst.constants[inst.inst[idx + 1]])})`;
                 idx += 2;
                 break;
             }

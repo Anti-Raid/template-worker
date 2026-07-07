@@ -1,7 +1,7 @@
-import { OP_APPLY } from "../common";
+import { OP_APPLY, OP_TRY } from "../common";
 import { Cons } from "../list";
 import { Compiler } from "./compiler";
-import { AnimaVM, APPLY_PROC, BuiltinFunction, Globals, IBUILTINS } from "./vm";
+import { AnimaVM, APPLY_PROC, BuiltinFunction, Globals, IBUILTINS, TRY_PROC } from "./vm";
 
 class MapObj {
     #iters: (ArrayIterator<any> | Generator<any, void, unknown>)[]
@@ -66,7 +66,8 @@ const privScope = Globals.newWith({
         if(!Array.isArray(regs[startReg])) throw new Error(`internal error: %ArrayPush called on non-array ${regs[startReg]}`)
         return regs[startReg].push(regs[startReg+1])
     }),
-    [OP_APPLY]: APPLY_PROC // technically not needed due to compiler optimizing intrinsics directly but for correctness purposes, keep it
+    [OP_APPLY]: APPLY_PROC, // technically not needed due to compiler optimizing intrinsics directly but for correctness purposes, keep it
+    [OP_TRY]: TRY_PROC,
 })
 
 const PRELUDE = `
@@ -113,3 +114,4 @@ for(const builtin of IBUILTINS) {
   publicScope.data.set(builtin.name, builtin)
 }
 publicScope.data.set(OP_APPLY, APPLY_PROC)
+publicScope.data.set(OP_TRY, TRY_PROC)

@@ -148,7 +148,7 @@ export class ConstPool {
 }
 
 export class IR {
-    constructor(public nodes: Node[]) {}
+    constructor(public cpsForm: boolean) {}
 
     #nodeOverwritesDestReg(node: Node) {
         if(node.t === "Move" || node.t === "LoadValue" || node.t === "Box" || node.t === "Unbox" || node.t === "Call") {
@@ -177,14 +177,14 @@ export class IR {
         return true; // if we dont know, just assume it reads
     }
 
-    lower(numRegs: number): ByteCode {
+    lower(nodes: Node[], numRegs: number): ByteCode {
         const cpool = new ConstPool()
         const inst: number[] = []
 
         const jumpIdxs: Map<number, JumpLabel> = new Map()
         const resolvedLabels: Map<JumpLabel, number> = new Map()
-        for(let i = 0; i < this.nodes.length; i++) {
-            const node = this.nodes[i]
+        for(let i = 0; i < nodes.length; i++) {
+            const node = nodes[i]
 
             switch (node.t) {
                 case "LoadValue": {
@@ -195,19 +195,19 @@ export class IR {
                     //
                     // Then we can reduce it to
                     // LOAD* rX
-                    const nextNode = this.nodes[i+1]
+                    const nextNode = nodes[i+1]
                     if(nextNode && nextNode.t === "Move" && nextNode.srcReg === node.destReg) {
                         //console.log(`Ignoring next node ${JSON.stringify(nextNode)} (${i+1}) by redirecting load of ${JSON.stringify(node)} (${i})`)
-                        this.nodes[i+1] = { t: "LoadValue", destReg: nextNode.destReg, constant: node.constant };
-                        this.nodes.splice(i, 1);
+                        nodes[i+1] = { t: "LoadValue", destReg: nextNode.destReg, constant: node.constant };
+                        nodes.splice(i, 1);
                         i--;
                         continue;                    
                     }
 
                     // Check 2: is it redundant
                     let isRedundant = null; // start with the assumption that its needed
-                    for (let j = i+1; j < this.nodes.length; j++) {
-                        const nextNode = this.nodes[j]
+                    for (let j = i+1; j < nodes.length; j++) {
+                        const nextNode = nodes[j]
                         // Stop at Labels, Jumps and CondJumps
                         if (nextNode.t === "Label" || nextNode.t === "Jump" || nextNode.t === "CondJump") break
 
@@ -328,7 +328,7 @@ export class IR {
                     break
                 }
                 case "NewClosure": {
-                    const closureBc = new IR(node.template.code).lower(node.template.numRegs)
+                    const closureBc = this.lower(node.template.code, node.template.numRegs)
                     const ct = new ClosureTemplate(node.template.params, node.template.remParams, closureBc, node.template.upvarLocs)
                     if(ct.upvarLocs.length === 0) {
                         // We can just directly push the template as a raw constant in the pool
@@ -368,7 +368,7 @@ export class IR {
             inst[jump] = resolvedOffset
         }
 
-        return new ByteCode(cpool.constants, new Uint32Array(inst), numRegs)
+        return new ByteCode(cpool.constants, new Uint32Array(inst), numRegs, this.cpsForm)
     }
 }
 

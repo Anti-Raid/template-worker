@@ -1,4 +1,4 @@
-import { ExposedProps, IProcedure, isDeepEqual, MissingVarError, OP_ADD, OP_CAR, OP_CDR, OP_CONS, OP_CONTAINS, OP_DIV, OP_EMPTY, OP_EQ, OP_EQQ, OP_EQUAL, OP_EQV, OP_GT, OP_GTE, OP_LAST, OP_LENGTH, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_NOT, OP_REMAINDER, OP_SUB, OP_UI_GET } from "../common";
+import { ErrorObject, ExposedProps, IProcedure, isDeepEqual, MissingVarError, OP_ADD, OP_CAR, OP_CDR, OP_CONS, OP_CONTAINS, OP_DIV, OP_EMPTY, OP_EQ, OP_EQQ, OP_EQUAL, OP_EQV, OP_GT, OP_GTE, OP_LAST, OP_LENGTH, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_NOT, OP_REMAINDER, OP_SUB, OP_UI_GET } from "../common";
 import { isTruthy } from "../common";
 import { Cons } from "../list";
 
@@ -32,14 +32,7 @@ export enum OpCode {
 }
 
 export class ByteCode {
-    public constants: any[]
-    public inst: Uint32Array
-    public numReg: number
-    constructor(constants: any[], inst: Uint32Array, numReg: number) {
-        this.constants = constants
-        this.inst = inst
-        this.numReg = numReg
-    }
+    constructor(public constants: any[], public inst: Uint32Array, public numReg: number, public cpsForm: boolean) {}
 }
 
 export type UpVarLoc = { index: number, local: boolean }
@@ -70,12 +63,17 @@ export class Closure extends IProcedure {
 }
 
 /** 
- * A builtin function. Builtin functions do not have access to their own lexical scope (at least not yet) 
+ * A builtin function. 
+ * 
+ * Builtin functions do not have access to their own lexical scope (at least not yet) 
+ * 
+ * It is undefined behaviour for a builtin function to modify regs (reg's are considered readonly). Additionally, the intermediate
+ * state of any BuiltinFunction must be well-defined/valid 
 */
 export class BuiltinFunction extends IProcedure {
     constructor(
         public name: symbol,
-        public cb: (regs: any[], startReg: number, nargs: number) => any,
+        public cb: (regs: readonly any[], startReg: number, nargs: number) => any,
     ) {
         super()
     }
@@ -396,6 +394,19 @@ export const IBUILTINS: BuiltinFunction[] = [
         console.log(regs[startReg])
         return undefined
     }),
+    new BuiltinFunction(Symbol.for("error"), (regs, startReg, nargs) => {
+        if (nargs != 1) throw new Error("");
+        throw new Error(regs[startReg])
+    }),
+    new BuiltinFunction(Symbol.for("error?"), (regs, startReg, nargs) => {
+        if (nargs != 1) throw new Error("error? requires 1 argument");
+        return regs[startReg] instanceof ErrorObject
+    }),
+    new BuiltinFunction(Symbol.for("error-message"), (regs, startReg, nargs) => {
+        if (nargs != 1) throw new Error("error-message requires 1 argument");
+        if(!(regs[startReg] instanceof ErrorObject)) throw new Error("error-message requires the first argument to be an instance of ErrorObject")
+        return regs[startReg].error?.message?.toString() || "<unknown>"
+    }),
     new BuiltinFunction(OP_UI_GET, (regs, startReg, nargs) => {
         if (nargs != 2) throw new Error("ui-get requires 2 arguments (ui-get props key-str)");
         const props = regs[startReg]
@@ -409,6 +420,10 @@ export const IBUILTINS: BuiltinFunction[] = [
 // Marker for `apply` intrinsic proc
 export class ApplyProc extends IProcedure {}
 export const APPLY_PROC = new ApplyProc()
+// Marker for `try` intrinsic proc
+export class TryProc extends IProcedure {}
+export const TRY_PROC = new TryProc()
+
 
 const createRegs = (numRegs: number) => {
     return new Array(numRegs).fill(undefined)
@@ -474,7 +489,8 @@ export class Globals {
     }
 }
 
-type Continuation = { type: 'RUNNING'; frame: CallFrame; parent: Continuation | null, destReg?: number }
+type RunningCont = { type: 'RUNNING'; frame: CallFrame; parent: Continuation | null, trySpot: Continuation | null | undefined, destReg?: number }
+type Continuation = RunningCont
 | { type: "TERMINAL", value: any }
 
 class CallFrame {
@@ -525,7 +541,7 @@ export class AnimaVM {
     }
 
     #execnext(initialFrame: CallFrame, execScope: Globals) {
-        let cont: Continuation = { type: 'RUNNING', frame: initialFrame, parent: null };
+        let cont: Continuation = { type: 'RUNNING', frame: initialFrame, parent: null, trySpot: undefined };
         while(cont.type === 'RUNNING') {
             this.steps++;
             if (this.maxSteps && this.steps > this.maxSteps) {
@@ -538,176 +554,196 @@ export class AnimaVM {
                 throw new Error(`internal error: ${frame.ip} >= ${frame.code.inst.length}`)
             }
 
-            const opcode: OpCode = frame.readNext()
-            //console.log(`[Frame #${frame.id}]: ${OpCode[opcode]} ${regs.map(r => regOut(r)).join(', ')}`)
-            switch (opcode) {
-                // Load
-                case OpCode.LOADCONST: {
-                    const destReg = frame.readNext()
-                    const constIdx = frame.readNext()
-                    regs[destReg] = frame.getConst(constIdx);
-                    break;
-                }
-                // Load specializations
-                case OpCode.LOADTRUE: {
-                    const destReg = frame.readNext()
-                    regs[destReg] = true
-                    break
-                }
-                case OpCode.LOADFALSE: {
-                    const destReg = frame.readNext()
-                    regs[destReg] = false
-                    break
-                }
-                case OpCode.LOADEMPTYLIST: {
-                    const destReg = frame.readNext()
-                    regs[destReg] = null // empty list is null
-                    break
-                }
-                case OpCode.LOADVOID: {
-                    const destReg = frame.readNext()
-                    regs[destReg] = undefined // #<void> is undefined
-                    break
-                }
-                case OpCode.LOADU32: {
-                    const destReg = frame.readNext()
-                    const u32Val = frame.readNext()
-                    regs[destReg] = u32Val 
-                    break
-                }
-                case OpCode.NEGATE: {
-                    const reg = frame.readNext()
-                    if (typeof regs[reg] !== "number") throw new Error("cannot negate non-number")
-                    regs[reg] = -1*regs[reg] 
-                    break
-                }
-                case OpCode.LOADUPVAR: {
-                    const destReg = frame.readNext()
-                    const upvarIdx = frame.readNext()
-                    const andUnbox = frame.readNext()
-                    regs[destReg] = andUnbox ? (frame.upvars[upvarIdx] as Box).val : frame.upvars[upvarIdx]
-                    break
-                }
-                case OpCode.SETUPVAR: {
-                    const srcReg = frame.readNext()
-                    const upvarIdx = frame.readNext()
-                    const andBox = frame.readNext()
-                    frame.upvars[upvarIdx] = andBox ? new Box(regs[srcReg]) : regs[srcReg]
-                    break
-                }
-                case OpCode.LOADGLOBAL: {
-                    const destReg = frame.readNext()
-                    const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
-                    regs[destReg] = execScope.get(varname)
-                    break
-                }
-                case OpCode.SETGLOBAL: {
-                    const srcReg = frame.readNext()
-                    const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
-                    execScope.set(varname, regs[srcReg])
-                    break
-                }
-                case OpCode.HASGLOBAL: {
-                    const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
-                    execScope.assert(varname)
-                    break
-                }
-                case OpCode.JIF: {
-                    const condReg = frame.readNext()
-                    const jumpIdx = frame.readNext()
-                    if (!isTruthy(regs[condReg])) {
-                        frame.ip = jumpIdx
+            try {
+                const opcode: OpCode = frame.readNext()
+                //console.log(`[Frame #${frame.id}]: ${OpCode[opcode]} ${regs.map(r => regOut(r)).join(', ')}`)
+                switch (opcode) {
+                    // Load
+                    case OpCode.LOADCONST: {
+                        const destReg = frame.readNext()
+                        const constIdx = frame.readNext()
+                        regs[destReg] = frame.getConst(constIdx);
+                        break;
                     }
-                    break
-                }
-                case OpCode.JIT: {
-                    const condReg = frame.readNext()
-                    const jumpIdx = frame.readNext()
-                    if (isTruthy(regs[condReg])) {
-                        frame.ip = jumpIdx
+                    // Load specializations
+                    case OpCode.LOADTRUE: {
+                        const destReg = frame.readNext()
+                        regs[destReg] = true
+                        break
                     }
-                    break
-                }
-                case OpCode.JUMP: {
-                    const jumpIdx = frame.readNext()
-                    frame.ip = jumpIdx
-                    break
-                }
-                case OpCode.NEWCLOSURE: {
-                    const destReg = frame.readNext()
-                    const tidx = frame.readNext()
-                    const template = frame.getConst(tidx) as ClosureTemplate
-                    const closure = new Closure(template)
-                    // Copy over upvalues
-                    for (let i = 0; i < template.upvarLocs.length; i++) {
-                        const loc = template.upvarLocs[i]
-                        if (loc.local) {
-                            closure.upvars[i] = regs[loc.index];
+                    case OpCode.LOADFALSE: {
+                        const destReg = frame.readNext()
+                        regs[destReg] = false
+                        break
+                    }
+                    case OpCode.LOADEMPTYLIST: {
+                        const destReg = frame.readNext()
+                        regs[destReg] = null // empty list is null
+                        break
+                    }
+                    case OpCode.LOADVOID: {
+                        const destReg = frame.readNext()
+                        regs[destReg] = undefined // #<void> is undefined
+                        break
+                    }
+                    case OpCode.LOADU32: {
+                        const destReg = frame.readNext()
+                        const u32Val = frame.readNext()
+                        regs[destReg] = u32Val 
+                        break
+                    }
+                    case OpCode.NEGATE: {
+                        const reg = frame.readNext()
+                        if (typeof regs[reg] !== "number") throw new Error("cannot negate non-number")
+                        regs[reg] = -1*regs[reg] 
+                        break
+                    }
+                    case OpCode.LOADUPVAR: {
+                        const destReg = frame.readNext()
+                        const upvarIdx = frame.readNext()
+                        const andUnbox = frame.readNext()
+                        regs[destReg] = andUnbox ? (frame.upvars[upvarIdx] as Box).val : frame.upvars[upvarIdx]
+                        break
+                    }
+                    case OpCode.SETUPVAR: {
+                        const srcReg = frame.readNext()
+                        const upvarIdx = frame.readNext()
+                        const andBox = frame.readNext()
+                        frame.upvars[upvarIdx] = andBox ? new Box(regs[srcReg]) : regs[srcReg]
+                        break
+                    }
+                    case OpCode.LOADGLOBAL: {
+                        const destReg = frame.readNext()
+                        const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
+                        regs[destReg] = execScope.get(varname)
+                        break
+                    }
+                    case OpCode.SETGLOBAL: {
+                        const srcReg = frame.readNext()
+                        const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
+                        execScope.set(varname, regs[srcReg])
+                        break
+                    }
+                    case OpCode.HASGLOBAL: {
+                        const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
+                        execScope.assert(varname)
+                        break
+                    }
+                    case OpCode.JIF: {
+                        const condReg = frame.readNext()
+                        const jumpIdx = frame.readNext()
+                        if (!isTruthy(regs[condReg])) {
+                            frame.ip = jumpIdx
+                        }
+                        break
+                    }
+                    case OpCode.JIT: {
+                        const condReg = frame.readNext()
+                        const jumpIdx = frame.readNext()
+                        if (isTruthy(regs[condReg])) {
+                            frame.ip = jumpIdx
+                        }
+                        break
+                    }
+                    case OpCode.JUMP: {
+                        const jumpIdx = frame.readNext()
+                        frame.ip = jumpIdx
+                        break
+                    }
+                    case OpCode.NEWCLOSURE: {
+                        const destReg = frame.readNext()
+                        const tidx = frame.readNext()
+                        const template = frame.getConst(tidx) as ClosureTemplate
+                        const closure = new Closure(template)
+                        // Copy over upvalues
+                        for (let i = 0; i < template.upvarLocs.length; i++) {
+                            const loc = template.upvarLocs[i]
+                            if (loc.local) {
+                                closure.upvars[i] = regs[loc.index];
+                            } else {
+                                // Grab from the current frame's upvars
+                                closure.upvars[i] = frame.upvars[loc.index];
+                            }
+                        }
+                        regs[destReg] = closure
+                        break;
+                    }
+                    case OpCode.BOX: {
+                        const destReg = frame.readNext();
+                        const srcReg = frame.readNext();
+                        regs[destReg] = new Box(regs[srcReg])
+                        break
+                    }
+                    case OpCode.UNBOX: {
+                        const destReg = frame.readNext();
+                        const srcReg = frame.readNext();
+                        regs[destReg] = (regs[srcReg] as Box).val
+                        break
+                    }
+                    case OpCode.SETBOX: {
+                        const destReg = frame.readNext();
+                        const srcReg = frame.readNext();
+                        (regs[destReg] as Box).val = regs[srcReg]
+                        break
+                    }
+                    case OpCode.MOVE: {
+                        const destReg = frame.readNext();
+                        const srcReg = frame.readNext();
+                        regs[destReg] = regs[srcReg]
+                        break
+                    }
+                    case OpCode.RETURN: {
+                        const reg = frame.readNext()
+                        const retVal = frame.regs[reg];
+                        if (cont.parent === null) {
+                            cont = { type: 'TERMINAL', value: retVal };
                         } else {
-                            // Grab from the current frame's upvars
-                            closure.upvars[i] = frame.upvars[loc.index];
+                            const parent: Continuation = cont.parent;
+                            if (parent.type === "RUNNING" && parent.destReg !== undefined) {
+                                parent.frame.regs[parent.destReg] = retVal;
+                            }
+                            cont = parent; // Jump back to the parent continuation
                         }
+                        break;               
                     }
-                    regs[destReg] = closure
-                    break;
-                }
-                case OpCode.BOX: {
-                    const destReg = frame.readNext();
-                    const srcReg = frame.readNext();
-                    regs[destReg] = new Box(regs[srcReg])
-                    break
-                }
-                case OpCode.UNBOX: {
-                    const destReg = frame.readNext();
-                    const srcReg = frame.readNext();
-                    regs[destReg] = (regs[srcReg] as Box).val
-                    break
-                }
-                case OpCode.SETBOX: {
-                    const destReg = frame.readNext();
-                    const srcReg = frame.readNext();
-                    (regs[destReg] as Box).val = regs[srcReg]
-                    break
-                }
-                case OpCode.MOVE: {
-                    const destReg = frame.readNext();
-                    const srcReg = frame.readNext();
-                    regs[destReg] = regs[srcReg]
-                    break
-                }
-                case OpCode.RETURN: {
-                    const reg = frame.readNext()
-                    const retVal = frame.regs[reg];
-                    if (cont.parent === null) {
-                        cont = { type: 'TERMINAL', value: retVal };
-                    } else {
-                        const parent: Continuation = cont.parent;
-                        if (parent.type === "RUNNING" && parent.destReg !== undefined) {
-                            parent.frame.regs[parent.destReg] = retVal;
-                        }
-                        cont = parent; // Jump back to the parent continuation
+                    case OpCode.CALL: {
+                        const procIdx = frame.readNext()
+                        const proc = (procIdx === APPLY_PROC_IDX) ? APPLY_PROC : (procIdx < BUILTINS_START) ? regs[procIdx] : IBUILTINS[procIdx - BUILTINS_START];
+                        const destReg = frame.readNext();
+                        const startReg = frame.readNext();
+                        const nargs = frame.readNext();
+                        cont = this.#invoke(proc, cont, frame, regs, destReg, startReg, nargs)
+                        break;
                     }
-                    break;               
+                    case OpCode.TAILCALL: {
+                        const procIdx = frame.readNext()
+                        const proc = (procIdx === APPLY_PROC_IDX) ? APPLY_PROC : (procIdx < BUILTINS_START) ? regs[procIdx] : IBUILTINS[procIdx - BUILTINS_START];
+                        const startReg = frame.readNext();
+                        const nargs = frame.readNext();
+                        cont = this.#invoke(proc, cont, frame, regs, undefined, startReg, nargs);
+                        break;
+                    }
+                    default:
+                        let _: never = opcode;
                 }
-                case OpCode.CALL: {
-                    const procIdx = frame.readNext()
-                    const proc = (procIdx === APPLY_PROC_IDX) ? APPLY_PROC : (procIdx < BUILTINS_START) ? regs[procIdx] : IBUILTINS[procIdx - BUILTINS_START];
-                    const destReg = frame.readNext();
-                    const startReg = frame.readNext();
-                    const nargs = frame.readNext();
-                    cont = this.#invoke(proc, cont, frame, regs, destReg, startReg, nargs)
-                    break;
+            } catch (err) {
+                // We either resolve the try-call or rethrow
+                console.log("Error", cont)
+                if (cont.type === "RUNNING" && cont.trySpot !== undefined) {
+                    const retVal = new ErrorObject(err)
+                    if (cont.trySpot === null || cont.trySpot.type !== "RUNNING") {
+                        return retVal
+                    }
+                    const target: RunningCont = cont.trySpot
+
+                    if (target.destReg !== undefined) {
+                        target.frame.regs[target.destReg] = retVal;
+                    }
+
+                    cont = target
+                    continue
                 }
-                case OpCode.TAILCALL: {
-                    const procIdx = frame.readNext()
-                    const proc = (procIdx === APPLY_PROC_IDX) ? APPLY_PROC : (procIdx < BUILTINS_START) ? regs[procIdx] : IBUILTINS[procIdx - BUILTINS_START];
-                    const startReg = frame.readNext();
-                    const nargs = frame.readNext();
-                    cont = this.#invoke(proc, cont, frame, regs, undefined, startReg, nargs);
-                    break;
-                }
-                default:
-                    let _: never = opcode;
+                throw err
             }
         }
 
@@ -756,6 +792,68 @@ export class AnimaVM {
                 throw new Error(`apply: last argument must be a list but got ${String(finalArg)}`);
             }
             return this.#invoke(actualProc, cont, callerFrame, actualArgs, destReg, 0, actualArgs.length)
+        } else if (proc instanceof TryProc) {
+            const actualProc = callerArgs[startReg];
+
+            // create a virtual set of registers to hold the arguments and copy args to it
+            const actualArgs = [];
+            for (let i = 1; i < nargs - 1; i++) {
+                actualArgs.push(callerArgs[startReg + i]);
+            }
+            const finalArg = callerArgs[startReg + nargs - 1]
+            if (Array.isArray(finalArg) || finalArg instanceof Cons) {
+                actualArgs.push(...finalArg);
+            } else if (finalArg === null) {
+                // Empty list
+            } else {
+                throw new Error(`try: last argument must be a list but got ${String(finalArg)}`);
+            }
+
+            const returnCont: Continuation | null = (destReg === undefined) ? cont.parent : {
+                type: 'RUNNING',
+                frame: callerFrame,
+                parent: cont.parent,
+                destReg: destReg,
+                trySpot: cont.trySpot // Preserve outer try context
+            };
+
+            try {
+                // 2. Forge a continuation to pass into the invocation.
+                // This ensures the nested call inherits `returnCont` as its `trySpot`.
+                const tryCont: Continuation = {
+                    type: 'RUNNING',
+                    frame: callerFrame,
+                    parent: cont.parent,
+                    destReg: destReg,
+                    trySpot: returnCont // Inject our specific catch boundary here
+                };
+
+                const resultingCont = this.#invoke(actualProc, tryCont, callerFrame, actualArgs, destReg, 0, actualArgs.length);
+                
+                // 3. Prevent caller state corruption. 
+                // If the invocation returns synchronously into the current frame (e.g., Built-ins), 
+                // we must discard tryCont and return the original continuation.
+                if (resultingCont.type === "RUNNING" && resultingCont.frame === callerFrame) {
+                    return cont; 
+                }
+                
+                return resultingCont;
+
+            } catch (err) {
+                // 4. Catch synchronous errors (e.g., from Builtins executing in #invoke)
+                // Route them directly to the return destination.
+                const errObj = new ErrorObject(err);
+                
+                if (returnCont === null || returnCont.type !== "RUNNING") {
+                    return { type: 'TERMINAL', value: errObj };
+                }
+                
+                if (returnCont.destReg !== undefined) {
+                    returnCont.frame.regs[returnCont.destReg] = errObj;
+                }
+                
+                return returnCont;
+            }
         } else if (proc instanceof Closure) {
             const template = proc.tmpl;
             const pregs = this.#createClosureArg(proc.tmpl, nargs, callerArgs, startReg)
@@ -763,10 +861,11 @@ export class AnimaVM {
                 type: 'RUNNING',
                 frame: callerFrame,
                 parent: cont.parent,
-                destReg: destReg 
+                destReg: destReg,
+                trySpot: cont.trySpot // Preserve outer try context
             } as Continuation | null;
             const nextFrame = new CallFrame(template.code, pregs, proc.upvars, 0, callerFrame.id+1);
-            return { type: 'RUNNING', frame: nextFrame, parent: parentCont };
+            return { type: 'RUNNING', frame: nextFrame, parent: parentCont, trySpot: cont.trySpot };
         } else {
             throw new Error(`Attempted to call a non-procedure: ${String(proc)}`);
         }
