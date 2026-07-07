@@ -2,7 +2,7 @@ import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_ADD, 
 import { AnimaTransformer } from "../syntax-transformer";
 import { AstAnalysis } from "./analysis";
 import { AnalysisScope, CompilerScope } from "./scope";
-import { AnimaVM, IBUILTINS } from "./vm";
+import { IBUILTINS } from "./vm";
 import { IR, type Node, JumpLabel, ClosureTemplateIR } from "./ir"
 
 interface CmpOpts {
@@ -19,11 +19,8 @@ interface CmpOpts {
 export class Compiler {
     #s = new ASTStringifier()
     #t = new AnimaTransformer()
-    #cvm: AnimaVM
 
-    constructor(stepsForClosureGen?: number, maxStepsForClosureGen?: number) {
-        this.#cvm = new AnimaVM(stepsForClosureGen, maxStepsForClosureGen)
-    }
+    constructor() {}
 
     compileRaw(s: string) {
         const ast = new ASP(s, true).parse()

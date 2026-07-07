@@ -407,6 +407,25 @@ export const IBUILTINS: BuiltinFunction[] = [
         if(!(regs[startReg] instanceof ErrorObject)) throw new Error("error-message requires the first argument to be an instance of ErrorObject")
         return regs[startReg].error?.message?.toString() || "<unknown>"
     }),
+    new BuiltinFunction(Symbol.for("typeof"), (regs, startReg, nargs) => {
+        if (nargs != 1) throw new Error("typeof requires 1 argument");
+        const val = regs[startReg]
+        if (val === null) return "list";
+        switch(typeof val) {
+            case "string": return "string"
+            case "number": return "number"
+            case "boolean": return "boolean"
+            case "undefined": return "null"
+            case "symbol": return "symbol";
+            default: {
+                if (val instanceof IProcedure) return "procedure";
+                if(Array.isArray(val) || val instanceof Cons) return "list"
+                if (val instanceof ErrorObject) return "error";
+                if (val instanceof ExposedProps) return "exposed-props";
+                return "object" // to allow consistency across all js engines/custom sv2 impls etc.
+            }
+        }
+    }),
     new BuiltinFunction(OP_UI_GET, (regs, startReg, nargs) => {
         if (nargs != 2) throw new Error("ui-get requires 2 arguments (ui-get props key-str)");
         const props = regs[startReg]
@@ -728,7 +747,6 @@ export class AnimaVM {
                 }
             } catch (err) {
                 // We either resolve the try-call or rethrow
-                console.log("Error", cont)
                 if (cont.type === "RUNNING" && cont.trySpot !== undefined) {
                     const retVal = new ErrorObject(err)
                     if (cont.trySpot === null || cont.trySpot.type !== "RUNNING") {

@@ -307,10 +307,8 @@ result
       ;; Pong does a standard tail-call to ping
       (ping (- n 1))))
 
-;; Start the rally!
-(define result (ping 1000))        
-result
-    `)).toContain("Ping Crash!")
+(error-message (ping 1000))        
+    `)).toBe('"Ping Crash!"')
         });
     })
 })
