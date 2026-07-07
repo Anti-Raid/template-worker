@@ -1,8 +1,8 @@
-import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_ADD, OP_AND, OP_APPLY, OP_BEGIN, OP_CAR, OP_CDR, OP_COND, OP_CONS, OP_CONT, OP_CONTAINS, OP_DEFINE, OP_DIV, OP_EMPTY, OP_EQ, OP_EQQ, OP_EQUAL, OP_EQV, OP_GT, OP_GTE, OP_IF, OP_LAMBDA, OP_LENGTH, OP_LET, OP_LETREC, OP_LETSTAR, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_OR, OP_QUOTE, OP_REMAINDER, OP_SET, OP_SUB, unpackLambdaExprArgs, wrapMulti } from "../common";
+import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_AND, OP_APPLY, OP_BEGIN, OP_COND, OP_CONT, OP_DEFINE, OP_IF, OP_LAMBDA, OP_LET, OP_LETREC, OP_LETSTAR, OP_OR, OP_QUOTE, OP_SET, unpackLambdaExprArgs, wrapMulti } from "../common";
 import { AnimaTransformer } from "../syntax-transformer";
 import { AstAnalysis } from "./analysis";
 import { AnalysisScope, CompilerScope } from "./scope";
-import { IBUILTINS } from "./vm";
+import { IBUILTINS_IDX_MAP } from "./vm";
 import { IR, type Node, JumpLabel, ClosureTemplateIR } from "./ir"
 
 interface CmpOpts {
@@ -95,33 +95,6 @@ export class Compiler {
                 case OP_OR:
                     this.#compileOr(expr, opts, syntaxCtx)
                     return
-                // Intrinsic optimizations
-                case OP_ADD:
-                case OP_SUB:
-                case OP_MUL:
-                case OP_DIV:
-                case OP_EQ:
-                case OP_EQQ:
-                case OP_EQV:
-                case OP_EQUAL:
-                case OP_MODULO:
-                case OP_REMAINDER:
-                case OP_LIST:
-                case OP_LT:
-                case OP_LTE:
-                case OP_GT:
-                case OP_GTE:
-                case OP_CAR:
-                case OP_CDR:
-                case OP_CONS:
-                case OP_CONTAINS:
-                case OP_MEMBER:
-                case OP_EMPTY:
-                case OP_LENGTH:
-                    const int = IBUILTINS.findLastIndex(x => x.name === operator)
-                    if(int !== -1) this.#optIntrinsicNormal(expr, int, opts, syntaxCtx)
-                    else throw new Error(`internal error: failed to find intrinsic for ${String(operator)}`)
-                    return
                 case OP_APPLY:
                     this.#optApply(expr, opts)
                     return
@@ -131,6 +104,13 @@ export class Compiler {
                 case OP_COND:
                     throw new Error("internal error: let/let*/letrec/cond should be transformed by AnimaTransform prior to reaching here")
             }
+        }
+
+        // intrinsic
+        const builtinsIdx = IBUILTINS_IDX_MAP.get(operator)
+        if (builtinsIdx !== undefined) {
+            this.#optIntrinsicNormal(expr, builtinsIdx, opts, syntaxCtx)
+            return
         }
 
         this.#compileNormalCall(expr, opts)

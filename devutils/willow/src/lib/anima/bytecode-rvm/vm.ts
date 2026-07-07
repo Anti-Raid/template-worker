@@ -436,6 +436,11 @@ export const IBUILTINS: BuiltinFunction[] = [
     })
 ]
 
+export const IBUILTINS_IDX_MAP = new Map<symbol, number>()
+for(let i = 0; i < IBUILTINS.length; i++) {
+    IBUILTINS_IDX_MAP.set(IBUILTINS[i].name, i)
+}
+
 // Marker for `apply` intrinsic proc
 export class ApplyProc extends IProcedure {}
 export const APPLY_PROC = new ApplyProc()
