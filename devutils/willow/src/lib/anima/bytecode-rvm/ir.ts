@@ -1,4 +1,4 @@
-import { APPLY_PROC_IDX, BUILTINS_START, ByteCode, ClosureTemplate, OpCode, type UpVarLoc } from "./vm";
+import { APPLY_PROC_IDX, BUILTINS_START, ByteCode, Closure, ClosureTemplate, OpCode, type UpVarLoc } from "./vm";
 
 export class JumpLabel {
     public id: number;
@@ -329,9 +329,15 @@ export class IR {
                 }
                 case "NewClosure": {
                     const closureBc = new IR(node.template.code).lower(node.template.numRegs)
-                    const ctidx = cpool.mutPush(new ClosureTemplate(node.template.params, node.template.remParams, closureBc, node.template.upvarLocs))
-                    //console.log(ctidx, cpool.constants)
-                    inst.push(OpCode.NEWCLOSURE, node.destReg, ctidx)
+                    const ct = new ClosureTemplate(node.template.params, node.template.remParams, closureBc, node.template.upvarLocs)
+                    if(ct.upvarLocs.length === 0) {
+                        // We can just directly push the template as a raw constant in the pool
+                        const cidx = cpool.mutPush(new Closure(ct))
+                        inst.push(OpCode.LOADCONST, node.destReg, cidx)
+                    } else {
+                        const ctidx = cpool.mutPush(ct)
+                        inst.push(OpCode.NEWCLOSURE, node.destReg, ctidx)
+                    }
                     break
                 }
                 case "Box": {

@@ -514,7 +514,7 @@ export class AnimaVM {
 
     public evaluateClosure(code: Closure, scope: Globals, args: any[]): any {
         // Initial frame
-        const cargs = this.#createClosureArg(code, args.length, args, 0)
+        const cargs = this.#createClosureArg(code.tmpl, args.length, args, 0)
         let frame: CallFrame = new CallFrame(code.tmpl.code, cargs, code.upvars, 0, 0);
         try {
             return this.#execnext(frame, scope);
@@ -758,7 +758,7 @@ export class AnimaVM {
             return this.#invoke(actualProc, cont, callerFrame, actualArgs, destReg, 0, actualArgs.length)
         } else if (proc instanceof Closure) {
             const template = proc.tmpl;
-            const pregs = this.#createClosureArg(proc, nargs, callerArgs, startReg)
+            const pregs = this.#createClosureArg(proc.tmpl, nargs, callerArgs, startReg)
             const parentCont = (destReg === undefined) ? cont.parent : {
                 type: 'RUNNING',
                 frame: callerFrame,
@@ -772,8 +772,7 @@ export class AnimaVM {
         }
     }
 
-    #createClosureArg(proc: Closure, nargs: number, args: any[], startOffset: number) {
-        const template = proc.tmpl;
+    #createClosureArg(template: ClosureTemplate, nargs: number, args: any[], startOffset: number) {
         const arity = template.params.length; // number of required args
         if (template.remParams !== null) {
             // variadic

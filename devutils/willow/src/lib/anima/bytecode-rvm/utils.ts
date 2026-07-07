@@ -1,4 +1,4 @@
-import { APPLY_PROC_IDX, BUILTINS_START, ClosureTemplate, IBUILTINS, OpCode, type ByteCode } from "./vm"
+import { APPLY_PROC_IDX, BUILTINS_START, Closure, ClosureTemplate, IBUILTINS, OpCode, type ByteCode } from "./vm"
 
 const constToString = (s: any): string => {
     if(typeof s === "symbol") {
@@ -19,6 +19,8 @@ const constToString = (s: any): string => {
         return `(${r.join(' ')})`
     } else if (s instanceof ClosureTemplate) {
         return `fn(${s.params.map(x => constToString(x)).join(', ')}${s.remParams ? ` . ${constToString(s.remParams)}` : ""})`
+    } else if (s instanceof Closure) {
+        return `c.fn(${s.tmpl.params.map(x => constToString(x)).join(', ')}${s.tmpl.remParams ? ` . ${constToString(s.tmpl.remParams)}` : ""})`
     } {
         return `<unknown:${s}>`
     }
@@ -151,7 +153,9 @@ export const deepPrint = (bc: ByteCode) => {
     for (let i = 0; i < bc.constants.length; i++) {
         const c = bc.constants[i]
         if (c instanceof ClosureTemplate) {
-            console.log(`Const #${i}:\n${stringifyInst(c.code).join("\n")}`)
+            console.log(`Const #${i} (template):\n${stringifyInst(c.code).join("\n")}`)
+        } else if (c instanceof Closure) {
+            console.log(`Const #${i} (c.fn):\n${stringifyInst(c.tmpl.code).join("\n")}`)
         }
     }
 }

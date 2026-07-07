@@ -290,7 +290,13 @@ const symGen = (base: string) => {
   (counter-b) ; 1 (Should be completely independent)
   (counter-a))
 */
-const simpleProg = `(and 1 2 3 4)
+// and 1 2 3 4
+const simpleProg = `(begin
+                  (define (loop n)
+                    (if (= n 0)
+                        "survived!"
+                        (loop (- n 1))))
+                  (loop 15000))
 `
 /*const simpleProg = `(and #f #t)`*/
 console.log("Started")
