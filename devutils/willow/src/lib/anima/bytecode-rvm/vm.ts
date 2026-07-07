@@ -1,4 +1,4 @@
-import { ExposedProps, IProcedure, isDeepEqual, MissingVarError, OP_ADD, OP_CAR, OP_CDR, OP_CONS, OP_CONTAINS, OP_DIV, OP_EMPTY, OP_EQ, OP_EQ_DEEP1, OP_EQ_PTR1, OP_GT, OP_GTE, OP_LAST, OP_LENGTH, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_NOT, OP_REMAINDER, OP_SUB, OP_UI_GET } from "../common";
+import { ExposedProps, IProcedure, isDeepEqual, MissingVarError, OP_ADD, OP_CAR, OP_CDR, OP_CONS, OP_CONTAINS, OP_DIV, OP_EMPTY, OP_EQ, OP_EQQ, OP_EQUAL, OP_EQV, OP_GT, OP_GTE, OP_LAST, OP_LENGTH, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_NOT, OP_REMAINDER, OP_SUB, OP_UI_GET } from "../common";
 import { isTruthy } from "../common";
 import { Cons } from "../list";
 
@@ -178,7 +178,8 @@ export const IBUILTINS: BuiltinFunction[] = [
         }
         return res
     }),
-    new BuiltinFunction(OP_EQ_PTR1, (regs, startReg, nargs) => {
+    new BuiltinFunction(OP_EQQ, (regs, startReg, nargs) => {
+        // DEVIATION: normal scheme requires arity 2, anima extends this to arity >=1
         if (nargs === 0) throw new Error("eq? requires at least 1 argument");
         
         let start = regs[startReg];
@@ -192,7 +193,22 @@ export const IBUILTINS: BuiltinFunction[] = [
         }
         return res
     }),
-    new BuiltinFunction(OP_EQ_DEEP1, (regs, startReg, nargs) => {
+    new BuiltinFunction(OP_EQV, (regs, startReg, nargs) => {
+        // DEVIATION: normal scheme requires arity 2, anima extends this to arity >=1
+        if (nargs === 0) throw new Error("eqv? requires at least 1 argument");
+        
+        let start = regs[startReg];
+        let res = true
+        for (let i = startReg+1; i < startReg+nargs; i++) {
+            const val = regs[i]
+            if (!Object.is(val, start)) {
+                res = false
+                break
+            }
+        }
+        return res
+    }),
+    new BuiltinFunction(OP_EQUAL, (regs, startReg, nargs) => {
         if (nargs === 0) throw new Error("equal? requires at least 1 argument");
         
         let start = regs[startReg];

@@ -186,6 +186,27 @@ describe('Anima', () => {
         })
     });
 
+    describe('Logic & Control Flow', () => {
+        it('evaluates strict equality', () => {
+            expect(run("(eqv? port 8080)")).toBe("#t");
+            expect(run(`(not (eqv? protocol "udp"))`)).toBe("#t");
+        });
+
+        it('evaluates if statements using strict truthiness', () => {
+            expect(run(`(if is_active "yes" "no")`)).toEqual('"yes"');
+            expect(run(`(if (not (empty? user_role)) "yes" "no")`)).toBe('"no"');
+            expect(run(`(if 0 "yes" "no")`)).toEqual('"yes"');
+        });
+
+        it('short-circuits AND statements', () => {
+            expect(run("(and #t #f does_not_exist)")).toBe("#f");
+        });
+
+        it('short-circuits OR statements and returns actual truthy values', () => {
+            expect(run("(or #f port (crash!))")).toEqual("8080");
+        });
+    });
+
     describe('map', () => {
         it('maps a procedure over a single list', () => {
             const script = `
@@ -350,27 +371,6 @@ describe('Anima', () => {
 
         it('errors for unknown variables', () => {
             expect(() => run("missing_var")).toThrow(MissingVarError);
-        });
-    });
-
-    describe('Logic & Control Flow', () => {
-        it('evaluates strict equality', () => {
-            expect(run("(eqv? port 8080)")).toBe(true);
-            expect(run(`(not (eqv? protocol "udp"))`)).toBe(true);
-        });
-
-        it('evaluates if statements using strict truthiness', () => {
-            expect(run(`(if is_active "yes" "no")`)).toBe("yes");
-            expect(run(`(if (not (empty? user_role)) "yes" "no")`)).toBe("no");
-            expect(run(`(if 0 "yes" "no")`)).toBe("yes");
-        });
-
-        it('short-circuits AND statements', () => {
-            expect(run("(and #t #f does_not_exist)")).toBe(false);
-        });
-
-        it('short-circuits OR statements and returns actual truthy values', () => {
-            expect(run("(or #f port (crash!))")).toBe(8080);
         });
     });
 

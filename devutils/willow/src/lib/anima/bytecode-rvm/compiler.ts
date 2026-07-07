@@ -1,4 +1,4 @@
-import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_ADD, OP_AND, OP_APPLY, OP_BEGIN, OP_CAR, OP_CDR, OP_COND, OP_CONS, OP_CONT, OP_CONTAINS, OP_DEFINE, OP_DIV, OP_EMPTY, OP_EQ, OP_EQ_DEEP1, OP_EQ_PTR1, OP_GT, OP_GTE, OP_IF, OP_LAMBDA, OP_LENGTH, OP_LET, OP_LETREC, OP_LETSTAR, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_OR, OP_QUOTE, OP_REMAINDER, OP_SET, OP_SUB, unpackLambdaExprArgs, wrapMulti } from "../common";
+import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_ADD, OP_AND, OP_APPLY, OP_BEGIN, OP_CAR, OP_CDR, OP_COND, OP_CONS, OP_CONT, OP_CONTAINS, OP_DEFINE, OP_DIV, OP_EMPTY, OP_EQ, OP_EQQ, OP_EQUAL, OP_EQV, OP_GT, OP_GTE, OP_IF, OP_LAMBDA, OP_LENGTH, OP_LET, OP_LETREC, OP_LETSTAR, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_OR, OP_QUOTE, OP_REMAINDER, OP_SET, OP_SUB, unpackLambdaExprArgs, wrapMulti } from "../common";
 import { AnimaTransformer } from "../syntax-transformer";
 import { AstAnalysis } from "./analysis";
 import { AnalysisScope, CompilerScope } from "./scope";
@@ -120,8 +120,9 @@ export class Compiler {
                 case OP_MUL:
                 case OP_DIV:
                 case OP_EQ:
-                case OP_EQ_PTR1:
-                case OP_EQ_DEEP1:
+                case OP_EQQ:
+                case OP_EQV:
+                case OP_EQUAL:
                 case OP_MODULO:
                 case OP_REMAINDER:
                 case OP_LIST:
@@ -187,7 +188,9 @@ export class Compiler {
         // Place true code
         this.#compile(expr[2], opts)
         // Place jump to end
-        opts.nodes.push({t: "Jump", label: endLabel})
+        if (!this.#nodesEndsInRet(opts.nodes)) {
+            opts.nodes.push({t: "Jump", label: endLabel})
+        }
         // Place false code as well as jump to start of false code
         opts.nodes.push({t:"Label", label: falseLabel})
         this.#compile(expr[3], opts)
@@ -309,9 +312,6 @@ export class Compiler {
         // tail expr is the last cond so it gets directly evaluated (if all the and condjumps get through)
         // This inherits the parent's destReg and isTail state so we get free tailcall + value stored in right dest reg
         this.#compile(expr[expr.length - 1], opts)
-        if (opts.nodes[opts.nodes.length - 1].t !== "TailCall") {
-            opts.nodes.push({ t: "Jump", label: endLabel })
-        }
         opts.nodes.push({ t: "Label", label: endLabel });
         if (opts.destReg === undefined) opts.scope.freeTemp(targetReg);
     }
@@ -335,9 +335,6 @@ export class Compiler {
         // tail expr is the last cond so it gets directly evaluated (if all the or condjumps get through)
         // This inherits the parent's destReg and isTail state so we get free tailcall + value stored in right dest reg
         this.#compile(expr[expr.length - 1], opts)
-        if (opts.nodes[opts.nodes.length - 1].t !== "TailCall") {
-            opts.nodes.push({ t: "Jump", label: endLabel })
-        }
         opts.nodes.push({ t: "Label", label: endLabel });
         if (opts.destReg === undefined) opts.scope.freeTemp(targetReg);
     }

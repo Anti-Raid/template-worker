@@ -96,10 +96,9 @@ export const OP_APPLY    = Symbol.for("apply")
 export const OP_NOT      = Symbol.for("not");
 export const OP_TYPE     = Symbol.for("type?");
 export const OP_EQ       = Symbol.for("=");
-export const OP_EQ_PTR1  = Symbol.for("eq?");
-export const OP_EQ_PTR2  = Symbol.for("eqv?");
-export const OP_EQ_DEEP1 = Symbol.for("equal?");
-export const OP_EQ_DEEP2 = Symbol.for("equals?");
+export const OP_EQQ  = Symbol.for("eq?");
+export const OP_EQV  = Symbol.for("eqv?");
+export const OP_EQUAL = Symbol.for("equal?");
 
 // Math & Comparisons
 export const OP_LT     = Symbol.for("<");
@@ -153,10 +152,9 @@ export const BUILTINS_OPS = new Set([
     OP_NOT,
     OP_TYPE,
     OP_EQ,
-    OP_EQ_PTR1,
-    OP_EQ_PTR2,
-    OP_EQ_DEEP1,
-    OP_EQ_DEEP2,
+    OP_EQQ,
+    OP_EQV,
+    OP_EQUAL,
 
     // Math & Comparisons
     OP_LT,
