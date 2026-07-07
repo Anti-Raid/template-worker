@@ -309,6 +309,118 @@ result
 
 (error-message (ping 1000))        
     `)).toBe('"Ping Crash!"')
+
+expect(run(`
+(define (long-chain n)
+  (if (= n 0)
+      (error "Second failure")
+      (long-chain (- n 1))))
+
+(define (level-1)
+  (error "First failure"))
+
+(define (level-2)
+  (let ((res (try level-1 '())))
+    (if (error? res)
+        (long-chain 1000) ;; NOT wrapped in its own try -- must be caught
+                           ;; by whatever try wraps level-2 itself, after
+                           ;; running 1000 tail calls under the OUTER scope
+        "unreachable")))
+
+(try level-2 '())
+`)).toContain("Second failure")
+
+expect(run(`
+(define (safe-add a b) (+ a b))
+(define (crash) (error "Boom"))
+
+(define (test)
+  (let ((ok (try safe-add 1 2 '())))
+    (if (= ok 3)
+        (crash)      ;; must be caught by outer try, not confused by prior success
+        "wrong")))
+
+(error-message (try test '()))
+`)).toBe('"Boom"')
+        });
+
+        it('survives tail-call trapdoor inheritance', () => {
+            // What it tests: If a function inside a `try` tail-calls another function,
+            // the TAILCALL opcode replaces the current CallFrame. Does the new 
+            // CallFrame correctly inherit the trySpot?
+            expect(run(`
+                (define (crash-later) (error "Delayed Boom"))
+                (define (tailcaller) (crash-later)) ;; Tailcall!
+                
+                (define (test)
+                    (try tailcaller '()))
+                    
+                (error-message (test))
+            `)).toBe('"Delayed Boom"');
+        });
+
+        it('prevents Zombie Trapdoors in escaping closures', () => {
+            // What it tests: If a closure is CREATED inside a try block, but 
+            // EXECUTED outside of it, it must NOT use the dead try block's trapdoor. 
+            // It must use the trapdoor of its execution context.
+            expect(run(`
+                (define (make-bomb)
+                    (try (lambda () 
+                            (lambda () (error "Zombie Boom"))) 
+                        '()))
+                        
+                (define bomb (make-bomb)) ;; The inner try is now DEAD.
+                
+                (define (test)
+                    (let ((res (try bomb '()))) ;; Wrapped in a NEW outer try
+                        (error-message res)))
+                        
+                (test)
+            `)).toBe('"Zombie Boom"');
+        });
+
+        it('clears success paths after multiple nested closure & builtin tries', () => {
+            // What it tests: A deeper version of the bug we just fixed. 
+            // Interleaving Builtins (synchronous) and Closures (asynchronous) 
+            // success paths. If any of them permanently poison the trySpot, 
+            // the final (crash) will be swallowed or segfault the VM.
+            expect(run(`
+                (define (safe-mul a b) (* a b))
+                (define (safe-add a b) (+ a b))
+                (define (crash) (error "Core Meltdown"))
+
+                (define (test)
+                    (let ((x (try safe-add 10 20 '()))) ;; Sync builtin success
+                        (let ((y (try (lambda () (safe-mul x 2)) '()))) ;; Async closure success
+                            (if (= y 60)
+                                (crash) ;; Outer try must catch this!
+                                "Math failed"))))
+
+                (error-message (try test '()))
+            `)).toBe('"Core Meltdown"');
+        });
+
+        it('intercepts synchronous builtin crashes (Pre-emptive catch)', () => {
+            // What it tests: The specific local try/catch block we added inside TryProc.
+            // If a JS builtin is passed bad arguments directly inside a try block, 
+            // it crashes instantly in JS, bypassing the VM's OpCode loop.
+            expect(run(`
+                ;; + is a builtin. We pass it a string to force a JS-level type error.
+                (define (test)
+                    (try + 1 "a" '()))
+                    
+                (error? (test))
+            `)).toBe('#t');
+        });
+
+        it('handles top-level tailcall returns and crashes cleanly', () => {
+            // What it tests: When destReg is undefined and parent is null.
+            // Ensures the fallback to "TOP_LEVEL" correctly exits the VM 
+            // instead of throwing an unhandled JS exception.
+            
+            // Success path
+            expect(run(`(try + 10 20 '())`)).toBe('30');
+            expect(run(`(error-message (try / 10 "b" '()))`)).toContain("requires numbers"); 
         });
     })
 })

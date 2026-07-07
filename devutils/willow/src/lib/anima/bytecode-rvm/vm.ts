@@ -832,50 +832,38 @@ export class AnimaVM {
                 throw new Error(`try: last argument must be a list but got ${String(finalArg)}`);
             }
 
-            const returnCont: Continuation | null = (destReg === undefined) ? cont.parent : {
+            const trapCont: Continuation | null = (destReg === undefined) ? cont.parent : {
                 type: 'RUNNING',
                 frame: callerFrame,
                 parent: cont.parent,
                 destReg: destReg,
-                trySpot: cont.trySpot // Preserve outer try context
+                trySpot: cont.trySpot
             };
 
             try {
-                // 2. Forge a continuation to pass into the invocation.
-                // This ensures the nested call inherits `returnCont` as its `trySpot`.
-                const tryCont: Continuation = {
-                    type: 'RUNNING',
-                    frame: callerFrame,
-                    parent: cont.parent,
-                    destReg: destReg,
-                    trySpot: returnCont // Inject our specific catch boundary here
-                };
-
-                const resultingCont = this.#invoke(actualProc, tryCont, callerFrame, actualArgs, destReg, 0, actualArgs.length);
+                const resultingCont = this.#invoke(actualProc, cont, callerFrame, actualArgs, destReg, 0, actualArgs.length);
                 
-                // 3. Prevent caller state corruption. 
-                // If the invocation returns synchronously into the current frame (e.g., Built-ins), 
-                // we must discard tryCont and return the original continuation.
-                if (resultingCont.type === "RUNNING" && resultingCont.frame === callerFrame) {
-                    return cont; 
-                }
-                
+                if (resultingCont.type === "RUNNING" && resultingCont.frame !== callerFrame) {
+                    return {
+                        ...resultingCont,
+                        trySpot: trapCont
+                    };
+                }                
                 return resultingCont;
 
             } catch (err) {
-                // 4. Catch synchronous errors (e.g., from Builtins executing in #invoke)
-                // Route them directly to the return destination.
+                // Builtins error etc.
                 const errObj = new ErrorObject(err);
                 
-                if (returnCont === null || returnCont.type !== "RUNNING") {
+                if (trapCont === null || trapCont.type !== "RUNNING") {
                     return { type: 'TERMINAL', value: errObj };
                 }
                 
-                if (returnCont.destReg !== undefined) {
-                    returnCont.frame.regs[returnCont.destReg] = errObj;
+                if (trapCont.destReg !== undefined) {
+                    trapCont.frame.regs[trapCont.destReg] = errObj;
                 }
                 
-                return returnCont;
+                return trapCont;
             }
         } else if (proc instanceof Closure) {
             const template = proc.tmpl;
