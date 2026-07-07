@@ -843,7 +843,7 @@ export class AnimaVM {
             try {
                 const resultingCont = this.#invoke(actualProc, cont, callerFrame, actualArgs, destReg, 0, actualArgs.length);
                 
-                if (resultingCont.type === "RUNNING" && resultingCont.frame !== callerFrame) {
+                if (resultingCont.type === "RUNNING" && resultingCont !== cont && resultingCont !== cont.parent) {
                     return {
                         ...resultingCont,
                         trySpot: trapCont
