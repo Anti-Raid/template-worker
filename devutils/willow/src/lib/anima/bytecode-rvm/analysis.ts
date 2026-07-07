@@ -15,9 +15,9 @@ import { AnalysisScope } from "./scope";
 export class AstAnalysis {
     scopeMap = new WeakMap<any[], AnalysisScope>();
     
-    analyze(ast: any[]) {
+    analyze(ast: any) {
         const baseScope = new AnalysisScope(null)
-        this.scopeMap.set(ast, baseScope)
+        if (Array.isArray(ast)) this.scopeMap.set(ast, baseScope)
         this.visit(ast, baseScope);
         return baseScope
     }

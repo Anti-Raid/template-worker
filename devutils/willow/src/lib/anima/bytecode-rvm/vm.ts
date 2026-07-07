@@ -1,4 +1,4 @@
-import { IProcedure, isDeepEqual, MissingVarError, OP_ADD, OP_CAR, OP_CDR, OP_CONS, OP_CONTAINS, OP_DIV, OP_EMPTY, OP_EQ, OP_EQ_DEEP1, OP_EQ_PTR1, OP_GT, OP_GTE, OP_LAST, OP_LENGTH, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_NOT, OP_REMAINDER, OP_SUB } from "../common";
+import { ExposedProps, IProcedure, isDeepEqual, MissingVarError, OP_ADD, OP_CAR, OP_CDR, OP_CONS, OP_CONTAINS, OP_DIV, OP_EMPTY, OP_EQ, OP_EQ_DEEP1, OP_EQ_PTR1, OP_GT, OP_GTE, OP_LAST, OP_LENGTH, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_NOT, OP_REMAINDER, OP_SUB, OP_UI_GET } from "../common";
 import { isTruthy } from "../common";
 import { Cons } from "../list";
 
@@ -25,11 +25,9 @@ export enum OpCode {
     TAILCALL,
     RETURN,
     NEWCLOSURE,
-    // may be removed later
     BOX,
     UNBOX,
     SETBOX,
-    // not yet used
     MOVE,
 }
 
@@ -381,6 +379,14 @@ export const IBUILTINS: BuiltinFunction[] = [
         if (nargs != 1) throw new Error("display requires 1 argument");
         console.log(regs[startReg])
         return undefined
+    }),
+    new BuiltinFunction(OP_UI_GET, (regs, startReg, nargs) => {
+        if (nargs != 2) throw new Error("ui-get requires 2 arguments (ui-get props key-str)");
+        const props = regs[startReg]
+        if (!(props instanceof ExposedProps)) throw new Error("ui-get requires the first argument to be an instance of ExposedProps")
+        const keyStr = regs[startReg+1]
+        if (typeof keyStr !== "string") throw new Error("ui-get requires the second argument to be a string")
+        return props.get(keyStr)
     })
 ]
 
@@ -408,19 +414,47 @@ class Box {
 }
 
 export class Globals {
-    constructor(public data: Map<symbol, any>, public frozen: boolean = false) {}
+    private constructor(public data: Map<symbol, any>, public frozen: boolean = false, public outer: Globals | null) {}
 
     static newWith(fields: Record<symbol, any>, frozen: boolean = false) {
         const map = new Map()
         Object.getOwnPropertySymbols(fields).forEach((sym) => {
             map.set(sym, fields[sym])
         });
-        return new Globals(map, frozen);
+        return new Globals(map, frozen, null);
     }
 
-    get(varname: symbol) {
-        if (!this.data.has(varname)) throw new MissingVarError(`Variable '${String(varname)}' is not defined in the current scope.`)
-       return this.data.get(varname)
+    nestWith(fields: Record<symbol, any>, frozen: boolean = false) {
+        const map = new Map()
+        Object.getOwnPropertySymbols(fields).forEach((sym) => {
+            map.set(sym, fields[sym])
+        });
+        return new Globals(map, frozen, this);
+    }
+
+    get(varname: symbol): any {
+        if (this.data.has(varname)) {
+            return this.data.get(varname)
+        }
+        if (this.outer) {
+            return this.outer.get(varname)
+        }
+        throw new MissingVarError(`Variable '${String(varname)}' is not defined in the current scope.`)
+    }
+
+    assert(varname: symbol): void {
+        if (this.data.has(varname)) {
+            return
+        }
+        if (this.outer) {
+            return this.outer.assert(varname)
+        }
+        throw new MissingVarError(`Variable '${String(varname)}' is not defined in the current scope.`)
+    }
+
+    set(varname: symbol, data: any) {
+        if (this.frozen) throw new Error(`Variable '${String(varname)}' cannot be set in a frozen scope.`);
+        this.data.set(varname, data)
     }
 }
 
@@ -458,6 +492,7 @@ export class AnimaVM {
             return this.#execnext(frame, scope);
         } catch (err: any) {
             console.log(`${err.stack}\n\nCurrent Frame IP: ${frame.ip}`)
+            throw err
         }
     }
 
@@ -469,6 +504,7 @@ export class AnimaVM {
             return this.#execnext(frame, scope);
         } catch (err: any) {
             console.log(`${err.stack}\n\nCurrent Frame IP: ${frame.ip}`)
+            throw err
         }
     }
 
@@ -546,20 +582,18 @@ export class AnimaVM {
                 case OpCode.LOADGLOBAL: {
                     const destReg = frame.readNext()
                     const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
-                    if (!execScope.data.has(varname)) throw new MissingVarError(`Variable '${String(varname)}' is not defined in the current scope.`)
-                    regs[destReg] = execScope.data.get(varname)
+                    regs[destReg] = execScope.get(varname)
                     break
                 }
                 case OpCode.SETGLOBAL: {
                     const srcReg = frame.readNext()
                     const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
-                    if (execScope.frozen) throw new Error(`Variable '${String(varname)}' cannot be set in a frozen scope.`);
-                    execScope.data.set(varname, regs[srcReg])
+                    execScope.set(varname, regs[srcReg])
                     break
                 }
                 case OpCode.HASGLOBAL: {
                     const varname = frame.getConst(frame.readNext()) as symbol // compiler ensures its a symbol
-                    if (!execScope.data.has(varname)) throw new MissingVarError(`Variable '${String(varname)}' is not defined in the current scope.`)
+                    execScope.assert(varname)
                     break
                 }
                 case OpCode.JIF: {

@@ -1,4 +1,5 @@
-import { OP_APPLY, OP_CALL_CC } from "../common";
+import { OP_APPLY } from "../common";
+import { publicScope } from "./bootstrap";
 import { Compiler } from "./compiler";
 import { deepPrint } from "./utils";
 import { AnimaVM, APPLY_PROC, Globals, IBUILTINS } from "./vm";
@@ -27,12 +28,7 @@ const stmts = [`(begin
                         (loop (- n 1))))
                   (loop 15000))`*/
 
-const GLOBALS = new Globals(new Map())
-for(const builtin of IBUILTINS) {
-  GLOBALS.data.set(builtin.name, builtin)
-}
-GLOBALS.data.set(OP_APPLY, APPLY_PROC)
-
+const GLOBALS = publicScope.nestWith({})
 
 const c = new Compiler()
 for (const code of stmts) {

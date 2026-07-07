@@ -17,12 +17,12 @@ interface CmpOpts {
 }
 
 export class Compiler {
-    s = new ASTStringifier()
-    t = new AnimaTransformer()
-    cvm: AnimaVM
+    #s = new ASTStringifier()
+    #t = new AnimaTransformer()
+    #cvm: AnimaVM
 
     constructor(stepsForClosureGen?: number, maxStepsForClosureGen?: number) {
-        this.cvm = new AnimaVM(stepsForClosureGen, maxStepsForClosureGen)
+        this.#cvm = new AnimaVM(stepsForClosureGen, maxStepsForClosureGen)
     }
 
     compileToClosure(s: string, args: any[] | DottedPair, globals: Globals) {
@@ -33,7 +33,7 @@ export class Compiler {
     compileAstToClosure(bast: any, args: any[] | DottedPair, globals: Globals) {
         const ast = [OP_LAMBDA, args, bast]
         const bc = this.compileRawAst(ast)
-        const res = this.cvm.evaluateRaw(bc, globals) // Use the VM to create the closure
+        const res = this.#cvm.evaluateRaw(bc, globals) // Use the VM to create the closure
         if (!(res instanceof Closure)) throw new Error("internal error: compileToClosure did not return a closure")
         return res
     }
@@ -48,7 +48,7 @@ export class Compiler {
         const astIIfe = implicitIife ? [[OP_LAMBDA, [], ast]] : ast
 
         // Step 1 is to apply the syntax transformation of cond/let/let*/letrec into simple form
-        let trExpr = this.t.transform(astIIfe)
+        let trExpr = this.#t.transform(astIIfe)
         // Step 2 is to analyze our variables so we know what to box and what not to box
         let analyzer = new AstAnalysis()
         const ascope = analyzer.analyze(trExpr)
@@ -71,7 +71,7 @@ export class Compiler {
             if (res) opts.nodes.push(...res)
             return
         } else if (expr instanceof DottedPair) {
-            throw new Error(`bad syntax: illegal use of dotted pair in execution context (consider quoting e.g. ${`'${this.s.stringify(expr)}`})`);
+            throw new Error(`bad syntax: illegal use of dotted pair in execution context (consider quoting e.g. ${`'${this.#s.stringify(expr)}`})`);
         } else if (!Array.isArray(expr)) { // non array (string etc.)
             if (opts.destReg === undefined) return  
             opts.nodes.push({t: "LoadValue", constant: expr, destReg: opts.destReg})

@@ -255,7 +255,6 @@ export const BUILTIN_PROCS: Record<symbol, Builtin> = {
 
         return vm.execproc(proc, args, scope);
     }),
-    // todo
     [OP_NOT]: new Builtin((vm, argCount, expr, scope) => {
         if (argCount != 1) throw new Error("not requires 1 argument");
         return !isTruthy(vm.evalinner(expr[1], scope));
@@ -272,6 +271,7 @@ export const BUILTIN_PROCS: Record<symbol, Builtin> = {
     [OP_GTE]: createCompareOp(">=", (a, b) => a >= b),
     [OP_EQ]:  createCompareOp("=",  (a, b) => a === b),
 
+    // todo
     [OP_TYPE]: new Builtin((vm, argCount, expr, scope) => {
         if(argCount != 1) {
             throw new Error(`type? must be in format ["type?", expr] but only have ${argCount} arguments`)

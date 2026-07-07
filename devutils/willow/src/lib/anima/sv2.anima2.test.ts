@@ -2,24 +2,24 @@
 import { MissingVarError, ASP, isDeepEqual } from './common';
 import { describe, it, expect } from 'vitest';
 import { Cons } from './list';
-import { Anima, AnimaCompiler, ByteCode, ClosureTemplate } from './bytecode-vm/anima';
+import { Anima, ByteCode, ASTStringifier } from './bytecode-rvm/anima';
+import { deepPrint } from './bytecode-rvm/utils';
 
 const bcCache: Record<string, ByteCode> = {}
 describe('Anima', () => {
     let evaluator: Anima = new Anima();
-    let cmp = new AnimaCompiler()
-    evaluator.rootScope.data.set(Symbol.for("port"), 8080)
-    evaluator.rootScope.data.set(Symbol.for("protocol"), "tcp")
-    evaluator.rootScope.data.set(Symbol.for("is_active"), true)
-    evaluator.rootScope.data.set(Symbol.for("user_role"), null)
-
+    let s = new ASTStringifier()
+    evaluator.scope.set(Symbol.for("port"), 8080)
+    evaluator.scope.set(Symbol.for("protocol"), "tcp")
+    evaluator.scope.set(Symbol.for("is_active"), true)
+    evaluator.scope.set(Symbol.for("user_role"), null)
+    
     const run = (expr: string) => {
-        if (bcCache[expr]) return cmp.s.stringify(evaluator.evaluate(bcCache[expr]))
-        const ast = new ASP(expr, true).parse(); // bytecode interpreter supports dotted pairs
-        const bc = cmp.compileExpr(ast)
-        bc.deepPrint()
+        if (bcCache[expr]) return s.stringify(evaluator.evaluateRaw(bcCache[expr]))
+        const bc = evaluator.compiler.compileRaw(expr)
+        deepPrint(bc)
         bcCache[expr] = bc
-        return cmp.s.stringify(evaluator.evaluate(bc));
+        return s.stringify(evaluator.evaluateRaw(bc));
     };
 
     describe('Primitives, Strings & Symbols', () => {

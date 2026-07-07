@@ -1,6 +1,7 @@
+import { OP_APPLY } from "../common";
 import { Cons } from "../list";
 import { Compiler } from "./compiler";
-import { AnimaVM, BuiltinFunction, Globals } from "./vm";
+import { AnimaVM, APPLY_PROC, BuiltinFunction, Globals, IBUILTINS } from "./vm";
 
 class MapObj {
     #iters: (ArrayIterator<any> | Generator<any, void, unknown>)[]
@@ -65,6 +66,7 @@ const privScope = Globals.newWith({
         if(!Array.isArray(regs[startReg])) throw new Error(`internal error: %ArrayPush called on non-array ${regs[startReg]}`)
         return regs[startReg].push(regs[startReg+1])
     }),
+    [OP_APPLY]: APPLY_PROC // technically not needed due to compiler optimizing intrinsics directly but for correctness purposes, keep it
 })
 
 const PRELUDE = `
@@ -95,13 +97,19 @@ const bootstrapComp = new Compiler()
 const PRELUDE_BC = bootstrapComp.compileRaw(PRELUDE)
 bootstrapVM.evaluateRaw(PRELUDE_BC, privScope)
 
-
-export const publicScope = Globals.newWith({}, false); 
+/* Base scope */
+export const publicScope = Globals.newWith({}, true); 
 for (const [sym, value] of privScope.data.entries()) {
     const symName = Symbol.keyFor(sym) || sym.description || "%Unknown";
     
-    // Drop prelude fns in the public root scope
+    // If the func starts with a $, its public
     if (symName.startsWith("$")) {
         publicScope.data.set(Symbol.for(symName.replace('$', '')), value);
     }
 }
+
+// finally, export the builtins
+for(const builtin of IBUILTINS) {
+  publicScope.data.set(builtin.name, builtin)
+}
+publicScope.data.set(OP_APPLY, APPLY_PROC)
