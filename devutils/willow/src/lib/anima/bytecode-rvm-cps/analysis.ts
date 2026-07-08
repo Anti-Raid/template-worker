@@ -89,6 +89,7 @@ type Continuation = { params: any, body: any, callSites: CallSite[], escapes: bo
 export class ContifyAnalyzer {
     public candidates = new Map<any, Continuation>();
     public boundNames = new Map<symbol, any>();
+    public lambdaToSymbol = new Map<any, symbol>();
     public activeLambdas = new Set<any>();
     public knownContinuationSymbols = new Set<symbol>()
 
@@ -101,7 +102,7 @@ export class ContifyAnalyzer {
 
     private registerCandidate(lambdaExpr: any) {
         if (this.candidates.has(lambdaExpr)) return;
-        
+
         const { params, remParams } = unpackLambdaExprArgs(lambdaExpr)
 
         if (params && params.length > 0) {
@@ -171,6 +172,7 @@ export class ContifyAnalyzer {
                 const [sym, rhs] = [expr[1], expr[2]];
                 if (op === OP_DEFINE && this.isEligibleForContification(sym, rhs)) {
                     this.boundNames.set(sym, rhs);
+                    this.lambdaToSymbol.set(rhs, sym);
                     this.registerCandidate(rhs);
                 } else {
                     this.visitValue(rhs);

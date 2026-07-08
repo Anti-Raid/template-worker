@@ -36,13 +36,14 @@ export class Compiler {
         let analyzer = new AstAnalysis()
         const ascope = analyzer.analyze(trExpr)
         // Step 3: Contify analysis
-        const cpsAnalyzed = new ContifyAnalyzer(ascope).analyze(trExpr)
-        console.log(cpsAnalyzed)
+        const contifyAnalyzer = new ContifyAnalyzer(ascope)
+        const contifyTags = contifyAnalyzer.analyze(trExpr)
+        console.log(contifyTags)
 
         const scope = new CompilerScope(null)
         const nodes: Node[] = []
         const retReg = scope.allocTemp(); // no need to free the temp reg as we return?
-        this.#compile(trExpr, {destReg: retReg, nodes, scope, ascope, analyzer})
+        this.#compile(trExpr, { destReg: retReg, nodes, scope, ascope, analyzer })
         const ir = new IR()
         return ir.lower(nodes, scope.numRegs)
     }
@@ -50,7 +51,7 @@ export class Compiler {
     #compile(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         // Raw values
         if (typeof expr === 'symbol') {
-            if (expr === OP_CONT_BASECONT && opts.destReg) {
+            if (expr === OP_CONT_BASECONT && opts.destReg !== undefined) {
                 opts.nodes.push({
                     t: "LoadBaseCont",
                     destReg: opts.destReg

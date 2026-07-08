@@ -1,7 +1,7 @@
 import type { JumpLabel } from "./ir";
 import type { UpVarLoc } from "./vm";
 
-export type Resolve = { type: "Global" } | { type: "Local", index: number } | { type: "Upvar", index: number } | { type: 'Contified', label: JumpLabel, paramRegs: number[] };
+export type Resolve = { type: "Global" } | { type: "Local", index: number } | { type: "Upvar", index: number }
 
 export class VariableMetadata {
     get isBoxed() { return this.isCaptured && this.mutable }
