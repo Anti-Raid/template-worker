@@ -1,9 +1,9 @@
 // Made w/ lots of help from gemini cli
-import { MissingVarError, ASP, isDeepEqual } from './common';
+import { MissingVarError, isDeepEqual } from './common';
 import { describe, it, expect } from 'vitest';
 import { Cons } from './list';
-import { Anima, ByteCode, ASTStringifier } from './bytecode-rvm/anima';
-import { deepPrint } from './bytecode-rvm/utils';
+import { Anima, ByteCode, ASTStringifier } from './bytecode-rvm-cps/anima';
+import { deepPrint } from './bytecode-rvm-cps/utils';
 
 const bcCache: Record<string, ByteCode> = {}
 describe('Anima', () => {

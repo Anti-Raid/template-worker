@@ -119,8 +119,9 @@ export const OP_REMAINDER = Symbol.for("remainder")
 
 // Continuation (IR only)
 //
-// Note: this is interna
+// Note: this is internal
 export const OP_CONT = Symbol("<cont>");
+export const OP_CONT_BASECONT = Symbol("k") 
 
 // Super cursed function
 export const OP_CALL_CC = Symbol.for("call/cc")

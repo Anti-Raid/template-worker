@@ -1,13 +1,13 @@
 import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_AND, OP_APPLY, OP_BEGIN, OP_COND, OP_CONT, OP_CONT_BASECONT, OP_DEFINE, OP_IF, OP_LAMBDA, OP_LET, OP_LETREC, OP_LETSTAR, OP_OR, OP_QUOTE, OP_SET, unpackLambdaExprArgs, wrapMulti } from "../common";
 import { AnimaTransformer } from "../syntax-transformer";
-import { AstAnalysis } from "./analysis";
+import { AstAnalysis, ContifyAnalyzer } from "./analysis";
 import { AnalysisScope, CompilerScope } from "./scope";
-import { IBUILTINS_IDX_MAP } from "./vm";
+import { APPLY_PROC_IDX, BUILTINS_START, IBUILTINS_IDX_MAP } from "./vm";
 import { IR, type Node, JumpLabel, ClosureTemplateIR } from "./ir"
+import { AstCps } from "./ext-transform";
 
 interface CmpOpts {
     destReg?: number // where to store dest reg
-    isTail: boolean // whether this is a tail-call or not (for tco)
     nodes: Node[]
     scope: CompilerScope,
 
@@ -30,17 +30,19 @@ export class Compiler {
     compileRawAst(ast: any) {
         // Step 1 is to apply the syntax transformation of cond/let/let*/letrec into simple form
         let trExpr = this.#t.transform(ast)
+        trExpr = new AstCps().transform(trExpr) // then apply cps transform
+        console.log(this.#s.stringify(trExpr))
         // Step 2 is to analyze our variables so we know what to box and what not to box
         let analyzer = new AstAnalysis()
         const ascope = analyzer.analyze(trExpr)
+        // Step 3: Contify analysis
+        const cpsAnalyzed = new ContifyAnalyzer(ascope).analyze(trExpr)
+        console.log(cpsAnalyzed)
 
         const scope = new CompilerScope(null)
         const nodes: Node[] = []
         const retReg = scope.allocTemp(); // no need to free the temp reg as we return?
-        this.#compile(trExpr, {destReg: retReg, isTail: true, nodes, scope, ascope, analyzer})
-        if (!this.#nodesEndsInRet(nodes)) {
-            nodes.push({t: "Return", reg: retReg})
-        }
+        this.#compile(trExpr, {destReg: retReg, nodes, scope, ascope, analyzer})
         const ir = new IR()
         return ir.lower(nodes, scope.numRegs)
     }
@@ -48,6 +50,13 @@ export class Compiler {
     #compile(expr: any, opts: CmpOpts, syntaxCtx?: string) {
         // Raw values
         if (typeof expr === 'symbol') {
+            if (expr === OP_CONT_BASECONT && opts.destReg) {
+                opts.nodes.push({
+                    t: "LoadBaseCont",
+                    destReg: opts.destReg
+                })
+                return
+            }
             const res = this.#getVar(expr, opts, opts.destReg)
             if (res) opts.nodes.push(...res)
             return
@@ -89,27 +98,24 @@ export class Compiler {
                 case OP_CONT:
                     this.#compileLambda(expr, opts, syntaxCtx)
                     return
-                case OP_AND:
-                    this.#compileAnd(expr, opts, syntaxCtx)
-                    return
-                case OP_OR:
-                    this.#compileOr(expr, opts, syntaxCtx)
-                    return
                 case OP_APPLY:
-                    this.#optApply(expr, opts)
+                    this.#optIntrinsicNormal(expr, APPLY_PROC_IDX, opts, syntaxCtx)
                     return
                 case OP_LET:
                 case OP_LETSTAR:
                 case OP_LETREC:
                 case OP_COND:
                     throw new Error("internal error: let/let*/letrec/cond should be transformed by AnimaTransform prior to reaching here")
+                case OP_AND:
+                case OP_OR:
+                    throw new Error("internal error: and/or should be transformed by AstCps prior to reaching here")
             }
         }
 
         // intrinsic
         const builtinsIdx = IBUILTINS_IDX_MAP.get(operator)
         if (builtinsIdx !== undefined) {
-            this.#optIntrinsicNormal(expr, builtinsIdx, opts, syntaxCtx)
+            this.#optIntrinsicNormal(expr, BUILTINS_START+builtinsIdx, opts, syntaxCtx)
             return
         }
 
@@ -125,10 +131,8 @@ export class Compiler {
         }
 
         for (let i = 1; i < expr.length; i++) {
-            // the child is a tail call only if we are a tail call and its the last child
             const isLastChild = (i === expr.length - 1);
-            const childIsTail = isLastChild && opts.isTail; 
-            this.#compile(expr[i], { ...opts, destReg: isLastChild ? opts.destReg : undefined, isTail: childIsTail });
+            this.#compile(expr[i], { ...opts, destReg: isLastChild ? opts.destReg : undefined });
         }
     }
 
@@ -140,23 +144,18 @@ export class Compiler {
 
         // We need to compile the first arg first and leave it to a temp reg
         const condReg = opts.scope.allocTemp()
-        this.#compile(expr[1], { ...opts, destReg: condReg, isTail: false })
-        // we place the bytecode as <jumpiffalse [false code]><true code><jump [|]><false code>|
+        this.#compile(expr[1], { ...opts, destReg: condReg })
+        // Note that the entire AST is in CPS form so the final end label jump isnt needed 
         const falseLabel = new JumpLabel()
-        const endLabel = new JumpLabel()
         opts.nodes.push({t: "CondJump", cond: "False", label: falseLabel, reg: condReg})
         opts.scope.freeTemp(condReg) // we can free the reg here
-        // Place true code
+
+        // Place true code, which will always fall into a tailcall
         this.#compile(expr[2], opts)
-        // Place jump to end
-        if (!this.#nodesEndsInRet(opts.nodes)) {
-            opts.nodes.push({t: "Jump", label: endLabel})
-        }
+
         // Place false code as well as jump to start of false code
         opts.nodes.push({t:"Label", label: falseLabel})
         this.#compile(expr[3], opts)
-        // Fix jump to end to now jump to after false code
-        opts.nodes.push({t: "Label", label: endLabel})
     }
 
     #compileQuote(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
@@ -169,9 +168,9 @@ export class Compiler {
 
     // note that the syntax transformer alr handles defines inside a lambda so
     #compileDefine(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
-        if (opts.scope.outer) {
-            throw new Error(`internal error: define found inside lambda-expr or other lexical scoping (let/let*/letrec), internal defines should be transformed by AnimaTransform prior to reaching here`);
-        }
+        /*if (opts.scope.outer) {
+            throw new Error(`internal error: define found inside lambda-expr or other lexical scoping (let/letstar/letrec), internal defines should be transformed by AnimaTransform prior to reaching here`);
+        }*/
 
         if(expr.length !== 3) {
             throw new Error(`define must be in format ["define" varname arg] (post transformation) but have ${expr.length-1} arguments, complex defines should be transformed by AnimaTransform prior to reaching here`)
@@ -184,7 +183,7 @@ export class Compiler {
 
         // We need to compile the second arg first and leave it on a temp reg
         const valReg = opts.scope.allocTemp();
-        this.#compile(expr[2], { ...opts, destReg: valReg, isTail: false });
+        this.#compile(expr[2], { ...opts, destReg: valReg });
         opts.nodes.push({t: "SetGlobal", srcReg: valReg, sym: expr[1]})
         opts.scope.freeTemp(valReg)
         if (opts.destReg !== undefined) {
@@ -197,7 +196,7 @@ export class Compiler {
 
         // We need to compile the second arg first and leave it on a temp reg
         const valReg = opts.scope.allocTemp();
-        this.#compile(expr[2], { ...opts, destReg: valReg, isTail: false });
+        this.#compile(expr[2], { ...opts, destReg: valReg });
         const res = this.#setVar(expr[1], opts, valReg)
         if(res) opts.nodes.push(...res)
         opts.scope.freeTemp(valReg)
@@ -234,70 +233,10 @@ export class Compiler {
         // Once we've verified the syntax, we can then drop the entire lambda if its not actually needed
         if (opts.destReg === undefined) return
 
-        // Compile lambda body
-        const retReg = lambdaScope.allocTemp() // no need to free the temp reg as we return?
-        this.#compile(wrapMulti(expr.slice(2)), {...opts, destReg: retReg, isTail: true, nodes: lambdaNodes, scope: lambdaScope, ascope })
-        if (!this.#nodesEndsInRet(lambdaNodes)) {
-            lambdaNodes.push({t: "Return", reg: retReg})
-        }
+        // Compile lambda body (which will later be evaluated as the result of a continuation)
+        this.#compile(wrapMulti(expr.slice(2)), {...opts, destReg: undefined, nodes: lambdaNodes, scope: lambdaScope, ascope })
         const template = new ClosureTemplateIR(params, remParams, lambdaNodes, lambdaScope.numRegs, lambdaScope.upvars);
         opts.nodes.push({t: "NewClosure", template: template, destReg: opts.destReg})
-    }
-
-    #nodesEndsInRet(nodes: Node[]) {
-        if (nodes.length === 0) return false // we need a return if nodes.length === 0
-        const lastNode = nodes[nodes.length-1]
-        if (lastNode.t === "TailCall" || lastNode.t === "ApplyTailCall" || lastNode.t === "IBuiltinTail" || lastNode.t === "Return") {
-            return true // all of these ops alr return
-        }
-        return false
-    }
-
-    #compileAnd(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
-        // if (argCount === 0) return true; 
-        if (expr.length === 1) {
-            if (opts.destReg !== undefined) opts.nodes.push({t: "LoadValue", destReg: opts.destReg, constant: true})
-            return;
-        }
-
-        const endLabel = new JumpLabel()
-
-        // OPTIMIZATION: Notice that the only falsy value in scheme is #f so the moment we fall through
-        // the condJump with a cond of False, the value in the dest reg is *false*
-        const targetReg = opts.destReg === undefined ? opts.scope.allocTemp() : opts.destReg!;
-        for (let i = 1; i < expr.length - 1; i++) {
-            this.#compile(expr[i], { ...opts, destReg: targetReg, isTail: false })
-            opts.nodes.push({ t: "CondJump", reg: targetReg, label: endLabel, cond: "False" })
-        }
-
-        // tail expr is the last cond so it gets directly evaluated (if all the and condjumps get through)
-        // This inherits the parent's destReg and isTail state so we get free tailcall + value stored in right dest reg
-        this.#compile(expr[expr.length - 1], opts)
-        opts.nodes.push({ t: "Label", label: endLabel });
-        if (opts.destReg === undefined) opts.scope.freeTemp(targetReg);
-    }
-
-    #compileOr(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
-        // if (argCount === 0) return false; 
-        if (expr.length === 1) {
-            if (opts.destReg !== undefined) opts.nodes.push({t: "LoadValue", destReg: opts.destReg, constant: false})
-            return;
-        }
-
-        const endLabel = new JumpLabel()
-
-        // OPTIMIZATION: Notice that scheme needs the or to short circuit with the last eval'd value soooo
-        const targetReg = opts.destReg === undefined ? opts.scope.allocTemp() : opts.destReg!;
-        for (let i = 1; i < expr.length - 1; i++) {
-            this.#compile(expr[i], { ...opts, destReg: targetReg, isTail: false })
-            opts.nodes.push({ t: "CondJump", reg: targetReg, label: endLabel, cond: "True" })
-        }
-
-        // tail expr is the last cond so it gets directly evaluated (if all the or condjumps get through)
-        // This inherits the parent's destReg and isTail state so we get free tailcall + value stored in right dest reg
-        this.#compile(expr[expr.length - 1], opts)
-        opts.nodes.push({ t: "Label", label: endLabel });
-        if (opts.destReg === undefined) opts.scope.freeTemp(targetReg);
     }
 
     // a normal call
@@ -309,45 +248,19 @@ export class Compiler {
 
         // We need to compile the proc and place it on its own tempval
         const procReg = opts.scope.allocTemp();
-        this.#compile(expr[0], { ...opts, destReg: procReg, isTail: false })
+        this.#compile(expr[0], { ...opts, destReg: procReg })
 
         // Push all arguments to a contiguous reg block
         const nargs = expr.length-1 // [func a b c] -> 5 - 2 = 3 args
         const startReg = opts.scope.regAlloc.allocBlock(nargs);
         for (let i = 1; i < expr.length; i++) {
-            this.#compile(expr[i], { ...opts, destReg: startReg+i-1, isTail: false })
+            this.#compile(expr[i], { ...opts, destReg: startReg+i-1 })
         }
 
-        if (opts.isTail) {
-            opts.nodes.push({t: "TailCall", nargs, procReg, startReg})
-        } else {
-            const targetReg = opts.destReg === undefined ? opts.scope.allocTemp() : opts.destReg!;
-            opts.nodes.push({t: "Call", destReg: targetReg, nargs, procReg, startReg})
-            if (opts.destReg === undefined) opts.scope.freeTemp(targetReg);
-        }
+        opts.nodes.push({t: "TailCall", nargs, procReg, startReg})
 
         opts.scope.regAlloc.freeBlock(startReg, nargs)
         opts.scope.freeTemp(procReg)
-    }
-
-    // apply blocks can be optimized to either APPLYCALL or APPLYTAILCALL
-    #optApply(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
-        // Push all arguments to a contiguous reg block
-        const nargs = expr.length-1 // [apply a b c]
-        const startReg = opts.scope.regAlloc.allocBlock(nargs);
-        for (let i = 1; i < expr.length; i++) {
-            this.#compile(expr[i], { ...opts, destReg: startReg+i-1, isTail: false })
-        }
-
-        if (opts.isTail) {
-            opts.nodes.push({t: "ApplyTailCall", nargs, startReg})
-        } else {
-            const targetReg = opts.destReg === undefined ? opts.scope.allocTemp() : opts.destReg!;
-            opts.nodes.push({t: "ApplyCall", destReg: targetReg, nargs, startReg})
-            if (opts.destReg === undefined) opts.scope.freeTemp(targetReg);
-        }
-
-        opts.scope.regAlloc.freeBlock(startReg, nargs)
     }
 
     #optIIFE(expr: any[], opts: CmpOpts, syntaxCtx?: string): boolean {
@@ -370,7 +283,7 @@ export class Compiler {
             const argRegs: number[] = [];
             for(let i = 0; i < args.length; i++) {
                 const tempReg = opts.scope.allocTemp();
-                this.#compile(args[i], { ...opts, destReg: tempReg, isTail: false });
+                this.#compile(args[i], { ...opts, destReg: tempReg });
                 argRegs.push(tempReg);
             }
 
@@ -401,23 +314,16 @@ export class Compiler {
         }
     }
 
-    /** Optimizes intrinsic ops to a INTRINSIC_ADD/SUB/MUL/DIV */ 
+    /** Optimizes intrinsic ops IBuiltinTail */ 
     #optIntrinsicNormal(expr: any[], builtinIdx: number, opts: CmpOpts, syntaxCtx?: string) {
         // Push args
         const nargs = expr.length - 1; // expr - Symbol(op)
         const startReg = opts.scope.regAlloc.allocBlock(nargs);
         for(let i = 1; i < expr.length; i++) {
-            this.#compile(expr[i], { ...opts, destReg: startReg + (i - 1), isTail: false });
+            this.#compile(expr[i], { ...opts, destReg: startReg + (i - 1) });
         }
 
-        if (opts.isTail) {
-            opts.nodes.push({t: "IBuiltinTail", startReg, nargs, builtinIdx})
-        } else {
-            const targetReg = opts.destReg === undefined ? opts.scope.allocTemp() : opts.destReg!;
-            opts.nodes.push({t: "IBuiltin", destReg: targetReg, startReg, nargs, builtinIdx})
-            if (opts.destReg === undefined) opts.scope.freeTemp(targetReg);
-        }
-
+        opts.nodes.push({t: "IBuiltinTail", startReg, nargs, builtinIdx})
         opts.scope.regAlloc.freeBlock(startReg, nargs)
     }
 

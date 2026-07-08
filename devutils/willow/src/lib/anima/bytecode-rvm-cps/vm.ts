@@ -21,14 +21,13 @@ export enum OpCode {
     JIF, // jump if false
     JIT, // jump if true
     JUMP, // unconditional jump
-    CALL,
     TAILCALL,
-    RETURN,
     NEWCLOSURE,
     BOX,
     UNBOX,
     SETBOX,
     MOVE,
+    LOADBASECONT
 }
 
 export class ByteCode {
@@ -447,6 +446,18 @@ export const APPLY_PROC = new ApplyProc()
 // Marker for `try` intrinsic proc
 export class TryProc extends IProcedure {}
 export const TRY_PROC = new TryProc()
+class TrySuccessProc extends IProcedure {
+    constructor(
+        public nextCont: any, 
+        public restoredHandler?: ExceptionHandler
+    ) {
+        super();
+    }
+}
+
+// (internal+cps-form only) base cont for cps form
+class CPSBaseCont extends IProcedure {}
+const CPS_BASE_CONT = new CPSBaseCont()
 
 const createRegs = (numRegs: number) => {
     return new Array(numRegs).fill(undefined)
@@ -512,7 +523,12 @@ export class Globals {
     }
 }
 
-type RunningCont = { type: 'RUNNING'; frame: CallFrame; parent: Continuation | null, trySpot: Continuation | null | undefined, destReg?: number }
+export type ExceptionHandler = {
+    returnCont: any;     // k 
+    parent: ExceptionHandler | undefined;
+}
+
+type RunningCont = { type: 'RUNNING'; frame: CallFrame; parent: Continuation | null, handler?: ExceptionHandler }
 type Continuation = RunningCont
 | { type: "TERMINAL", value: any }
 
@@ -564,7 +580,8 @@ export class AnimaVM {
     }
 
     #execnext(initialFrame: CallFrame, execScope: Globals) {
-        let cont: Continuation = { type: 'RUNNING', frame: initialFrame, parent: null, trySpot: undefined }
+        let rootCont: Continuation = { type: 'RUNNING', frame: initialFrame, parent: null };
+        let cont: Continuation = rootCont
         while(cont.type === 'RUNNING') {
             this.steps++;
             if (this.maxSteps && this.steps > this.maxSteps) {
@@ -715,35 +732,17 @@ export class AnimaVM {
                         regs[destReg] = regs[srcReg]
                         break
                     }
-                    case OpCode.RETURN: {
-                        const reg = frame.readNext()
-                        const retVal = frame.regs[reg];
-                        if (cont.parent === null) {
-                            cont = { type: 'TERMINAL', value: retVal };
-                        } else {
-                            const parent: Continuation = cont.parent;
-                            if (parent.type === "RUNNING" && parent.destReg !== undefined) {
-                                parent.frame.regs[parent.destReg] = retVal;
-                            }
-                            cont = parent; // Jump back to the parent continuation
-                        }
-                        break;               
-                    }
-                    case OpCode.CALL: {
-                        const procIdx = frame.readNext()
-                        const proc = (procIdx === APPLY_PROC_IDX) ? APPLY_PROC : (procIdx < BUILTINS_START) ? regs[procIdx] : IBUILTINS[procIdx - BUILTINS_START];
-                        const destReg = frame.readNext();
-                        const startReg = frame.readNext();
-                        const nargs = frame.readNext();
-                        cont = this.#invoke(proc, cont, frame, regs, destReg, startReg, nargs)
-                        break;
-                    }
                     case OpCode.TAILCALL: {
                         const procIdx = frame.readNext()
                         const proc = (procIdx === APPLY_PROC_IDX) ? APPLY_PROC : (procIdx < BUILTINS_START) ? regs[procIdx] : IBUILTINS[procIdx - BUILTINS_START];
                         const startReg = frame.readNext();
                         const nargs = frame.readNext();
-                        cont = this.#invoke(proc, cont, frame, regs, undefined, startReg, nargs);
+                        cont = this.#invoke(proc, cont, frame, regs, startReg, nargs);
+                        break;
+                    }
+                    case OpCode.LOADBASECONT: {
+                        const destReg = frame.readNext()
+                        regs[destReg] = CPS_BASE_CONT
                         break;
                     }
                     default:
@@ -751,19 +750,18 @@ export class AnimaVM {
                 }
             } catch (err) {
                 // We either resolve the try-call or rethrow
-                if (cont.type === "RUNNING" && cont.trySpot !== undefined) {
-                    const retVal = new ErrorObject(err)
-                    if (cont.trySpot === null || cont.trySpot.type !== "RUNNING") {
-                        return retVal
-                    }
-                    const target: RunningCont = cont.trySpot
+                if (cont.type === "RUNNING" && cont.handler !== undefined) {
+                    const errObj = new ErrorObject(err);
+                    const currHandler = cont.handler
+                    const errorCont: Continuation = {
+                        type: 'RUNNING',
+                        frame: frame,
+                        parent: cont.parent,
+                        handler: currHandler.parent
+                    };
 
-                    if (target.destReg !== undefined) {
-                        target.frame.regs[target.destReg] = retVal;
-                    }
-
-                    cont = target
-                    continue
+                    cont = this.#invoke(currHandler.returnCont, errorCont, frame, [errObj], 0, 1);
+                    continue;
                 }
                 throw err
             }
@@ -778,104 +776,78 @@ export class AnimaVM {
         cont: Continuation,
         callerFrame: CallFrame, 
         callerArgs: any[], 
-        destReg: number | undefined, 
         startReg: number, 
         nargs: number
     ): Continuation {
         if (cont.type !== "RUNNING") throw new Error("internal error: cannot invoke function using non-running cont")
         if (proc instanceof BuiltinFunction) {
-            const retVal = proc.cb(callerArgs, startReg, nargs)
-            if (destReg !== undefined) {
-                callerFrame.regs[destReg] = retVal
-            } else {
-                if (cont.parent === null) return { type: 'TERMINAL', value: retVal };
-                
-                const parent = cont.parent;
-                if (parent.type === "RUNNING" && parent.destReg !== undefined) {
-                    parent.frame.regs[parent.destReg] = retVal;
-                }
-                return parent;
-            }
-            return cont // no change to continuation needed
+            const contArg = callerArgs[startReg];
+            const retVal = proc.cb(callerArgs, startReg+1, nargs-1)
+            return this.#invoke(contArg, cont, callerFrame, [retVal], 0, 1);
         } else if (proc instanceof ApplyProc) {
-            const actualProc = callerArgs[startReg];
+            const contArg = callerArgs[startReg];
+            const actualProc = callerArgs[startReg+1];
 
             // create a virtual set of registers to hold the arguments and copy args to it
-            const actualArgs = [];
-            for (let i = 1; i < nargs - 1; i++) {
+            const actualArgs = [contArg];
+            for (let i = 2; i < nargs - 1; i++) {
                 actualArgs.push(callerArgs[startReg + i]);
             }
             const finalArg = callerArgs[startReg + nargs - 1]
             if (Array.isArray(finalArg) || finalArg instanceof Cons) {
                 actualArgs.push(...finalArg);
-            } else if (finalArg === null) {
-                // Empty list
-            } else {
+            } else if (finalArg !== null) {
                 throw new Error(`apply: last argument must be a list but got ${String(finalArg)}`);
             }
-            return this.#invoke(actualProc, cont, callerFrame, actualArgs, destReg, 0, actualArgs.length)
+            return this.#invoke(actualProc, cont, callerFrame, actualArgs, 0, actualArgs.length);
         } else if (proc instanceof TryProc) {
-            const actualProc = callerArgs[startReg];
+            const contArg = callerArgs[startReg];
+            const actualProc = callerArgs[startReg+1];
+
+            const newHandler: ExceptionHandler = {
+                returnCont: contArg,
+                parent: cont.handler
+            };
+            const successProc = new TrySuccessProc(contArg, cont.handler);
 
             // create a virtual set of registers to hold the arguments and copy args to it
-            const actualArgs = [];
-            for (let i = 1; i < nargs - 1; i++) {
+            const actualArgs = [successProc];
+            for (let i = 2; i < nargs - 1; i++) {
                 actualArgs.push(callerArgs[startReg + i]);
             }
             const finalArg = callerArgs[startReg + nargs - 1]
             if (Array.isArray(finalArg) || finalArg instanceof Cons) {
                 actualArgs.push(...finalArg);
-            } else if (finalArg === null) {
-                // Empty list
-            } else {
+            } else if (finalArg !== null) {
                 throw new Error(`try: last argument must be a list but got ${String(finalArg)}`);
             }
 
-            const trapCont: Continuation | null = (destReg === undefined) ? cont.parent : {
-                type: 'RUNNING',
-                frame: callerFrame,
-                parent: cont.parent,
-                destReg: destReg,
-                trySpot: cont.trySpot
-            };
-
+            const tryCont: Continuation = { type: 'RUNNING', frame: callerFrame, parent: cont.parent, handler: newHandler };
             try {
-                const resultingCont = this.#invoke(actualProc, cont, callerFrame, actualArgs, destReg, 0, actualArgs.length);
-                
-                if (resultingCont.type === "RUNNING" && resultingCont !== cont && resultingCont !== cont.parent) {
-                    return {
-                        ...resultingCont,
-                        trySpot: trapCont
-                    };
-                }                
-                return resultingCont;
-
+                return this.#invoke(actualProc, tryCont, callerFrame, actualArgs, 0, actualArgs.length);
             } catch (err) {
                 // Builtins error etc.
                 const errObj = new ErrorObject(err);
-                
-                if (trapCont === null || trapCont.type !== "RUNNING") {
-                    return { type: 'TERMINAL', value: errObj };
-                }
-                
-                if (trapCont.destReg !== undefined) {
-                    trapCont.frame.regs[trapCont.destReg] = errObj;
-                }
-                
-                return trapCont;
+                return this.#invoke(contArg, cont, callerFrame, [errObj], 0, 1);
             }
-        } else if (proc instanceof Closure) {
-            const template = proc.tmpl;
-            const pregs = this.#createClosureArg(proc.tmpl, nargs, callerArgs, startReg)
-            const parentCont = (destReg === undefined) ? cont.parent : {
+        } else if (proc instanceof TrySuccessProc) {
+            if (nargs !== 1) throw new Error(`try-success proc continuation expected 1 argument (the final result), but got ${nargs}`)
+            const resultArg = callerArgs[startReg];
+            const restoreCont: Continuation = {
                 type: 'RUNNING',
                 frame: callerFrame,
                 parent: cont.parent,
-                destReg: destReg,
-                trySpot: cont.trySpot // Preserve outer try context
-            } as Continuation | null;
+                handler: proc.restoredHandler 
+            };
+            return this.#invoke(proc.nextCont, restoreCont, callerFrame, [resultArg], 0, 1);
+        } else if (proc instanceof Closure) {
+            const template = proc.tmpl;
+            const pregs = this.#createClosureArg(proc.tmpl, nargs, callerArgs, startReg)
             const nextFrame = new CallFrame(template.code, pregs, proc.upvars, 0, callerFrame.id+1);
-            return { type: 'RUNNING', frame: nextFrame, parent: parentCont, trySpot: cont.trySpot };
+            return { type: 'RUNNING', frame: nextFrame, parent: cont.parent, handler: cont.handler };
+        } else if (proc instanceof CPSBaseCont) {
+            if (nargs !== 1) throw new Error(`Base continuation expected 1 argument (the final result), but got ${nargs}`)
+            return { type: 'TERMINAL', value: callerArgs[startReg] }
         } else {
             throw new Error(`Attempted to call a non-procedure: ${String(proc)}`);
         }

@@ -1,4 +1,4 @@
-import { ASP, ASTStringifier, DottedPair, OP_AND, OP_BEGIN, OP_CONT, OP_DEFINE, OP_IF, OP_LAMBDA, OP_OR, OP_QUOTE, OP_SET, wrapMulti } from "../common";
+import { ASP, ASTStringifier, DottedPair, OP_AND, OP_BEGIN, OP_CONT, OP_CONT_BASECONT, OP_DEFINE, OP_IF, OP_LAMBDA, OP_OR, OP_QUOTE, OP_SET, wrapMulti } from "../common";
 import { AnimaTransformer } from "../syntax-transformer";
 import { AstAnalysis, ContifyAnalyzer } from "./analysis";
 import { Compiler } from "./compiler";
@@ -15,7 +15,7 @@ export class AstCps {
     #transform(expr: any) {
         const srcMap = new Map()
         let transformed = T(expr, initialCont, new Map(), srcMap)
-        console.log(srcMap)
+        //console.log(srcMap)
         return transformed
     }
 }
@@ -39,8 +39,7 @@ const makeContFunc = (cont: any): ((val: any) => any) => {
     return f
 } 
 
-const INITIAL_K = Symbol.for("k")
-const initialCont = makeContFunc(INITIAL_K) 
+const initialCont = makeContFunc(OP_CONT_BASECONT) 
 
 const makeDynamicCont = (srcMap: SrcMap, origNode: any, k: (v: any) => any): any => {
     if ((k as any)[CONT_TGT] !== undefined) {
@@ -291,6 +290,7 @@ const symGen = (base: string) => {
   (counter-a))
 */
 // and 1 2 3 4
+/*
 const simpleProg = `(begin
                   (define (loop n)
                     (if (= n 0)
@@ -298,13 +298,10 @@ const simpleProg = `(begin
                         (loop (- n 1))))
                   (loop 15000))
 `
-/*const simpleProg = `(and #f #t)`*/
 console.log("Started")
 const t1 = performance.now()
 const baseAst = new ASP(simpleProg, true).parse()
 const synTrans = new AnimaTransformer().transform(baseAst)
-//const synTransStr = new ASTStringifier().stringify(synTrans)
-//console.log(synTransStr)
 const cpsTrans = new AstCps().transform(synTrans)
 const astStr = new ASTStringifier().stringify(cpsTrans)
 const t2 = performance.now()
@@ -317,3 +314,4 @@ const cpsAnalyzed = new ContifyAnalyzer(ascope).analyze(cpsTrans)
 console.log(cpsAnalyzed)
 const bc = new Compiler().compileRawAst(cpsTrans)
 console.log(deepPrint(bc))
+*/

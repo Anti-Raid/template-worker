@@ -48,41 +48,15 @@ export type Node = {
     t: "Jump",
     label: JumpLabel
 } | {
-    t: "Call",
-    procReg: number,
-    destReg: number, // ret value is stored in destReg
-    startReg: number,
-    nargs: number,
-} | {
     t: "TailCall",
     procReg: number,
     // does not return to caller so no ret value needed
     startReg: number,
     nargs: number,
 } | {
-    t: "ApplyCall",
-    destReg: number, // ret value is stored in destReg
-    startReg: number,
-    nargs: number,
-} | {
-    t: "ApplyTailCall",
-    // does not return to caller so no ret value needed
-    startReg: number,
-    nargs: number,
-} | {
-    t: "Return",
-    reg: number
-} | {
     t: "NewClosure",
     destReg: number,
     template: ClosureTemplateIR
-} | {
-    // A call to a builtin function
-    t: "IBuiltin",
-    builtinIdx: number,
-    destReg: number,
-    startReg: number,
-    nargs: number
 } | {
     // A call to a builtin function
     t: "IBuiltinTail",
@@ -104,6 +78,9 @@ export type Node = {
     t: "SetBox",
     destReg: number,
     srcReg: number
+} | {
+    t: "LoadBaseCont",
+    destReg: number
 }
 
 export class ConstPool {
@@ -151,7 +128,7 @@ export class IR {
     constructor() {}
 
     #nodeOverwritesDestReg(node: Node) {
-        if(node.t === "Move" || node.t === "LoadValue" || node.t === "Box" || node.t === "Unbox" || node.t === "Call") {
+        if(node.t === "Move" || node.t === "LoadValue" || node.t === "Box" || node.t === "Unbox") {
             return node
         }
         return null
@@ -168,11 +145,8 @@ export class IR {
         if (node.t === "SetBox") return node.srcReg === reg;
         if (node.t === "SetUpvar") return node.srcReg === reg;
         if (node.t === "SetGlobal") return node.srcReg === reg;
-        if (node.t === "Call") return (node.procReg === reg || this.#numInRange(node.startReg, node.startReg + node.nargs, reg));
-        if (node.t === "Return") return node.reg === reg;
         if (node.t === "TailCall") return this.#numInRange(node.startReg, node.startReg + node.nargs, reg)
         if (node.t === "Label") return false // its just a label
-        if (node.t === "IBuiltin") return this.#numInRange(node.startReg, node.startReg + node.nargs, reg)
         if (node.t === "HasGlobal" || node.t === "LoadValue" || node.t === "LoadGlobal" || node.t === "LoadUpvar") return false // this reads from either const pool or upvars, not a register
         return true; // if we dont know, just assume it reads
     }
@@ -300,34 +274,14 @@ export class IR {
                     jumpIdxs.set(jidx, node.label)
                     break
                 }
-                case "Call": {
-                    inst.push(OpCode.CALL, node.procReg, node.destReg, node.startReg, node.nargs)
-                    break
-                }
                 case "TailCall": {
                     inst.push(OpCode.TAILCALL, node.procReg, node.startReg, node.nargs)
                     break
                 }
-                case "ApplyCall": {
-                    inst.push(OpCode.CALL, APPLY_PROC_IDX, node.destReg, node.startReg, node.nargs)
-                    break
-                }
-                case "ApplyTailCall": {
-                    inst.push(OpCode.TAILCALL, APPLY_PROC_IDX, node.startReg, node.nargs)
-                    break
-                }
-                case "IBuiltin": {
-                    inst.push(OpCode.CALL, BUILTINS_START+node.builtinIdx, node.destReg, node.startReg, node.nargs)
-                    break
-                }
                 case "IBuiltinTail": {
-                    inst.push(OpCode.TAILCALL, BUILTINS_START+node.builtinIdx, node.startReg, node.nargs)
+                    inst.push(OpCode.TAILCALL, node.builtinIdx, node.startReg, node.nargs)
                     break
                 }   
-                case "Return": {
-                    inst.push(OpCode.RETURN, node.reg)
-                    break
-                }
                 case "NewClosure": {
                     const closureBc = this.lower(node.template.code, node.template.numRegs)
                     const ct = new ClosureTemplate(node.template.params, node.template.remParams, closureBc, node.template.upvarLocs)
@@ -355,6 +309,10 @@ export class IR {
                 }
                 case "Move": {
                     inst.push(OpCode.MOVE, node.destReg, node.srcReg)
+                    break
+                }
+                case "LoadBaseCont": {
+                    inst.push(OpCode.LOADBASECONT, node.destReg)
                     break
                 }
                 default:
