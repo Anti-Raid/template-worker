@@ -374,13 +374,12 @@ export class AnimaVM {
     // Note: if destReg is not set, we treat it as a tailcall
     #invoke(
         proc: any, 
-        cont: Continuation,
+        cont: RunningCont,
         callerFrame: CallFrame, 
         callerArgs: any[], 
         startReg: number, 
         nargs: number
     ): Continuation {
-        if (cont.type !== "RUNNING") throw new Error("internal error: cannot invoke function using non-running cont")
         if (proc instanceof BuiltinFunction) {
             const contArg = callerArgs[startReg];
             const retVal = proc.cb(callerArgs, startReg+1, nargs-1)
