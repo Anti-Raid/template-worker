@@ -2,9 +2,10 @@ import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_AND, 
 import { AnimaTransformer } from "../syntax-transformer";
 import { AstAnalysis, ContifyAnalyzer } from "./analysis";
 import { AnalysisScope, CompilerScope } from "./scope";
-import { APPLY_PROC_IDX, BUILTINS_START, IBUILTINS_IDX_MAP, OP_CONT, OP_CONT_BASECONT } from "./vm";
+import { APPLY_PROC_IDX, BUILTINS_START, OP_CONT, OP_CONT_BASECONT } from "./vm";
 import { IR, type Node, JumpLabel, ClosureTemplateIR } from "./ir"
 import { AstCps } from "./ext-transform";
+import { IBUILTINS_IDX_MAP } from "../std";
 
 interface CmpOpts {
     destReg?: number // where to store dest reg

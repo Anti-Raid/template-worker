@@ -579,6 +579,7 @@ export class BS {
     static readonly NULL = 0x08
     static readonly BOOL = 0x09
     static readonly CLASS = 0x0A
+    static readonly UNDEFINED = 0xFF
 
     constructor(initialCapacity: number = 1024) {
         this.#buffer = new Uint32Array(initialCapacity);
@@ -698,6 +699,12 @@ export class BS {
         this.#buffer[this.#length++] = BS.NULL;
     }
 
+    /** Writes a undefined value */
+    writeUndefined(): void {
+        this.#ensureCapacity(1);
+        this.#buffer[this.#length++] = BS.UNDEFINED;
+    }
+
     /** Writes a custom class implementing SerializableBytecode */
     writeSerializable(obj: SerializableBytecode): void {
         this.#ensureCapacity(1);
@@ -711,6 +718,8 @@ export class BS {
     writeValue(val: any): void {
         if (val === null) {
             this.writeNull();
+        } else if (val === undefined) {
+            this.writeUndefined()
         } else if (typeof val === 'number') {
             this.writeU32(val);
         } else if (typeof val === 'string') {
@@ -774,7 +783,7 @@ export class BSReader {
     /**
      * Reads the next dynamically typed value based on its tag.
      */
-    read(): number | Uint32Array | string | symbol | boolean | null | any[] | Map<any, any> | Record<string, any> {
+    read(): number | Uint32Array | string | symbol | boolean | null | undefined | any[] | Map<any, any> | Record<string, any> {
         if (!this.hasMore) throw new Error("Unexpected end of bytecode");
 
         const tag = this.#buffer[this.#cursor++];
@@ -858,6 +867,10 @@ export class BSReader {
                 return factory(this);
             }
 
+            case BS.UNDEFINED: {
+                return undefined;
+            }
+
             default:
                 throw new Error(`Unknown data tag encountered: 0x${tag.toString(16)} at offset ${this.#cursor - 1}`);
         }
@@ -918,6 +931,12 @@ export class BSReader {
         return this.read() as null;
     }
 
+    /** Helper to explicitly expect an null */
+    readUndefined(): undefined {
+        if (this.peekTag() !== BS.UNDEFINED) throw new Error("Expected undefined");
+        return this.read() as undefined;
+    }
+
     /** Helper to explicitly expect a serializable */
     readSerializable<T extends SerializableBytecode>(expectedBsid?: string): T {
         if (this.peekTag() !== BS.CLASS) throw new Error("Expected class");
@@ -931,4 +950,97 @@ export interface SerializableBytecode {
     bsid: string
     // Returns the underlying bytecode instructions as a Uint32array
     dump(w: BS): void;
+}
+
+/** A simple structure for registering constants */
+export class ConstPool {
+    #known: Map<unknown, number>;
+    public constants: any[]
+    constructor() {
+        this.constants = []
+        this.#known = new Map()
+
+        // pre-reserve constants
+        this.push(false)
+        this.push(true)
+        this.push(null)
+        this.push(undefined)
+    }
+
+    // Register a object with the constant pool
+    push(s: unknown) {
+        // Try to deduplicate anything
+        if (s === null || typeof s !== "object") {
+            const idx = this.#known.get(s)
+            if(idx !== undefined) {
+                return idx
+            } else {
+                const idx = this.constants.push(s) - 1
+                this.#known.set(s, idx)
+                return idx
+            }
+        }
+
+        // TODO: Deduplicate stuff later
+        return this.constants.push(this.#freezeObj(s)) - 1
+    }
+
+    mutPush(s: unknown) {
+        return this.constants.push(s) - 1
+    }
+
+    #freezeObj(obj: any) {
+        if (typeof obj !== "object") return obj
+        Object.keys(obj).forEach(prop => {
+            if (typeof obj[prop] === 'object' && !Object.isFrozen(obj[prop])) {
+                this.#freezeObj(obj[prop]);
+            }
+        });
+        return Object.freeze(obj);
+    }
+}
+
+export class Globals {
+    private constructor(public data: Map<symbol, any>, public frozen: boolean = false, public outer: Globals | null) {}
+
+    static newWith(fields: Record<symbol, any>, frozen: boolean = false) {
+        const map = new Map()
+        Object.getOwnPropertySymbols(fields).forEach((sym) => {
+            map.set(sym, fields[sym])
+        });
+        return new Globals(map, frozen, null);
+    }
+
+    nestWith(fields: Record<symbol, any>, frozen: boolean = false) {
+        const map = new Map()
+        Object.getOwnPropertySymbols(fields).forEach((sym) => {
+            map.set(sym, fields[sym])
+        });
+        return new Globals(map, frozen, this);
+    }
+
+    get(varname: symbol): any {
+        if (this.data.has(varname)) {
+            return this.data.get(varname)
+        }
+        if (this.outer) {
+            return this.outer.get(varname)
+        }
+        throw new MissingVarError(`Variable '${String(varname)}' is not defined in the current scope.`)
+    }
+
+    assert(varname: symbol): void {
+        if (this.data.has(varname)) {
+            return
+        }
+        if (this.outer) {
+            return this.outer.assert(varname)
+        }
+        throw new MissingVarError(`Variable '${String(varname)}' is not defined in the current scope.`)
+    }
+
+    set(varname: symbol, data: any) {
+        if (this.frozen) throw new Error(`Variable '${String(varname)}' cannot be set in a frozen scope.`);
+        this.data.set(varname, data)
+    }
 }

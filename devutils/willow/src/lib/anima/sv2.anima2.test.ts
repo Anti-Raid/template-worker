@@ -1,13 +1,14 @@
 // Made w/ lots of help from gemini cli
-import { MissingVarError, isDeepEqual } from './common';
+import { ASTStringifier, MissingVarError, isDeepEqual } from './common';
 import { describe, it, expect } from 'vitest';
 import { Cons } from './list';
-import { Anima, ByteCode, ASTStringifier } from './bytecode-rvm/anima';
-import { deepPrint } from './bytecode-rvm/utils';
+import { impl } from './bytecode-rvm/meta';
+import { Anima, type ByteCode } from './anima';
 
+const vmImpl = impl
 const bcCache: Record<string, ByteCode> = {}
 describe('Anima', () => {
-    let evaluator: Anima = new Anima();
+    let evaluator = new Anima(vmImpl)
     let s = new ASTStringifier()
     evaluator.scope.set(Symbol.for("port"), 8080)
     evaluator.scope.set(Symbol.for("protocol"), "tcp")
@@ -16,8 +17,8 @@ describe('Anima', () => {
     
     const run = (expr: string) => {
         if (bcCache[expr]) return s.stringify(evaluator.evaluateRaw(bcCache[expr]))
-        const bc = evaluator.compiler.compileRaw(expr)
-        deepPrint(bc)
+        const bc = evaluator.compileRaw(expr)
+        evaluator.deepPrint(bc)
         bcCache[expr] = bc
         return s.stringify(evaluator.evaluateRaw(bc));
     };

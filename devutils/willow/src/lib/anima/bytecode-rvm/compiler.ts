@@ -2,8 +2,8 @@ import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_AND, 
 import { AnimaTransformer } from "../syntax-transformer";
 import { AstAnalysis } from "./analysis";
 import { AnalysisScope, CompilerScope } from "./scope";
-import { IBUILTINS_IDX_MAP } from "./vm";
 import { IR, type Node, JumpLabel, ClosureTemplateIR } from "./ir"
+import { IBUILTINS_IDX_MAP } from "../std";
 
 interface CmpOpts {
     destReg?: number // where to store dest reg

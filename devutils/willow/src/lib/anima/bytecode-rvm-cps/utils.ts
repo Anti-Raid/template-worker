@@ -1,5 +1,6 @@
 import { BS, BSReader, type SerializableBytecode } from "../common"
-import { APPLY_PROC_IDX, BUILTINS_START, ByteCode, Closure, ClosureTemplate, IBUILTINS, OpCode } from "./vm"
+import { IBUILTINS } from "../std"
+import { APPLY_PROC_IDX, BUILTINS_START, ByteCode, Closure, ClosureTemplate, OpCode } from "./vm"
 
 const constToString = (s: any): string => {
     if(typeof s === "symbol") {
@@ -38,15 +39,7 @@ const stringifyInst = (inst: ByteCode): string[] => {
         const opcode: OpCode = inst.inst[idx];
         let line = `${lineNum}: `;
 
-        switch (opcode) {
-            case OpCode.LOADTRUE:
-            case OpCode.LOADFALSE:
-            case OpCode.LOADEMPTYLIST:
-            case OpCode.LOADVOID:
-                line += `${padOp(OpCode[opcode])} r${inst.inst[idx + 1]}`;
-                idx += 2; 
-                break;
-                
+        switch (opcode) {                
             case OpCode.JUMP:
                 line += `${padOp("JUMP")} #${inst.inst[idx + 1]}`; 
                 idx += 2;

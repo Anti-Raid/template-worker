@@ -1,7 +1,7 @@
 import { Anima } from "./anima";
-import { deepPrint } from "./utils";
+import { impl } from "./bytecode-rvm/meta";
 
-const anima = new Anima()
+const anima = new Anima(impl)
 const simpleProg = `(begin
                   (define (loop n)
                     (if (= n 0)
@@ -10,7 +10,7 @@ const simpleProg = `(begin
                   (loop 15000))
 `
 const bc = anima.compileRaw(simpleProg)
-deepPrint(bc)
+impl.deepPrint(bc)
 const t1 = performance.now()
 const res = anima.evaluateRaw(bc)
 const t2 = performance.now()

@@ -1,3 +1,4 @@
+import { ConstPool } from "../common";
 import { APPLY_PROC_IDX, BUILTINS_START, ByteCode, Closure, ClosureTemplate, OpCode, type UpVarLoc } from "./vm";
 
 export class JumpLabel {
@@ -81,47 +82,6 @@ export type Node = {
 } | {
     t: "LoadBaseCont",
     destReg: number
-}
-
-export class ConstPool {
-    #known: Map<unknown, number>;
-    public constants: any[]
-    constructor() {
-        this.constants = []
-        this.#known = new Map()
-    }
-
-    // Register a symbol with the constant pool
-    push(s: unknown) {
-        // Try to deduplicate anything
-        if (s === null || typeof s !== "object") {
-            const symIdx = this.#known.get(s)
-            if(symIdx !== undefined) {
-                return symIdx
-            } else {
-                const idx = this.constants.push(s) - 1
-                this.#known.set(s, idx)
-                return idx
-            }
-        }
-
-        // TODO: Deduplicate stuff later
-        return this.constants.push(this.#freezeObj(s)) - 1
-    }
-
-    mutPush(s: unknown) {
-        return this.constants.push(s) - 1
-    }
-
-    #freezeObj(obj: any) {
-        if (typeof obj !== "object") return obj
-        Object.keys(obj).forEach(prop => {
-            if (typeof obj[prop] === 'object' && !Object.isFrozen(obj[prop])) {
-                this.#freezeObj(obj[prop]);
-            }
-        });
-        return Object.freeze(obj);
-    }
 }
 
 export class IR {
@@ -225,15 +185,6 @@ export class IR {
                         } else {
                             inst.push(OpCode.LOADCONST, node.destReg, cpool.push(v))
                         }
-                        continue
-                    } else if (typeof v === "boolean") {
-                        inst.push((v ? OpCode.LOADTRUE : OpCode.LOADFALSE), node.destReg)
-                        continue
-                    } else if((Array.isArray(v) && v.length === 0) || v === null) {
-                        inst.push(OpCode.LOADEMPTYLIST, node.destReg)
-                        continue
-                    } else if (v === undefined) {
-                        inst.push(OpCode.LOADVOID, node.destReg)
                         continue
                     } else {
                         inst.push(OpCode.LOADCONST, node.destReg, cpool.push(v))
