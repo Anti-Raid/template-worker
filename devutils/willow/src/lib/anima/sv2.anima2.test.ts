@@ -2,8 +2,8 @@
 import { ASTStringifier, MissingVarError, isDeepEqual } from './common';
 import { describe, it, expect } from 'vitest';
 import { Cons } from './list';
-import { impl } from './bytecode-rvm/meta';
 import { Anima, type ByteCode } from './anima';
+import { impl } from './bytecode-rvm/meta';
 
 const vmImpl = impl
 const bcCache: Record<string, ByteCode> = {}
