@@ -333,7 +333,7 @@ export class IR {
                     const ct = new ClosureTemplate(node.template.params, node.template.remParams, closureBc, node.template.upvarLocs)
                     if(ct.upvarLocs.length === 0) {
                         // We can just directly push the template as a raw constant in the pool
-                        const cidx = cpool.mutPush(new Closure(ct))
+                        const cidx = cpool.mutPush(Closure.fromTemplate(ct))
                         inst.push(OpCode.LOADCONST, node.destReg, cidx)
                     } else {
                         const ctidx = cpool.mutPush(ct)

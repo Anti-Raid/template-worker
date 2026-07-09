@@ -1,4 +1,5 @@
-import { APPLY_PROC_IDX, BUILTINS_START, Closure, ClosureTemplate, IBUILTINS, OpCode, type ByteCode } from "./vm"
+import { BS, BSReader, type SerializableBytecode } from "../common"
+import { APPLY_PROC_IDX, BUILTINS_START, ByteCode, Closure, ClosureTemplate, IBUILTINS, OpCode } from "./vm"
 
 const constToString = (s: any): string => {
     if(typeof s === "symbol") {
@@ -158,4 +159,18 @@ export const deepPrint = (bc: ByteCode) => {
             console.log(`Const #${i} (c.fn):\n${stringifyInst(c.tmpl.code).join("\n")}`)
         }
     }
+}
+
+export const dumpFull = (b: SerializableBytecode): Uint32Array => {
+    const bs = new BS()
+    bs.writeValue(b)
+    return bs.finalize()
+}
+
+export const readFull = (b: Uint32Array): SerializableBytecode => {
+    const bsr = new BSReader(b)
+    ByteCode.register(bsr)
+    ClosureTemplate.register(bsr)
+    Closure.register(bsr)
+    return bsr.readSerializable()
 }

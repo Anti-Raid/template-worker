@@ -117,12 +117,6 @@ export const OP_DIV    = Symbol.for("/");
 export const OP_MODULO = Symbol.for("modulo");
 export const OP_REMAINDER = Symbol.for("remainder")
 
-// Continuation (IR only)
-//
-// Note: this is internal
-export const OP_CONT = Symbol("<cont>");
-export const OP_CONT_BASECONT = Symbol("k") 
-
 // Super cursed function
 export const OP_CALL_CC = Symbol.for("call/cc")
 
@@ -563,4 +557,378 @@ export const wrapMulti = (exprs: any[]) => {
     if (exprs.length === 0) return []; 
     if (exprs.length === 1) return exprs[0];
     return [OP_BEGIN, ...exprs];
+}
+
+/**
+ * Bytecode storage
+ * Internal format:
+ * <objtype><data>
+ */
+export class BS {
+    #buffer: Uint32Array;
+    #length: number = 0;
+    #textEncoder = new TextEncoder();
+
+    static readonly U32 = 0x01
+    static readonly U32ARR = 0x02
+    static readonly STR = 0x03
+    static readonly SYMBOL = 0x04
+    static readonly ARR = 0x05
+    static readonly MAP = 0x06
+    static readonly OBJ = 0x07
+    static readonly NULL = 0x08
+    static readonly BOOL = 0x09
+    static readonly CLASS = 0x0A
+
+    constructor(initialCapacity: number = 1024) {
+        this.#buffer = new Uint32Array(initialCapacity);
+    }
+
+    // Ensures we have enough space, doubling the buffer if necessary
+    #ensureCapacity(needed: number) {
+        if (this.#length + needed > this.#buffer.length) {
+            const newSize = Math.max(this.#buffer.length * 2, this.#length + needed);
+            const newBuffer = new Uint32Array(newSize);
+            newBuffer.set(this.#buffer);
+            this.#buffer = newBuffer;
+        }
+    }
+
+    /** Write a single 32-bit word (e.g., an opcode or register index) 
+     * 
+     * Format: <U32><val>
+    */
+    writeU32(val: number): void {
+        this.#ensureCapacity(2);
+        this.#buffer[this.#length++] = BS.U32
+        this.#buffer[this.#length++] = val
+    }
+
+    /** Write an array of 32-bit words
+     * 
+     * Format: <U32ARR><length><arr>
+     */
+    writeU32Arr(arr: Uint32Array): void {
+        this.#ensureCapacity(2 + arr.length);
+        this.#buffer[this.#length++] = BS.U32ARR
+        this.#buffer[this.#length++] = arr.length
+        this.#buffer.set(arr, this.#length);
+        this.#length += arr.length;
+    }
+
+    /** Writes a string */
+    writeString(str: string): void {
+        return this.#writeString(str, BS.STR)
+    }
+
+    /** Writes a non-unique/interned/Symbol.for() symbol */
+    writeSymbol(sym: symbol): void {
+        const str = Symbol.keyFor(sym);
+        if (str === undefined) throw new Error("Cannot write unique symbol")
+        return this.#writeString(str, BS.SYMBOL)
+    }
+
+    /** * Writes a string (for symbols/constants). 
+     * Format: <STR (op)><length><utf8 packed into 32-bit words>
+     */
+    #writeString(str: string, strop: number): void {
+        const bytes = this.#textEncoder.encode(str);
+        const wordsNeeded = Math.ceil(bytes.length / 4);
+        this.#ensureCapacity(2 + wordsNeeded);
+        this.#buffer[this.#length++] = strop
+        this.#buffer[this.#length++] = bytes.length
+        
+        for (let i = 0; i < bytes.length; i += 4) {
+            let word = 0;
+            word |= (bytes[i] || 0);
+            word |= (bytes[i + 1] || 0) << 8;
+            word |= (bytes[i + 2] || 0) << 16;
+            word |= (bytes[i + 3] || 0) << 24;
+            this.#buffer[this.#length++] = word >>> 0;
+        }
+    }
+
+    /** 
+     * Writes a heterogeneous array containing any supported types 
+     * 
+     * Format: <ARR><LEN><VALS>
+    */
+    writeArray(arr: any[]): void {
+        this.#ensureCapacity(2);
+        this.#buffer[this.#length++] = BS.ARR;
+        this.#buffer[this.#length++] = arr.length;
+        for (const item of arr) {
+            this.writeValue(item);
+        }
+    }
+
+    /** Writes a Map (key-value pairs) */
+    writeMap(map: Map<any, any>): void {
+        this.#ensureCapacity(2);
+        this.#buffer[this.#length++] = BS.MAP;
+        this.#buffer[this.#length++] = map.size;
+        for (const [key, val] of map.entries()) {
+            this.writeValue(key);
+            this.writeValue(val);
+        }
+    }
+
+    /** Writes a plain JavaScript Object (Record<string, any>) */
+    writeObject(obj: Record<string, any>): void {
+        const entries = Object.entries(obj);
+        this.#ensureCapacity(2);
+        this.#buffer[this.#length++] = BS.OBJ;
+        this.#buffer[this.#length++] = entries.length;
+        for (const [key, val] of entries) {
+            this.writeValue(key);
+            this.writeValue(val);
+        }
+    }
+
+    /** Writes a boolean value */
+    writeBool(val: boolean): void {
+        this.#ensureCapacity(2);
+        this.#buffer[this.#length++] = BS.BOOL;
+        this.#buffer[this.#length++] = val ? 1 : 0;
+    }
+
+    /** Writes a null value */
+    writeNull(): void {
+        this.#ensureCapacity(1);
+        this.#buffer[this.#length++] = BS.NULL;
+    }
+
+    /** Writes a custom class implementing SerializableBytecode */
+    writeSerializable(obj: SerializableBytecode): void {
+        this.#ensureCapacity(1);
+        this.#buffer[this.#length++] = BS.CLASS;
+        this.writeString(obj.bsid);
+        obj.dump(this);
+    }
+
+
+    /** Helper to dynamically write any supported type */
+    writeValue(val: any): void {
+        if (val === null) {
+            this.writeNull();
+        } else if (typeof val === 'number') {
+            this.writeU32(val);
+        } else if (typeof val === 'string') {
+            this.writeString(val);
+        } else if (typeof val === 'symbol') {
+            this.writeSymbol(val);
+        } else if (typeof val === 'boolean') {
+            this.writeBool(val);
+        } else if (val instanceof Uint32Array) {
+            this.writeU32Arr(val);
+        } else if (Array.isArray(val)) {
+            this.writeArray(val);
+        } else if (val instanceof Map) {
+            this.writeMap(val);
+        } else if (typeof val === 'object' && 'bsid' in val && 'dump' in val && typeof val.dump === 'function') {
+            this.writeSerializable(val as SerializableBytecode);
+        } else if (typeof val === 'object') {
+            this.writeObject(val);
+        } else {
+            throw new Error(`Unsupported type for serialization: ${typeof val}`);
+        }
+    }
+
+    /** Returns the final dumped bytecode array */
+    finalize(): Uint32Array {
+        return this.#buffer.slice(0, this.#length);
+    }
+}
+
+export class BSReader {
+    #buffer: Uint32Array;
+    #cursor: number = 0;
+    #textDecoder = new TextDecoder();
+    #factories = new Map<string, (r: BSReader) => any>();
+
+    constructor(buffer: Uint32Array) {
+        this.#buffer = buffer;
+    }
+
+    get hasMore(): boolean {
+        return this.#cursor < this.#buffer.length;
+    }
+
+    /**
+     * Registers a factory function capable of deserializing a specific class type.
+     * @param bsid The unique identifier matching the SerializableBytecode.bsid
+     * @param factory A function that reads from the reader and returns the constructed class
+     */
+    registerFactory(bsid: string, factory: (r: BSReader) => any): void {
+        this.#factories.set(bsid, factory);
+    }
+
+    /**
+     * Peeks at the tag of the next value without advancing the cursor.
+     */
+    peekTag(): number {
+        if (!this.hasMore) throw new Error("Unexpected end of bytecode");
+        return this.#buffer[this.#cursor];
+    }
+
+    /**
+     * Reads the next dynamically typed value based on its tag.
+     */
+    read(): number | Uint32Array | string | symbol | boolean | null | any[] | Map<any, any> | Record<string, any> {
+        if (!this.hasMore) throw new Error("Unexpected end of bytecode");
+
+        const tag = this.#buffer[this.#cursor++];
+
+        switch (tag) {
+            case BS.U32:
+                return this.#buffer[this.#cursor++];
+            
+            case BS.U32ARR: {
+                const len = this.#buffer[this.#cursor++];
+                // We use slice to give a detached copy of the array chunk
+                const arr = this.#buffer.slice(this.#cursor, this.#cursor + len);
+                this.#cursor += len;
+                return arr;
+            }
+            
+            case BS.STR:
+            case BS.SYMBOL: {
+                const byteLen = this.#buffer[this.#cursor++];
+                const wordsToRead = Math.ceil(byteLen / 4);
+                const bytes = new Uint8Array(byteLen);
+                
+                let byteIndex = 0;
+                for (let i = 0; i < wordsToRead; i++) {
+                    const word = this.#buffer[this.#cursor++];
+                    if (byteIndex < byteLen) bytes[byteIndex++] = word & 0xFF;
+                    if (byteIndex < byteLen) bytes[byteIndex++] = (word >> 8) & 0xFF;
+                    if (byteIndex < byteLen) bytes[byteIndex++] = (word >> 16) & 0xFF;
+                    if (byteIndex < byteLen) bytes[byteIndex++] = (word >> 24) & 0xFF;
+                }
+                
+                const str = this.#textDecoder.decode(bytes);
+                return tag === BS.SYMBOL ? Symbol.for(str) : str;
+            }
+
+            case BS.ARR: {
+                const len = this.#buffer[this.#cursor++];
+                const arr = new Array(len);
+                for (let i = 0; i < len; i++) {
+                    arr[i] = this.read();
+                }
+                return arr;
+            }
+
+            case BS.MAP: {
+                const len = this.#buffer[this.#cursor++];
+                const map = new Map();
+                for (let i = 0; i < len; i++) {
+                    const key = this.read();
+                    const val = this.read();
+                    map.set(key, val);
+                }
+                return map;
+            }
+
+            case BS.OBJ: {
+                const len = this.#buffer[this.#cursor++];
+                const obj: Record<string, any> = Object.create(null);
+                for (let i = 0; i < len; i++) {
+                    const key = this.read();
+                    const val = this.read();
+                    obj[key as string] = val;
+                }
+                return obj;
+            }
+
+            case BS.NULL:
+                return null;
+            
+            case BS.BOOL:
+                return this.#buffer[this.#cursor++] === 1;
+
+            case BS.CLASS: {
+                // Read the class ID using the STR tag deserializer logic
+                const bsid = this.readString();
+                const factory = this.#factories.get(bsid);
+                if (!factory) {
+                    throw new Error(`no factory registered for SerializableBytecode class '${bsid}'`);
+                }
+                // The factory is expected to read its own internal state from the reader
+                return factory(this);
+            }
+
+            default:
+                throw new Error(`Unknown data tag encountered: 0x${tag.toString(16)} at offset ${this.#cursor - 1}`);
+        }
+    }
+
+    /** Helper to explicitly expect a U32 */
+    readU32(): number {
+        if (this.peekTag() !== BS.U32) throw new Error("Expected U32");
+        const val = this.read();
+        return val as number;
+    }
+
+    /** Helper to explicitly expect a Uint32Array */
+    readU32Arr(): Uint32Array {
+        if (this.peekTag() !== BS.U32ARR) throw new Error("Expected Uint32Array");
+        return this.read() as Uint32Array;
+    }
+
+    /** Helper to explicitly expect a string */
+    readString(): string {
+        if (this.peekTag() !== BS.STR) throw new Error("Expected string");
+        return this.read() as string;
+    }
+
+    /** Helper to explicitly expect a string */
+    readSymbol(): symbol {
+        if (this.peekTag() !== BS.SYMBOL) throw new Error("Expected string");
+        return this.read() as symbol;
+    }
+
+    /** Helper to explicitly expect an Array */
+    readArray(): any[] {
+        if (this.peekTag() !== BS.ARR) throw new Error("Expected Array");
+        return this.read() as any[];
+    }
+
+    /** Helper to explicitly expect a Map */
+    readMap(): Map<any, any> {
+        if (this.peekTag() !== BS.MAP) throw new Error("Expected Map");
+        return this.read() as Map<any, any>;
+    }
+
+    /** Helper to explicitly expect an object */
+    readObject(): Record<string, any> {
+        if (this.peekTag() !== BS.OBJ) throw new Error("Expected Object");
+        return this.read() as Record<string, any>;
+    }
+
+    /** Helper to explicitly expect an boolean */
+    readBool(): boolean {
+        if (this.peekTag() !== BS.BOOL) throw new Error("Expected bool");
+        return this.read() as boolean;
+    }
+
+    /** Helper to explicitly expect an null */
+    readNull(): null {
+        if (this.peekTag() !== BS.NULL) throw new Error("Expected null");
+        return this.read() as null;
+    }
+
+    /** Helper to explicitly expect a serializable */
+    readSerializable<T extends SerializableBytecode>(expectedBsid?: string): T {
+        if (this.peekTag() !== BS.CLASS) throw new Error("Expected class");
+        const res = this.read() as T;
+        if (expectedBsid !== undefined && res.bsid != expectedBsid) throw new Error(`Expected ${expectedBsid} but got ${res.bsid}`)
+        return res
+    }
+}
+
+export interface SerializableBytecode {
+    bsid: string
+    // Returns the underlying bytecode instructions as a Uint32array
+    dump(w: BS): void;
 }

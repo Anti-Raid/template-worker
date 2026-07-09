@@ -3,13 +3,13 @@ import {
   DottedPair,
   OP_LAMBDA,
   OP_SET,
-  OP_CONT,
   OP_IF,
   OP_BEGIN,
   OP_DEFINE,
   unpackLambdaExprArgs,
 } from "../common";
 import { AnalysisScope } from "./scope";
+import { OP_CONT } from "./vm";
 
 // Analyzes a fully transformed AST to handle scoping prior to actual compilation. This lets us avoid boxing of primitives
 export class AstAnalysis {

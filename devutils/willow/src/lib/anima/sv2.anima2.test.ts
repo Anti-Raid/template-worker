@@ -2,8 +2,8 @@
 import { MissingVarError, isDeepEqual } from './common';
 import { describe, it, expect } from 'vitest';
 import { Cons } from './list';
-import { Anima, ByteCode, ASTStringifier } from './bytecode-rvm-cps/anima';
-import { deepPrint } from './bytecode-rvm-cps/utils';
+import { Anima, ByteCode, ASTStringifier } from './bytecode-rvm/anima';
+import { deepPrint } from './bytecode-rvm/utils';
 
 const bcCache: Record<string, ByteCode> = {}
 describe('Anima', () => {
@@ -245,6 +245,41 @@ describe('Anima', () => {
         });
     })
 
+    describe('apply', () => {
+        it('applies a procedure to a single list of arguments', () => {
+            expect(run(`(apply + '(1 2 3 4))`)).toBe("10");
+            expect(run(`(apply * '(2 3 4))`)).toBe("24");
+        });
+
+        it('handles preceding standalone arguments before the final list', () => {
+            expect(run(`(apply + 100 200 '(1 2))`)).toBe("303");
+            expect(run(`(apply - 100 '(50 25))`)).toBe("25");
+        });
+
+        it('works flawlessly with user-defined closures', () => {
+            const script = `
+                (begin
+                  (define (multiply-add a b c) (+ (* a b) c))
+                  (apply multiply-add 10 '(5 2)))
+            `;
+            // (10 * 5) + 2 = 52
+            expect(run(script)).toBe("52"); 
+        });
+
+        it('handles the empty list gracefully', () => {
+            const script = `
+                (begin
+                  (define (return-five) 5)
+                  (apply return-five '()))
+            `;
+            expect(run(script)).toBe("5");
+        });
+
+        it('throws an error if the last argument is not a list', () => {
+            expect(() => run(`(apply + 1 2 3)`)).toThrow(/must be a list/);
+        });
+    });
+
     describe('Try/Catch', () => {
         it('basic try-catch', () => {
             expect(run("(try (lambda () + abc) '())")).toContain("Variable 'Symbol(abc)' is not defined");
@@ -380,10 +415,6 @@ expect(run(`
         });
 
         it('clears success paths after multiple nested closure & builtin tries', () => {
-            // What it tests: A deeper version of the bug we just fixed. 
-            // Interleaving Builtins (synchronous) and Closures (asynchronous) 
-            // success paths. If any of them permanently poison the trySpot, 
-            // the final (crash) will be swallowed or segfault the VM.
             expect(run(`
                 (define (safe-mul a b) (* a b))
                 (define (safe-add a b) (+ a b))
@@ -423,6 +454,234 @@ expect(run(`
             expect(run(`(error-message (try / 10 "b" '()))`)).toContain("requires numbers"); 
         });
     })
+
+    describe('Math Operations', () => {
+        it('performs basic arithmetic', () => {
+            expect(run("(+ 10 5)")).toBe("15");
+            expect(run("(- 10 5)")).toBe("5");
+            expect(run("(* 10 5)")).toBe("50");
+            expect(run("(/ 10 5)")).toBe("2");
+            expect(run("(modulo 10 3)")).toBe("1");
+        });
+    });
+
+    describe('Data Structures & Types', () => {
+        it('creates lists and evaluates length', () => {
+            expect(run("(list 1 2 3)")).toEqual("(1 2 3)");
+            expect(run(`(length (list "a" "b"))`)).toBe("2");
+            expect(run(`(length "string_len")`)).toBe("10");
+        });
+
+        it('checks contains', () => {
+            expect(run("(contains? (list 1 2) 2)")).toBe("#t");
+            expect(run("(contains? (list 1 2) 3)")).toBe("#f");
+        });
+
+        it('evaluates type? with JS Symbols', () => {
+            expect(run("(type? port)")).toBe('"number"');
+            expect(run("(type? protocol)")).toBe('"string"');
+            expect(run("(type? user_role)")).toBe('"list"');
+            expect(run("(type? 'my_symbol)")).toBe('"symbol"');
+        });
+    });
+
+    describe('Lexical Scoping & Closures', () => {
+        it('executes defines correctly', () => {
+            const script = `
+                (define x 10)
+                (define y 20)
+                (+ x y)
+            `;
+            expect(run(script)).toBe("30");
+        });
+
+        it('creates and calls a lambda with arguments', () => {
+            const script = `
+                (begin
+                  (define (add a b) (+ a b))
+                  (add 5 7))
+            `;
+            expect(run(script)).toBe("12");
+        });
+
+        it('creates and calls a lambda with multiple body expressions', () => {
+            const script = `
+                (begin
+                  (define counter 0)
+                  (define (increment)
+                    (set! counter (+ counter 1))
+                    counter)
+                  (increment))
+            `;
+            expect(run(script)).toBe("1");
+        });
+
+        it('respects closure scope (variables enclosed at creation)', () => {
+            const script = `
+                (begin
+                  (define x 100)
+                  (define (make_adder y) (+ x y))
+                  (define x 999)
+                  (make_adder 5))
+            `;
+            expect(run(script)).toBe("1004");
+        });
+    });
+
+    describe('quote operator & Native Symbols', () => {
+        it('quotes primitive numbers', () => {
+            expect(run("'42")).toBe("42");
+        });
+
+        it('quotes Symbols perfectly', () => {
+            expect(run("'x")).toBe("x");
+        });
+
+        it('protects lists and retains inner native types', () => {
+            expect(run("'(+ 1 2)")).toEqual("(+ 1 2)");
+        });
+
+        it('protects nested lists perfectly', () => {
+            expect(run("'(1 (2 3) 4)")).toEqual("(1 (2 3) 4)");
+        });
+
+        it('handles nested quotes recursively', () => {
+            expect(run("''100")).toEqual("(quote 100)");
+        });
+
+        it('throws an error if given too many arguments natively', () => {
+            expect(() => run("(quote 1 2)")).toThrow();
+        });
+    });
+
+    describe('cond special form', () => {
+        it('Matches the first truthy condition', () => {
+            const script = `
+                (cond 
+                  (#t "first")
+                  (#t "second"))
+            `;
+            expect(run(script)).toBe('"first"');
+        });
+
+        it('Skips falsey conditions and matches later ones', () => {
+            const script = `
+                (cond 
+                  (#f "first")
+                  ((= 1 2) "second")
+                  ((> 5 3) "third"))
+            `;
+            expect(run(script)).toBe('"third"');
+        });
+
+        it('Falls back to the else clause if nothing matches', () => {
+            const script = `
+                (cond 
+                  (#f "first")
+                  (#f "second")
+                  (else "fallback"))
+            `;
+            expect(run(script)).toBe('"fallback"');
+        });
+
+        it('Returns void if no conditions match and there is no else clause', () => {
+            const script = `
+                (cond 
+                  (#f "first")
+                  ((= 1 2) "second"))
+            `;
+            expect(run(script)).toBe("<#void>");
+        });
+    });
+
+    describe('Cons, Arrays & FFI Boundary', () => {
+        it('constructs a proper list and extracts values (car/cdr)', () => {
+            expect(run("(car (cons 1 (cons 2 null)))")).toBe("1");
+            expect(run("(car (cdr (cons 1 (cons 2 null))))")).toBe("2");
+        });
+
+        it('supports improper lists perfectly', () => {
+            expect(run("(car (cons 1 2))")).toBe("1");
+            expect(run("(cdr (cons 1 2))")).toBe("2");
+            expect(run("(length (cons 1 2))")).toBe("1");
+        });
+
+        it('triggers the O(1) Fast Path for raw JS arrays', () => {
+            expect(run("(car '(10 20 30))")).toBe("10");
+            expect(run("(car (cdr '(10 20 30)))")).toBe("20");
+            expect(run("(length '(10 20 30))")).toBe("3");
+        });
+
+        it('handles array -> Cons', () => {
+            expect(run("(car (cons 1 '(2 3)))")).toBe("1");
+            expect(run("(car (cdr (cons 1 '(2 3))))")).toBe("2");
+            expect(run("(length (cons 1 '(2 3)))")).toBe("3"); 
+        });
+
+        it('throws errors for empty lists', () => {
+            expect(() => run("(car null)")).toThrow();
+            expect(() => run("(car '())")).toThrow();
+            expect(() => run("(cdr '())")).toThrow();
+        });
+
+        it('traverses cons-array hybrids with standard operators (last, contains)', () => {
+            expect(run(`(contains? (cons "a" (cons "b" null)) "b")`)).toBe("#t");
+            expect(run(`(contains? (cons "a" (cons "b" null)) "c")`)).toBe("#f");
+            expect(run(`(contains? '("a" "b") "b")`)).toBe("#t");
+
+            expect(run(`(last (cons "a" (cons "b" null)))`)).toBe('"b"');
+            expect(run(`(last '("a" "b"))`)).toBe('"b"');
+            expect(run(`(last (cons "a" "b"))`)).toBe('"b"');
+        });
+    });
+
+    describe('let bindings', () => {
+        it('evaluates a simple single binding', () => {
+            const script = `(let ([x 10]) x)`;
+            expect(run(script)).toBe("10");
+        });
+
+        it('evaluates multiple bindings', () => {
+            const script1 = `
+                (let ([x 10] [y 20] [z 5]) 
+                  (- (+ x y) z))
+            `;
+            expect(run(script1)).toBe("25");
+
+            const script2 = `(let ((a 5) (b 5)) (+ a b))`;
+            expect(run(script2)).toBe("10");
+        });
+
+        it('shadows outer variables without mutating them (Lexical Purity)', () => {
+            const script = `
+                (begin
+                  (define x 100)
+                  (define result (let ([x 5] [y 5]) (+ x y)))
+                  (list result x))
+            `;
+            expect(run(script)).toStrictEqual("(10 100)");
+        });
+
+        it('supports multiple body expressions', () => {
+            const script = `
+                (let ([multiplier 10])
+                  (define x 5)
+                  (define y 2)
+                  (* x y multiplier))
+            `;
+            expect(run(script)).toBe("100");
+        });
+
+        it('handles empty bindings correctly', () => {
+            const script = `(let () 99)`;
+            expect(run(script)).toBe("99");
+        });
+        
+        it('throws an error for malformed bindings', () => {
+            const script = `(let ([x]) x)`;
+            expect(() => run(script)).toThrow();
+        });
+    });
 })
 
 describe("isDeepEqual: Improper Lists (Dotted Pairs)", () => {
@@ -513,297 +772,6 @@ export const TEST_PROG_BC = new AnimaCompiler().compileExpr(new ASP(TEST_PROG).p
 */
 
 /*
-describe('Anima', () => {
-    let evaluator: Anima = new Anima();
-    let baseData: Record<string, any> = {
-        port: 8080,
-        protocol: "tcp",
-        is_active: true,
-        user_role: null 
-    };
-
-    const run = (expr: string) => {
-        const ast = new ASP(expr).parse();
-        return evaluator.evaluate(ast, baseData);
-    };
-
-    describe('Primitives, Strings & Symbols', () => {
-        it('evaluates boolean primitives', () => {
-            expect(run("#t")).toBe(true);
-            expect(run("#f")).toBe(false);
-        });
-
-        it('evaluates numbers and raw arrays', () => {
-            expect(run("42")).toBe(42);
-            expect(run("()")).toBe(null); // ASP parses () as [], VM evals [] as null
-        });
-
-        it('evaluates native Symbols as implicit variables', () => {
-            expect(run("port")).toBe(8080);
-            expect(run("protocol")).toBe("tcp");
-        });
-
-        it('evaluates literal JS strings as Scheme strings directly', () => {
-            expect(run('"hello"')).toBe("hello");
-            expect(run('"port"')).toBe("port"); // String primitive, not a variable lookup
-        });
-
-        it('errors for unknown variables', () => {
-            expect(() => run("missing_var")).toThrow(MissingVarError);
-        });
-    });
-
-    describe('Math Operations', () => {
-        it('performs basic arithmetic', () => {
-            expect(run("(+ 10 5)")).toBe(15);
-            expect(run("(- 10 5)")).toBe(5);
-            expect(run("(* 10 5)")).toBe(50);
-            expect(run("(/ 10 5)")).toBe(2);
-            expect(run("(modulo 10 3)")).toBe(1);
-        });
-
-        it('performs numeric comparisons', () => {
-            expect(run("(> port 1024)")).toBe(true);
-            expect(run("(< port 10000)")).toBe(true);
-            expect(run("(>= 10 10)")).toBe(true);
-            expect(run("(<= 5 10)")).toBe(true);
-        });
-    });
-
-    describe('Data Structures & Types', () => {
-        it('creates lists and evaluates length', () => {
-            expect(run("(list 1 2 3)")).toEqual([1, 2, 3]);
-            expect(run(`(length (list "a" "b"))`)).toBe(2);
-            expect(run(`(length "string_len")`)).toBe(10);
-        });
-
-        it('checks contains', () => {
-            expect(run("(contains (list 1 2) 2)")).toBe(true);
-            expect(run("(contains (list 1 2) 3)")).toBe(false);
-        });
-
-        it('evaluates type? with JS Symbols', () => {
-            expect(run("(type? port)")).toBe("number");
-            expect(run("(type? protocol)")).toBe("string");
-            expect(run("(type? user_role)")).toBe("list");
-            
-            // Verifying our new native Symbol logic!
-            expect(run("(type? 'my_symbol)")).toBe("symbol");
-        });
-    });
-
-    describe('Lexical Scoping & Closures', () => {
-        it('executes defines correctly', () => {
-            const script = `
-                (define x 10)
-                (define y 20)
-                (+ x y)
-            `;
-            expect(run(script)).toBe(30);
-            expect(baseData.x).toBeUndefined(); // ensure it never pollutes outer scope
-        });
-
-        it('creates and calls a lambda with arguments', () => {
-            const script = `
-                (begin
-                  (define (add a b) (+ a b))
-                  (add 5 7))
-            `;
-            expect(run(script)).toBe(12);
-        });
-
-        it('creates and calls a lambda with multiple body expressions', () => {
-            const script = `
-                (begin
-                  (define counter 0)
-                  (define (increment)
-                    (define counter (+ counter 1))
-                    counter)
-                  (increment))
-            `;
-            expect(run(script)).toBe(1);
-        });
-
-        it('respects closure scope (variables enclosed at creation)', () => {
-            const script = `
-                (begin
-                  (define x 100)
-                  (define (make_adder y) (+ x y))
-                  (define x 999)
-                  (make_adder 5))
-            `;
-            expect(run(script)).toBe(1004);
-        });
-
-        it('Ensure valid TCO', () => {
-            const script = `
-                (begin
-                  (define (loop n)
-                    (if (= n 0)
-                        "survived!"
-                        (loop (- n 1))))
-                  (loop 15000))
-            `;
-            expect(() => run(script)).not.toThrow();
-            expect(run(script)).toBe("survived!");
-        });
-    });
-
-    describe('quote operator & Native Symbols', () => {
-        it('quotes primitive numbers', () => {
-            expect(run("'42")).toBe(42);
-        });
-
-        it('quotes Symbols perfectly', () => {
-            expect(run("'x")).toBe(Symbol.for("x"));
-        });
-
-        it('protects lists and retains inner native types', () => {
-            expect(run("'(+ 1 2)")).toEqual([Symbol.for("+"), 1, 2]);
-        });
-
-        it('protects nested lists perfectly', () => {
-            expect(run("'(1 (2 3) 4)")).toEqual([1, [2, 3], 4]);
-        });
-
-        it('handles nested quotes recursively', () => {
-            expect(run("''100")).toEqual([Symbol.for("quote"), 100]);
-        });
-
-        it('throws an error if given too many arguments natively', () => {
-            expect(() => run("(quote 1 2)")).toThrow();
-        });
-    });
-
-    describe('cond special form', () => {
-        it('Matches the first truthy condition', () => {
-            const script = `
-                (cond 
-                  (#t "first")
-                  (#t "second"))
-            `;
-            expect(run(script)).toBe("first");
-        });
-
-        it('Skips falsey conditions and matches later ones', () => {
-            const script = `
-                (cond 
-                  (#f "first")
-                  ((= 1 2) "second")
-                  ((> 5 3) "third"))
-            `;
-            expect(run(script)).toBe("third");
-        });
-
-        it('Falls back to the else clause if nothing matches', () => {
-            const script = `
-                (cond 
-                  (#f "first")
-                  (#f "second")
-                  (else "fallback"))
-            `;
-            expect(run(script)).toBe("fallback");
-        });
-
-        it('Returns void if no conditions match and there is no else clause', () => {
-            const script = `
-                (cond 
-                  (#f "first")
-                  ((= 1 2) "second"))
-            `;
-            expect(run(script)).toBeUndefined();
-        });
-    });
-
-    describe('Cons, Arrays & FFI Boundary', () => {
-        it('constructs a proper list and extracts values (car/cdr)', () => {
-            expect(run("(car (cons 1 (cons 2 null)))")).toBe(1);
-            expect(run("(car (cdr (cons 1 (cons 2 null))))")).toBe(2);
-        });
-
-        it('supports improper lists perfectly', () => {
-            expect(run("(car (cons 1 2))")).toBe(1);
-            expect(run("(cdr (cons 1 2))")).toBe(2);
-            expect(run("(length (cons 1 2))")).toBe(1);
-        });
-
-        it('triggers the O(1) Fast Path for raw JS arrays', () => {
-            expect(run("(car '(10 20 30))")).toBe(10);
-            expect(run("(car (cdr '(10 20 30)))")).toBe(20);
-            expect(run("(length '(10 20 30))")).toBe(3);
-        });
-
-        it('handles array -> Cons perfectly', () => {
-            expect(run("(car (cons 1 '(2 3)))")).toBe(1);
-            expect(run("(car (cdr (cons 1 '(2 3))))")).toBe(2);
-            expect(run("(length (cons 1 '(2 3)))")).toBe(3); 
-        });
-
-        it('throws errors for empty lists', () => {
-            expect(() => run("(car null)")).toThrow();
-            expect(() => run("(car '())")).toThrow();
-            expect(() => run("(cdr '())")).toThrow();
-        });
-
-        it('traverses cons-array hybrids with standard operators (last, contains)', () => {
-            expect(run(`(contains (cons "a" (cons "b" null)) "b")`)).toBe(true);
-            expect(run(`(contains (cons "a" (cons "b" null)) "c")`)).toBe(false);
-            expect(run(`(contains '("a" "b") "b")`)).toBe(true);
-
-            expect(run(`(last (cons "a" (cons "b" null)))`)).toBe("b");
-            expect(run(`(last '("a" "b"))`)).toBe("b");
-            expect(run(`(last (cons "a" "b"))`)).toBe("b");
-        });
-    });
-
-    describe('let bindings', () => {
-        it('evaluates a simple single binding', () => {
-            const script = `(let ([x 10]) x)`;
-            expect(run(script)).toBe(10);
-        });
-
-        it('evaluates multiple bindings', () => {
-            const script1 = `
-                (let ([x 10] [y 20] [z 5]) 
-                  (- (+ x y) z))
-            `;
-            expect(run(script1)).toBe(25);
-
-            const script2 = `(let ((a 5) (b 5)) (+ a b))`;
-            expect(run(script2)).toBe(10);
-        });
-
-        it('shadows outer variables without mutating them (Lexical Purity)', () => {
-            const script = `
-                (begin
-                  (define x 100)
-                  (define result (let ([x 5] [y 5]) (+ x y)))
-                  (list result x))
-            `;
-            expect(run(script)).toStrictEqual([10, 100]);
-        });
-
-        it('supports multiple body expressions', () => {
-            const script = `
-                (let ([multiplier 10])
-                  (define x 5)
-                  (define y 2)
-                  (* x y multiplier))
-            `;
-            expect(run(script)).toBe(100);
-        });
-
-        it('handles empty bindings correctly', () => {
-            const script = `(let () 99)`;
-            expect(run(script)).toBe(99);
-        });
-        
-        it('throws an error for malformed bindings', () => {
-            const script = `(let ([x]) x)`;
-            expect(() => run(script)).toThrow();
-        });
-    });
-
     describe('apply', () => {
         it('applies a procedure to a single list of arguments', () => {
             expect(run(`(apply + '(1 2 3 4))`)).toBe(10);

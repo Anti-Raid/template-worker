@@ -1,8 +1,5 @@
-import { ASP, ASTStringifier, DottedPair, OP_AND, OP_BEGIN, OP_CONT, OP_CONT_BASECONT, OP_DEFINE, OP_IF, OP_LAMBDA, OP_OR, OP_QUOTE, OP_SET, wrapMulti } from "../common";
-import { AnimaTransformer } from "../syntax-transformer";
-import { AstAnalysis, ContifyAnalyzer } from "./analysis";
-import { Compiler } from "./compiler";
-import { deepPrint } from "./utils";
+import { DottedPair, OP_AND, OP_BEGIN, OP_DEFINE, OP_IF, OP_LAMBDA, OP_OR, OP_QUOTE, OP_SET, wrapMulti } from "../common";
+import { OP_CONT, OP_CONT_BASECONT } from "./vm";
 
 type SrcMap = Map<any, any>
 

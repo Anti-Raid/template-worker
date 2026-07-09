@@ -3,7 +3,6 @@ import {
   DottedPair,
   OP_LAMBDA,
   OP_SET,
-  OP_CONT,
   unpackLambdaExprArgs,
 } from "../common";
 import { AnalysisScope } from "./scope";
@@ -45,7 +44,6 @@ export class AstAnalysis {
             case OP_QUOTE:
                 return // don't touch quoted
             case OP_LAMBDA:
-            case OP_CONT:
                 const body = ast.slice(2);
                 
                 const lambdaScope = new AnalysisScope(scope);

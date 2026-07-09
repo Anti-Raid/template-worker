@@ -1,8 +1,8 @@
-import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_AND, OP_APPLY, OP_BEGIN, OP_COND, OP_CONT, OP_CONT_BASECONT, OP_DEFINE, OP_IF, OP_LAMBDA, OP_LET, OP_LETREC, OP_LETSTAR, OP_OR, OP_QUOTE, OP_SET, unpackLambdaExprArgs, wrapMulti } from "../common";
+import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_AND, OP_APPLY, OP_BEGIN, OP_COND, OP_DEFINE, OP_IF, OP_LAMBDA, OP_LET, OP_LETREC, OP_LETSTAR, OP_OR, OP_QUOTE, OP_SET, unpackLambdaExprArgs, wrapMulti } from "../common";
 import { AnimaTransformer } from "../syntax-transformer";
 import { AstAnalysis, ContifyAnalyzer } from "./analysis";
 import { AnalysisScope, CompilerScope } from "./scope";
-import { APPLY_PROC_IDX, BUILTINS_START, IBUILTINS_IDX_MAP } from "./vm";
+import { APPLY_PROC_IDX, BUILTINS_START, IBUILTINS_IDX_MAP, OP_CONT, OP_CONT_BASECONT } from "./vm";
 import { IR, type Node, JumpLabel, ClosureTemplateIR } from "./ir"
 import { AstCps } from "./ext-transform";
 

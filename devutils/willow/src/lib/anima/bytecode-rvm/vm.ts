@@ -1,4 +1,4 @@
-import { ErrorObject, ExposedProps, IProcedure, isDeepEqual, MissingVarError, OP_ADD, OP_CAR, OP_CDR, OP_CONS, OP_CONTAINS, OP_DIV, OP_EMPTY, OP_EQ, OP_EQQ, OP_EQUAL, OP_EQV, OP_GT, OP_GTE, OP_LAST, OP_LENGTH, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_NOT, OP_REMAINDER, OP_SUB, OP_UI_GET } from "../common";
+import { BS, BSReader, ErrorObject, ExposedProps, IProcedure, isDeepEqual, MissingVarError, OP_ADD, OP_CAR, OP_CDR, OP_CONS, OP_CONTAINS, OP_DIV, OP_EMPTY, OP_EQ, OP_EQQ, OP_EQUAL, OP_EQV, OP_GT, OP_GTE, OP_LAST, OP_LENGTH, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_NOT, OP_REMAINDER, OP_SUB, OP_TYPE, OP_UI_GET, type SerializableBytecode } from "../common";
 import { isTruthy } from "../common";
 import { Cons } from "../list";
 
@@ -31,14 +31,30 @@ export enum OpCode {
     MOVE,
 }
 
-export class ByteCode {
+export class ByteCode implements SerializableBytecode {
+    public bsid = "ByteCode"
     constructor(public constants: any[], public inst: Uint32Array, public numReg: number) {}
+    dump(bs: BS) {
+        bs.writeU32Arr(this.inst)
+        bs.writeArray(this.constants)
+        bs.writeU32(this.numReg)
+    }
+    static register(bsr: BSReader) {
+        bsr.registerFactory("ByteCode", (bsr) => {
+            const inst = bsr.readU32Arr()
+            const constants = bsr.readArray()
+            const numReg = bsr.readU32()
+            return new ByteCode(constants, inst, numReg)
+        })
+    }
 }
 
 export type UpVarLoc = { index: number, local: boolean }
 
 /** A template for a closure that can then be bound to a scope */
-export class ClosureTemplate {
+export class ClosureTemplate implements SerializableBytecode {
+    public bsid = "ClosureTemplate"
+
     params: symbol[]; // base (individual param binds)
     remParams: symbol | null; // where the remaining params should be bound too (if any). This implicitly makes a closure variadic as well
     code: ByteCode
@@ -50,15 +66,47 @@ export class ClosureTemplate {
         this.code = code
         this.upvarLocs = upvarLocs
     }
+
+    dump(bs: BS) {
+        bs.writeValue(this.params)
+        bs.writeValue(this.remParams)
+        bs.writeValue(this.code)
+        bs.writeValue(this.upvarLocs)
+    }
+    static register(bsr: BSReader) {
+        bsr.registerFactory("ClosureTemplate", (bsr) => {
+            const params = bsr.read() as symbol[]
+            const remParams = bsr.read() as symbol | null
+            const code = bsr.readSerializable<ByteCode>("ByteCode")
+            const upvarLocs = bsr.readArray() as UpVarLoc[]
+            return new ClosureTemplate(params, remParams, code, upvarLocs)
+        })
+    }
 }
 
 /** An actual anima closure bound to a scope */
-export class Closure extends IProcedure {
-    upvars: any[]
-    constructor(public tmpl: ClosureTemplate) {
+export class Closure extends IProcedure implements SerializableBytecode {
+    public bsid = "Closure"
+    constructor(public tmpl: ClosureTemplate, public upvars: any[]) {
         super()
+    }
+
+    static fromTemplate(tmpl: ClosureTemplate) {
         // Allocate enough space for the upvars from outer scopes
-        this.upvars = new Array(tmpl.upvarLocs.length)
+        const upvars = new Array(tmpl.upvarLocs.length)
+        return new Closure(tmpl, upvars)
+    }
+
+    dump(bs: BS) {
+        bs.writeValue(this.upvars)
+        bs.writeValue(this.tmpl)
+    }
+    static register(bsr: BSReader) {
+        bsr.registerFactory("Closure", (bsr) => {
+            const upvars = bsr.readArray()
+            const tmpl = bsr.readSerializable<ClosureTemplate>("ClosureTemplate")
+            return new Closure(tmpl, upvars)
+        })
     }
 }
 
@@ -324,11 +372,19 @@ export const IBUILTINS: BuiltinFunction[] = [
             if (val.length < 1) throw new Error("last requires a non-empty list");
             return val[val.length - 1];
         } else if (val instanceof Cons) {
-            let last = val.head
-            for(const v of val) {
-                last = v;
+            const iterator = val[Symbol.iterator]();
+            let result = iterator.next();
+            let last = result.value;
+
+            while (!result.done) {
+                last = result.value;
+                result = iterator.next();
             }
-            return last
+
+            if (result.value !== undefined) {
+                last = result.value;
+            }
+            return last;
         } else if (val === null) {
             throw new Error("last requires a non-empty list");
         } else {
@@ -407,8 +463,8 @@ export const IBUILTINS: BuiltinFunction[] = [
         if(!(regs[startReg] instanceof ErrorObject)) throw new Error("error-message requires the first argument to be an instance of ErrorObject")
         return regs[startReg].error?.message?.toString() || "<unknown>"
     }),
-    new BuiltinFunction(Symbol.for("typeof"), (regs, startReg, nargs) => {
-        if (nargs != 1) throw new Error("typeof requires 1 argument");
+    new BuiltinFunction(OP_TYPE, (regs, startReg, nargs) => {
+        if (nargs != 1) throw new Error("type? requires 1 argument");
         const val = regs[startReg]
         if (val === null) return "list";
         switch(typeof val) {
@@ -677,7 +733,7 @@ export class AnimaVM {
                         const destReg = frame.readNext()
                         const tidx = frame.readNext()
                         const template = frame.getConst(tidx) as ClosureTemplate
-                        const closure = new Closure(template)
+                        const closure = Closure.fromTemplate(template)
                         // Copy over upvalues
                         for (let i = 0; i < template.upvarLocs.length; i++) {
                             const loc = template.upvarLocs[i]

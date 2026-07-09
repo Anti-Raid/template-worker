@@ -1,4 +1,4 @@
-import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_AND, OP_APPLY, OP_BEGIN, OP_COND, OP_CONT, OP_CONT_BASECONT, OP_DEFINE, OP_IF, OP_LAMBDA, OP_LET, OP_LETREC, OP_LETSTAR, OP_OR, OP_QUOTE, OP_SET, unpackLambdaExprArgs, wrapMulti } from "../common";
+import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_AND, OP_APPLY, OP_BEGIN, OP_COND, OP_DEFINE, OP_IF, OP_LAMBDA, OP_LET, OP_LETREC, OP_LETSTAR, OP_OR, OP_QUOTE, OP_SET, unpackLambdaExprArgs, wrapMulti } from "../common";
 import { AnimaTransformer } from "../syntax-transformer";
 import { AstAnalysis } from "./analysis";
 import { AnalysisScope, CompilerScope } from "./scope";
@@ -86,7 +86,6 @@ export class Compiler {
                     this.#compileSet(expr, opts, syntaxCtx)
                     return
                 case OP_LAMBDA:
-                case OP_CONT:
                     this.#compileLambda(expr, opts, syntaxCtx)
                     return
                 case OP_AND:
@@ -354,7 +353,7 @@ export class Compiler {
         // if we have a non-variadic IIFE ((lambda (params...) body) args...), then we can optimize it down
         // to BLOCK/ENDBLOCK instead of doing a whole function call
         const first = expr[0]
-        if (Array.isArray(first) && (first[0] === OP_LAMBDA || first[0] === OP_CONT) && Array.isArray(first[1])) {
+        if (Array.isArray(first) && (first[0] === OP_LAMBDA) && Array.isArray(first[1])) {
             console.log("Applying IIFE")
             const ascope = opts.analyzer.scopeMap.get(first)
             if (!ascope) throw new Error(`internal error: could not find ascope for expr ${first}`)
