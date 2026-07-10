@@ -3,7 +3,7 @@ import { ASTStringifier, MissingVarError, isDeepEqual } from './common';
 import { describe, it, expect } from 'vitest';
 import { Cons } from './list';
 import { Anima, type ByteCode } from './anima';
-import { impl } from './bytecode-svm/meta';
+import { impl } from './bytecode-rvm/meta';
 
 const vmImpl = impl
 const bcCache: Record<string, ByteCode> = {}
@@ -683,6 +683,69 @@ expect(run(`
             expect(() => run(script)).toThrow();
         });
     });
+
+    describe('Complex tests', () => {
+        it('my-set?', () => {
+            expect(run(`
+(define my-set?
+  (lambda (a)
+    (define (in a rst) 
+      (cond 
+         [(empty? rst) #f]
+         [(equal? a (car rst)) #t]
+         [else (in a (cdr rst))]))
+
+    (cond 
+      [(empty? a) #t]
+      [else 
+        (if (in (car a) (cdr a)) #f (my-set? (cdr a)))])))
+
+(my-set? (list 1 2 3 4 5))`
+)).toBe("#t");
+
+            expect(run(`
+(define my-set?
+  (lambda (a)
+    (define (in a rst) 
+      (cond 
+         [(empty? rst) #f]
+         [(equal? a (car rst)) #t]
+         [else (in a (cdr rst))]))
+
+    (cond 
+      [(empty? a) #t]
+      [else 
+        (if (in (car a) (cdr a)) #f (my-set? (cdr a)))])))
+
+(my-set? (list 1 2 3 4 4))`
+)).toBe("#f");
+
+        expect(run(`
+(define union
+    (lambda (a b)
+        (define (in a rst) 
+        (cond 
+            [(empty? rst) #f]
+            [(equal? a (car rst)) #t]
+            [else (in a (cdr rst))]))
+
+        (cond
+        ; if either set is empty, the other one if the union
+        [(empty? a) b]
+        [(empty? b) a]
+        ; if b is in a, skip it
+        [(in (car b) a) (union a (cdr b))]
+        [else (cons (car b) (union a (cdr b)))])))
+
+(define sum-of-squares
+  (lambda (a)
+    ; do x*x for every element in a, then sum them all up
+    (apply + [map (lambda (x) (* x x)) a])))
+        
+    (list (equal? (union '(a b d e f h j) '(f c e g a)) '(c g a b d e f h j)) (equal? (sum-of-squares (list 1 3 5 7)) 84))
+        `)).toEqual("(#t #t)")
+        });
+    });
 })
 
 describe("isDeepEqual: Improper Lists (Dotted Pairs)", () => {
@@ -770,159 +833,4 @@ const TEST_PROG = `
 //export const TEST_PROG = `(cond [#f 1] [#f 2])`
 
 export const TEST_PROG_BC = new AnimaCompiler().compileExpr(new ASP(TEST_PROG).parse(), false, false)
-*/
-
-/*
-    describe('apply', () => {
-        it('applies a procedure to a single list of arguments', () => {
-            expect(run(`(apply + '(1 2 3 4))`)).toBe(10);
-            expect(run(`(apply * '(2 3 4))`)).toBe(24);
-        });
-
-        it('handles preceding standalone arguments before the final list', () => {
-            expect(run(`(apply + 100 200 '(1 2))`)).toBe(303);
-            expect(run(`(apply - 100 '(50 25))`)).toBe(25);
-        });
-
-        it('works flawlessly with user-defined closures', () => {
-            const script = `
-                (begin
-                  (define (multiply-add a b c) (+ (* a b) c))
-                  (apply multiply-add 10 '(5 2)))
-            `;
-            // (10 * 5) + 2 = 52
-            expect(run(script)).toBe(52); 
-        });
-
-        it('handles the empty list gracefully', () => {
-            const script = `
-                (begin
-                  (define (return-five) 5)
-                  (apply return-five '()))
-            `;
-            expect(run(script)).toBe(5);
-        });
-
-        it('throws an error if the last argument is not a list', () => {
-            expect(() => run(`(apply + 1 2 3)`)).toThrow(/must be a list/);
-        });
-    });
-
-    describe('map', () => {
-        it('maps a procedure over a single list', () => {
-            const script = `
-                (begin
-                  (define (double x) (* x 2))
-                  (map double '(1 2 3 4)))
-            `;
-            expect(run(script)).toEqual([2, 4, 6, 8]);
-        });
-
-        it('maps a procedure over multiple lists in parallel', () => {
-            const script = `(map + '(1 2 3) '(10 20 30))`;
-            expect(run(script)).toEqual([11, 22, 33]);
-            
-            const script3 = `(map + '(1 1 1) '(2 2 2) '(3 3 3))`;
-            expect(run(script3)).toEqual([6, 6, 6]);
-        });
-
-        it('safely terminates when the shortest list is exhausted', () => {
-            const script = `(map + '(1 2 3 4 5) '(10 20))`;
-            expect(run(script)).toEqual([11, 22]);
-        });
-
-        it('maps over Cons as well', () => {
-            const script = `(map + (cons 1 (cons 2 null)) '(10 20))`;
-            expect(run(script)).toEqual([11, 22]);
-        });
-
-        it('returns an empty list when mapping over an empty list', () => {
-            const script = `(map + '())`;
-            expect(run(script)).toEqual([]);
-        });
-
-        it('throws an error if given a non-list argument', () => {
-            expect(() => run(`(map + '(1 2 3) 5)`)).toThrow(/must be lists/);
-        });
-    });
-});
-
-describe('Complex Tests', () => {
-    let evaluator: Anima;
-    let baseData: Record<string, any>;
-
-    beforeEach(() => {
-        evaluator = new Anima();
-        baseData = {};
-    });
-
-    const stringifier = new ASTStringifier();
-    const run = (expr: string) => {
-        const ast = new ASP(expr).parse();
-        return stringifier.stringify(evaluator.evaluate(ast, baseData));
-    };
-
-    describe('Complex tests', () => {
-        it('my-set?', () => {
-            expect(run(`
-(define my-set?
-  (lambda (a)
-    (define (in a rst) 
-      (cond 
-         [(empty? rst) #f]
-         [(equal? a (car rst)) #t]
-         [else (in a (cdr rst))]))
-
-    (cond 
-      [(empty? a) #t]
-      [else 
-        (if (in (car a) (cdr a)) #f (my-set? (cdr a)))])))
-
-(my-set? (list 1 2 3 4 5))`
-)).toBe("#t");
-
-            expect(run(`
-(define my-set?
-  (lambda (a)
-    (define (in a rst) 
-      (cond 
-         [(empty? rst) #f]
-         [(equal? a (car rst)) #t]
-         [else (in a (cdr rst))]))
-
-    (cond 
-      [(empty? a) #t]
-      [else 
-        (if (in (car a) (cdr a)) #f (my-set? (cdr a)))])))
-
-(my-set? (list 1 2 3 4 4))`
-)).toBe("#f");
-
-        expect(run(`
-(define union
-    (lambda (a b)
-        (define (in a rst) 
-        (cond 
-            [(empty? rst) #f]
-            [(equal? a (car rst)) #t]
-            [else (in a (cdr rst))]))
-
-        (cond
-        ; if either set is empty, the other one if the union
-        [(empty? a) b]
-        [(empty? b) a]
-        ; if b is in a, skip it
-        [(in (car b) a) (union a (cdr b))]
-        [else (cons (car b) (union a (cdr b)))])))
-
-(define sum-of-squares
-  (lambda (a)
-    ; do x*x for every element in a, then sum them all up
-    (apply + [map (lambda (x) (* x x)) a])))
-        
-    (list (equal? (union '(a b d e f h j) '(f c e g a)) '(c g a b d e f h j)) (equal? (sum-of-squares (list 1 3 5 7)) 84))
-        `)).toEqual("(#t #t)")
-        });
-    });
-});
 */
