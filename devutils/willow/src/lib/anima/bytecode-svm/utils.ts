@@ -65,7 +65,7 @@ const stringifyInst = (inst: ByteCode): string[] => {
             case OpCode.PUSHBUILTIN: {
                 const proc = inst.inst[idx + 1]
                 const procStr = (proc === APPLY_PROC_IDX) ? "apply" : (proc === TRY_PROC_IDX) ? `try` : `builtin(${String(IBUILTINS[proc].name)})`
-                line += `${padOp(OpCode[opcode])} ${inst.inst[idx + 1]} ${procStr}`;
+                line += `${padOp(OpCode[opcode])} ${procStr} (${inst.inst[idx + 1]})`;
                 idx += 2;
                 break;
             }

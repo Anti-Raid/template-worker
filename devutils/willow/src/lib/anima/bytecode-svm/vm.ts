@@ -142,7 +142,8 @@ type RunningCont = {
 }
 
 type Continuation = RunningCont | {
-    type: "TERMINAL"
+    type: "TERMINAL",
+    value: any
 }
 
 class CallFrame {
@@ -193,7 +194,7 @@ export class AnimaVM {
     }
 
     #execnext(initialFrame: CallFrame, execScope: Globals) {
-        let cont: Continuation = { type: 'RUNNING', frame: initialFrame, parent: { type: "TERMINAL" }, trySpot: undefined }
+        let cont: Continuation = { type: 'RUNNING', frame: initialFrame, parent: { type: "TERMINAL", value: undefined }, trySpot: undefined }
         while(cont.type === 'RUNNING') {
             this.steps++;
             if (this.maxSteps && this.steps > this.maxSteps) {
@@ -277,14 +278,14 @@ export class AnimaVM {
                         frame.localSlots[slot].value = val
                         break
                     }
-                    case OpCode.JIF: {
+                    case OpCode.JIT: {
                         const jumpIdx = frame.readNext()
                         if (isTruthy(stack.pop())) {
                             frame.ip = jumpIdx
                         }
                         break
                     }
-                    case OpCode.JIT: {
+                    case OpCode.JIF: {
                         const jumpIdx = frame.readNext()
                         if (!isTruthy(stack.pop())) {
                             frame.ip = jumpIdx
@@ -319,6 +320,7 @@ export class AnimaVM {
                             cont = cont.parent
                             continue
                         }
+                        if (cont.parent.value !== undefined) throw new Error("Unknown error")
                         return retVal
                     }
                     case OpCode.CALL:
@@ -350,6 +352,7 @@ export class AnimaVM {
                 throw err
             }
         }
+        return cont.value
     }
 
     #createClosureArg(template: ClosureTemplate, nargs: number, args: any[], startOffset: number) {
@@ -393,19 +396,35 @@ export class AnimaVM {
         nargs: number,
         isTail: boolean
     ): Continuation {
-        if (cont.type !== "RUNNING") throw new Error("internal error: cannot invoke function using non-running cont")
+        const cleanStack = () => {
+            if (callerArgs === callerFrame.stack) {
+                callerFrame.stack.length = startIdx - 1; 
+            }
+        }
+
         if (proc instanceof BuiltinFunction) {
             const res = proc.cb(callerArgs, startIdx, nargs)
-            callerFrame.stack.push(res)
-            return isTail ? cont.parent : cont
+            cleanStack()
+            //console.log(proc, callerArgs, nargs, res) // 
+            if (isTail) {
+                if (cont.parent.type === "TERMINAL") {
+                    return {type: "TERMINAL", value: res}
+                }
+                cont.parent.frame.stack.push(res)
+                return cont.parent
+            } else {
+                callerFrame.stack.push(res)
+                return cont
+            }
         } else if (proc instanceof ApplyProc) {
             const actualProc = callerArgs[startIdx];
             const actualArgs = flattenDynamicArgs([], callerArgs, startIdx, nargs, "apply")
+            cleanStack() // cleanup before applying w/ fake regs
             return this.#invoke(actualProc, cont, callerFrame, actualArgs, 0, actualArgs.length, isTail)
         } else if (proc instanceof TryProc) {
             const actualProc = callerArgs[startIdx];
             const actualArgs = flattenDynamicArgs([], callerArgs, startIdx, nargs, "try")
-
+            cleanStack() // cleanup before applying w/ fake regs
             const trapCont: Continuation = isTail ? cont.parent : {
                 type: 'RUNNING',
                 frame: callerFrame,
@@ -426,16 +445,17 @@ export class AnimaVM {
 
             } catch (err) {
                 // Builtins error etc.                
-                if (trapCont.type !== "RUNNING") {
-                    throw err
-                }
                 const errObj = new ErrorObject(err);
+                if (trapCont.type !== "RUNNING") {
+                    return {type: "TERMINAL", value: errObj}
+                }
                 trapCont.frame.stack.push(errObj)                
                 return trapCont;
             }
         } else if (proc instanceof Closure) { 
             const template = proc.tmpl;
             const clocals = this.#createClosureArg(proc.tmpl, nargs, callerArgs, startIdx)
+            cleanStack() // cleanup before applying w/ fake regs
             const parentCont = isTail ? cont.parent : {
                 type: 'RUNNING',
                 frame: callerFrame,

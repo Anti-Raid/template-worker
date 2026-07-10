@@ -1,14 +1,10 @@
 import { Anima } from "./anima";
-import { impl } from "./bytecode-rvm/meta";
+import { impl } from "./bytecode-svm/meta";
 
 const anima = new Anima(impl)
-const simpleProg = `(begin
-                  (define (loop n)
-                    (if (= n 0)
-                        "survived!"
-                        (loop (- n 1))))
-                  (loop 15000))
-`
+
+console.log("\n\n")
+const simpleProg = `(+ (* 1 2) (- 1 1) (- 1 2))`
 const bc = anima.compileRaw(simpleProg)
 impl.deepPrint(bc)
 const t1 = performance.now()
