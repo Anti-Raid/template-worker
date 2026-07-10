@@ -1,4 +1,4 @@
-import { ASP, ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_AND, OP_APPLY, OP_BEGIN, OP_COND, OP_DEFINE, OP_IF, OP_LAMBDA, OP_LET, OP_LETREC, OP_LETSTAR, OP_OR, OP_QUOTE, OP_SET, unpackLambdaExprArgs, wrapMulti } from "../common";
+import { ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_AND, OP_APPLY, OP_BEGIN, OP_COND, OP_DEFINE, OP_IF, OP_LAMBDA, OP_LET, OP_LETREC, OP_LETSTAR, OP_OR, OP_QUOTE, OP_SET, unpackLambdaExprArgs, wrapMulti } from "../common";
 import { AnimaTransformer } from "../syntax-transformer";
 import { AstAnalysis, ContifyAnalyzer } from "./analysis";
 import { AnalysisScope, CompilerScope } from "./scope";
@@ -23,11 +23,6 @@ export class Compiler {
 
     constructor() {}
 
-    compileRaw(s: string) {
-        const ast = new ASP(s, true).parse()
-        return this.compileRawAst(ast)
-    }
-
     compileRawAst(ast: any) {
         // Step 1 is to apply the syntax transformation of cond/let/let*/letrec into simple form
         let trExpr = this.#t.transform(ast)
@@ -49,7 +44,7 @@ export class Compiler {
         return ir.lower(nodes, scope.numRegs)
     }
 
-    #compile(expr: any, opts: CmpOpts, syntaxCtx?: string) {
+    #compile(expr: any, opts: CmpOpts) {
         // Raw values
         if (typeof expr === 'symbol') {
             if (expr === OP_CONT_BASECONT && opts.destReg !== undefined) {
@@ -82,26 +77,26 @@ export class Compiler {
         if (typeof operator === "symbol") {
             switch (operator) {
                 case OP_BEGIN:
-                    this.#compileBegin(expr, opts, syntaxCtx)
+                    this.#compileBegin(expr, opts)
                     return
                 case OP_IF:
-                    this.#compileIfCall(expr, opts, syntaxCtx)
+                    this.#compileIfCall(expr, opts)
                     return
                 case OP_QUOTE:
-                    this.#compileQuote(expr, opts, syntaxCtx)
+                    this.#compileQuote(expr, opts)
                     return
                 case OP_DEFINE:
-                    this.#compileDefine(expr, opts, syntaxCtx)
+                    this.#compileDefine(expr, opts)
                     return
                 case OP_SET:
-                    this.#compileSet(expr, opts, syntaxCtx)
+                    this.#compileSet(expr, opts)
                     return
                 case OP_LAMBDA:
                 case OP_CONT:
-                    this.#compileLambda(expr, opts, syntaxCtx)
+                    this.#compileLambda(expr, opts)
                     return
                 case OP_APPLY:
-                    this.#optIntrinsicNormal(expr, APPLY_PROC_IDX, opts, syntaxCtx)
+                    this.#optIntrinsicNormal(expr, APPLY_PROC_IDX, opts)
                     return
                 case OP_LET:
                 case OP_LETSTAR:
@@ -117,14 +112,14 @@ export class Compiler {
         // intrinsic
         const builtinsIdx = IBUILTINS_IDX_MAP.get(operator)
         if (builtinsIdx !== undefined) {
-            this.#optIntrinsicNormal(expr, BUILTINS_START+builtinsIdx, opts, syntaxCtx)
+            this.#optIntrinsicNormal(expr, BUILTINS_START+builtinsIdx, opts)
             return
         }
 
         this.#compileNormalCall(expr, opts)
     }
 
-    #compileBegin(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
+    #compileBegin(expr: any[], opts: CmpOpts) {
         // We need to load a void if we see an empty begin block
         if (expr.length === 1) {
             if (opts.destReg === undefined) return 
@@ -139,7 +134,7 @@ export class Compiler {
     }
 
     // compiles both if calls as well as code that is converted into if calls
-    #compileIfCall(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
+    #compileIfCall(expr: any[], opts: CmpOpts) {
         if(expr.length != 4) {
             throw new Error(`if condition must be in format ["if", condition, true_expr, false_expr] but only have ${expr.length-1} arguments`)
         }
@@ -160,7 +155,7 @@ export class Compiler {
         this.#compile(expr[3], opts)
     }
 
-    #compileQuote(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
+    #compileQuote(expr: any[], opts: CmpOpts) {
         if(expr.length != 2) {
             throw new Error(`quote must be in format ["quote", expr] but have ${expr.length-1} arguments`)
         }
@@ -169,19 +164,8 @@ export class Compiler {
     }
 
     // note that the syntax transformer alr handles defines inside a lambda so
-    #compileDefine(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
-        /*if (opts.scope.outer) {
-            throw new Error(`internal error: define found inside lambda-expr or other lexical scoping (let/letstar/letrec), internal defines should be transformed by AnimaTransform prior to reaching here`);
-        }*/
-
-        if(expr.length !== 3) {
-            throw new Error(`define must be in format ["define" varname arg] (post transformation) but have ${expr.length-1} arguments, complex defines should be transformed by AnimaTransform prior to reaching here`)
-        }
-
+    #compileDefine(expr: any[], opts: CmpOpts) {
         if(typeof expr[1] !== "symbol") throw new Error("internal error: complex defines should be transformed by AnimaTransform prior to reaching here")
-
-        // By now, everything here should be a normal define
-        ensureCanBind(expr[1], undefined, syntaxCtx || "define")
 
         // We need to compile the second arg first and leave it on a temp reg
         const valReg = opts.scope.allocTemp();
@@ -193,7 +177,7 @@ export class Compiler {
         }
     }
 
-    #compileSet(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
+    #compileSet(expr: any[], opts: CmpOpts) {
         // AnimaTransform ensures sets are of correct form
 
         // We need to compile the second arg first and leave it on a temp reg
@@ -207,14 +191,14 @@ export class Compiler {
         }
     }
 
-    #compileLambda(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
+    #compileLambda(expr: any[], opts: CmpOpts) {
         // AnimaTransform ensures lambdas are of correct form
         const lambdaScope = new CompilerScope(opts.scope)
         const ascope = opts.analyzer.scopeMap.get(expr)
         if (!ascope) throw new Error(`internal error: could not find ascope for expr ${expr}`)
         ascope.dbgPrint()
 
-        const { params, remParams } = unpackLambdaExprArgs(expr, syntaxCtx)
+        const { params, remParams } = unpackLambdaExprArgs(expr, "lambda")
         const lambdaNodes: Node[] = []
 
         for(let i = 0; i < params.length; i++) {
@@ -242,7 +226,7 @@ export class Compiler {
     }
 
     // a normal call
-    #compileNormalCall(expr: any[], opts: CmpOpts, syntaxCtx?: string) {
+    #compileNormalCall(expr: any[], opts: CmpOpts) {
         // Try IIFE optimizations
         if(this.#optIIFE(expr, opts)) {
             return
@@ -265,7 +249,7 @@ export class Compiler {
         opts.scope.freeTemp(procReg)
     }
 
-    #optIIFE(expr: any[], opts: CmpOpts, syntaxCtx?: string): boolean {
+    #optIIFE(expr: any[], opts: CmpOpts): boolean {
         // if we have a non-variadic IIFE ((lambda (params...) body) args...), then we can optimize it down
         // to BLOCK/ENDBLOCK instead of doing a whole function call
         const first = expr[0]
@@ -293,7 +277,7 @@ export class Compiler {
             opts.scope.enterBlock()
             const seen = new Set<symbol>();
             for(let i = 0; i < params.length; i++) {
-                ensureCanBind(params[i], seen, syntaxCtx || "lambda")
+                ensureCanBind(params[i], seen, "lambda")
                 const inf = ascope.getVarinfo(params[i]);
                 if(!inf) throw new Error("Could not fetch varinfo")
                 
@@ -316,8 +300,8 @@ export class Compiler {
         }
     }
 
-    /** Optimizes intrinsic ops IBuiltinTail */ 
-    #optIntrinsicNormal(expr: any[], builtinIdx: number, opts: CmpOpts, syntaxCtx?: string) {
+    /** Optimizes intrinsic/builtin ops */ 
+    #optIntrinsicNormal(expr: any[], builtinIdx: number, opts: CmpOpts) {
         // Push args
         const nargs = expr.length - 1; // expr - Symbol(op)
         const startReg = opts.scope.regAlloc.allocBlock(nargs);

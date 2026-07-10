@@ -1,4 +1,4 @@
-import { BS, BSReader, ErrorObject, Globals, IProcedure, type SerializableBytecode } from "../common";
+import { BS, BSReader, ErrorObject, flattenDynamicArgs, Globals, IProcedure, type SerializableBytecode } from "../common";
 import { isTruthy } from "../common";
 import { Cons } from "../list";
 import { APPLY_PROC, ApplyProc, BuiltinFunction, IBUILTINS, TryProc } from "../std";
@@ -387,18 +387,7 @@ export class AnimaVM {
         } else if (proc instanceof ApplyProc) {
             const contArg = callerArgs[startReg];
             const actualProc = callerArgs[startReg+1];
-
-            // create a virtual set of registers to hold the arguments and copy args to it
-            const actualArgs = [contArg];
-            for (let i = 2; i < nargs - 1; i++) {
-                actualArgs.push(callerArgs[startReg + i]);
-            }
-            const finalArg = callerArgs[startReg + nargs - 1]
-            if (Array.isArray(finalArg) || finalArg instanceof Cons) {
-                actualArgs.push(...finalArg);
-            } else if (finalArg !== null) {
-                throw new Error(`apply: last argument must be a list but got ${String(finalArg)}`);
-            }
+            const actualArgs = flattenDynamicArgs([contArg], callerArgs, startReg, nargs, "apply")
             return this.#invoke(actualProc, cont, callerFrame, actualArgs, 0, actualArgs.length);
         } else if (proc instanceof TryProc) {
             const contArg = callerArgs[startReg];
@@ -410,18 +399,7 @@ export class AnimaVM {
             };
             const successProc = new TrySuccessProc(contArg, cont.handler);
 
-            // create a virtual set of registers to hold the arguments and copy args to it
-            const actualArgs = [successProc];
-            for (let i = 2; i < nargs - 1; i++) {
-                actualArgs.push(callerArgs[startReg + i]);
-            }
-            const finalArg = callerArgs[startReg + nargs - 1]
-            if (Array.isArray(finalArg) || finalArg instanceof Cons) {
-                actualArgs.push(...finalArg);
-            } else if (finalArg !== null) {
-                throw new Error(`try: last argument must be a list but got ${String(finalArg)}`);
-            }
-
+            const actualArgs = flattenDynamicArgs([successProc], callerArgs, startReg, nargs, "apply")
             const tryCont: Continuation = { type: 'RUNNING', frame: callerFrame, parent: cont.parent, handler: newHandler };
             try {
                 return this.#invoke(actualProc, tryCont, callerFrame, actualArgs, 0, actualArgs.length);

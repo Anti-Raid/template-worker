@@ -1,5 +1,5 @@
 import { ConstPool } from "../common";
-import { APPLY_PROC_IDX, BUILTINS_START, ByteCode, Closure, ClosureTemplate, OpCode, type UpVarLoc } from "./vm";
+import { ByteCode, Closure, ClosureTemplate, OpCode, type UpVarLoc } from "./vm";
 
 export class JumpLabel {
     public id: number;
@@ -57,16 +57,6 @@ export type Node = {
 } | {
     t: "TailCall",
     procReg: number,
-    // does not return to caller so no ret value needed
-    startReg: number,
-    nargs: number,
-} | {
-    t: "ApplyCall",
-    destReg: number, // ret value is stored in destReg
-    startReg: number,
-    nargs: number,
-} | {
-    t: "ApplyTailCall",
     // does not return to caller so no ret value needed
     startReg: number,
     nargs: number,
@@ -259,20 +249,12 @@ export class IR {
                     inst.push(OpCode.TAILCALL, node.procReg, node.startReg, node.nargs)
                     break
                 }
-                case "ApplyCall": {
-                    inst.push(OpCode.CALL, APPLY_PROC_IDX, node.destReg, node.startReg, node.nargs)
-                    break
-                }
-                case "ApplyTailCall": {
-                    inst.push(OpCode.TAILCALL, APPLY_PROC_IDX, node.startReg, node.nargs)
-                    break
-                }
                 case "IBuiltin": {
-                    inst.push(OpCode.CALL, BUILTINS_START+node.builtinIdx, node.destReg, node.startReg, node.nargs)
+                    inst.push(OpCode.CALL, node.builtinIdx, node.destReg, node.startReg, node.nargs)
                     break
                 }
                 case "IBuiltinTail": {
-                    inst.push(OpCode.TAILCALL, BUILTINS_START+node.builtinIdx, node.startReg, node.nargs)
+                    inst.push(OpCode.TAILCALL, node.builtinIdx, node.startReg, node.nargs)
                     break
                 }   
                 case "Return": {

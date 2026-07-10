@@ -519,9 +519,6 @@ export const ensureCanBind = (param: any, seen: Set<symbol> | undefined, syntaxC
     if (SPECIAL_FORMS.has(param)) {
         throw new Error(`${String(param)}: bad syntax`)
     }
-    if (BUILTINS_OPS.has(param)) {
-        throw new Error(`${String(param)}: cannot shadow builtin procedure`)
-    }
 }
 
 export type UnpackedLambdaArgs = { params: symbol[], remParams: symbol | null }
@@ -551,6 +548,22 @@ export const unpackLambdaExprArgs = (expr: any, ctx?: string): UnpackedLambdaArg
     }
 
     return { params, remParams }
+}
+
+export const flattenDynamicArgs = (actualArgs: any[], callerArgs: any[], start: number, nargs: number, ctx: string) => {
+    const initialFill = actualArgs.length
+    for (let i = 1+initialFill; i < nargs - 1; i++) {
+        actualArgs.push(callerArgs[start + i]);
+    }
+    const finalArg = callerArgs[start + nargs - 1]
+    if (Array.isArray(finalArg) || finalArg instanceof Cons) {
+        actualArgs.push(...finalArg);
+    } else if (finalArg === null) {
+        // Empty list
+    } else {
+        throw new Error(`${ctx}: last argument must be a list but got ${String(finalArg)}`);
+    }
+    return actualArgs
 }
 
 export const wrapMulti = (exprs: any[]) => {

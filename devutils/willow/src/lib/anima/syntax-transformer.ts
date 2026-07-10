@@ -122,12 +122,13 @@ export class AnimaTransformer {
             if(expr.length !== 3) {
                 throw new Error(`define must be in format (define varname expr), but received ${expr.length - 1} arguments`);
             }
-
+            ensureCanBind(expr[1], undefined, "define")
             return [expr, false]
         } else if (Array.isArray(expr[1])) { 
             // (define (func_name arg1 arg2) body_expr...), this one just gets rewritten to a normal define with lambda
             if (expr[1].length === 0) throw new Error("define: missing function name");
             const funcName = expr[1][0];
+            ensureCanBind(funcName, undefined, "define")
             const params = expr[1].slice(1);
             const body = expr.slice(2);
             const equivExpr = [OP_DEFINE, funcName, [OP_LAMBDA, params, ...body]];
@@ -136,6 +137,7 @@ export class AnimaTransformer {
             // (define (func arg1 . rest) body...)
             if (expr[1].items.length === 0) throw new Error("define: missing function name");
             const funcName = expr[1].items[0];
+            ensureCanBind(funcName, undefined, "define")
             const params = expr[1].items.slice(1);
             const body = expr.slice(2);
             

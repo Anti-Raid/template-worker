@@ -1,6 +1,5 @@
-import { BS, BSReader, ErrorObject, Globals, IProcedure, type SerializableBytecode } from "../common";
+import { BS, BSReader, ErrorObject, flattenDynamicArgs, Globals, IProcedure, type SerializableBytecode } from "../common";
 import { isTruthy } from "../common";
-import { Cons } from "../list";
 import { APPLY_PROC, ApplyProc, BuiltinFunction, IBUILTINS, TryProc } from "../std";
 
 export const BUILTINS_START = 2**31
@@ -391,37 +390,11 @@ export class AnimaVM {
             return cont // no change to continuation needed
         } else if (proc instanceof ApplyProc) {
             const actualProc = callerArgs[startReg];
-
-            // create a virtual set of registers to hold the arguments and copy args to it
-            const actualArgs = [];
-            for (let i = 1; i < nargs - 1; i++) {
-                actualArgs.push(callerArgs[startReg + i]);
-            }
-            const finalArg = callerArgs[startReg + nargs - 1]
-            if (Array.isArray(finalArg) || finalArg instanceof Cons) {
-                actualArgs.push(...finalArg);
-            } else if (finalArg === null) {
-                // Empty list
-            } else {
-                throw new Error(`apply: last argument must be a list but got ${String(finalArg)}`);
-            }
+            const actualArgs = flattenDynamicArgs([], callerArgs, startReg, nargs, "apply")
             return this.#invoke(actualProc, cont, callerFrame, actualArgs, destReg, 0, actualArgs.length)
         } else if (proc instanceof TryProc) {
             const actualProc = callerArgs[startReg];
-
-            // create a virtual set of registers to hold the arguments and copy args to it
-            const actualArgs = [];
-            for (let i = 1; i < nargs - 1; i++) {
-                actualArgs.push(callerArgs[startReg + i]);
-            }
-            const finalArg = callerArgs[startReg + nargs - 1]
-            if (Array.isArray(finalArg) || finalArg instanceof Cons) {
-                actualArgs.push(...finalArg);
-            } else if (finalArg === null) {
-                // Empty list
-            } else {
-                throw new Error(`try: last argument must be a list but got ${String(finalArg)}`);
-            }
+            const actualArgs = flattenDynamicArgs([], callerArgs, startReg, nargs, "try")
 
             const trapCont: Continuation | null = (destReg === undefined) ? cont.parent : {
                 type: 'RUNNING',
