@@ -99,37 +99,6 @@ export const SPECIAL_FORMS = new Set([
     OP_OR
 ])
 
-// List Operations
-export const OP_LIST     = Symbol.for("list");
-export const OP_CONS     = Symbol.for("cons")
-export const OP_CAR      = Symbol.for("car");
-export const OP_CDR      = Symbol.for("cdr");
-export const OP_LAST     = Symbol.for("last");
-export const OP_LENGTH   = Symbol.for("length");
-export const OP_EMPTY    = Symbol.for("empty?")
-export const OP_CONTAINS = Symbol.for("contains?");
-export const OP_MEMBER   = Symbol.for("member?");
-
-// Logic & Type Checking
-export const OP_NOT      = Symbol.for("not");
-export const OP_TYPE     = Symbol.for("type?");
-export const OP_EQ       = Symbol.for("=");
-export const OP_EQQ  = Symbol.for("eq?");
-export const OP_EQV  = Symbol.for("eqv?");
-export const OP_EQUAL = Symbol.for("equal?");
-
-// Math & Comparisons
-export const OP_LT     = Symbol.for("<");
-export const OP_GT     = Symbol.for(">");
-export const OP_LTE    = Symbol.for("<=");
-export const OP_GTE    = Symbol.for(">=");
-export const OP_ADD    = Symbol.for("+");
-export const OP_SUB    = Symbol.for("-");
-export const OP_MUL    = Symbol.for("*");
-export const OP_DIV    = Symbol.for("/");
-export const OP_MODULO = Symbol.for("modulo");
-export const OP_REMAINDER = Symbol.for("remainder")
-
 export class ASPTokenError extends Error {
     pos: number;
     curtok?: string;

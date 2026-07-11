@@ -40,9 +40,9 @@ export type MBotSyscall =
       /** Verify a presigned URL and return the decoded payload */
       op: "GetBlobData";
       /** Payload */
-      payload: String;
+      payload: string;
       /** Signature */
-      signature: String;
+      signature: string;
   } | { 
       /** Dispatch an event to a worker process with some safety checks removed (Secure only) */
       op: "AdminRelaxedDispatchEvent"; 

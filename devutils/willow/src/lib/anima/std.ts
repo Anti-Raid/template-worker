@@ -1,4 +1,4 @@
-import { ErrorObject, ExposedProps, Globals, IProcedure, isDeepEqual, isTruthy, OP_ADD, OP_CAR, OP_CDR, OP_CONS, OP_CONTAINS, OP_DIV, OP_EMPTY, OP_EQ, OP_EQQ, OP_EQUAL, OP_EQV, OP_GT, OP_GTE, OP_LAST, OP_LENGTH, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_NOT, OP_REMAINDER, OP_SUB, OP_TYPE } from "./common";
+import { ErrorObject, ExposedProps, Globals, IProcedure, isDeepEqual, isTruthy } from "./common";
 import { Cons } from "./list";
 
 /** 
@@ -29,7 +29,7 @@ export class TryProc extends IProcedure {
 
 // Stores all of our builtin funcs
 export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
-    new BuiltinFunction(OP_ADD, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("+"), (regs, startReg, nargs) => {
         let acc = 0; 
         for (let i = startReg; i < startReg+nargs; i++) {
             const val = regs[i]
@@ -38,7 +38,7 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
         }
         return acc
     }),
-    new BuiltinFunction(OP_SUB, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("-"), (regs, startReg, nargs) => {
         if (nargs === 0) throw new Error("- requires at least 1 argument");
         
         if (nargs === 1) {
@@ -56,7 +56,7 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
         }
         return acc
     }),
-    new BuiltinFunction(OP_MUL, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("*"), (regs, startReg, nargs) => {
         let acc = 1; 
         for (let i = startReg; i < startReg+nargs; i++) {
             const val = regs[i]
@@ -65,7 +65,7 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
         }
         return acc
     }),
-    new BuiltinFunction(OP_DIV, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("/"), (regs, startReg, nargs) => {
         if (nargs === 0) throw new Error("/ requires at least 1 argument");
         
         if (nargs === 1) {
@@ -85,7 +85,7 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
         }
         return acc
     }),
-    new BuiltinFunction(OP_MODULO, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("modulo"), (regs, startReg, nargs) => {
         if(nargs !== 2) throw new Error("modulo requires 2 arguments");
         const a = regs[startReg] 
         const b = regs[startReg+1]
@@ -93,7 +93,7 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
         if (b === 0) throw new Error("modulo: division by zero");
         return ((a % b) + b) % b
     }),
-    new BuiltinFunction(OP_REMAINDER, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("remainder"), (regs, startReg, nargs) => {
         if(nargs !== 2) throw new Error("remainder requires 2 arguments");
         const a = regs[startReg] 
         const b = regs[startReg+1]
@@ -101,14 +101,14 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
         if (b === 0) throw new Error("remainder: division by zero");
         return a % b
     }),
-    new BuiltinFunction(OP_LIST, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("list"), (regs, startReg, nargs) => {
         const lst = new Array(nargs)
         for(let i = 0; i < nargs; i++) {
             lst[i] = regs[startReg+i]
         }
         return lst
     }),
-    new BuiltinFunction(OP_EQ, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("="), (regs, startReg, nargs) => {
         if (nargs === 0) throw new Error("= requires at least 1 argument");
         
         let start = regs[startReg];
@@ -124,7 +124,7 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
         }
         return res
     }),
-    new BuiltinFunction(OP_EQQ, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("eq?"), (regs, startReg, nargs) => {
         // DEVIATION: normal scheme requires arity 2, anima extends this to arity >=1
         if (nargs === 0) throw new Error("eq? requires at least 1 argument");
         
@@ -139,7 +139,7 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
         }
         return res
     }),
-    new BuiltinFunction(OP_EQV, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("eqv?"), (regs, startReg, nargs) => {
         // DEVIATION: normal scheme requires arity 2, anima extends this to arity >=1
         if (nargs === 0) throw new Error("eqv? requires at least 1 argument");
         
@@ -154,7 +154,7 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
         }
         return res
     }),
-    new BuiltinFunction(OP_EQUAL, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("equal?"), (regs, startReg, nargs) => {
         if (nargs === 0) throw new Error("equal? requires at least 1 argument");
         
         let start = regs[startReg];
@@ -168,7 +168,7 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
         }
         return res
     }),
-    new BuiltinFunction(OP_LT, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("<"), (regs, startReg, nargs) => {
         if (nargs === 0) throw new Error("< requires at least 1 argument");
         
         let start = regs[startReg];
@@ -184,7 +184,7 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
         }
         return res
     }),
-    new BuiltinFunction(OP_LTE, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("<="), (regs, startReg, nargs) => {
         if (nargs === 0) throw new Error("<= requires at least 1 argument");
         
         let start = regs[startReg];
@@ -200,7 +200,7 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
         }
         return res
     }),
-    new BuiltinFunction(OP_GT, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for(">"), (regs, startReg, nargs) => {
         if (nargs === 0) throw new Error("> requires at least 1 argument");
         
         let start = regs[startReg];
@@ -216,7 +216,7 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
         }
         return res
     }),
-    new BuiltinFunction(OP_GTE, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for(">="), (regs, startReg, nargs) => {
         if (nargs === 0) throw new Error(">= requires at least 1 argument");
         
         let start = regs[startReg];
@@ -233,7 +233,7 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
         return res
     }),
     // list builtins
-    new BuiltinFunction(OP_CAR, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("car"), (regs, startReg, nargs) => {
         if (nargs !== 1) throw new Error("car requires 1 argument");
         const val = regs[startReg]
         if (Array.isArray(val)) {
@@ -247,7 +247,7 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
             throw new Error("car requires a list");
         }
     }),
-    new BuiltinFunction(OP_CDR, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("cdr"), (regs, startReg, nargs) => {
         if (nargs !== 1) throw new Error("cdr requires 1 argument");
         const val = regs[startReg]
         if (Array.isArray(val)) {
@@ -261,11 +261,11 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
             throw new Error(`cdr requires a list but got ${val}`);
         }
     }),
-    new BuiltinFunction(OP_CONS, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("cons"), (regs, startReg, nargs) => {
         if (nargs != 2) throw new Error("cons requires 2 arguments [cons a d]");
         return Cons.pair(regs[startReg], regs[startReg+1])
     }),
-    new BuiltinFunction(OP_LAST, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("last"), (regs, startReg, nargs) => {
         if (nargs != 1) throw new Error("last requires 1 argument");
         const val = regs[startReg]
         if (Array.isArray(val)) {
@@ -291,7 +291,7 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
             throw new Error("last requires a list");
         }
     }),
-    new BuiltinFunction(OP_LENGTH, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("length"), (regs, startReg, nargs) => {
         if (nargs != 1) throw new Error("length requires 1 argument");
         const val = regs[startReg]
         if (val === null) {
@@ -300,21 +300,21 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
         // TODO: Add string-length? for strings specifically like scheme does
         return (Array.isArray(val) || val instanceof Cons) ? val.length : (typeof val === "string" ? val.length : 0)
     }),
-    new BuiltinFunction(OP_EMPTY, (regs, startReg, nargs) => {
-        if (nargs != 1) throw new Error("empty requires 1 argument");
+    new BuiltinFunction(Symbol.for("empty?"), (regs, startReg, nargs) => {
+        if (nargs != 1) throw new Error("empty? requires 1 argument");
         const val = regs[startReg]
         if (val === null) {
             return true // empty list
         }
         return (Array.isArray(val) || val instanceof Cons) ? (val.length == 0) : (typeof val === "string" ? (val.length == 0) : false);
     }),
-    new BuiltinFunction(OP_CONTAINS, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("contains?"), (regs, startReg, nargs) => {
         if (nargs != 2) throw new Error("contains? requires 2 arguments");
         const list = regs[startReg]
         const item = regs[startReg+1]
         return (Array.isArray(list) || list instanceof Cons) ? list.includes(item) : false;
     }),
-    new BuiltinFunction(OP_MEMBER, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("member"), (regs, startReg, nargs) => {
         if (nargs != 2) throw new Error("member? requires 2 arguments");
         let list = regs[startReg] as (any[] | Cons | null)
         const item = regs[startReg+1]
@@ -341,7 +341,7 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
         }
         return false
     }),
-    new BuiltinFunction(OP_NOT, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("not"), (regs, startReg, nargs) => {
         if (nargs != 1) throw new Error("not requires 1 argument");
         return !isTruthy(regs[startReg]);
     }),
@@ -363,7 +363,7 @@ export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
         if(!(regs[startReg] instanceof ErrorObject)) throw new Error("error-message requires the first argument to be an instance of ErrorObject")
         return regs[startReg].error?.message?.toString() || "<unknown>"
     }),
-    new BuiltinFunction(OP_TYPE, (regs, startReg, nargs) => {
+    new BuiltinFunction(Symbol.for("type?"), (regs, startReg, nargs) => {
         if (nargs != 1) throw new Error("type? requires 1 argument");
         const val = regs[startReg]
         if (val === null) return "list";

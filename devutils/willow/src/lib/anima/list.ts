@@ -40,6 +40,7 @@ export class Cons {
     }
 
     *[Symbol.iterator]() {
+        // eslint-disable-next-line
         let current: any = this;
         
         while (current !== null) {
@@ -79,6 +80,7 @@ export class Cons {
             return undefined;
         }
 
+        // eslint-disable-next-line
         let current: Cons | null = this;
         let stepsRemaining = idx;
 

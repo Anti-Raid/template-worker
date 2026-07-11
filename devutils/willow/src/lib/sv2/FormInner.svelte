@@ -13,8 +13,10 @@
     import MultiSelect from '$lib/MultiSelect.svelte';
     import MultiTextBox from '$lib/MultiTextBox.svelte';
     import Toggle from '$lib/Toggle.svelte';
-    import { Anima, ByteCode, ExposedProps } from '$lib/anima/bytecode-vm/anima';
-    import { isTruthy } from '$lib/anima/common';
+    import { ExposedProps, isTruthy } from '$lib/anima/common';
+    import { SvelteMap } from 'svelte/reactivity';
+    import { Anima, type Closure } from '$lib/anima/anima';
+    import { impl } from '$lib/anima/bytecode-rvm/meta';
 
 	let { template, form, formid, formidx, actions, formsetid }: {
         template: string,
@@ -28,16 +30,12 @@
     let clickedBtns = $state<Record<number, string | null>>({})
     let data = $derived(mps.state.settings[template].formdata[formsetid][formidx].data);
 	
-    const branchEngine = new Anima({ 
-        disableLambda: true, 
-        disableDefine: true, 
-        maxSteps: 5000 
-    });
+    const branchEngine = new Anima(impl);
 
-    const astCache = new Map<string, ByteCode>();
-    const getBytecode = (cond: string): ByteCode => {
+    const astCache = new SvelteMap<string, Closure>();
+    const getBytecode = (cond: string): Closure => {
         if (!astCache.has(cond)) {
-            astCache.set(cond, branchEngine.compileStr(cond));
+            astCache.set(cond, branchEngine.compileToClosure(cond, ['props'], branchEngine.scope));
         }
         return astCache.get(cond)!;
     };
@@ -50,7 +48,7 @@
                 if (el.type === "Branch") {
                     try {
                         const ast = getBytecode(el.cond);
-                        const isVisible = isTruthy(branchEngine.evaluate(ast, props));
+                        const isVisible = isTruthy(branchEngine.evaluateClosure(ast, [props]));
                         
                         if (isVisible) {
                             result.push(...flattenVisible(el.elems));
@@ -75,7 +73,7 @@
             if (elem.type == "DisplayElement") continue
             if (elem.type === "Branch") {
                 const ast = getBytecode(elem.cond)
-                const isVisible = isTruthy(branchEngine.evaluate(ast, props));
+                const isVisible = isTruthy(branchEngine.evaluateClosure(ast, [props]));
                 if (isVisible) {
                     gatherData(rec, elem.elems);
                 }

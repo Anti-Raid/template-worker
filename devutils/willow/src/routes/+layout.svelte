@@ -4,6 +4,7 @@
 	import TextBox from '$lib/TextBox.svelte';
 	import Button from '$lib/Button.svelte';
 	import { auth } from '$lib/auth.svelte';
+    import { resolve } from '$app/paths';
 
 	let { children } = $props();
 	let isLoggingIn = $state(false);
@@ -68,7 +69,7 @@
 </svelte:head>
 
 <header class="p-4 border-b">
-	<h1 class="text-2xl font-bold"><a href="/">willow</a></h1>
+	<h1 class="text-2xl font-bold"><a href={resolve('/')}>willow</a></h1>
 </header>
 
 <main class="p-4 max-w-6xl mx-auto">
@@ -122,7 +123,7 @@
 			}} class="mb-4">
 				Logout
 			</Button>
-<div class="flex items-center gap-4 p-4 border rounded-lg bg-gray-50 mb-4">
+			<div class="flex items-center gap-4 p-4 border rounded-lg bg-gray-50 mb-4">
 				{#if auth.session.user.avatar}
 					<img 
 						src={`https://cdn.discordapp.com/avatars/${auth.session.user.id}/${auth.session.user.avatar}.png`} 

@@ -2,7 +2,9 @@ import { ASP, Globals, OP_LAMBDA, type DottedPair, type SerializableBytecode } f
 import { IBUILTINS, STD_PRELUDE, stdPreludeScope } from "./std"
 import { AnimaTransformer } from "./syntax-transformer"
 
-export interface Closure {}
+// eslint-disable-next-line
+export interface Closure extends SerializableBytecode {}
+// eslint-disable-next-line
 export interface ByteCode extends SerializableBytecode {}
 export interface AnimaVM {
     evaluateRaw(code: ByteCode, scope: Globals): any,
