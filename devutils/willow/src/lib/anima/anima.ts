@@ -1,5 +1,6 @@
 import { ASP, Globals, OP_LAMBDA, type DottedPair, type SerializableBytecode } from "./common"
 import { IBUILTINS, STD_PRELUDE, stdPreludeScope } from "./std"
+import { AnimaTransformer } from "./syntax-transformer"
 
 export interface Closure {}
 export interface ByteCode extends SerializableBytecode {}
@@ -8,7 +9,7 @@ export interface AnimaVM {
     evaluateClosure(code: Closure, scope: Globals, args: any[]): any
 }
 export interface Compiler {
-    compileRawAst(ast: any): ByteCode
+    compile(trExpr: any): ByteCode
 }
 export interface AnimaMeta {
     id: string,
@@ -22,6 +23,7 @@ export class Anima {
     #comp: Compiler
     #scope: Globals
     #impl: AnimaMeta
+    #t = new AnimaTransformer()
 
     get scope() {
         return this.#scope
@@ -39,7 +41,7 @@ export class Anima {
         this.#impl = impl
         this.#vm = impl.vm(maxSteps || 0)
         this.#comp = impl.compiler()
-        const publicScope = getBootstrapScopeFor(impl, this.#comp, this.#vm)
+        const publicScope = getBootstrapScopeFor(impl, this.#comp, this.#vm, this.#t)
         this.#scope = publicScope.nestWith({})
     }
 
@@ -69,7 +71,7 @@ export class Anima {
     }
 
     compileRawAst(ast: any) {
-        return this.#comp.compileRawAst(ast)
+        return _compileRawAst(ast, this.#comp, this.#t)
     }
 
     deepPrint(bc: ByteCode) {
@@ -77,13 +79,18 @@ export class Anima {
     }
 }
 
+const _compileRawAst = (ast: any, cmp: Compiler, t: AnimaTransformer) => {
+    let trExpr = t.transform(ast)
+    return cmp.compile(trExpr)
+}
+
 const bootstrappedPreludes: Map<string, Globals> = new Map()
-const getBootstrapScopeFor = (impl: AnimaMeta, cmp: Compiler, vm: AnimaVM) => {
+const getBootstrapScopeFor = (impl: AnimaMeta, cmp: Compiler, vm: AnimaVM, t: AnimaTransformer) => {
     if (bootstrappedPreludes.has(impl.id)) {
         return bootstrappedPreludes.get(impl.id)!
     }
     const preludeAst = new ASP(STD_PRELUDE, true).parse()
-    const PRELUDE_BC = cmp.compileRawAst(preludeAst)
+    const PRELUDE_BC = _compileRawAst(preludeAst, cmp, t)
     //impl.deepPrint(PRELUDE_BC)
     const privScope = stdPreludeScope()
     vm.evaluateRaw(PRELUDE_BC, privScope)

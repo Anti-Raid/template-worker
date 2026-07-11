@@ -1,6 +1,5 @@
 import { ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_AND, OP_BEGIN, OP_COND, OP_DEFINE, OP_IF, OP_LAMBDA, OP_LET, OP_LETREC, OP_LETSTAR, OP_OR, OP_QUOTE, OP_SET, unpackLambdaExprArgs, wrapMulti } from "../common"
 import { IBUILTINS_IDX_MAP } from "../std"
-import { AnimaTransformer } from "../syntax-transformer"
 import { IR, type Node, JumpLabel, ClosureTemplateIR } from "./ir"
 import { CompilerScope } from "./scope"
 
@@ -13,14 +12,10 @@ interface CmpOpts {
 
 export class Compiler {
     #s = new ASTStringifier()
-    #t = new AnimaTransformer()
 
     constructor() {}
 
-    compileRawAst(ast: any) {
-        // We need to transform all the special syntax down first
-        let trExpr = this.#t.transform(ast)
-
+    compile(trExpr: any) {
         const scope = new CompilerScope(null)
         const nodes: Node[] = []
         this.#compile(trExpr, {leaveOnStack: true, isTail: true, nodes, scope})

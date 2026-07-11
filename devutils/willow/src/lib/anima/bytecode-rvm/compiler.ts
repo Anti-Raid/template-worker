@@ -1,5 +1,4 @@
 import { ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_AND, OP_BEGIN, OP_COND, OP_DEFINE, OP_IF, OP_LAMBDA, OP_LET, OP_LETREC, OP_LETSTAR, OP_OR, OP_QUOTE, OP_SET, unpackLambdaExprArgs, wrapMulti } from "../common";
-import { AnimaTransformer } from "../syntax-transformer";
 import { AstAnalysis } from "./analysis";
 import { AnalysisScope, CompilerScope } from "./scope";
 import { IR, type Node, JumpLabel, ClosureTemplateIR } from "./ir"
@@ -19,14 +18,11 @@ interface CmpOpts {
 
 export class Compiler {
     #s = new ASTStringifier()
-    #t = new AnimaTransformer()
 
     constructor() {}
 
-    compileRawAst(ast: any) {
-        // Step 1 is to apply the syntax transformation of cond/let/let*/letrec into simple form
-        let trExpr = this.#t.transform(ast)
-        // Step 2 is to analyze our variables so we know what to box and what not to box
+    compile(trExpr: any) {
+        // Step 1 is to analyze our variables so we know what to box and what not to box
         let analyzer = new AstAnalysis()
         const ascope = analyzer.analyze(trExpr)
 

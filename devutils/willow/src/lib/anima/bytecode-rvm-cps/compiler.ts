@@ -1,5 +1,4 @@
 import { ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_AND, OP_BEGIN, OP_COND, OP_DEFINE, OP_IF, OP_LAMBDA, OP_LET, OP_LETREC, OP_LETSTAR, OP_OR, OP_QUOTE, OP_SET, unpackLambdaExprArgs, wrapMulti } from "../common";
-import { AnimaTransformer } from "../syntax-transformer";
 import { AstAnalysis, ContifyAnalyzer } from "./analysis";
 import { AnalysisScope, CompilerScope } from "./scope";
 import { BUILTINS_START, OP_CONT, OP_CONT_BASECONT } from "./vm";
@@ -19,19 +18,16 @@ interface CmpOpts {
 
 export class Compiler {
     #s = new ASTStringifier()
-    #t = new AnimaTransformer()
 
     constructor() {}
 
-    compileRawAst(ast: any) {
-        // Step 1 is to apply the syntax transformation of cond/let/let*/letrec into simple form
-        let trExpr = this.#t.transform(ast)
-        trExpr = new AstCps().transform(trExpr) // then apply cps transform
+    compile(trExpr_: any) {
+        let trExpr = new AstCps().transform(trExpr_) // apply cps transform to trExpr
         console.log(this.#s.stringify(trExpr))
-        // Step 2 is to analyze our variables so we know what to box and what not to box
+        // Step 1 is to analyze our variables so we know what to box and what not to box
         let analyzer = new AstAnalysis()
         const ascope = analyzer.analyze(trExpr)
-        // Step 3: Contify analysis
+        // Step 2: Contify analysis
         const contifyAnalyzer = new ContifyAnalyzer(ascope)
         const contifyTags = contifyAnalyzer.analyze(trExpr)
         console.log(contifyTags)
