@@ -140,6 +140,7 @@ export type FormElement = {
     disabled?: boolean,
 } | {
     type: "Branch",
+    id: string,
     // anima s-expression
     cond: string,
     elems: FormElement[] // if Branch is true
@@ -414,11 +415,12 @@ export const dispatchResultToSetting = (value: RawKhronosValue): Page => {
                 const bdisabled = assertOptional(mapGetOpt(map, "disabled"), assertBoolean)
                 return { type, id: bid, label: blabel, description: bdesc, disabled: bdisabled }
             case "Branch":
+                const brid = assertString(mapGet(map, "id"), "id")
                 const brcond = assertString(mapGet(map, "cond"), "cond")
                 const baseForm = assertList(mapGet(map, "elems"), "elems").map((formListElem, idx) => {
                     return expandRawFormElement(assertMap(formListElem, `FormElement at idx ${idx} of FormSet.Branch`), usedIds)
                 })
-                return { type, cond: brcond, elems: baseForm }
+                return { type, id: brid, cond: brcond, elems: baseForm }
         }
     }
 

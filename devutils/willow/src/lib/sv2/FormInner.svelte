@@ -14,7 +14,6 @@
     import MultiTextBox from '$lib/MultiTextBox.svelte';
     import Toggle from '$lib/Toggle.svelte';
     import { ExposedProps, isTruthy } from '$lib/anima/common';
-    import { SvelteMap } from 'svelte/reactivity';
     import { Anima, type Closure } from '$lib/anima/anima';
     import { impl } from '$lib/anima/bytecode-rvm/meta';
 
@@ -32,14 +31,17 @@
 	
     const branchEngine = new Anima(impl);
 
-    const astCache = new SvelteMap<string, Closure>();
+    // eslint-disable-next-line
+    const astCache = new Map<string, Closure>();
     const getBytecode = (cond: string): Closure => {
         if (!astCache.has(cond)) {
-            astCache.set(cond, branchEngine.compileToClosure(cond, ['props'], branchEngine.scope));
+            astCache.set(cond, branchEngine.compileToClosure(cond, [Symbol.for('props'), Symbol.for('id')], branchEngine.scope));
         }
         return astCache.get(cond)!;
     };
+
     const visibleElements = $derived.by(() => {
+        console.log("rerender")
         const props = new ExposedProps(data)
         const flattenVisible = (elems: FormElement[]): FormElement[] => {
             const result: FormElement[] = [];
@@ -48,13 +50,14 @@
                 if (el.type === "Branch") {
                     try {
                         const ast = getBytecode(el.cond);
-                        const isVisible = isTruthy(branchEngine.evaluateClosure(ast, [props]));
+                        branchEngine.deepPrint((ast as any).tmpl.code)
+                        const isVisible = isTruthy(branchEngine.evaluateClosure(ast, [props, el.id]));
                         
                         if (isVisible) {
                             result.push(...flattenVisible(el.elems));
                         }
                     } catch (error) {
-                        console.error(`Branch evaluation failed for cond: ${el.cond}`, error);
+                        console.error(`Branch evaluation failed for id ${el.id} cond: ${el.cond}`, error);
                     }
                 } else {
                     result.push(el);
@@ -73,7 +76,7 @@
             if (elem.type == "DisplayElement") continue
             if (elem.type === "Branch") {
                 const ast = getBytecode(elem.cond)
-                const isVisible = isTruthy(branchEngine.evaluateClosure(ast, [props]));
+                const isVisible = isTruthy(branchEngine.evaluateClosure(ast, [props, elem.id]));
                 if (isVisible) {
                     gatherData(rec, elem.elems);
                 }
