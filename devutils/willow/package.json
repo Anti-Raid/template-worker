@@ -35,5 +35,8 @@
 		"typescript-eslint": "^8.58.1",
 		"vite": "^8.0.7",
 		"vitest": "^4.1.9"
+	},
+	"dependencies": {
+		"animalang": "github:Anti-Raid/animalang"
 	}
 }

@@ -13,9 +13,8 @@
     import MultiSelect from '$lib/MultiSelect.svelte';
     import MultiTextBox from '$lib/MultiTextBox.svelte';
     import Toggle from '$lib/Toggle.svelte';
-    import { ExposedProps, isTruthy } from '$lib/anima/common';
-    import { Anima, type Closure } from '$lib/anima/anima';
-    import { impl } from '$lib/anima/bytecode-rvm/meta';
+    import * as anima from 'animalang';
+    import { ExposedProps, isTruthy, type Closure } from 'animalang';
 
 	let { template, form, formid, formidx, actions, formsetid }: {
         template: string,
@@ -29,7 +28,7 @@
     let clickedBtns = $state<Record<number, string | null>>({})
     let data = $derived(mps.state.settings[template].formdata[formsetid][formidx].data);
 	
-    const branchEngine = new Anima(impl);
+    const branchEngine = new anima.Anima(anima.implRvm);
 
     // eslint-disable-next-line
     const astCache = new Map<string, Closure>();
