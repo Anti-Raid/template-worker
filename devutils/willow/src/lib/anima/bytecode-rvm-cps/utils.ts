@@ -1,6 +1,6 @@
 import { BS, BSReader, type SerializableBytecode } from "../common"
 import { IBUILTINS } from "../std"
-import { APPLY_PROC_IDX, BUILTINS_START, ByteCode, Closure, ClosureTemplate, OpCode } from "./vm"
+import { BUILTINS_START, ByteCode, Closure, ClosureTemplate, OpCode } from "./vm"
 
 const constToString = (s: any): string => {
     if(typeof s === "symbol") {
@@ -111,7 +111,7 @@ const stringifyInst = (inst: ByteCode): string[] => {
                 const proc = inst.inst[idx + 1];
                 const startReg = inst.inst[idx + 2];
                 const nargs = inst.inst[idx + 3];
-                const procStr = (proc === APPLY_PROC_IDX) ? "apply" : (proc < BUILTINS_START) ? `r${proc}` : `builtin(${String(IBUILTINS[proc-BUILTINS_START].name)})`
+                const procStr = (proc < BUILTINS_START) ? `r${proc}` : `builtin(${String(IBUILTINS[proc-BUILTINS_START].name)})`
                 line += `${padOp("TAILCALL")} ${procStr}, start=r${startReg}, nargs=${nargs}`;
                 idx += 4;
                 break;

@@ -1,8 +1,8 @@
-import { ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_AND, OP_APPLY, OP_BEGIN, OP_COND, OP_DEFINE, OP_IF, OP_LAMBDA, OP_LET, OP_LETREC, OP_LETSTAR, OP_OR, OP_QUOTE, OP_SET, unpackLambdaExprArgs, wrapMulti } from "../common";
+import { ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_AND, OP_BEGIN, OP_COND, OP_DEFINE, OP_IF, OP_LAMBDA, OP_LET, OP_LETREC, OP_LETSTAR, OP_OR, OP_QUOTE, OP_SET, unpackLambdaExprArgs, wrapMulti } from "../common";
 import { AnimaTransformer } from "../syntax-transformer";
 import { AstAnalysis, ContifyAnalyzer } from "./analysis";
 import { AnalysisScope, CompilerScope } from "./scope";
-import { APPLY_PROC_IDX, BUILTINS_START, OP_CONT, OP_CONT_BASECONT } from "./vm";
+import { BUILTINS_START, OP_CONT, OP_CONT_BASECONT } from "./vm";
 import { IR, type Node, JumpLabel, ClosureTemplateIR } from "./ir"
 import { AstCps } from "./ext-transform";
 import { IBUILTINS_IDX_MAP } from "../std";
@@ -94,9 +94,6 @@ export class Compiler {
                 case OP_LAMBDA:
                 case OP_CONT:
                     this.#compileLambda(expr, opts)
-                    return
-                case OP_APPLY:
-                    this.#optIntrinsicNormal(expr, APPLY_PROC_IDX, opts)
                     return
                 case OP_LET:
                 case OP_LETSTAR:
@@ -198,7 +195,7 @@ export class Compiler {
         if (!ascope) throw new Error(`internal error: could not find ascope for expr ${expr}`)
         ascope.dbgPrint()
 
-        const { params, remParams } = unpackLambdaExprArgs(expr, "lambda")
+        const { params, remParams } = unpackLambdaExprArgs(expr, IBUILTINS_IDX_MAP, "lambda")
         const lambdaNodes: Node[] = []
 
         for(let i = 0; i < params.length; i++) {
@@ -277,7 +274,7 @@ export class Compiler {
             opts.scope.enterBlock()
             const seen = new Set<symbol>();
             for(let i = 0; i < params.length; i++) {
-                ensureCanBind(params[i], seen, "lambda")
+                ensureCanBind(params[i], seen, "lambda", IBUILTINS_IDX_MAP)
                 const inf = ascope.getVarinfo(params[i]);
                 if(!inf) throw new Error("Could not fetch varinfo")
                 

@@ -1,9 +1,8 @@
-import { ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_AND, OP_APPLY, OP_BEGIN, OP_COND, OP_DEFINE, OP_IF, OP_LAMBDA, OP_LET, OP_LETREC, OP_LETSTAR, OP_OR, OP_QUOTE, OP_SET, OP_TRY, unpackLambdaExprArgs, wrapMulti } from "../common"
+import { ASTStringifier, DottedPair, ensureCanBind, normalizeExpr, OP_AND, OP_BEGIN, OP_COND, OP_DEFINE, OP_IF, OP_LAMBDA, OP_LET, OP_LETREC, OP_LETSTAR, OP_OR, OP_QUOTE, OP_SET, unpackLambdaExprArgs, wrapMulti } from "../common"
 import { IBUILTINS_IDX_MAP } from "../std"
 import { AnimaTransformer } from "../syntax-transformer"
 import { IR, type Node, JumpLabel, ClosureTemplateIR } from "./ir"
 import { CompilerScope } from "./scope"
-import { APPLY_PROC_IDX, TRY_PROC_IDX } from "./vm"
 
 interface CmpOpts {
     leaveOnStack: boolean // whether to leave created values on the stack or not
@@ -80,12 +79,6 @@ export class Compiler {
                     return
                 case OP_OR:
                     this.#compileOr(expr, opts)
-                    return
-                case OP_APPLY:
-                    this.#optIntrinsicNormal(expr, APPLY_PROC_IDX, opts)
-                    return
-                case OP_TRY:
-                    this.#optIntrinsicNormal(expr, TRY_PROC_IDX, opts)
                     return
                 case OP_LET:
                 case OP_LETSTAR:
@@ -240,7 +233,7 @@ export class Compiler {
 
     #compileLambda(expr: any[], opts: CmpOpts) {
         // AnimaTransform ensures lambdas are of correct form
-        const { params, remParams } = unpackLambdaExprArgs(expr, "lambda")
+        const { params, remParams } = unpackLambdaExprArgs(expr, IBUILTINS_IDX_MAP, "lambda")
 
         // Once we've verified the syntax, we can then drop the entire lambda if its not actually needed
         if (!opts.leaveOnStack) return
@@ -291,7 +284,7 @@ export class Compiler {
         // to BLOCK/ENDBLOCK instead of doing a whole function call
         const first = expr[0]
         if (Array.isArray(first) && (first[0] === OP_LAMBDA) && Array.isArray(first[1])) {
-            console.log("Applying IIFE")
+            //console.log("Applying IIFE")
             const params = first[1];
             const body = first.slice(2);
             const args = expr.slice(1)
@@ -302,7 +295,7 @@ export class Compiler {
             // Bind all arguments outside new block scope
             const seen = new Set<symbol>();
             for(let i = 0; i < args.length; i++) {
-                ensureCanBind(params[i], seen, "lambda")
+                ensureCanBind(params[i], seen, "lambda", IBUILTINS_IDX_MAP)
                 if (args[i] === undefined) continue // the vm guarantees that locals are initially undefined as a default value
                 this.#compile(args[i], { ...opts, leaveOnStack: true, isTail: false });
             }

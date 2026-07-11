@@ -28,7 +28,7 @@ Comments begin with ; and continue to the end of the line.
 
 - Strings and symbols are distinct data types. String literals (e.g., "hello") evaluate to themselves as string primitives
 - Unquoted symbols (e.g. my-var) are evaluated as dynamic variable lookups in the lexical scope.
-- A quoted expression like '<expr> should have the same effect as (quote <expr>). Quoting a symbol (e.g., 'my-var) returns an interned 
+- A quoted expression like ``'<expr>`` should have the same effect as ``(quote <expr>)``. Quoting a symbol (e.g., ``'my-var``) returns an interned 
 symbol rather than performing a variable lookup.
 - Multiple top-level expressions should be evaluated sequentially with the result being the result of the last expression (one way
 to achieve this is to parse multiple top-level expressions expr1 expr2... in a begin block like (begin expr1 expr2 ...))
@@ -39,44 +39,34 @@ to achieve this is to parse multiple top-level expressions expr1 expr2... in a b
 `define` strictly mutates or initializes within the local execution scope and never the parent scope and variables in the outermost scope 
 cannot be reassigned or mutated whatsoever for sandboxing purposes.
 
-2. Truthiness: false and null are falsey. All other values are truthy.
+2. Truthiness: false (`#f`) is falsy. All other values are truthy (including `#<void>`)
 
 3. Tail-Call Optimization (TCO): The runtime must execute the final expression in begin, if, and, or, and custom procedure calls without allocating a new frame on the host call stack.
 
-4. Anima does not support macros/custom syntax extensions.
+4. Anima does not support macros/custom syntax currently. Although compliant implementations *may* choose to additionally support this for future use, code written in Anima must *not* assume support for macros/custom syntax.
 
 5. It is not allowed for user-code to override a builtin using define. Compliant implementations of Anima should error if an attempt to do so is detected
 
 6. Like Scheme, all procedures in Anima (including builtin procedures that are *not* special forms) must be first class. Furthermore, both builtin
 and user-defined procedures must return `procedure` if type? is called on it.
 
-7. Compliant implementations of Anima should support the following options:
-- disableLambda (disables creation of closures using lambda)
-- disableDefine (disables setting values to scope to define)
-- maxSteps (the maximum number of steps that anima code is allowed to use up. Each vm loop should use 1 step and future functions defined in the spec may
-be defined to take up additional steps in addition to the fixed 1 step cost)
-
-### Supported Features/Builtins
-
-Implementations must enforce strict arity and type checking, throwing errors on mismatch.
-
 ### Special Forms
 
-- define (varname: symbol, value: expr): Evaluates value and binds it to varname in the current scope. Arity: 2.
-- define ((varname, args) body: expr): Creates a function (following same rules as lambda) with args and body as params+body then binds
-it to varname in the current scope
-- quote (expr): Returns the expression without evaluating it. Any raw identifiers within the quoted expression (or deeply nested 
-within quoted lists) are converte into symbols. Arity: 1.
-- lambda ([params...], body: expr): Returns a closure capturing the current lexical scope. If multiple body expressions are provided, 
-they are evaluated sequentially with the last result returned Arity: >= 2.
-- if (cond, true_expr, false_expr): Evaluates cond. If truthy, evaluates and returns true_expr, else false_expr. Arity: 3.
-- cond (clauses...): Each clause must be a list of exactly two elements: [condition, expr]. Each condition must be executed in 
-order. Upon encountering the first truthy clause condition (or the exact symbol 'else'), expr is evaluated and returned. If no 
-conditions match, returns null. Throws an error if zero clauses are provided or if any clause is malformed. Arity: >= 1.
-- and (expr...): Short-circuits on the first falsey evaluation. Returns true if 0 arguments.
-- or (expr...): Short-circuits on the first truthy evaluation. Returns false if 0 arguments.
-- begin (expr...): Evaluates arguments sequentially. Returns the result of the last expression. Arity: >= 1.
-- 
+- ``(define varname value)``: Evaluates ``value`` and binds it to ``varname`` *globally*. A define inside a ``lambda`` (internal lambda) is hoisted/treated as a ``letrec``
+- ``(define (varname [args]) exprs...)``: Shorthand for ``(define varname (lambda [args] exprs...))``
+- ``(set! varname value)``: Evaluates ``value`` and binds it to ``varname`` in the current scope (mutates `varname` in the current scope)
+- ``(quote expr)``: Returns the expression without evaluating it. Any raw identifiers within the quoted expression (or deeply nested 
+within quoted lists) are converted into symbols
+- ``(lambda [args] exprs...)``: Returns a closure capturing the current lexical scope. If multiple `exprs...` are provided, 
+they are evaluated sequentially with the last result returned. ``[args]`` can either be of form ``(args...)`` (arity of `args...` length), `args` (variadic with all args to the lambda collapsed into a list and placed in `args`) or ``(args... . rem-params)`` (minimum arity of `args...` length with all variadic arguments collapsed into a list and placed in ``rem-params``)
+- ``(if cond true-expr false-expr)``: Evaluates ``cond``. If truthy, evaluates to `trye-expr`, else ``false-expr``
+- ``(cond clauses...)``: Each clause must be a list of exactly two elements: ``(condition expr)``. Each condition must be executed in 
+order. Upon encountering the first truthy clause condition (or the exact symbol ``else``), expr is evaluated and returned. If there are no clauses or if no 
+conditions match, returns `#<void>`. Throws an error if any clause is malformed.
+- ``(and expr...)``: Short-circuits on the first falsy evaluation or returns the value of the last expression in ``expr...``. Returns true if 0 arguments.
+- ``(or expr...)``: Short-circuits on the first truthy evaluation or returns the value of the last expression in ``expr...``. Returns false if 0 arguments.
+- ``(begin expr...)``: Evaluates arguments sequentially. Returns the result of the last expression.
+- ``let/let*/letrec``: Same as Scheme ``let/let*/letrec`` (TODO: Write docs here for this as well)
 
 ### Builtin procedures
 
@@ -110,6 +100,7 @@ otheriwse checks pointer equality. Arity: 2
 - try (proc args... rem-lst): Calls ``proc`` with the packed ``args... rem-lst`` as arguments for ``proc``. If ``proc`` errors, ``try`` evaluates to an
 ``res`` of type ``ErrorObject`` (whose ``type? res`` is ``error``, ``error? res`` yielding ``#t`` and ``error-message res`` containing the error caught by ``try`` while evaluating ``proc``)
 - map: Same as Scheme specification on map (TODO: Write docs here for this as well)
+- pget (props str-key): Given `props` (which must be an instance of `ExposedProps`), returns the value of the property keyed by `str-key` in props, or `#<void>` if not found in `props`
 
 ## Deviations from Scheme
 

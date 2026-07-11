@@ -1,4 +1,4 @@
-import { ErrorObject, ExposedProps, Globals, IProcedure, isDeepEqual, isTruthy, OP_ADD, OP_APPLY, OP_CAR, OP_CDR, OP_CONS, OP_CONTAINS, OP_DIV, OP_EMPTY, OP_EQ, OP_EQQ, OP_EQUAL, OP_EQV, OP_GT, OP_GTE, OP_LAST, OP_LENGTH, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_NOT, OP_REMAINDER, OP_SUB, OP_TRY, OP_TYPE, OP_UI_GET } from "./common";
+import { ErrorObject, ExposedProps, Globals, IProcedure, isDeepEqual, isTruthy, OP_ADD, OP_CAR, OP_CDR, OP_CONS, OP_CONTAINS, OP_DIV, OP_EMPTY, OP_EQ, OP_EQQ, OP_EQUAL, OP_EQV, OP_GT, OP_GTE, OP_LAST, OP_LENGTH, OP_LIST, OP_LT, OP_LTE, OP_MEMBER, OP_MODULO, OP_MUL, OP_NOT, OP_REMAINDER, OP_SUB, OP_TYPE } from "./common";
 import { Cons } from "./list";
 
 /** 
@@ -18,8 +18,17 @@ export class BuiltinFunction extends IProcedure {
     }
 }
 
+// Marker for `apply` intrinsic proc
+export class ApplyProc extends IProcedure {
+    public name = Symbol.for("apply")
+}
+// Marker for `try` intrinsic proc
+export class TryProc extends IProcedure {
+    public name = Symbol.for("try")
+}
+
 // Stores all of our builtin funcs
-export const IBUILTINS: BuiltinFunction[] = [
+export const IBUILTINS: (BuiltinFunction | ApplyProc | TryProc)[] = [
     new BuiltinFunction(OP_ADD, (regs, startReg, nargs) => {
         let acc = 0; 
         for (let i = startReg; i < startReg+nargs; i++) {
@@ -373,27 +382,23 @@ export const IBUILTINS: BuiltinFunction[] = [
             }
         }
     }),
-    new BuiltinFunction(OP_UI_GET, (regs, startReg, nargs) => {
-        if (nargs != 2) throw new Error("ui-get requires 2 arguments (ui-get props key-str)");
+    new BuiltinFunction(Symbol.for("pget"), (regs, startReg, nargs) => {
+        if (nargs != 2) throw new Error("pget requires 2 arguments (pget props key-str)");
         const props = regs[startReg]
-        if (!(props instanceof ExposedProps)) throw new Error("ui-get requires the first argument to be an instance of ExposedProps")
+        if (!(props instanceof ExposedProps)) throw new Error("pget requires the first argument to be an instance of ExposedProps")
         const keyStr = regs[startReg+1]
-        if (typeof keyStr !== "string") throw new Error("ui-get requires the second argument to be a string")
+        if (typeof keyStr !== "string") throw new Error("pget requires the second argument to be a string")
         return props.get(keyStr)
-    })
+    }),
+    new ApplyProc(),
+    new TryProc()
+
 ]
 
 export const IBUILTINS_IDX_MAP = new Map<symbol, number>()
 for(let i = 0; i < IBUILTINS.length; i++) {
     IBUILTINS_IDX_MAP.set(IBUILTINS[i].name, i)
 }
-
-// Marker for `apply` intrinsic proc
-export class ApplyProc extends IProcedure {}
-export const APPLY_PROC = new ApplyProc()
-// Marker for `try` intrinsic proc
-export class TryProc extends IProcedure {}
-export const TRY_PROC = new TryProc()
 
 class MapObj {
     #iters: (ArrayIterator<any> | Generator<any, void, unknown>)[]
@@ -458,8 +463,6 @@ export const stdPreludeScope = () => Globals.newWith({
         if(!Array.isArray(regs[startReg])) throw new Error(`internal error: %ArrayPush called on non-array ${regs[startReg]}`)
         return regs[startReg].push(regs[startReg+1])
     }),
-    [OP_APPLY]: APPLY_PROC,
-    [OP_TRY]: TRY_PROC,
 })
 
 export const STD_PRELUDE = `

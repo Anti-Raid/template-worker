@@ -1,10 +1,6 @@
 import { ErrorObject, flattenDynamicArgs, Globals, IProcedure, isTruthy, type BS, type BSReader, type SerializableBytecode } from "../common"
 import { Cons } from "../list"
-import { APPLY_PROC, ApplyProc, BuiltinFunction, IBUILTINS, TRY_PROC, TryProc } from "../std"
-
-// Ptrs
-export const APPLY_PROC_IDX = 2**32 - 1
-export const TRY_PROC_IDX = 2**32 - 2
+import { ApplyProc, BuiltinFunction, IBUILTINS, TryProc } from "../std"
 
 export enum OpCode {
     // Push a constant from consts to the stack
@@ -221,7 +217,7 @@ export class AnimaVM {
                     }
                     case OpCode.PUSHBUILTIN: {
                         const proc = frame.readNext()
-                        const procObj = (proc === APPLY_PROC_IDX) ? APPLY_PROC : (proc === TRY_PROC_IDX) ? TRY_PROC : IBUILTINS[proc]
+                        const procObj = IBUILTINS[proc]
                         stack.push(procObj)
                         break
                     }

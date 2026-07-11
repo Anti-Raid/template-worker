@@ -48,7 +48,7 @@ export class MissingVarError extends Error {
     }
 }
 
-/** Properties that are exposed to the anima engine, can be retrieved with (ui-get propname) */
+/** Properties that are exposed to the anima engine */
 export class ExposedProps {
     #props: Record<string, any>;
 
@@ -83,6 +83,22 @@ export const OP_QUOTE  = Symbol.for("quote");
 export const OP_AND      = Symbol.for("and");
 export const OP_OR       = Symbol.for("or");
 
+export const SPECIAL_FORMS = new Set([
+    OP_DEFINE, 
+    OP_SET,
+    OP_BEGIN,
+    OP_LAMBDA, 
+    OP_LET,
+    OP_LETSTAR,
+    OP_LETREC,
+    OP_IF,
+    OP_COND,
+    OP_ELSE,
+    OP_QUOTE,
+    OP_AND,
+    OP_OR
+])
+
 // List Operations
 export const OP_LIST     = Symbol.for("list");
 export const OP_CONS     = Symbol.for("cons")
@@ -93,9 +109,6 @@ export const OP_LENGTH   = Symbol.for("length");
 export const OP_EMPTY    = Symbol.for("empty?")
 export const OP_CONTAINS = Symbol.for("contains?");
 export const OP_MEMBER   = Symbol.for("member?");
-export const OP_MAP      = Symbol.for("map")
-export const OP_APPLY    = Symbol.for("apply")
-export const OP_TRY      = Symbol.for("try")
 
 // Logic & Type Checking
 export const OP_NOT      = Symbol.for("not");
@@ -116,62 +129,6 @@ export const OP_MUL    = Symbol.for("*");
 export const OP_DIV    = Symbol.for("/");
 export const OP_MODULO = Symbol.for("modulo");
 export const OP_REMAINDER = Symbol.for("remainder")
-
-// Super cursed function
-export const OP_CALL_CC = Symbol.for("call/cc")
-
-// Misc
-export const OP_UI_GET = Symbol.for("ui-get")
-
-export const SPECIAL_FORMS = new Set([
-    OP_DEFINE, 
-    OP_QUOTE, 
-    OP_LAMBDA, 
-    OP_LET,
-    OP_IF, 
-    OP_COND, 
-    OP_AND, 
-    OP_OR, 
-    OP_BEGIN,
-])
-
-export const BUILTINS_OPS = new Set([
-    // List Operations
-    OP_LIST,
-    OP_CONS,
-    OP_CAR,
-    OP_CDR,
-    OP_LAST,
-    OP_LENGTH,
-    OP_EMPTY,
-    OP_MEMBER,
-    OP_MAP,
-    OP_APPLY,
-    OP_TRY,
-
-    // Logic & Type Checking
-    OP_NOT,
-    OP_TYPE,
-    OP_EQ,
-    OP_EQQ,
-    OP_EQV,
-    OP_EQUAL,
-
-    // Math & Comparisons
-    OP_LT,
-    OP_GT,
-    OP_LTE,
-    OP_GTE,
-    OP_ADD,
-    OP_SUB,
-    OP_MUL,
-    OP_DIV,
-    OP_MODULO,
-    OP_REMAINDER,
-
-    // Misc
-    OP_UI_GET
-]);
 
 export class ASPTokenError extends Error {
     pos: number;
@@ -504,7 +461,7 @@ export const normalizeExpr = (expr: any): any =>{
     return expr;
 }
 
-export const ensureCanBind = (param: any, seen: Set<symbol> | undefined, syntaxCtx: string) => {
+export const ensureCanBind = (param: any, seen: Set<symbol> | undefined, syntaxCtx: string, builtins: Map<symbol, number>) => {
     if(typeof param !== "symbol") {
         throw new Error(`${syntaxCtx} parameter must be a symbol, but received ${typeof param}: ${String(param)}`);
     }
@@ -519,10 +476,14 @@ export const ensureCanBind = (param: any, seen: Set<symbol> | undefined, syntaxC
     if (SPECIAL_FORMS.has(param)) {
         throw new Error(`${String(param)}: bad syntax`)
     }
+
+    if (builtins.has(param)) {
+        throw new Error(`${String(param)}: cannot shadow builtin procedure`)
+    }
 }
 
 export type UnpackedLambdaArgs = { params: symbol[], remParams: symbol | null }
-export const unpackLambdaExprArgs = (expr: any, ctx?: string): UnpackedLambdaArgs => {
+export const unpackLambdaExprArgs = (expr: any, builtins: Map<symbol, number>, ctx?: string): UnpackedLambdaArgs => {
     let params: symbol[] = []
     let remParams: symbol | null = null
     if (Array.isArray(expr[1])) {
@@ -541,10 +502,10 @@ export const unpackLambdaExprArgs = (expr: any, ctx?: string): UnpackedLambdaArg
     // Validate params and remParams here
     const seen = new Set<symbol>();
     for(let i = 0; i < params.length; i++) {
-        ensureCanBind(params[i], seen, ctx || "lambda")
+        ensureCanBind(params[i], seen, ctx || "lambda", builtins)
     }
     if (remParams) {
-        ensureCanBind(remParams, seen, ctx || "lambda")
+        ensureCanBind(remParams, seen, ctx || "lambda", builtins)
     }
 
     return { params, remParams }

@@ -1,9 +1,8 @@
 import { BS, BSReader, ErrorObject, flattenDynamicArgs, Globals, IProcedure, type SerializableBytecode } from "../common";
 import { isTruthy } from "../common";
-import { APPLY_PROC, ApplyProc, BuiltinFunction, IBUILTINS, TryProc } from "../std";
+import { ApplyProc, BuiltinFunction, IBUILTINS, TryProc } from "../std";
 
 export const BUILTINS_START = 2**31
-export const APPLY_PROC_IDX = 2**32 - 1
 
 export enum OpCode {
     LOADCONST,
@@ -323,7 +322,7 @@ export class AnimaVM {
                     }
                     case OpCode.CALL: {
                         const procIdx = frame.readNext()
-                        const proc = (procIdx === APPLY_PROC_IDX) ? APPLY_PROC : (procIdx < BUILTINS_START) ? regs[procIdx] : IBUILTINS[procIdx - BUILTINS_START];
+                        const proc = (procIdx < BUILTINS_START) ? regs[procIdx] : IBUILTINS[procIdx - BUILTINS_START];
                         const destReg = frame.readNext();
                         const startReg = frame.readNext();
                         const nargs = frame.readNext();
@@ -332,7 +331,7 @@ export class AnimaVM {
                     }
                     case OpCode.TAILCALL: {
                         const procIdx = frame.readNext()
-                        const proc = (procIdx === APPLY_PROC_IDX) ? APPLY_PROC : (procIdx < BUILTINS_START) ? regs[procIdx] : IBUILTINS[procIdx - BUILTINS_START];
+                        const proc = (procIdx < BUILTINS_START) ? regs[procIdx] : IBUILTINS[procIdx - BUILTINS_START];
                         const startReg = frame.readNext();
                         const nargs = frame.readNext();
                         cont = this.#invoke(proc, cont, frame, regs, undefined, startReg, nargs);

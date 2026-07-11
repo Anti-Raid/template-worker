@@ -1,5 +1,5 @@
-import { ASP, Globals, OP_LAMBDA, type DottedPair, type SerializableBytecode, OP_APPLY, OP_TRY } from "./common"
-import { APPLY_PROC, IBUILTINS, STD_PRELUDE, stdPreludeScope, TRY_PROC } from "./std"
+import { ASP, Globals, OP_LAMBDA, type DottedPair, type SerializableBytecode } from "./common"
+import { IBUILTINS, STD_PRELUDE, stdPreludeScope } from "./std"
 
 export interface Closure {}
 export interface ByteCode extends SerializableBytecode {}
@@ -58,14 +58,14 @@ export class Anima {
 
     compileAstToClosure(bast: any, args: any[] | DottedPair, globals: Globals): Closure {
         const ast = [OP_LAMBDA, args, bast]
-        const bc = this.#comp.compileRawAst(ast)
+        const bc = this.compileRawAst(ast)
         const res = this.#vm.evaluateRaw(bc, globals) // Use the VM to create the closure
         return res
     }
 
     compileRaw(s: string) {
         const ast = new ASP(s, true).parse()
-        return this.#comp.compileRawAst(ast)
+        return this.compileRawAst(ast)
     }
 
     compileRawAst(ast: any) {
@@ -84,7 +84,7 @@ const getBootstrapScopeFor = (impl: AnimaMeta, cmp: Compiler, vm: AnimaVM) => {
     }
     const preludeAst = new ASP(STD_PRELUDE, true).parse()
     const PRELUDE_BC = cmp.compileRawAst(preludeAst)
-    impl.deepPrint(PRELUDE_BC)
+    //impl.deepPrint(PRELUDE_BC)
     const privScope = stdPreludeScope()
     vm.evaluateRaw(PRELUDE_BC, privScope)
 
@@ -103,8 +103,6 @@ const getBootstrapScopeFor = (impl: AnimaMeta, cmp: Compiler, vm: AnimaVM) => {
     for(const builtin of IBUILTINS) {
         publicScope.data.set(builtin.name, builtin)
     }
-    publicScope.data.set(OP_APPLY, APPLY_PROC)
-    publicScope.data.set(OP_TRY, TRY_PROC)
 
     bootstrappedPreludes.set(impl.id, publicScope)
     return publicScope

@@ -1,5 +1,5 @@
 import { ConstPool } from "../common";
-import { APPLY_PROC_IDX, TRY_PROC_IDX, ByteCode, Closure, ClosureTemplate, OpCode, type UpVarLoc } from "./vm";
+import { ByteCode, Closure, ClosureTemplate, OpCode, type UpVarLoc } from "./vm";
 
 export class JumpLabel {
     public id: number;

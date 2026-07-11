@@ -1,6 +1,6 @@
 import { BS, BSReader, type SerializableBytecode } from "../common"
 import { IBUILTINS } from "../std"
-import { APPLY_PROC_IDX, ByteCode, Closure, ClosureTemplate, OpCode, TRY_PROC_IDX } from "./vm"
+import { ByteCode, Closure, ClosureTemplate, OpCode } from "./vm"
 
 const constToString = (s: any): string => {
     if(typeof s === "symbol") {
@@ -64,7 +64,7 @@ const stringifyInst = (inst: ByteCode): string[] => {
 
             case OpCode.PUSHBUILTIN: {
                 const proc = inst.inst[idx + 1]
-                const procStr = (proc === APPLY_PROC_IDX) ? "apply" : (proc === TRY_PROC_IDX) ? `try` : `builtin(${String(IBUILTINS[proc].name)})`
+                const procStr =`builtin(${String(IBUILTINS[proc].name)})`
                 line += `${padOp(OpCode[opcode])} ${procStr} (${inst.inst[idx + 1]})`;
                 idx += 2;
                 break;

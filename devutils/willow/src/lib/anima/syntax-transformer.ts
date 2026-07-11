@@ -13,6 +13,7 @@ import {
   DottedPair,
   ensureCanBind,
 } from "./common";
+import { IBUILTINS_IDX_MAP } from "./std";
 
 /**
  * transforms all of the complex special forms (like cond/let/let-star/letrec/complex defines into their simplest forms (if/lambda/lambda with set!))
@@ -76,7 +77,7 @@ export class AnimaTransformer {
             throw new Error(`${String(expr[1])}: expr[1] not symbol or list syntax`)
         }
 
-        ensureCanBind(expr[1], undefined, ctx || "set!")
+        ensureCanBind(expr[1], undefined, ctx || "set!", IBUILTINS_IDX_MAP)
     }
 
     #wrapMulti = (exprs: any[]) => {
@@ -86,7 +87,7 @@ export class AnimaTransformer {
     }
 
     #transformCond(expr: any[]) {
-        if (expr.length === 1) throw new Error("cond requires at least one clause");
+        if (expr.length === 1) return undefined // an empty cond evaluates to undefined
 
         let result: any = undefined; 
 
@@ -122,13 +123,13 @@ export class AnimaTransformer {
             if(expr.length !== 3) {
                 throw new Error(`define must be in format (define varname expr), but received ${expr.length - 1} arguments`);
             }
-            ensureCanBind(expr[1], undefined, "define")
+            ensureCanBind(expr[1], undefined, "define", IBUILTINS_IDX_MAP)
             return [expr, false]
         } else if (Array.isArray(expr[1])) { 
             // (define (func_name arg1 arg2) body_expr...), this one just gets rewritten to a normal define with lambda
             if (expr[1].length === 0) throw new Error("define: missing function name");
             const funcName = expr[1][0];
-            ensureCanBind(funcName, undefined, "define")
+            ensureCanBind(funcName, undefined, "define", IBUILTINS_IDX_MAP)
             const params = expr[1].slice(1);
             const body = expr.slice(2);
             const equivExpr = [OP_DEFINE, funcName, [OP_LAMBDA, params, ...body]];
@@ -137,7 +138,7 @@ export class AnimaTransformer {
             // (define (func arg1 . rest) body...)
             if (expr[1].items.length === 0) throw new Error("define: missing function name");
             const funcName = expr[1].items[0];
-            ensureCanBind(funcName, undefined, "define")
+            ensureCanBind(funcName, undefined, "define", IBUILTINS_IDX_MAP)
             const params = expr[1].items.slice(1);
             const body = expr.slice(2);
             
