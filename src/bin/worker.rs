@@ -89,15 +89,13 @@ async fn main_impl(args: CmdArgs) {
         .build()
         .expect("Could not initialize reqwest client");
 
-    let (http, stratum, current_user) = setup_discord().await;
+    let stratum = setup_discord().await;
 
     let (meso_client, meso_client_stream) = MesophyllClient::new(worker_id)
         .await
         .expect("Failed to create Mesophyll client");
 
     let worker_state = WorkerState::new(
-        http.clone(),
-        Arc::new(current_user.clone()),
         Arc::new(meso_client.clone()),
         stratum.clone(),
         reqwest,

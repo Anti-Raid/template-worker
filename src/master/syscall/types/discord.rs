@@ -1,9 +1,9 @@
+use dapi::{ChannelId, GuildId, Permissions, RoleId};
 use serde::{Deserialize, Serialize};
-use serenity::all::{GenericChannelId, Permissions, RoleId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DashboardGuild {
-    pub id: serenity::all::GuildId,
+    pub id: GuildId,
     pub name: String,
     pub icon: Option<String>,
     pub permissions: String,
@@ -29,13 +29,13 @@ pub struct GuildChannelWithPermissions {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ApiPartialGuildChannel {
     /// The ID of the channel
-    pub id: GenericChannelId,
+    pub id: ChannelId,
     /// The name of the channel
     pub name: String,
     /// The position of the channel in the guild
-    pub position: u16,
+    pub position: i32,
     /// The ID of the parent channel, if any
-    pub parent_id: Option<GenericChannelId>,
+    pub parent_id: Option<ChannelId>,
     /// The type of the channel
     pub r#type: u8,
 }

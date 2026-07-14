@@ -1,6 +1,6 @@
 use crate::worker::workerstate::WorkerState;
 use crate::worker::workervmmanager::Id;
-use dapi::controller::{DiscordProvider, DiscordProviderContext};
+use dapi::{ChannelId, GuildId, UserId, controller::{DiscordProvider, DiscordProviderContext}, dhttp::Client};
 use serde_json::Value;
 
 #[derive(Clone)]
@@ -12,7 +12,7 @@ pub(super) struct ArDiscordProvider {
 impl ArDiscordProvider {
     const DISCLAIMER: &str = "Content provided by users is the sole responsibility of the author. AntiRaid does not monitor, verify, or endorse any user-generated messages.";
 
-    fn guild_id(&self) -> Result<serenity::all::GuildId, crate::Error> {
+    fn guild_id(&self) -> Result<GuildId, crate::Error> {
         match self.id {
             Id::Guild(guild_id) => Ok(guild_id),
             Id::User(_) => Err("Current context is not a guild".into()),
@@ -35,25 +35,17 @@ impl DiscordProvider for ArDiscordProvider {
 
     async fn get_guild(
         &self,
-    ) -> serenity::Result<Value, crate::Error> {
+    ) -> Result<Value, crate::Error> {
         let guild_id = self.guild_id()?;
         let obj = self.state.stratum.guild(guild_id).await?;
         let Some(obj) = obj else { return Ok(serde_json::Value::Null) };
         Ok(obj)
     }
 
-    fn current_user(&self) -> Option<serenity::all::CurrentUser> {
-        Some(
-            (*self.state
-            .current_user)
-            .clone()
-        )
-    }
-
     async fn get_guild_member(
         &self,
-        user_id: serenity::all::UserId,
-    ) -> serenity::Result<Value, crate::Error> {
+        user_id: UserId,
+    ) -> Result<Value, crate::Error> {
         let guild_id = self.guild_id()?;
         let obj = self.state.stratum.guild_member(guild_id, user_id).await?;
         let Some(obj) = obj else { return Ok(serde_json::Value::Null) };
@@ -62,7 +54,7 @@ impl DiscordProvider for ArDiscordProvider {
 
     async fn get_guild_channels(
         &self,
-    ) -> serenity::Result<Value, crate::Error> {
+    ) -> Result<Value, crate::Error> {
         let guild_id = self.guild_id()?;
         let obj = self.state.stratum.guild_channels(guild_id).await?;
         let Some(obj) = obj else { return Ok(serde_json::Value::Null) };
@@ -71,7 +63,7 @@ impl DiscordProvider for ArDiscordProvider {
 
     async fn get_guild_roles(
         &self,
-    ) -> serenity::Result<Value, crate::Error>
+    ) -> Result<Value, crate::Error>
     {
         let guild_id = self.guild_id()?;
         let obj = self.state.stratum.guild_roles(guild_id).await?;
@@ -81,8 +73,8 @@ impl DiscordProvider for ArDiscordProvider {
 
     async fn get_channel(
         &self,
-        channel_id: serenity::all::GenericChannelId,
-    ) -> serenity::Result<Value, crate::Error> {
+        channel_id: ChannelId,
+    ) -> Result<Value, crate::Error> {
         let guild_id = self.guild_id()?;
         let channel = self.state.stratum.channel(channel_id).await?;
 
@@ -105,54 +97,7 @@ impl DiscordProvider for ArDiscordProvider {
         self.id.to_provider_context()
     }
 
-    fn serenity_http(&self) -> &serenity::http::Http {
-        &self.state.serenity_http
-    }
-
-    async fn edit_channel_permissions(
-        &self,
-        channel_id: serenity::all::GenericChannelId,
-        target_id: serenity::all::TargetId,
-        data: impl serde::Serialize,
-        audit_log_reason: Option<&str>,
-    ) -> Result<(), khronos_runtime::Error> {
-        self.state
-            .serenity_http
-            .create_permission(channel_id.expect_channel(), target_id, &data, audit_log_reason)
-            .await
-            .map_err(|e| format!("Failed to edit channel permissions: {}", e))?;
-
-        Ok(())
-    }
-
-    async fn edit_channel(
-        &self,
-        channel_id: serenity::all::GenericChannelId,
-        map: impl serde::Serialize,
-        audit_log_reason: Option<&str>,
-    ) -> Result<Value, crate::Error> {
-        let chan = self
-            .state
-            .serenity_http
-            .edit_channel(channel_id, &map, audit_log_reason)
-            .await
-            .map_err(|e| format!("Failed to edit channel: {}", e))?;
-
-        Ok(chan)
-    }
-
-    async fn delete_channel(
-        &self,
-        channel_id: serenity::all::GenericChannelId,
-        audit_log_reason: Option<&str>,
-    ) -> Result<Value, crate::Error> {
-        let chan = self
-            .state
-            .serenity_http
-            .delete_channel(channel_id, audit_log_reason)
-            .await
-            .map_err(|e| format!("Failed to delete channel: {}", e))?;
-
-        Ok(chan)
+    fn dhttp(&self) -> &Client {
+        &self.state.stratum.discord_http()
     }
 }

@@ -1,17 +1,18 @@
 use std::sync::Arc;
 
+use dapi::{ChannelId, GuildId, UserId, dhttp::{Client, HttpCall, HttpError, ResultJson}, types::User};
 use serde_json::Value;
-use serenity::all::{GenericChannelId, GuildId, ResultJson, UserId};
 use stratum_client::{BulkIsResourceInCacheRequest, GetResourceRequest, IsResourceInCacheRequest, StratumClient};
 use stratum_common::{GuildFetchOpts, pb};
 use tokio::sync::watch;
 
-use crate::{Error, config::CONFIG, worker::{workerdispatch::SimpleEvent, workerthread::WorkerThread, workervmmanager::Id}};
+use crate::{Error, worker::{workerdispatch::SimpleEvent, workerthread::WorkerThread, workervmmanager::Id}};
 
 #[derive(Clone)]
 pub struct Stratum {
     client: Arc<StratumClient>,
-    http: Arc<serenity::http::Http>,
+    http: Client,
+    current_user: Arc<User>
 }
 
 impl std::ops::Deref for Stratum {
@@ -23,9 +24,8 @@ impl std::ops::Deref for Stratum {
 }
 
 impl Stratum {
-    pub async fn new(http: Arc<serenity::http::Http>) -> Result<Self, Error> {
-        let client = StratumClient::new(&CONFIG.meta.stratum_server, CONFIG.meta.stratum_grpc_access_key.clone()).await?;
-        Ok(Self { client: Arc::new(client), http })
+    pub fn new(client: StratumClient, http: Client, current_user: User) -> Self {
+        Self { client: Arc::new(client), http, current_user: Arc::new(current_user) }
     }
 
     /// Starts listening for discord events and pushing them to worker thread
@@ -46,10 +46,7 @@ impl Stratum {
 
     /// Helper method to start the event stream and listen in calling `discord_event_dispatch` for every message
     async fn listen_discord_events_impl(&self, wt: Arc<WorkerThread>, shutdown: watch::Receiver<bool>) -> Result<(), crate::Error> {
-        let Some(current_user) = self.current_user().await? else {
-            return Err("Current user not ready yet!".into());
-        };
-        let bot_id = current_user.id;
+        let bot_id = self.current_user.id;
 
         let stream = self.event_stream(wt.id().try_into()?).await?;
         log::info!("[Worker {wid}] Started event stream", wid=wt.id());
@@ -102,29 +99,19 @@ impl Stratum {
         };
         
         match e {
-            serenity::Error::Http(e) => match e {
-                serenity::all::HttpError::UnsuccessfulRequest(er) => {
-                    if er.status_code == reqwest::StatusCode::NOT_FOUND {
-                        return Ok(None);
-                    } else {
-                        return Err(
-                            format!("Failed to fetch (http, non-404): {:?}", er).into()
-                        );
-                    }
+            HttpError::UnsuccessfulRequest(er) => {
+                if er.status_code == reqwest::StatusCode::NOT_FOUND {
+                    return Ok(None);
+                } else {
+                    return Err(
+                        format!("Failed to fetch (http, non-404): {:?}", er).into()
+                    );
                 }
-                _ => {
-                    return Err(format!("Failed to fetch (http): {:?}", e).into());
-                }
-            },
+            }
             _ => {
-                return Err(format!("Failed to fetch: {:?}", e).into());
+                return Err(format!("Failed to fetch (http): {:?}", e).into());
             }
         }
-    }
-
-    /// Returns the current user
-    pub async fn current_user(&self) -> Result<Option<serenity::all::CurrentUser>, Error> {
-        self.client.get_parsed_resource_from_cache::<_>(GetResourceRequest::CurrentUser {}).await
     }
 
     /// Given a guild ids, returns if the bot is in it
@@ -161,7 +148,7 @@ impl Stratum {
         }
 
         // Last resort: make the http call
-        let res = self.http.get_guild_with_counts(guild_id).await;
+        let res = self.http.call_json(HttpCall::GetGuild { guild_id, with_counts: true }).await;
         Self::extract_from_discord(res)
     }
 
@@ -177,7 +164,7 @@ impl Stratum {
         }
 
         // Last resort: make the http call
-        let res = self.http.get_member(guild_id, user_id).await;
+        let res = self.http.call_json(HttpCall::GetGuildMember { guild_id, user_id }).await;
         Self::extract_from_discord(res)
     }
 
@@ -192,7 +179,7 @@ impl Stratum {
         }
 
         // Last resort: make the http call
-        let res = self.http.get_guild_roles(guild_id).await;
+        let res = self.http.call_json(HttpCall::GetGuildRoles { guild_id }).await;
         Self::extract_from_discord(res)
     }
 
@@ -207,14 +194,14 @@ impl Stratum {
         }
 
         // Last resort: make the http call
-        let res = self.http.get_channels(guild_id).await;
+        let res = self.http.call_json(HttpCall::GetChannels { guild_id }).await;
         Self::extract_from_discord(res)
     }
 
     /// Fetches a channel, trying first Stratum and then the discord api
     pub async fn channel(
         &self,
-        channel_id: GenericChannelId,
+        channel_id: ChannelId,
     ) -> Result<Option<Value>, Error> {
         // First try normal fetch
         if let Some(channel) = self.get_resource_from_cache(GetResourceRequest::Channel { channel_id: channel_id.get() }).await? {
@@ -222,11 +209,15 @@ impl Stratum {
         }
 
         // Last resort: make the http call
-        let res = self.http.get_channel(channel_id).await;
+        let res = self.http.call_json(HttpCall::GetChannel { channel_id }).await;
         Self::extract_from_discord(res)
     }
 
-    pub(crate) fn discord_http(&self) -> &serenity::http::Http {
+    pub fn discord_http(&self) -> &Client {
         &self.http
+    }
+
+    pub fn current_user(&self) -> &Arc<User> {
+        &self.current_user
     }
 }

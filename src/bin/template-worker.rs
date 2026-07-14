@@ -83,7 +83,7 @@ async fn main_impl(args: CmdArgs) {
         .build()
         .expect("Could not initialize reqwest client");
 
-    let (_, stratum, current_user) = setup_discord().await;
+    let stratum = setup_discord().await;
 
     // Ask stratum for its worker count
     let worker_count: usize = stratum.get_config()
@@ -112,7 +112,6 @@ async fn main_impl(args: CmdArgs) {
     
     // Start msyscall server
     let msyscall_handler = MSyscallHandler::new(
-        current_user.into(),
         worker_pool.clone(),
         stratum,
         reqwest,

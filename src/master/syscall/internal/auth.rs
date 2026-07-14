@@ -1,6 +1,6 @@
 use chrono::{DateTime, Duration, Utc};
 use rand::distr::{Alphanumeric, SampleString};
-use serenity::all::UserId;
+use dapi::UserId;
 use sqlx::PgPool;
 use crate::master::syscall::{MSyscallError, MSyscallHandler, types::auth::UserSession};
 

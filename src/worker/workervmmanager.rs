@@ -1,9 +1,10 @@
 use dapi::controller::DiscordProviderContext;
+use dapi::types::User;
 use khronos_runtime::core::typesext::Vfs;
 use khronos_runtime::primitives::syscall::RawSyscall;
 use khronos_runtime::rt::{KhronosRuntime, RuntimeCreateOpts};
 use serde::{Deserialize, Serialize};
-use serenity::all::{GuildId, UserId};
+use dapi::{GuildId, UserId};
 use stratum_common::worker_id_for_tenant;
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -121,7 +122,7 @@ pub struct VmState {
 }
 
 struct BaseTenantData<'a> {
-    bot: Arc<serenity::all::CurrentUser>,
+    bot: Arc<User>,
     id: Id,
     dispatchable_events: &'a [&'static str],
     base_vfs: &'a HashMap<String, Vfs>,
@@ -195,7 +196,7 @@ impl WorkerVmManager {
             .map_err(|e| LuaError::external(format!("Failed to get tenant state for ID {id:?}: {e}")))?;
         let lts = BaseTenantData { 
             id, 
-            bot: worker_state.current_user.clone(), 
+            bot: worker_state.stratum.current_user().clone(), 
             dispatchable_events: &dapi::EVENT_LIST, 
             base_vfs: &super::builtins::EXPOSED_VFS,
             support_server: &crate::CONFIG.meta.support_server_invite,

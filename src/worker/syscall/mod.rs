@@ -28,7 +28,7 @@ pub enum SyscallArgs {
 }
 
 impl FromLua for SyscallArgs {
-    fn from_lua(value: LuaValue, _lua: &Lua) -> LuaResult<Self> {
+    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
         let LuaValue::Table(tab) = value else {
             return Err(LuaError::FromLuaConversionError {
                 from: value.type_name(),
@@ -48,8 +48,8 @@ impl FromLua for SyscallArgs {
                 Ok(Self::Cdn { op })
             },
             b"Discord" => {
-                let op = tab.get("req")?;
-                Ok(Self::Discord { op })
+                let op: LuaValue = tab.get("req")?;
+                Ok(Self::Discord { op: lua.from_value(op)? })
             },
             b"Meta" => {
                 let op = tab.get("req")?;

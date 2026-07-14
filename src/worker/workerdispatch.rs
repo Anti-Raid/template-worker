@@ -1,5 +1,4 @@
-use std::sync::Arc;
-
+use dapi::dhttp::{Client, HttpCall};
 use khronos_runtime::primitives::LUA_SERIALIZE_OPTIONS;
 use khronos_runtime::rt::mlua::prelude::*;
 use khronos_runtime::{utils::khronos_value::KhronosValue};
@@ -72,7 +71,7 @@ impl WorkerDispatch {
             return Err(mlua::Error::external("Lua VM to dispatch to is broken"));
         }
 
-        let http = self.worker_state.serenity_http.clone();
+        let http = self.worker_state.stratum.discord_http().clone();
         match vm_data.runtime.call_in_scheduler::<_, KhronosValue>(vm_data.dispatch_func, Event { name, author, data }).await {
             Ok(result) => Ok(result),
             Err(e) => {
@@ -117,16 +116,14 @@ impl WorkerDispatch {
 
     /// Helper method to log a template error to the main server
     async fn log_error_to_main_server(
-        serenity_http: Arc<serenity::all::Http>,
+        http: Client,
         error: String,
     ) -> Result<(), crate::Error> {
         let error = format!("```lua\n{}```", error.replace('`', "\\`"));
-        // Send to main server
-        serenity_http.send_message(
-            crate::CONFIG.meta.default_error_channel.widen(),
-            Vec::with_capacity(0),
-            &Self::error_message(error),
-        )
+        http.call_fire(HttpCall::CreateChannelMessage {
+            channel_id: crate::CONFIG.meta.default_error_channel,
+            map: serde_json::to_vec(&Self::error_message(error))?
+        })
         .await?;
 
         Ok(())

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use dapi::types::CreateCommand;
 use khronos_runtime::{utils::khronos_value::{CKhronosValue, KhronosValue}};
 use serde::{Deserialize, Serialize};
-use serenity::all::{GuildId, UserId};
+use dapi::{GuildId, UserId};
 use crate::{geese::{state::{StateExecResult, StateOp}, tenantstate::{ModFlags, TenantState}}, master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::bot::{BotStatus, ShardConn}}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id}};
 
 #[derive(Debug, Serialize, Deserialize)]

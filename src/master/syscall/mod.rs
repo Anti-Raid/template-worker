@@ -9,11 +9,12 @@ pub(super) mod internal;
 use std::num::NonZeroU32;
 use std::{sync::Arc, time::Duration};
 use std::fmt::{Display, Debug};
+use dapi::types::Member;
 use governor::DefaultKeyedRateLimiter;
 use governor::clock::{Clock, QuantaClock};
 use moka::future::Cache;
 use serde::{Deserialize, Serialize};
-use serenity::all::{GuildId, UserId};
+use dapi::{GuildId, UserId};
 use crate::geese::state::StateDb;
 use crate::geese::tenantstate::TenantStateDb;
 use crate::{geese::stratum::Stratum, master::{syscall::{auth::{AuthError, MAuthSyscall, MAuthSyscallRet}, bot::{MBotSyscall, MBotSyscallRet}, discord::{MDiscordSyscall, MDiscordSyscallRet}, gkv::{MGkvSyscall, MGkvSyscallRet}, types::bot::BotStatus}, workerpool::WorkerPool}};
@@ -155,13 +156,12 @@ impl<T: Debug + Display + 'static> From<T> for MSyscallError {
 
 #[derive(Clone)]
 pub struct MSyscallHandler {
-    pub(super) current_user: Arc<serenity::all::CurrentUser>,
     pub(super) reqwest: reqwest::Client,
     pub(super) worker_pool: Arc<WorkerPool>,
     pub(super) stratum: Stratum,
     pub(super) pool: sqlx::PgPool,
     pub(super) bot_has_guild_cache: Cache<GuildId, bool>,
-    pub(super) guild_members_cache: Cache<(GuildId, UserId), Option<serenity::all::Member>>,
+    pub(super) guild_members_cache: Cache<(GuildId, UserId), Option<Member>>,
     pub(super) oauth2_code_cache: Cache<String, ()>,
     pub(super) user_rl: Arc<Ratelimiter>,
     pub(super) status_cache: Cache<(), BotStatus>,
@@ -172,7 +172,6 @@ pub struct MSyscallHandler {
 impl MSyscallHandler {
     /// Creates a new MSyscallHandler
     pub fn new(
-        current_user: Arc<serenity::all::CurrentUser>, 
         worker_pool: Arc<WorkerPool>,
         stratum: Stratum,
         reqwest: reqwest::Client,
@@ -180,7 +179,6 @@ impl MSyscallHandler {
     ) -> Self {
         Self { 
             pool: pool.clone(), 
-            current_user,
             reqwest,
             stratum,
             worker_pool,
@@ -231,7 +229,7 @@ impl MSyscallHandler {
     }
 
     /// Helper function to check if the bot is in a single guild
-    async fn has_bot_single(&self, guild: serenity::all::GuildId) -> Result<bool, MSyscallError> {
+    async fn has_bot_single(&self, guild: GuildId) -> Result<bool, MSyscallError> {
         let hb = self.bot_has_guild_cache.try_get_with::<_, crate::Error>(guild, async move {
             self.stratum.has_guild(guild).await
         })
@@ -240,7 +238,7 @@ impl MSyscallHandler {
     }
 
     /// Helper function to check if the bot is in a list of guilds
-    async fn has_bot(&self, guilds: &[serenity::all::GuildId]) -> Result<Vec<bool>, MSyscallError> {
+    async fn has_bot(&self, guilds: &[GuildId]) -> Result<Vec<bool>, MSyscallError> {
         if guilds.len() == 1 {
             let hb = self.bot_has_guild_cache.try_get_with::<_, crate::Error>(guilds[0], async move {
                 self.stratum.has_guild(guilds[0]).await
@@ -258,7 +256,7 @@ impl MSyscallHandler {
     }
 
     /// Helper method to get user guild member with caching
-    async fn guild_member(&self, guild_id: serenity::all::GuildId, user_id: serenity::all::UserId) -> Result<Option<serenity::all::Member>, MSyscallError> {
+    async fn guild_member(&self, guild_id: GuildId, user_id: UserId) -> Result<Option<Member>, MSyscallError> {
         let hb = self.guild_members_cache.try_get_with::<_, crate::Error>((guild_id, user_id), async move {
             let mem_v = self.stratum.guild_member(guild_id, user_id).await?;
             if let Some(mem_v) = mem_v {

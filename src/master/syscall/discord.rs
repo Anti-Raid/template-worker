@@ -1,14 +1,11 @@
+use dapi::{GuildId, dhttp::{ClientKind, HttpCall}, types::{Channel, PartialGuild}};
 use serde::{Deserialize, Serialize};
-use serenity::{all::GuildId, nonmax::NonMaxU16};
 use sqlx::Row;
 use crate::master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, internal::auth as iauth};
 use super::types::discord::*;
 
 /// While discord supports up to 1000, we limit to 20 for user experience purposes
-pub const SEARCH_GUILD_MEMBERS_LIMIT: NonMaxU16 = match NonMaxU16::new(20) {
-    Some(m) => m,
-    None => unreachable!(),
-};
+pub const SEARCH_GUILD_MEMBERS_LIMIT: u16 = 20;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "op")]
@@ -72,27 +69,22 @@ impl MDiscordSyscall {
                     None => {
                         // Get the access token
                         let access_token = iauth::get_user_access_token(handler, &user_id.to_string()).await?;
-
-                        let resp = handler.reqwest.get(format!("{}/api/v10/users/@me/guilds", crate::CONFIG.meta.proxy))
-                        .header("Authorization", format!("Bearer {access_token}"))
-                        .send()
-                        .await?;
-
-                        if resp.status() != reqwest::StatusCode::OK {
-                            let error_text = resp.text().await?;
-                            return Err(format!("Failed to get user guilds: {}", error_text).into());
-                        }
+                        let oauth_client = handler.stratum.discord_http().nest(ClientKind::Oauth2 { token: access_token });
 
                         #[derive(serde::Deserialize)]
                         pub struct OauthGuild {
-                            id: serenity::all::GuildId,
+                            id: GuildId,
                             name: String,
                             icon: Option<String>,
                             permissions: String,
                             owner: bool,
                         }
 
-                        let guilds: Vec<OauthGuild> = resp.json().await?;
+                        let guilds = oauth_client.call::<Vec<OauthGuild>>(HttpCall::GetCurrentUserGuilds { target: None, limit: None, with_counts: true }).await?;
+
+                        let Some(guilds) = guilds else {
+                            return Err("No user guilds found".into());
+                        };
 
                         let mut dashboard_guilds = Vec::with_capacity(guilds.len());
 
@@ -133,12 +125,12 @@ impl MDiscordSyscall {
             Self::GetGuildInfo { guild_id } => {
                 handler.limit(&ctx, "GetGuildInfo")?;
 
-                let bot_id = handler.current_user.id;
+                let bot_id = handler.stratum.current_user().id;
                 let Some(guild_json) = handler.stratum.guild(guild_id).await? else {
                     return Err(MSyscallError::EntityNotFound { reason: "Failed to fetch guild data from stratum" });
                 };
 
-                let guild = serde_json::from_value::<serenity::all::PartialGuild>(guild_json)?;
+                let guild = serde_json::from_value::<PartialGuild>(guild_json)?;
 
                 // Next fetch the member and bot_user
                 let Some(member) = handler.guild_member(guild_id, user_id).await? else {
@@ -154,20 +146,20 @@ impl MDiscordSyscall {
                     return Err(MSyscallError::EntityNotFound { reason: "Failed to find guild channel info" });
                 };
 
-                let channels = serde_json::from_value::<Vec<serenity::all::GuildChannel>>(channels_json)?;
+                let channels = serde_json::from_value::<Vec<Channel>>(channels_json)?;
 
                 let mut channels_with_permissions = Vec::with_capacity(channels.len());
 
-                for channel in channels.iter() {
+                for channel in channels {
                     channels_with_permissions.push(GuildChannelWithPermissions {
-                        user: guild.user_permissions_in(channel, &member),
-                        bot: guild.user_permissions_in(channel, &bot_user),
+                        user: guild.user_permissions_in(&channel, &member),
+                        bot: guild.user_permissions_in(&channel, &bot_user),
                         channel: ApiPartialGuildChannel {
-                            id: channel.id.widen(),
-                            name: channel.base.name.to_string(),
-                            position: channel.position,
-                            parent_id: channel.parent_id.map(|id| id.widen()),
-                            r#type: channel.base.kind.0,
+                            id: channel.id,
+                            name: channel.name.unwrap_or_default(),
+                            position: channel.position.unwrap_or(-1),
+                            parent_id: channel.parent_id,
+                            r#type: channel.kind.0,
                         },
                     });
                 }
@@ -199,7 +191,7 @@ impl MDiscordSyscall {
                     return Err(MSyscallError::Unauthorized { reason: "You are potentially not a member of this server! If you recently joined the server, you may need to wait up to 5 minutes." });
                 };
 
-                let sgm = handler.stratum.discord_http().search_guild_members(guild_id, &name, Some(SEARCH_GUILD_MEMBERS_LIMIT)).await?;
+                let sgm = handler.stratum.discord_http().call_json(HttpCall::SearchGuildMembers { guild_id, query: &name, limit: Some(SEARCH_GUILD_MEMBERS_LIMIT) }).await?;
                 let mem_data = serde_json::from_value::<Vec<PartialMember>>(sgm)?;
                 Ok(MDiscordSyscallRet::GuildMembers { data: mem_data })
             }

@@ -1,6 +1,6 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use serenity::all::UserId;
+use dapi::UserId;
 use crate::master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, internal::auth as iauth, types::auth::UserSession};
 use super::types::discord::*;
 
@@ -89,7 +89,7 @@ impl MAuthSyscall {
 
                 let resp = handler.reqwest.post(format!("{}/api/v10/oauth2/token", crate::CONFIG.meta.proxy))
                     .form(&Response {
-                        client_id: handler.current_user.id,
+                        client_id: handler.stratum.current_user().id,
                         client_secret: &crate::CONFIG.discord_auth.client_secret,
                         grant_type: "authorization_code",
                         code,

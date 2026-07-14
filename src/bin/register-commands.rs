@@ -1,3 +1,4 @@
+use dapi::dhttp::HttpCall;
 use tw::master::register;
 use tw::setup_discord;
 use log::info;
@@ -54,7 +55,7 @@ async fn main_impl() {
 
     env_builder.init();
 
-    let (http, _, _) = setup_discord().await;
+    let stratum = setup_discord().await;
 
     info!("Getting registration data from builtins");
 
@@ -62,7 +63,10 @@ async fn main_impl() {
 
     println!("Register data: {:?}", data);
 
-    http.create_global_commands(&data.commands)
-        .await
-        .expect("Failed to register commands");
+    stratum.discord_http().call_fire(HttpCall::CreateGlobalCommands { 
+        application_id: stratum.discord_http().app_id(),
+        map: serde_json::to_vec(&data.commands).expect("Failed to create global commands"),
+    })
+    .await
+    .expect("Failed to register commands");
 }

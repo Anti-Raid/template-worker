@@ -60,11 +60,6 @@ parking_lot = "0.12.5"
 version = "1"
 features = ["sync", "macros", "rt-multi-thread", "tracing", "process", "signal"]
 
-[dependencies.serenity]
-git = "https://github.com/Anti-Raid/serenity"
-branch = "next"
-features = ["model", "http", "cache", "rustls_backend", "unstable"]
-
 [features]
 default = []
 

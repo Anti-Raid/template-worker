@@ -5,9 +5,10 @@ pub mod migrations;
 pub mod geese;
 pub mod master;
 
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
+use dapi::{ApplicationId, dhttp::{Client, ClientKind}, types::User};
 use log::{debug, error};
-use serenity::all::{ApplicationId, CurrentUser, Http, HttpBuilder};
+use stratum_client::{GetResourceRequest, StratumClient};
 use crate::geese::stratum::Stratum;
 
 pub use crate::config::CONFIG;
@@ -16,18 +17,11 @@ pub use crate::config::CONFIG;
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 /// Helper method to setup discord related state in a tw binary
-pub async fn setup_discord() -> (Arc<Http>, Stratum, CurrentUser) {
-    let proxy_url = CONFIG.meta.proxy.clone();
-
-    debug!("Proxy URL: {}", proxy_url);
-
-    let token = serenity::all::SecretString::new(CONFIG.discord_auth.token.clone().into());
-    let http = Arc::new(HttpBuilder::new(token.clone()).proxy(proxy_url).build());
-
-    let stratum = Stratum::new(http.clone()).await.expect("Failed to connect to stratum");
-
-    let current_user = loop {
-        match stratum.current_user().await {
+pub async fn setup_discord() -> Stratum {
+    // To bootstrap, we need to first create a stratumclient and fetch current user manually for the geese client
+    let client = StratumClient::new(&CONFIG.meta.stratum_server, CONFIG.meta.stratum_grpc_access_key.clone()).await.expect("Failed to connect to stratum");
+    let current_user: User = loop {
+        match client.get_parsed_resource_from_cache::<_>(GetResourceRequest::CurrentUser {}).await {
             Ok(Some(user)) => break user,
             Ok(None) => {
                 error!("Current user is not available yet, retrying in 5 seconds...");
@@ -42,8 +36,14 @@ pub async fn setup_discord() -> (Arc<Http>, Stratum, CurrentUser) {
         }
     };
 
-    debug!("Current user: {} ({})", current_user.name, current_user.id);
-    http.set_application_id(ApplicationId::new(current_user.id.get()));
+    debug!("Current user: {} ({})", current_user.username, current_user.id);
 
-    (http, stratum, current_user)
+    let dhttp = Client::new(
+        CONFIG.meta.proxy.clone(), 
+        ClientKind::Bot { token: CONFIG.discord_auth.token.clone() }, 
+        reqwest::ClientBuilder::new().build().unwrap(),
+        ApplicationId::new(current_user.id.get())
+    );
+
+    Stratum::new(client, dhttp, current_user)
 }

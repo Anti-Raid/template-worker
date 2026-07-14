@@ -5,8 +5,6 @@ use crate::{geese::stratum::Stratum, mesophyll::client::MesophyllClient};
 #[derive(Clone)]
 /// Represents the state of the worker, which includes the serenity context, reqwest client, object store, and database pool
 pub struct WorkerState {
-    pub serenity_http: Arc<serenity::http::Http>,
-    pub current_user: Arc<serenity::all::CurrentUser>,
     pub mesophyll_client: Arc<MesophyllClient>,
     pub stratum: Stratum,
     pub worker_print: bool,
@@ -16,16 +14,12 @@ pub struct WorkerState {
 impl WorkerState {
     /// Creates a new CreateWorkerState with the given serenity context, reqwest client, object store, and database pool
     pub fn new(
-        serenity_http: Arc<serenity::http::Http>,
-        current_user: Arc<serenity::all::CurrentUser>,
         mesophyll_client: Arc<MesophyllClient>,
         stratum: Stratum,
         reqwest: reqwest::Client,
         worker_print: bool
     ) -> Self {
         Self {
-            serenity_http,
-            current_user,
             mesophyll_client,
             stratum,
             reqwest,

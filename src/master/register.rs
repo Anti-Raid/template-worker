@@ -4,7 +4,6 @@ use dapi::types::CreateCommand;
 use khronos_runtime::rt::mlua::prelude::*;
 use khronos_runtime::rt::KhronosRuntime;
 use serde::{Deserialize, Serialize};
-use serenity::all::*;
 use std::sync::{Arc, LazyLock};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

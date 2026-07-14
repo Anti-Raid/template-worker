@@ -1,5 +1,5 @@
+use dapi::{ChannelId, GuildId, UserId};
 use serde::{Deserialize, Serialize};
-use serenity::all::UserId;
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::LazyLock;
@@ -23,7 +23,7 @@ pub struct Meta {
     pub postgres_url: String,
     pub proxy: String,
     pub support_server_invite: String,
-    pub default_error_channel: serenity::all::ChannelId,
+    pub default_error_channel: ChannelId,
     pub mesophyll_token: String,
     pub blob_token: String,
     pub stratum_server: String,
@@ -39,7 +39,7 @@ pub struct Sites {
 
 #[derive(Serialize, Deserialize)]
 pub struct Servers {
-    pub main: serenity::all::GuildId,
+    pub main: GuildId,
 }
 
 #[derive(Serialize, Deserialize)]
