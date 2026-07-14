@@ -23,6 +23,36 @@
 			.map((guild, i) => ({ guild, exists: guildsExist[i] }))
 			.filter(item => !mps.state.showOnlyPresent || item.exists);
 	});
+
+	const fetchPage = async () => {
+		if(!mps.state.selectedGuild) return
+		fetchingSettings = true
+		try {
+			let data = await auth.dispatchEvent({type: "Guild", id: mps.state.selectedGuild.id}, "WebSettings", encode({
+				type: "fetch_page",
+			}))
+			let ders = toDispatchResults(data)
+			let settingsForTmpls: Record<string, Page> = {}
+			let newerrs: [string, string][] = []
+			for(const der of ders) {
+				if(der.type == "err") {
+					newerrs.push([der.id, der.value?.toString() || "Unknown error"])
+				} else {
+					try {
+						settingsForTmpls[der.id] = dispatchResultToSetting(der.value)
+					} catch (err) {
+						newerrs.push([der.id, err?.toString() || "Unknown error when parsing to setting"])
+					}
+				}
+			}
+			mps.state.settings = settingsForTmpls
+			mps.state.settingsErr = newerrs
+		} catch (err) {
+			mps.state.settingsErr = [["*", err ? err.toString() : "Unknown error"]]
+		} finally {
+			fetchingSettings = false
+		}
+	}
 </script>
 
 <div class="p-4 border rounded-lg bg-gray-50 mb-4">
@@ -60,7 +90,7 @@
 					class="hidden"
 					bind:this={_statefileInput}
 					onchange={async (e) => {
-						const file = (e.target as HTMLInputElement).files?.[0];
+						const file = (e.target as any).files?.[0];
 						if (file) {
 							const text = await file.text();
 							mps.import(text);
@@ -210,6 +240,7 @@
 			try {
 				let data = await auth.getGuildInfo(mps.state.selectedGuild.id)
 				mps.state.baseGuildDatas[mps.state.selectedGuild.id] = data
+				mps.state.baseGuildDatasFetchErrors = {}
 			} catch (err) {
 				mps.state.baseGuildDatasFetchErrors[mps.state.selectedGuild.id] = err ? err.toString() : "Unknown error"
 			} finally {
@@ -246,35 +277,7 @@
 
 	<div class="p-4 border rounded-lg mb-4 flex flex-col gap-2">
 		<h2 class="text-lg font-semibold mb-2">Settings Fetch</h2>
-		<Button disabled={fetchingSettings} onclick={async () => {
-			if(!mps.state.selectedGuild) return
-			fetchingSettings = true
-			try {
-				let data = await auth.dispatchEvent({type: "Guild", id: mps.state.selectedGuild.id}, "WebSettings", encode({
-					type: "fetch_page",
-				}))
-				let ders = toDispatchResults(data)
-				let settingsForTmpls: Record<string, Page> = {}
-				let newerrs: [string, string][] = []
-				for(const der of ders) {
-					if(der.type == "err") {
-						newerrs.push([der.id, der.value?.toString() || "Unknown error"])
-					} else {
-						try {
-							settingsForTmpls[der.id] = dispatchResultToSetting(der.value)
-						} catch (err) {
-							newerrs.push([der.id, err?.toString() || "Unknown error when parsing to setting"])
-						}
-					}
-				}
-				mps.state.settings = settingsForTmpls
-				mps.state.settingsErr = newerrs
-			} catch (err) {
-				mps.state.settingsErr = [["*", err ? err.toString() : "Unknown error"]]
-			} finally {
-				fetchingSettings = false
-			}
-		}}>{fetchingSettings ? "Fetching Settings" : "Fetch All Settings"}</Button>
+		<Button disabled={fetchingSettings} onclick={fetchPage}>{fetchingSettings ? "Fetching Settings" : "Fetch All Settings"}</Button>
 		{#each mps.state.settingsErr as [tmplId, err]}
 			<h3 class="text-md font-semibold mb-2 text-red-500">Template '{tmplId}'</h3>
 			<ErrorBox error={err} />
