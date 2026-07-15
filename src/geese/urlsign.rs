@@ -61,7 +61,7 @@ pub fn create_url(tid: Id, key: &str, scope: &str, expires_in_seconds: u64) -> R
     let payload = hex::encode(payload);
 
     // Construct the final download URL
-    Ok(format!("{}/blobs/{payload}/{signature}", CONFIG.api))
+    Ok(format!("{}/blob?p={payload}&s={signature}", CONFIG.api))
 }
 
 pub struct VerifiedUrl {

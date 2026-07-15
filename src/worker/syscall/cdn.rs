@@ -1,4 +1,4 @@
-use axum::body::Bytes;
+use bytes::Bytes;
 use khronos_runtime::{primitives::blob::Blob, rt::mluau::prelude::*};
 use reqwest::Url;
 

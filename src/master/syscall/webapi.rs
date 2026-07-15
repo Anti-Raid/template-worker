@@ -113,9 +113,17 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
         Ok(resp)
     }
 
+    #[derive(serde::Deserialize)]
+    struct Presigned {
+        #[serde(rename = "p")]
+        payload: String,
+        #[serde(rename = "s")]
+        sig: String,
+    }
+
     pub(super) async fn get_presigned(
         State(handler): State<MSyscallHandler>,
-        axum::extract::Path((payload, signature)): axum::extract::Path<(String, String)>
+        axum::extract::Query(p): axum::extract::Query<Presigned>
     ) -> impl IntoResponse {
         enum Resp {
             Err(MSyscallError),
@@ -142,7 +150,7 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
                 }
             }
         }
-        match handler.handle_syscall(MSyscallArgs::Bot { req: MBotSyscall::GetBlobData { payload, signature } }, MSyscallContext::ApiAnonGetter).await {
+        match handler.handle_syscall(MSyscallArgs::Bot { req: MBotSyscall::GetBlobData { payload: p.payload, signature: p.sig } }, MSyscallContext::ApiAnonGetter).await {
             Ok(MSyscallRet::Bot { data: MBotSyscallRet::BlobData { data, filename } }) => Resp::Data { data, filename },
             Ok(_) => Resp::Err(MSyscallError::EntityNotFound { reason: "Failed to get blob back from server" }),
             Err(e) => Resp::Err(e)
@@ -161,7 +169,7 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
         .route("/status", get(async |State(handler): State<MSyscallHandler>| {
             handler.handle_syscall(MSyscallArgs::Bot { req: MBotSyscall::GetBotStatus {} }, MSyscallContext::ApiAnonGetter).await
         }))
-        .route("/blobs/{payload}/{signature}", get(get_presigned))
+        .route("/blob", get(get_presigned))
         .fallback(get(|| async {
             (
                 StatusCode::NOT_FOUND,
