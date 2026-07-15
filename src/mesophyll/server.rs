@@ -1,7 +1,7 @@
 use futures::{Stream, StreamExt};
 use dapi::{UserId, GuildId};
 use tonic::Status;
-use crate::{geese::{state::StateDb, tenantstate::{TenantState, TenantStateDb}}, master::syscall::{MSyscallContext, MSyscallHandler}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id as RealId}};
+use crate::{geese::{state::StateDb, tenantstate::{TenantState, TenantStateDb}}, master::syscall::MSyscallHandler, worker::{workerdispatch::SimpleEvent, workervmmanager::Id as RealId}};
 use khronos_runtime::utils::khronos_value::KhronosValue as RealKhronosValue;
 use dashmap::DashMap;
 use std::{net::ToSocketAddrs, sync::OnceLock};
@@ -88,7 +88,7 @@ impl pb::Worker {
             return Err(Status::permission_denied(format!("Invalid worker ID: {}, exceeds number of workers in pool", wid)));
         }
 
-        if self.token != crate::CONFIG.meta.mesophyll_token {
+        if self.token != crate::CONFIG.mesophyll_token {
             return Err(Status::permission_denied("Invalid token"));
         }
 
@@ -147,7 +147,7 @@ impl MesophyllServer {
             num_workers,
         };
 
-        let meso_addr = crate::CONFIG.addrs.mesophyll_server.to_socket_addrs()?.next().ok_or("Invalid Mesophyll server address")?;
+        let meso_addr = crate::CONFIG.mesophyll_server_bind_addr.to_socket_addrs()?.next().ok_or("Invalid Mesophyll server address")?;
 
         let s_ref = s.clone();
         tokio::spawn(async move {
@@ -263,23 +263,6 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         Ok(tonic::Response::new(pb::MtwBaseWorkerInfo {
             num_workers: self.num_workers.try_into().map_err(|_e| Status::internal("num_workers exceeds u32 max"))?,
         }))
-    }
-
-    async fn shell_msyscall(&self, request: tonic::Request<pb::ShellMSyscall>) -> Result<tonic::Response<pb::AnyValue>, Status> {
-        let req = request.into_inner();
-        if req.token != crate::CONFIG.meta.mesophyll_token {
-            return Err(Status::permission_denied("Invalid token"));
-        }
-        let Some(req) = req.msyscall else {
-            return Err(Status::permission_denied("No msyscall found"));
-        };
-        let handler_g = self.msyscall_handler.get();
-        let Some(ref handler) = handler_g else {
-            return Err(Status::permission_denied("No msyscall handler found"));
-        };
-        let args = req.to_real()?;
-        let resp = handler.handle_syscall(args, MSyscallContext::ShellAnon).await;
-        Ok(tonic::Response::new(pb::AnyValue::from_real(&resp)?))
     }
 }
 

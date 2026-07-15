@@ -64,7 +64,7 @@ async fn main_impl(args: CmdArgs) {
 
     let pg_pool = PgPoolOptions::new()
         .max_connections(args.max_db_connections)
-        .connect(&CONFIG.meta.postgres_url)
+        .connect(&CONFIG.postgres_url)
         .await
         .expect("Could not initialize connection");
 

@@ -102,8 +102,6 @@ export type MBotSyscallRet =
   | { 
       /** Bot configuration response */
       op: "BotConfig"; 
-      /** The ID of the main support server */
-      main_server: string; 
       /** Discord support server invite link */
       support_server_invite: string; 
       /** The Discord client ID of the bot */

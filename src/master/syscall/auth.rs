@@ -60,7 +60,7 @@ impl MAuthSyscall {
     pub(super) async fn exec(self, handler: &MSyscallHandler, ctx: MSyscallContext) -> Result<MAuthSyscallRet, MSyscallError> {
         match self {
             Self::CreateLoginSession { code, redirect_uri, code_verifier } => {
-                if !crate::CONFIG.discord_auth.allowed_redirects.contains(&redirect_uri) {
+                if !crate::CONFIG.allowed_redirects.contains(&redirect_uri) {
                     return Err(MSyscallError::AuthError { reason: AuthError::InvalidRedirectUri });
                 }
 
@@ -87,10 +87,10 @@ impl MAuthSyscall {
                     code_verifier: Option<String>,
                 }
 
-                let resp = handler.reqwest.post(format!("{}/api/v10/oauth2/token", crate::CONFIG.meta.proxy))
+                let resp = handler.reqwest.post(format!("{}/api/v10/oauth2/token", crate::CONFIG.proxy))
                     .form(&Response {
                         client_id: handler.stratum.current_user().id,
-                        client_secret: &crate::CONFIG.discord_auth.client_secret,
+                        client_secret: &crate::CONFIG.client_secret,
                         grant_type: "authorization_code",
                         code,
                         redirect_uri,
@@ -117,7 +117,7 @@ impl MAuthSyscall {
                 }    
 
                 // Fetch user info
-                let user_resp = handler.reqwest.get(format!("{}/api/v10/users/@me", crate::CONFIG.meta.proxy))
+                let user_resp = handler.reqwest.get(format!("{}/api/v10/users/@me", crate::CONFIG.proxy))
                     .header("Authorization", format!("Bearer {}", &token_response.access_token))
                     .send()
                     .await

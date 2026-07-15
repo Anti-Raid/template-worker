@@ -219,7 +219,7 @@ pub async fn get_user_access_token(handler: &MSyscallHandler, user_id: &str) -> 
             refresh_token: String
         }
 
-        let resp = handler.reqwest.post(format!("{}/api/v10/oauth2/token", crate::CONFIG.meta.proxy))
+        let resp = handler.reqwest.post(format!("{}/api/v10/oauth2/token", crate::CONFIG.proxy))
             .form(&Response {
                 grant_type: "refresh_token",
                 refresh_token: data.refresh_token

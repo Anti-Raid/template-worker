@@ -19,7 +19,7 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 /// Helper method to setup discord related state in a tw binary
 pub async fn setup_discord() -> Stratum {
     // To bootstrap, we need to first create a stratumclient and fetch current user manually for the geese client
-    let client = StratumClient::new(&CONFIG.meta.stratum_server, CONFIG.meta.stratum_grpc_access_key.clone()).await.expect("Failed to connect to stratum");
+    let client = StratumClient::new(&CONFIG.stratum_server, CONFIG.stratum_grpc_access_key.clone()).await.expect("Failed to connect to stratum");
     let current_user: User = loop {
         match client.get_parsed_resource_from_cache::<_>(GetResourceRequest::CurrentUser {}).await {
             Ok(Some(user)) => break user,
@@ -39,8 +39,8 @@ pub async fn setup_discord() -> Stratum {
     debug!("Current user: {} ({})", current_user.username, current_user.id);
 
     let dhttp = Client::new(
-        CONFIG.meta.proxy.clone(), 
-        ClientKind::Bot { token: CONFIG.discord_auth.token.clone() }, 
+        CONFIG.proxy.clone(), 
+        ClientKind::Bot { token: CONFIG.nirn_token.clone() }, 
         reqwest::ClientBuilder::new().build().unwrap(),
         ApplicationId::new(current_user.id.get())
     );

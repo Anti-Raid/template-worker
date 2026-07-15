@@ -1,4 +1,4 @@
-use dapi::{ChannelId, GuildId, UserId};
+use dapi::{ChannelId, UserId};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::path::PathBuf;
@@ -9,17 +9,15 @@ use crate::Error;
 pub static CONFIG: LazyLock<Config> =
     LazyLock::new(|| Config::load().expect("Failed to load config"));
 
-#[derive(Serialize, Deserialize, Default)]
-pub struct DiscordAuth {
-    pub token: String,
+#[derive(Serialize, Deserialize)]
+pub struct Config {
+    // Discord core
+    pub nirn_token: String,
     pub client_id: UserId,
     pub client_secret: String,
-    pub root_users: Vec<UserId>,
-    pub allowed_redirects: Vec<String>
-}
+    pub allowed_redirects: Vec<String>,
 
-#[derive(Serialize, Deserialize, Default)]
-pub struct Meta {
+    // meta
     pub postgres_url: String,
     pub proxy: String,
     pub support_server_invite: String,
@@ -27,34 +25,18 @@ pub struct Meta {
     pub mesophyll_token: String,
     pub blob_token: String,
     pub stratum_server: String,
-    pub stratum_grpc_access_key: String
-}
+    pub stratum_grpc_access_key: String,
 
-#[derive(Serialize, Deserialize)]
-pub struct Sites {
+    // sites
     pub api: String,
     pub frontend: String,
     pub docs: String,
-}
 
-#[derive(Serialize, Deserialize)]
-pub struct Servers {
-    pub main: GuildId,
-}
+    // addresses
+    pub template_worker_bind_addr: String,
+    pub mesophyll_server_bind_addr: String,
 
-#[derive(Serialize, Deserialize)]
-pub struct Addrs {
-    pub template_worker: String,
-    pub mesophyll_server: String,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct Config {
-    pub discord_auth: DiscordAuth,
-    pub meta: Meta,
-    pub sites: Sites,
-    pub servers: Servers,
-    pub addrs: Addrs,
+    // misc
     pub worker_path: PathBuf,
 
     #[serde(skip)]
@@ -65,12 +47,12 @@ pub struct Config {
 impl Config {
     pub fn load() -> Result<Self, Error> {
         // Open config.yaml from parent directory
-        let file = File::open("config.yaml");
+        let file = File::open("config.json");
 
         match file {
             Ok(file) => {
                 // Parse config.yaml
-                let mut cfg: Config = serde_saphyr::from_reader(file)?;
+                let mut cfg: Config = serde_json::from_reader(file)?;
 
                 cfg.start_time = chrono::Utc::now();
 
@@ -79,7 +61,7 @@ impl Config {
             }
             Err(e) => {
                 // Print error
-                println!("config.yaml could not be loaded: {}", e);
+                println!("config.json could not be loaded: {}", e);
 
                 // Exit
                 std::process::exit(1);

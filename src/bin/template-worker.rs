@@ -95,7 +95,7 @@ async fn main_impl(args: CmdArgs) {
 
     let pg_pool = PgPoolOptions::new()
         .max_connections(args.max_db_connections)
-        .connect(&CONFIG.meta.postgres_url)
+        .connect(&CONFIG.postgres_url)
         .await
         .expect("Could not initialize connection");
 
@@ -124,7 +124,7 @@ async fn main_impl(args: CmdArgs) {
         log::info!("Starting RPC server");
 
         let rpc_server = tw::master::syscall::webapi::create(msyscall_handler);
-        let listener = tokio::net::TcpListener::bind(&CONFIG.addrs.template_worker).await.unwrap();
+        let listener = tokio::net::TcpListener::bind(&CONFIG.template_worker_bind_addr).await.unwrap();
         axum::serve(listener, rpc_server).await.unwrap();
     });
 

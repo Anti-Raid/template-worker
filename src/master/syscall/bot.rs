@@ -3,7 +3,7 @@ use std::sync::Arc;
 use dapi::types::CreateCommand;
 use khronos_runtime::{utils::khronos_value::{CKhronosValue, KhronosValue}};
 use serde::{Deserialize, Serialize};
-use dapi::{GuildId, UserId};
+use dapi::UserId;
 use crate::{geese::{state::{StateExecResult, StateOp}, tenantstate::{ModFlags, TenantState}}, master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::bot::{BotStatus, ShardConn}}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id}};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -77,8 +77,6 @@ pub enum MBotSyscallRet {
     },
     /// Bot config
     BotConfig {
-        /// The ID of the main AntiRaid support server
-        main_server: GuildId,
         /// Discord Support Server Link
         support_server_invite: String,
         /// The ID of the AntiRaid bot client
@@ -120,9 +118,8 @@ impl MBotSyscall {
             }
             Self::GetBotConfig {  } => {
                 Ok(MBotSyscallRet::BotConfig { 
-                    main_server: crate::CONFIG.servers.main,
-                    client_id: crate::CONFIG.discord_auth.client_id,
-                    support_server_invite: crate::CONFIG.meta.support_server_invite.clone(),
+                    client_id: crate::CONFIG.client_id,
+                    support_server_invite: crate::CONFIG.support_server_invite.clone(),
                 })
             }
             Self::GetBotStatus {  } => {

@@ -1,36 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
 use futures::{StreamExt, stream::FuturesUnordered};
-use crate::{geese::{state::{StateExecResponse, StateOp}, tenantstate::TenantState}, master::syscall::{MSyscallArgs, MSyscallError, MSyscallRet}, worker::{workerthread::WorkerThread, workervmmanager::Id}};
+use crate::{geese::{state::{StateExecResponse, StateOp}, tenantstate::TenantState}, worker::{workerthread::WorkerThread, workervmmanager::Id}};
 use crate::mesophyll::server::pb;
 use khronos_runtime::utils::khronos_value::KhronosValue;
-
-/// Mesophyll client
-#[derive(Clone)]
-pub struct MesophyllShellClient {
-    client: pb::mesophyll_master_client::MesophyllMasterClient<tonic::transport::Channel>,
-}
-
-#[allow(dead_code)]
-impl MesophyllShellClient {
-    /// Creates a new Mesophyll client
-    pub async fn new() -> Result<Self, crate::Error> {
-        let uri = tonic::transport::Endpoint::from_shared(format!("http://{}", crate::CONFIG.addrs.mesophyll_server))?;
-        let client = pb::mesophyll_master_client::MesophyllMasterClient::connect(uri).await?;
-
-        Ok(Self { client })
-    }
-
-    /// Returns a list of all tenant states from the Mesophyll server
-    pub async fn msyscall(&self, args: MSyscallArgs) -> Result<MSyscallRet, MSyscallError> {
-        let mut cli = self.client.clone();
-        Ok(cli.shell_msyscall(pb::ShellMSyscall { token: crate::CONFIG.meta.mesophyll_token.clone(), msyscall: Some(pb::AnyValue::from_real(&args)?) })
-            .await
-            .map_err(|e| e.to_string())?
-            .into_inner()
-            .to_real_exec()?)
-    }
-}
 
 /// Mesophyll client
 #[derive(Clone)]
@@ -50,9 +23,9 @@ impl MesophyllClient {
     pub async fn new(worker_id: usize) -> Result<(Self, MesophyllClientStream), crate::Error> {
         let worker = pb::Worker {
             worker_id: worker_id as u64,
-            token: crate::CONFIG.meta.mesophyll_token.clone(),
+            token: crate::CONFIG.mesophyll_token.clone(),
         };
-        let uri = tonic::transport::Endpoint::from_shared(format!("http://{}", crate::CONFIG.addrs.mesophyll_server))?;
+        let uri = tonic::transport::Endpoint::from_shared(format!("http://{}", crate::CONFIG.mesophyll_server_bind_addr))?; // TODO: Stop assuming http
         let mut client = pb::mesophyll_master_client::MesophyllMasterClient::connect(uri).await?;
 
         // Start worker_init and identify to the server

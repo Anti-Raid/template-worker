@@ -199,8 +199,8 @@ impl WorkerVmManager {
             bot: worker_state.stratum.current_user().clone(), 
             dispatchable_events: &dapi::EVENT_LIST, 
             base_vfs: &super::builtins::EXPOSED_VFS,
-            support_server: &crate::CONFIG.meta.support_server_invite,
-            website: &crate::CONFIG.sites.frontend
+            support_server: &crate::CONFIG.support_server_invite,
+            website: &crate::CONFIG.frontend
         };
 
         let syscall_h = SyscallHandler::new(

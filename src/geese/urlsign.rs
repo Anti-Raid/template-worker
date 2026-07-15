@@ -53,7 +53,7 @@ pub fn create_url(tid: Id, key: &str, scope: &str, expires_in_seconds: u64) -> R
     let tid = tid.tenant_id();
     let payload = construct_payload(&ttype, &tid, key, scope, expires_at)?;
 
-    let mut mac = HmacSha256::new_from_slice(CONFIG.meta.blob_token.as_bytes())
+    let mut mac = HmacSha256::new_from_slice(CONFIG.blob_token.as_bytes())
         .expect("HMAC accepts keys of any size");
     mac.update(&payload);
     
@@ -61,7 +61,7 @@ pub fn create_url(tid: Id, key: &str, scope: &str, expires_in_seconds: u64) -> R
     let payload = hex::encode(payload);
 
     // Construct the final download URL
-    Ok(format!("{}/blobs/{payload}/{signature}", CONFIG.sites.api))
+    Ok(format!("{}/blobs/{payload}/{signature}", CONFIG.api))
 }
 
 pub struct VerifiedUrl {
@@ -77,7 +77,7 @@ pub fn verify_url(provided_payload: &str, provided_signature: &str) -> Result<Ve
     let payload_bytes = hex::decode(provided_payload).map_err(|_| VerifyError::InvalidSignature)?;
     
     // Verify signature before parsing anything
-    let mut mac = HmacSha256::new_from_slice(CONFIG.meta.blob_token.as_bytes())
+    let mut mac = HmacSha256::new_from_slice(CONFIG.blob_token.as_bytes())
         .expect("HMAC accepts keys of any size");
     mac.update(&payload_bytes);
 

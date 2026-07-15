@@ -106,7 +106,7 @@ impl WorkerDispatch {
                             "type": 2,
                             "style": 5,
                             "label": "Support Server",
-                            "url": crate::CONFIG.meta.support_server_invite.to_string(),
+                            "url": crate::CONFIG.support_server_invite.to_string(),
                         },
                     ]
                 }
@@ -121,7 +121,7 @@ impl WorkerDispatch {
     ) -> Result<(), crate::Error> {
         let error = format!("```lua\n{}```", error.replace('`', "\\`"));
         http.call_fire(HttpCall::CreateChannelMessage {
-            channel_id: crate::CONFIG.meta.default_error_channel,
+            channel_id: crate::CONFIG.default_error_channel,
             map: serde_json::to_vec(&Self::error_message(error))?
         })
         .await?;
