@@ -1,7 +1,6 @@
 use dapi::controller::DiscordProviderContext;
 use dapi::types::User;
 use khronos_runtime::core::typesext::Vfs;
-use khronos_runtime::primitives::syscall::RawSyscall;
 use khronos_runtime::rt::{KhronosRuntime, RuntimeCreateOpts};
 use serde::{Deserialize, Serialize};
 use dapi::{GuildId, UserId};
@@ -210,7 +209,7 @@ impl WorkerVmManager {
             id
         );
 
-        let dispatch_func = func.call::<LuaFunction>((RawSyscall::new(syscall_h), tenant_state, lts))?;
+        let dispatch_func = func.call::<LuaFunction>((syscall_h, tenant_state, lts))?;
 
         Ok(VmState {
             runtime,

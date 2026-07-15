@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use crate::{geese::{state::{FastStateReq, StateExecResult, StateOp}, tenantstate::TenantState}, worker::{limits::Ratelimits, syscall::{cdn::{CdnCall, CdnResult}, discord::ArDiscordProvider, meta::{MetaCall, MetaResult}}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
 use dapi::context::DiscordContext;
-use khronos_runtime::{primitives::{lazy::Lazy, syscall::Syscall}, rt::mluau::prelude::*};
+use khronos_ext::mlua_scheduler_ext::LuaSchedulerAsyncUserData;
+use khronos_runtime::{primitives::lazy::Lazy, rt::mluau::prelude::*};
 use log::info;
 
 /// The core underlying syscall
@@ -157,7 +158,7 @@ impl SyscallHandler {
                         // non-faststate compatible, do normal mesophyll client call
                         let res = self.state.mesophyll_client.exec_state_op(self.id, ops).await?;
                         if let Some(ref ts) = res.new_tenant_state {
-                            self.wts.reload_for_tenant(self.id, ts).map_err(|e| e.to_string())?;
+                            self.wts.reload_for_tenant(self.id, ts)?;
                         }
                         Ok(SyscallRet::State { res: res.results, new_tenant_state: res.new_tenant_state })
                     }
@@ -182,12 +183,11 @@ impl SyscallHandler {
     }
 }
 
-impl Syscall for SyscallHandler {
-    type SyscallArgs = SyscallArgs;
-    type SyscallRet = SyscallRet;
-
-
-    async fn syscall(&self, args: SyscallArgs) -> Result<SyscallRet, khronos_runtime::Error> {
-        self.handle_syscall(args).await
+impl LuaUserData for SyscallHandler {
+    fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
+        methods.add_scheduler_async_method("async", async |_lua, this, ops| {
+            let state = this.handle_syscall(ops).await.map_err(|x| LuaError::external(x.to_string()))?;
+            Ok(state)
+        });
     }
 }
