@@ -1,0 +1,32 @@
+# Discord Core
+nirn_token = ""
+client_id = ""
+client_secret = ""
+allowed_redirects = [
+    "http://localhost:5173/authorize",
+    "http://localhost:5174/authorize",
+    "https://v6-beta.antiraid.xyz/authorize",
+    "https://antiraid.xyz/authorize"
+]
+
+# meta
+postgres_url = "postgres:///antiraid"
+proxy = "http://localhost:3221"
+support_server_invite = ""
+default_error_channel = ""
+mesophyll_token = "MYTOKENHERE"
+blob_token = "MYTOKENHERE"
+stratum_server = ""
+stratum_grpc_access_key = "MYTOKENHERE"
+
+# sites
+api = "http://localhost:60000"
+frontend = "https://antiraid.xyz"
+docs = "https://docs.antiraid.xyz"
+
+# addresses
+template_worker_bind_addr = "0.0.0.0:60000"
+mesophyll_server_bind_addr = "127.0.0.1:30000"
+
+# misc
+worker_path =  "/home/myusernamehere/template-worker/target/release/worker" # Path to worker executable

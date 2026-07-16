@@ -1,6 +1,8 @@
 /target
 /bindings
 /config.yaml
+/config.json
+/tw.toml
 
 # Docker
 /deploy/dockerconf

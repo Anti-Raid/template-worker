@@ -1,6 +1,5 @@
 use dapi::{ChannelId, UserId};
 use serde::{Deserialize, Serialize};
-use std::fs::File;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 use crate::Error;
@@ -47,25 +46,10 @@ pub struct Config {
 impl Config {
     pub fn load() -> Result<Self, Error> {
         // Open config.yaml from parent directory
-        let file = File::open("config.json");
+        let file = std::fs::read_to_string("tw.toml")?;
+        let mut cfg: Config = toml::from_str(&file)?;
+        cfg.start_time = chrono::Utc::now();
+        Ok(cfg)
 
-        match file {
-            Ok(file) => {
-                // Parse config.yaml
-                let mut cfg: Config = serde_json::from_reader(file)?;
-
-                cfg.start_time = chrono::Utc::now();
-
-                // Return config
-                Ok(cfg)
-            }
-            Err(e) => {
-                // Print error
-                println!("config.json could not be loaded: {}", e);
-
-                // Exit
-                std::process::exit(1);
-            }
-        }
     }
 }
