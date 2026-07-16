@@ -1,4 +1,6 @@
+use std::sync::Arc;
 use khronos_ext::mlua_scheduler_ext::taskmgr::SchedulerImpl;
+use khronos_runtime::mluau_require::Vfs;
 use khronos_runtime::rt::{KhronosRuntime, RuntimeCreateOpts};
 use khronos_runtime::rt::mluau::prelude::*;
 
@@ -14,12 +16,11 @@ Resp: Send + 'static
     async fn run(rt: &KhronosRuntime, data: Data) -> Resp;
 }
 
-/// Helper method to run a function in a new thread with a KhronosRuntime, used for shell, command registration etc.
-pub fn run_in_thread<R, RD, RR, FS>(vfs: FS, data: RD) -> RR
+/// Helper method to run a function in a new thread with a KhronosRuntime, used for command registration etc.
+pub fn run_in_thread<R, RD, RR>(vfs: Arc<Vfs>, data: RD) -> RR
 where R: RunInThreadFn<RD, RR> + 'static,
     RD: Send + 'static,
     RR: Send + 'static,
-    FS: khronos_runtime::mluau_require::vfs::FileSystem + 'static
 {
     let (tx, rx) = std::sync::mpsc::channel();
 

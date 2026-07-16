@@ -1,9 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
-use futures::{StreamExt, stream::FuturesUnordered};
 use crate::{geese::{state::{StateExecResponse, StateOp}, tenantstate::TenantState}, worker::{workerthread::WorkerThread, workervmmanager::Id}};
 use crate::mesophyll::server::pb;
-use khronos_runtime::utils::khronos_value::KhronosValue;
+use khronos_runtime::{futures_util::{StreamExt, stream::FuturesUnordered}, utils::khronos_value::KhronosValue};
 
 /// Mesophyll client
 #[derive(Clone)]

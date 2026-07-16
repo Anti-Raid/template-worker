@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::sync::Arc;
 use std::{collections::HashMap, rc::Rc};
 use khronos_runtime::rt::mlua::prelude::*;
-use crate::worker::builtins::{Builtins, TemplatingTypes};
+use crate::worker::builtins::BUILTINS;
 use crate::worker::limits::TEMPLATE_GIVE_TIME;
 use crate::worker::syscall::SyscallHandler;
 use crate::worker::workertenantstate::WorkerTenantState;
@@ -260,10 +260,7 @@ impl WorkerVmManager {
             None::<(fn(&Lua, LuaThread) -> Result<(), LuaError>, fn(LuaLightUserData) -> ())>,
             // We start with builtins *always* as the root template, the builtins root template then spawns in all other templates to dispatch
             // automatically from within luau (which is a lot easier + maintainable and allows for custom events etc.)
-            vfs::OverlayFS::new(&vec![
-                vfs::EmbeddedFS::<Builtins>::new().into(),
-                vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
-            ]),
+            BUILTINS.clone(),
             "antiraid"
         )?;
 

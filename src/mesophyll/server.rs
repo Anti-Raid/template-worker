@@ -1,4 +1,4 @@
-use futures::{Stream, StreamExt};
+use khronos_runtime::futures_util::{Stream, StreamExt};
 use dapi::{UserId, GuildId};
 use tonic::Status;
 use crate::{geese::{state::StateDb, tenantstate::{TenantState, TenantStateDb}}, master::syscall::MSyscallHandler, worker::{workerdispatch::SimpleEvent, workervmmanager::Id as RealId}};

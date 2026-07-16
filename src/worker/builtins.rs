@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::{Arc, LazyLock}};
 
-use khronos_runtime::core::typesext::Vfs;
+use khronos_runtime::{core::typesext::Vfs, mluau_require::{self, create_memory_vfs_from_embedded}};
 use rust_embed::Embed;
 
 /// Builtins
@@ -15,9 +15,16 @@ pub struct Builtins;
 #[prefix = "templating-types/"]
 pub struct TemplatingTypes;
 
+pub static BUILTINS: LazyLock<Arc<mluau_require::Vfs>> = LazyLock::new(|| {
+    Arc::new(create_memory_vfs_from_embedded::<Builtins>())
+});
+pub static TEMPLATING_TYPES: LazyLock<Arc<mluau_require::Vfs>> = LazyLock::new(|| {
+    Arc::new(create_memory_vfs_from_embedded::<TemplatingTypes>())
+});
+
 pub static EXPOSED_VFS: LazyLock<HashMap<String, Vfs>> = LazyLock::new(|| {
     let mut map = HashMap::new();
-    map.insert("Builtins".to_string(), Vfs::new(Arc::new(vfs::EmbeddedFS::<Builtins>::new()), false));
-    map.insert("TemplatingTypes".to_string(), Vfs::new(Arc::new(vfs::EmbeddedFS::<TemplatingTypes>::new()), false));
+    map.insert("Builtins".to_string(), Vfs::new(BUILTINS.clone(), false));
+    map.insert("TemplatingTypes".to_string(), Vfs::new(TEMPLATING_TYPES.clone(), false));
     map
 });

@@ -14,14 +14,16 @@ mod migrate_backups;
 
 use std::borrow::Cow;
 
-use futures::future::BoxFuture;
 use khronos_ext::db::SimpleDbValueMapper;
-use khronos_runtime::rt::mluau::prelude::*;
+use khronos_runtime::futures_util::future::BoxFuture;
+use khronos_runtime::mluau_require::create_memory_vfs_from_embedded;
+use khronos_runtime::{mluau_require::Vfs, rt::mluau::prelude::*};
 use khronos_runtime::rt::KhronosRuntime;
 use log::info;
 use rust_embed::Embed;
 
-use crate::{master::mainthread::{RunInThreadFn, run_in_thread}, worker::builtins::TemplatingTypes};
+use crate::worker::builtins::TEMPLATING_TYPES;
+use crate::master::mainthread::{RunInThreadFn, run_in_thread};
 
 // Rust migrations that must run before the luau migrations in `luau/twshell/migrations/`.
 // Do not change order without verifying dependencies.
@@ -100,12 +102,16 @@ async fn apply_luau_migration(pool: sqlx::PgPool, migration_name: String) -> Res
         }
     }
 
-    run_in_thread::<RunInThreadMigration, _, _, _>(
-    vfs::OverlayFS::new(&vec![
-            vfs::EmbeddedFS::<LuaurcVfs>::new().into(),
-            vfs::EmbeddedFS::<TwShell>::new().into(),
-            vfs::EmbeddedFS::<TemplatingTypes>::new().into(),
-        ]),
+    let rvfs = {
+        let mut vfs = Vfs::new();
+        vfs.extend(create_memory_vfs_from_embedded::<LuaurcVfs>());
+        vfs.extend(create_memory_vfs_from_embedded::<TwShell>());
+        vfs.extend_ref(&TEMPLATING_TYPES);
+        vfs
+    };
+
+    run_in_thread::<RunInThreadMigration, _, _>(
+    rvfs.into(),
         Data { pool, migration_name }
     )?;
 
