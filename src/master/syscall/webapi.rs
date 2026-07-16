@@ -162,13 +162,6 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
     router = router
         .route("/healthcheck", post(|| async { Json(()) }))
         .route("/msyscall", post(msyscall))
-        // GET apis for better caching etc.
-        .route("/commands", get(async |State(handler): State<MSyscallHandler>| {
-            handler.handle_syscall(MSyscallArgs::Bot { req: MBotSyscall::GetBotCommands {} }, MSyscallContext::ApiAnonGetter).await
-        }))
-        .route("/status", get(async |State(handler): State<MSyscallHandler>| {
-            handler.handle_syscall(MSyscallArgs::Bot { req: MBotSyscall::GetBotStatus {} }, MSyscallContext::ApiAnonGetter).await
-        }))
         .route("/blob", get(get_presigned))
         .fallback(get(|| async {
             (
