@@ -6,10 +6,10 @@ use governor::DefaultKeyedRateLimiter;
 use governor::clock::{Clock, QuantaClock};
 
 #[allow(dead_code)]
-pub struct Ratelimiter<T: Hash + Eq + Clone, PBK: Hash + Eq = &'static str> {
+pub struct Ratelimiter<T: Hash + Eq + Clone> {
     pub clock: QuantaClock,
     pub global: Vec<DefaultKeyedRateLimiter<T>>,
-    pub per_bucket: indexmap::IndexMap<PBK, Vec<DefaultKeyedRateLimiter<T>>>,
+    pub per_bucket: indexmap::IndexMap<&'static str, Vec<DefaultKeyedRateLimiter<T>>>,
 } 
 
 #[derive(Debug)]
