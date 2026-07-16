@@ -205,7 +205,7 @@ impl WorkerVmManager {
         let syscall_h = SyscallHandler::new(
             worker_state,
             wts,
-            Ratelimits::new().map_err(|e| LuaError::external(e.to_string()))?.into(),
+            Ratelimits::new().into(),
             id
         );
 

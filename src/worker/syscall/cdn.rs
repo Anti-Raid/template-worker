@@ -2,7 +2,7 @@ use bytes::Bytes;
 use khronos_runtime::{primitives::blob::Blob, rt::mluau::prelude::*};
 use reqwest::Url;
 
-use crate::worker::{limits::MAX_ATTACHMENT_SIZE, syscall::SyscallHandler, workervmmanager::Id};
+use crate::{geese::ratelimit::RlExceededError, worker::{limits::MAX_ATTACHMENT_SIZE, syscall::SyscallHandler, workervmmanager::Id}};
 
 /// The core underlying syscall
 #[derive(Debug)]
@@ -72,7 +72,7 @@ impl CdnCall {
     pub(super) async fn exec(self, _id: Id, handler: &SyscallHandler) -> Result<CdnResult, crate::Error> {
         match self {
             Self::DownloadFile { url, as_buffer } => {
-                handler.ratelimits.http.check("DownloadFile")?;
+                handler.ratelimits.cdn.check("DownloadFile", ()).map_err(RlExceededError)?;
                 if !url.is_ascii() {
                     return Err("Url must be ascii-only".into());
                 }

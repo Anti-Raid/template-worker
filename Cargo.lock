@@ -532,16 +532,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crossbeam-deque"
-version = "0.8.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5181e0de7b61eb03a81e347d6dd8797bae9da5146707b51077e2d71a54ec0ceb"
-dependencies = [
- "crossbeam-epoch",
- "crossbeam-utils",
-]
-
-[[package]]
 name = "crossbeam-epoch"
 version = "0.9.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -606,7 +596,7 @@ dependencies = [
 [[package]]
 name = "dapi"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#e01e990063b1bf811b5f5917c8e202e0c24b047b"
+source = "git+https://github.com/anti-raid/khronos#95f7192e9b3ab13835eef295db68c9ac52e35e4b"
 dependencies = [
  "bitflags 2.13.1",
  "chrono",
@@ -633,7 +623,6 @@ dependencies = [
  "lock_api",
  "once_cell",
  "parking_lot_core",
- "rayon",
  "serde",
 ]
 
@@ -1617,7 +1606,7 @@ dependencies = [
 [[package]]
 name = "khronos_ext"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#e01e990063b1bf811b5f5917c8e202e0c24b047b"
+source = "git+https://github.com/anti-raid/khronos#95f7192e9b3ab13835eef295db68c9ac52e35e4b"
 dependencies = [
  "chrono",
  "khronos_runtime",
@@ -1632,7 +1621,7 @@ dependencies = [
 [[package]]
 name = "khronos_runtime"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#e01e990063b1bf811b5f5917c8e202e0c24b047b"
+source = "git+https://github.com/anti-raid/khronos#95f7192e9b3ab13835eef295db68c9ac52e35e4b"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -1643,8 +1632,6 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "futures-util",
- "governor",
- "indexmap",
  "log",
  "mlua_scheduler",
  "mluau",
@@ -2493,26 +2480,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "498cd0dc59d73224351ee52a95fee0f1a617a2eae0e7d9d720cc622c73a54186"
 dependencies = [
  "bitflags 2.13.1",
-]
-
-[[package]]
-name = "rayon"
-version = "1.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
-dependencies = [
- "either",
- "rayon-core",
-]
-
-[[package]]
-name = "rayon-core"
-version = "1.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
-dependencies = [
- "crossbeam-deque",
- "crossbeam-utils",
 ]
 
 [[package]]

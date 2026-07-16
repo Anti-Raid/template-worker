@@ -6,15 +6,14 @@ pub mod gkv;
 pub mod webapi;
 pub(super) mod internal;
 
-use std::num::NonZeroU32;
 use std::{sync::Arc, time::Duration};
 use std::fmt::{Display, Debug};
 use dapi::types::Member;
-use governor::DefaultKeyedRateLimiter;
-use governor::clock::{Clock, QuantaClock};
+use governor::clock::QuantaClock;
 use moka::future::Cache;
 use serde::{Deserialize, Serialize};
 use dapi::{GuildId, UserId};
+use crate::geese::ratelimit::Ratelimiter;
 use crate::geese::state::StateDb;
 use crate::geese::tenantstate::TenantStateDb;
 use crate::{geese::stratum::Stratum, master::{syscall::{auth::{AuthError, MAuthSyscall, MAuthSyscallRet}, bot::{MBotSyscall, MBotSyscallRet}, discord::{MDiscordSyscall, MDiscordSyscallRet}, gkv::{MGkvSyscall, MGkvSyscallRet}, types::bot::BotStatus}, workerpool::WorkerPool}};
@@ -163,7 +162,7 @@ pub struct MSyscallHandler {
     pub(super) bot_has_guild_cache: Cache<GuildId, bool>,
     pub(super) guild_members_cache: Cache<(GuildId, UserId), Option<Member>>,
     pub(super) oauth2_code_cache: Cache<String, ()>,
-    pub(super) user_rl: Arc<Ratelimiter>,
+    pub(super) user_rl: Arc<Ratelimiter<UserId>>,
     pub(super) status_cache: Cache<(), BotStatus>,
     pub(super) tsdb: TenantStateDb,
     pub(super) statedb: StateDb,
@@ -193,26 +192,19 @@ impl MSyscallHandler {
     }
 
     /// Helper method to return msyscall ratelimits
-    fn user_limits() -> Result<Ratelimiter, crate::Error> {
-        fn new(limit_per: u32, limit_time: Duration) -> DefaultKeyedRateLimiter<UserId> {
-            let quota =
-                Ratelimiter::create_quota(NonZeroU32::new(limit_per).unwrap(), limit_time).expect("Failed to create quota");
-            let lim = DefaultKeyedRateLimiter::keyed(quota);
-            lim
-        }
-
+    fn user_limits() -> Result<Ratelimiter<UserId>, crate::Error> {
         // Create the global limit
-        let global1 = new(10, Duration::from_secs(1));
+        let global1 = Ratelimiter::limit(10, Duration::from_secs(1));
 
         // GetUserGuilds (with refresh)
-        let gug_refresh1 = new(3, Duration::from_secs(5));
+        let gug_refresh1 = Ratelimiter::limit(3, Duration::from_secs(5));
 
         // GetGuildInfo
-        let ggi1 = new(2, Duration::from_secs(5));
+        let ggi1 = Ratelimiter::limit(2, Duration::from_secs(5));
 
         // SearchGuildMembers
-        let sgm1 = new(1, Duration::from_secs(4));
-        let sgm2 = new(5, Duration::from_mins(1));
+        let sgm1 = Ratelimiter::limit(1, Duration::from_secs(4));
+        let sgm2 = Ratelimiter::limit(5, Duration::from_mins(1));
 
         // Create the clock
         let clock = QuantaClock::default();
@@ -312,74 +304,5 @@ impl MSyscallHandler {
                 Ok(MSyscallRet::Gkv { data: req.exec(self, ctx).await? })
             }
         }
-    }
-}
-
-
-#[allow(dead_code)]
-pub struct Ratelimiter {
-    pub clock: QuantaClock,
-    pub global: Vec<DefaultKeyedRateLimiter<UserId>>,
-    pub per_bucket: indexmap::IndexMap<&'static str, Vec<DefaultKeyedRateLimiter<UserId>>>,
-}
-
-struct RlExceeded {
-    dur: Duration,
-    bucket: &'static str,
-    req_bucket: &'static str
-}
-
-impl Ratelimiter {
-    fn create_quota(
-        limit_per: NonZeroU32,
-        limit_time: Duration,
-    ) -> Result<governor::Quota, crate::Error> {
-        let quota = governor::Quota::with_period(limit_time)
-            .ok_or("Failed to create quota")?
-            .allow_burst(limit_per);
-
-        Ok(quota)
-    }
-
-    fn check(&self, bucket: &'static str, user: UserId) -> Result<(), RlExceeded> {
-        for global_lim in self.global.iter() {
-            match global_lim.check_key(&user) {
-                Ok(()) => continue,
-                Err(wait) => {
-                    return Err(RlExceeded { dur: wait.wait_time_from(self.clock.now()), bucket: "global", req_bucket: bucket });
-                }
-            };
-        }
-
-        // Check per bucket ratelimits
-        if let Some(per_bucket) = self.per_bucket.get(bucket) {
-            for lim in per_bucket.iter() {
-                match lim.check_key(&user) {
-                    Ok(()) => continue,
-                    Err(wait) => {
-                        return Err(RlExceeded { dur: wait.wait_time_from(self.clock.now()), bucket, req_bucket: bucket });
-                    }
-                };
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Same as check, but only checks bucket
-    fn sub_check(&self, bucket: &'static str, user: UserId) -> Result<(), RlExceeded> {
-        // Check per bucket ratelimits
-        if let Some(per_bucket) = self.per_bucket.get(bucket) {
-            for lim in per_bucket.iter() {
-                match lim.check_key(&user) {
-                    Ok(()) => continue,
-                    Err(wait) => {
-                        return Err(RlExceeded { dur: wait.wait_time_from(self.clock.now()), bucket, req_bucket: bucket });
-                    }
-                };
-            }
-        }
-
-        Ok(())
     }
 }

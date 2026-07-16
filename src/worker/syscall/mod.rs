@@ -4,7 +4,7 @@ mod meta;
 
 use std::sync::Arc;
 
-use crate::{geese::{state::{FastStateReq, StateExecResult, StateOp}, tenantstate::TenantState}, worker::{limits::Ratelimits, syscall::{cdn::{CdnCall, CdnResult}, discord::ArDiscordProvider, meta::{MetaCall, MetaResult}}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
+use crate::{geese::{ratelimit::RlExceededError, state::{FastStateReq, StateExecResult, StateOp}, tenantstate::TenantState}, worker::{limits::Ratelimits, syscall::{cdn::{CdnCall, CdnResult}, discord::ArDiscordProvider, meta::{MetaCall, MetaResult}}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
 use dapi::context::DiscordContext;
 use khronos_ext::mlua_scheduler_ext::LuaSchedulerAsyncUserData;
 use khronos_runtime::{primitives::lazy::Lazy, rt::mluau::prelude::*};
@@ -147,7 +147,7 @@ impl SyscallHandler {
 
         match args {
             SyscallArgs::State { ops } => {
-                self.ratelimits.object_storage.check("syscall")?;
+                self.ratelimits.object_storage.check("syscall", ()).map_err(RlExceededError)?;
                 match FastStateReq::from_ops(ops) {
                     Ok(freq) => {
                         // faststate compatible, execute with faststate req and avoid mesophyll client call
@@ -170,7 +170,11 @@ impl SyscallHandler {
             }
             SyscallArgs::Discord { op } => {
                 let op_name = op.api_name();
-                self.ratelimits.discord.check(op_name)?;
+                if Ratelimits::DISCORD_GLOBAL_IGNORE.contains(&op_name) {
+                    self.ratelimits.discord.sub_check(op_name, ()).map_err(RlExceededError)?;
+                } else {
+                    self.ratelimits.discord.check(op_name, ()).map_err(RlExceededError)?;
+                }
                 let dp = DiscordContext::new(ArDiscordProvider { id: self.id, state: self.state.clone() });
                 let (value, mrm) = op.execute(&dp).await?;
                 Ok(SyscallRet::Discord { op: op_name, res: value, mrm })

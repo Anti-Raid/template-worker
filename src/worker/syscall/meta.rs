@@ -1,6 +1,6 @@
 use khronos_runtime::{core::datetime::DateTime, rt::mluau::prelude::*};
 
-use crate::worker::{syscall::SyscallHandler, workervmmanager::Id};
+use crate::{geese::ratelimit::RlExceededError, worker::{syscall::SyscallHandler, workervmmanager::Id}};
 
 /// The core underlying syscall
 #[derive(Debug)]
@@ -62,7 +62,7 @@ impl MetaCall {
     pub(super) async fn exec(self, _id: Id, handler: &SyscallHandler) -> Result<MetaResult, crate::Error> {
         match self {
             Self::GetStats {} => {
-                handler.ratelimits.runtime.check("GetStats")?;
+                handler.ratelimits.runtime.check("GetStats", ()).map_err(RlExceededError)?;
                 let resp = handler.state.stratum.get_status().await?;
 
                 Ok(MetaResult::Stats {
