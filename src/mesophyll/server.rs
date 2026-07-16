@@ -1,7 +1,7 @@
 use khronos_runtime::futures_util::{Stream, StreamExt};
 use dapi::{UserId, GuildId};
 use tonic::Status;
-use crate::{geese::{state::StateDb, tenantstate::{TenantState, TenantStateDb}}, master::syscall::MSyscallHandler, worker::{workerdispatch::SimpleEvent, workervmmanager::Id as RealId}};
+use crate::{geese::{state::{StateDb, StateDbFlags}, tenantstate::{TenantState, TenantStateDb}}, master::syscall::MSyscallHandler, worker::{workerdispatch::SimpleEvent, workervmmanager::Id as RealId}};
 use khronos_runtime::utils::khronos_value::KhronosValue as RealKhronosValue;
 use dashmap::DashMap;
 use std::{net::ToSocketAddrs, sync::OnceLock};
@@ -240,8 +240,8 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         self.verify_worker(req.worker)?;
         let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
         let state_op = req.state_op.ok_or_else(|| Status::invalid_argument("Missing state_op"))?.to_real()?;
-
-        match self.state_db.do_op(id, state_op).await {
+        let sdb_flags = StateDbFlags::from_bits(req.flags).ok_or_else(|| Status::invalid_argument("Invalid flags"))?;
+        match self.state_db.do_op(id, state_op, sdb_flags).await {
             Ok(result) => Ok(tonic::Response::new(pb::AnyValue::from_real(&result)?)),
             Err(e) => Err(Status::internal(e.to_string())),
         }

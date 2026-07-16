@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::{geese::{state::{StateExecResponse, StateOp}, tenantstate::TenantState}, worker::{workerthread::WorkerThread, workervmmanager::Id}};
+use crate::{geese::{state::{StateDbFlags, StateExecResponse, StateOp}, tenantstate::TenantState}, worker::{workerthread::WorkerThread, workervmmanager::Id}};
 use crate::mesophyll::server::pb;
 use khronos_runtime::{futures_util::{StreamExt, stream::FuturesUnordered}, utils::khronos_value::KhronosValue};
 
@@ -168,12 +168,13 @@ impl MesophyllClient {
     }
 
     /// Sets the tenant state for a given tenant ID
-    pub async fn exec_state_op(&self, id: Id, state_op: Vec<StateOp>) -> Result<StateExecResponse, crate::Error> {
+    pub async fn exec_state_op(&self, id: Id, state_op: Vec<StateOp>, flags: StateDbFlags) -> Result<StateExecResponse, crate::Error> {
         let mut cli = self.client.clone();
         Ok(cli.exec_state_op(pb::WtmExecStateOp { 
             worker: Some(self.worker.clone()), 
             id: Some(pb::Id::from_real_id(&id)),
             state_op: Some(pb::AnyValue::from_real_exec(&state_op)?),
+            flags: flags.bits()
         })
         .await
         .map_err(|e| e.to_string())?

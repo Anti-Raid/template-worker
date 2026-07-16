@@ -1,8 +1,9 @@
-use dapi::dhttp::{Client, HttpCall};
 use khronos_runtime::primitives::LUA_SERIALIZE_OPTIONS;
 use khronos_runtime::rt::mlua::prelude::*;
 use khronos_runtime::{utils::khronos_value::KhronosValue};
+use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
+use crate::geese::state::{StateDbFlags, StateOp};
 use crate::{geese::tenantstate::DEFAULT_EVENTS, worker::{workerstate::WorkerState, workertenantstate::WorkerTenantState}};
 
 use super::workervmmanager::{Id, WorkerVmManager};
@@ -21,6 +22,8 @@ pub struct WorkerDispatch {
 }
 
 impl WorkerDispatch {
+    const ERR_SCOPE: &str = "#err";
+
     /// Creates a new WorkerDispatch with the given WorkerVmManager
     pub fn new(vm_manager: WorkerVmManager, worker_state: WorkerState, tenant_state: WorkerTenantState) -> Self {
         let dispatch = Self { vm_manager, worker_state, tenant_state };
@@ -71,61 +74,26 @@ impl WorkerDispatch {
             return Err(mlua::Error::external("Lua VM to dispatch to is broken"));
         }
 
-        let http = self.worker_state.stratum.discord_http().clone();
         match vm_data.runtime.call_in_scheduler::<_, KhronosValue>(vm_data.dispatch_func, Event { name, author, data }).await {
             Ok(result) => Ok(result),
             Err(e) => {
                 let err_str = e.to_string();
-                tokio::task::spawn_local(async move {
-                    if let Err(e) = Self::log_error_to_main_server(http, err_str.clone()).await {
-                        log::error!("Failed to log error for ID {id:?}: {}", e);
-                    }
-                });
+                if let Err(e) = self.save_error(id, err_str).await {
+                    log::error!("Failed to log error for ID {id:?}: {}", e);
+                }
                 Err(e)
             },
         }
     }
 
-    /// Returns an Discord error message for a template error
-    fn error_message(
-        error: String,
-    ) -> serde_json::Value {
-        serde_json::json!({
-            "embeds": [
-                {
-                    "title": "Error executing template",
-                    "description": error,
-                    "fields": [],
-                }
-            ],
-            "components": [
-                {
-                    "type": 1,
-                    "components": [
-                        {
-                            "type": 2,
-                            "style": 5,
-                            "label": "Support Server",
-                            "url": crate::CONFIG.support_server_invite.to_string(),
-                        },
-                    ]
-                }
-            ],
-        })
-    }
-
-    /// Helper method to log a template error to the main server
-    async fn log_error_to_main_server(
-        http: Client,
-        error: String,
-    ) -> Result<(), crate::Error> {
-        let error = format!("```lua\n{}```", error.replace('`', "\\`"));
-        http.call_fire(HttpCall::CreateChannelMessage {
-            channel_id: crate::CONFIG.default_error_channel,
-            map: serde_json::to_vec(&Self::error_message(error))?
-        })
-        .await?;
-
+    /// Saves a error directly to key-value API
+    async fn save_error(&self, id: Id, error: String) -> Result<(), crate::Error> {
+        let key = Alphanumeric.sample_string(&mut rand::rng(), 64);
+        let ops = vec![StateOp::KvSet { key, scope: Self::ERR_SCOPE.to_string(), value: KhronosValue::Text(error), blob: None }];
+        let res = self.worker_state.mesophyll_client.exec_state_op(id, ops, StateDbFlags::WORKER_INITIATED).await?;
+        if let Some(ref ts) = res.new_tenant_state {
+            self.tenant_state.reload_for_tenant(id, ts)?;
+        }
         Ok(())
     }
 }

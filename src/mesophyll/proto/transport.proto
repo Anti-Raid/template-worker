@@ -81,6 +81,7 @@ message WTMExecStateOp {
   Worker worker = 1;
   Id id = 2;
   AnyValue state_op = 3;
+  uint32 flags = 4;
 }
 
 // Mesophyll service (runs on master and called by worker)

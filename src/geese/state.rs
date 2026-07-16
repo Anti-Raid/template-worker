@@ -242,6 +242,30 @@ impl FromLua for StateOp {
     }
 }
 
+bitflags::bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    pub struct StateDbFlags: u32 {
+        /// Initiated from worker itself (not user controlled)
+        const WORKER_INITIATED = 1 << 1;
+        const ADMIN = 1 << 2;
+    }
+}
+
+// workers + admin can set internal scope, anyone can *delete* errors, but only workers + admin can delete other internal scopes 
+impl StateDbFlags {
+    pub fn can_set_internal_scope(self) -> bool {
+        self.intersects(StateDbFlags::WORKER_INITIATED | StateDbFlags::ADMIN)
+    }    
+
+    pub fn can_delete_internal_scope(self, scope: &str) -> bool {
+        if scope == "#err" {
+            // Anyone can delete errors
+            return true;
+        }
+        self.intersects(StateDbFlags::WORKER_INITIATED | StateDbFlags::ADMIN)
+    }    
+}
+
 #[derive(Clone)]
 /// A simple wrapper around the database pool that provides luau state manipulation functionality
 pub struct StateDb {
@@ -276,14 +300,14 @@ impl StateDb {
     }
 
     /// Perform execution of an op
-    pub async fn do_op(&self, tid: Id, op: Vec<StateOp>) -> Result<StateExecResponse, crate::Error> {
+    pub async fn do_op(&self, tid: Id, op: Vec<StateOp>, flags: StateDbFlags) -> Result<StateExecResponse, crate::Error> {
         let mut result = StateExecResponse { results: vec![], tenant_state_changed: false, new_tenant_state: None };
         // fast path of no explicit transaction can only be applied if none of the inner ops alter the tenant state
         let fastpath = op.len() <= 1 && op.iter().all(|x| !x.alters_tenant_state());
 
         if fastpath {
             for op in op {
-                Self::apply_op(&self.pool, tid, op, &mut result).await?
+                Self::apply_op(&self.pool, tid, op, &mut result, flags).await?
             }
             if result.tenant_state_changed {
                 return Err("internal error: tenant state changed in unsupported fastpath".into());
@@ -292,7 +316,7 @@ impl StateDb {
             // atomic
             let mut tx = self.pool.begin().await?;
             for op in op {
-                Self::apply_op(&mut *tx, tid, op, &mut result).await?
+                Self::apply_op(&mut *tx, tid, op, &mut result, flags).await?
             }
 
             if result.tenant_state_changed {
@@ -309,7 +333,8 @@ impl StateDb {
         executor: E, 
         tid: Id, 
         op: StateOp,
-        state: &mut StateExecResponse
+        state: &mut StateExecResponse,
+        flags: StateDbFlags
     ) -> Result<(), crate::Error> 
     where 
         E: sqlx::Executor<'c, Database = sqlx::Postgres>, 
@@ -377,6 +402,9 @@ impl StateDb {
                 if key.len() > KV_MAX_KEY_LENGTH {
                     return Err(format!("key-value length exceeds {KV_MAX_KEY_LENGTH} chars").into())
                 }
+                if scope.starts_with('#') && !flags.can_set_internal_scope() {
+                    return Err(format!("Cannot write to this internal scope").into())
+                }
                 if let Some(blob) = &blob {
                     if blob.len() > MAX_OBJ_STORAGE_BYTES {
                         return Err(format!("blob size exceeds {MAX_OBJ_STORAGE_BYTES} bytes").into())
@@ -398,6 +426,10 @@ impl StateDb {
                 .await?;
             }
             StateOp::KvDelete { key, scope } => {
+                if scope.starts_with('#') && !flags.can_delete_internal_scope(&scope) {
+                    return Err(format!("Cannot write to this internal scope").into())
+                }
+
                 sqlx::query(
                 "DELETE FROM tenant_kv WHERE owner_id = $1 AND owner_type = $2 AND key = $3 AND scope = $4",
                 )

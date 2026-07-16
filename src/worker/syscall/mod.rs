@@ -4,7 +4,7 @@ mod meta;
 
 use std::sync::Arc;
 
-use crate::{geese::{ratelimit::RlExceededError, state::{FastStateReq, StateExecResult, StateOp}, tenantstate::TenantState}, worker::{limits::Ratelimits, syscall::{cdn::{CdnCall, CdnResult}, discord::ArDiscordProvider, meta::{MetaCall, MetaResult}}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
+use crate::{geese::{ratelimit::RlExceededError, state::{FastStateReq, StateDbFlags, StateExecResult, StateOp}, tenantstate::TenantState}, worker::{limits::Ratelimits, syscall::{cdn::{CdnCall, CdnResult}, discord::ArDiscordProvider, meta::{MetaCall, MetaResult}}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
 use dapi::context::DiscordContext;
 use khronos_ext::mlua_scheduler_ext::LuaSchedulerAsyncUserData;
 use khronos_runtime::{primitives::lazy::Lazy, rt::mluau::prelude::*};
@@ -156,7 +156,7 @@ impl SyscallHandler {
                     },
                     Err(ops) => {
                         // non-faststate compatible, do normal mesophyll client call
-                        let res = self.state.mesophyll_client.exec_state_op(self.id, ops).await?;
+                        let res = self.state.mesophyll_client.exec_state_op(self.id, ops, StateDbFlags::empty()).await?;
                         if let Some(ref ts) = res.new_tenant_state {
                             self.wts.reload_for_tenant(self.id, ts)?;
                         }

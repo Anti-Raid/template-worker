@@ -4,7 +4,7 @@ use dapi::types::CreateCommand;
 use khronos_runtime::{utils::khronos_value::{CKhronosValue, KhronosValue}};
 use serde::{Deserialize, Serialize};
 use dapi::UserId;
-use crate::{geese::{state::{StateExecResult, StateOp}, tenantstate::{ModFlags, TenantState}}, master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::bot::{BotStatus, ShardConn}}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id}};
+use crate::{geese::{state::{StateDbFlags, StateExecResult, StateOp}, tenantstate::{ModFlags, TenantState}}, master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::bot::{BotStatus, ShardConn}}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id}};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "op")]
@@ -301,7 +301,7 @@ impl MBotSyscall {
                     return Err(MSyscallError::ContextInsecure);
                 }
 
-                let res = handler.statedb.do_op(id, ops).await?;
+                let res = handler.statedb.do_op(id, ops, StateDbFlags::ADMIN).await?;
 
                 // inform worker of new tenant state if we have a new tenant state
                 if let Some(ref new_ts) = res.new_tenant_state {

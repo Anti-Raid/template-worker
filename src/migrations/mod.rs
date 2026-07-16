@@ -41,7 +41,7 @@ const MIGRATIONS: [MigrationType; 14] = [
     MigrationType::Rust(tenant_kv_add_bytea::MIGRATION),
     MigrationType::Luau(Cow::Borrowed("stings.luau")),
     MigrationType::Rust(kv_scope_unnest::MIGRATION),
-    MigrationType::Rust(migrate_backups::MIGRATION)
+    MigrationType::Rust(migrate_backups::MIGRATION),
 ];
 
 #[derive(Embed, Debug)]
