@@ -110,8 +110,16 @@ impl<'de> Deserialize<'de> for StreamId {
     where
         D: Deserializer<'de>,
     {
-        // Serde temporarily borrows the string from the raw JSON bytes
-        let s: &str = Deserialize::deserialize(deserializer)?;
-        std::str::FromStr::from_str(s).map_err(serde::de::Error::custom)
+        struct SidVisitor;
+        impl<'de> serde::de::Visitor<'de> for SidVisitor {
+            type Value = StreamId;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "a {}-character hex string", N * 2)
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<StreamId, E> {
+                StreamId::from_str(v).map_err(E::custom)
+            }
+        }
+        deserializer.deserialize_str(SidVisitor)
     }
 }
