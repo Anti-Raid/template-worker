@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::time::Duration;
 
 use axum::extract::WebSocketUpgrade;
@@ -15,10 +16,10 @@ use serde::{Deserialize, Serialize};
 use tokio_stream::StreamMap;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tower_http::cors::MaxAge;
+use crate::geese::stream::StreamId;
 use crate::master::syscall::bot::{MBotSyscall, MBotSyscallRet};
 use crate::master::syscall::{MSyscallArgs, MSyscallContext, MSyscallRet};
 use crate::master::syscall::{MSyscallError, MSyscallHandler, internal::auth as iauth};
-use crate::mesophyll::StreamId;
 
 impl IntoResponse for MSyscallRet {
     fn into_response(self) -> Response {
@@ -208,28 +209,29 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
                         };
                         match msg {
                             WsMessage::Sub { id } => {
-                                let sid = StreamId::new(id.clone()).ok_or("Failed to parse id")?;
+                                let sid = StreamId::from_str(&id)?;
                                 let Some((ag, rx)) = state.worker_pool.attach_stream(sid) else { 
                                     ws_sender.send(WsMessage::Warn { msg: "Cannot attach this stream (already attached?)".to_string() }.to_msg()?).await?;
                                     continue 
                                 };
-                                active_guards.insert(id.clone(), ag);
-                                multiplexed_receivers.insert(id, UnboundedReceiverStream::new(rx));
+                                active_guards.insert(sid, ag);
+                                multiplexed_receivers.insert(sid, UnboundedReceiverStream::new(rx));
                             }
                             WsMessage::DropSub { id } => {
+                                let sid = StreamId::from_str(&id)?;
                                 // Dropping here will drop the AttachedStreamGuard hence also removing the mapping from mesophyll automatically
-                                multiplexed_receivers.remove(id.as_str());
-                                active_guards.remove(id.as_str());
+                                multiplexed_receivers.remove(&sid);
+                                active_guards.remove(&sid);
                             }
                             WsMessage::Hb {} | WsMessage::Warn { .. } => {},
                             WsMessage::Msg { id, msg } => {
-                                let sid = StreamId::new(id).ok_or("Failed to parse id")?;
+                                let sid = StreamId::from_str(&id)?;
                                 state.worker_pool.stream_message(sid, msg.0)?;
                             }
                         }
                     }
                     Some((id, kv)) = multiplexed_receivers.next() => {
-                        ws_sender.send(WsMessage::Msg { id, msg: CKhronosValue(kv) }.to_msg()?).await?;
+                        ws_sender.send(WsMessage::Msg { id: id.to_hex_str(), msg: CKhronosValue(kv) }.to_msg()?).await?;
                     }
                 }
             }

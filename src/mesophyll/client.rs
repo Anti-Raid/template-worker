@@ -1,12 +1,12 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::{geese::{state::{StateDbFlags, StateExecResponse, StateOp}, tenantstate::TenantState}, mesophyll::STREAM_TIMEOUT, worker::{workerthread::WorkerThread, workervmmanager::Id}};
+use crate::{geese::{state::{StateDbFlags, StateExecResponse, StateOp}, stream::StreamId, tenantstate::TenantState}, mesophyll::STREAM_TIMEOUT, worker::{workerthread::WorkerThread, workervmmanager::Id}};
 use crate::mesophyll::server::pb;
 use khronos_runtime::{futures_util::{StreamExt, stream::FuturesUnordered}, utils::khronos_value::KhronosValue};
 use moka::future::Cache;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
-type AttachedStreams = Cache<String, UnboundedSender<KhronosValue>>;
+type AttachedStreams = Cache<StreamId, UnboundedSender<KhronosValue>>;
 
 /// Mesophyll client
 #[derive(Clone)]
@@ -91,7 +91,8 @@ impl MesophyllClient {
                                         });
                                     },
                                     pb::mtw_message::Payload::StreamMsg(sm) => { // master has *sent* the worker a new message, broadcast it!
-                                        if let Some(stream) = self_ref.attached_streams.get(&sm.stream_id).await {
+                                        let Some(sid) = StreamId::try_from_slice(&sm.stream_id) else { continue; };
+                                        if let Some(stream) = self_ref.attached_streams.get(&sid).await {
                                             let Some(payload) = sm.payload else {
                                                 log::error!("Mesophyll client received StreamMsg message with no payload");
                                                 continue;
@@ -217,19 +218,19 @@ impl MesophyllClient {
             .into_inner())
     }
 
-    pub async fn attach_stream(&self, stream_id: String) -> (UnboundedSender<KhronosValue>, UnboundedReceiver<KhronosValue>) {
+    pub async fn attach_stream(&self, stream_id: StreamId) -> (UnboundedSender<KhronosValue>, UnboundedReceiver<KhronosValue>) {
         let (tx, rx) = unbounded_channel();
         self.attached_streams.insert(stream_id, tx.clone()).await;
         (tx, rx)
     }
 
     /// Send a stream message from worker to master
-    pub fn stream_message(&self, stream_id: String, payload: KhronosValue) -> Result<(), crate::Error> {
+    pub fn stream_message(&self, stream_id: StreamId, payload: KhronosValue) -> Result<(), crate::Error> {
         let pb_payload = pb::AnyValue::from_real(&payload)?;
 
         let msg = pb::WtmMessage {
             payload: Some(pb::wtm_message::Payload::StreamMsg(pb::StreamMessage {
-                stream_id,
+                stream_id: stream_id.to_vec(),
                 payload: Some(pb_payload),
             })),
             resp_id: None,

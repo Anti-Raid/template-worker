@@ -2,9 +2,9 @@ use khronos_runtime::utils::khronos_value::KhronosValue;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::sleep;
 
+use crate::geese::stream::StreamId;
 use crate::geese::tenantstate::TenantState;
 use crate::master::workerprocesshandle::{ExpBackoff, WorkerProcessHandle};
-use crate::mesophyll::StreamId;
 use crate::mesophyll::server::{AttachedStreamGuard, MesophyllServer};
 use crate::worker::workerdispatch::SimpleEvent;
 use crate::worker::workervmmanager::Id;
@@ -170,14 +170,14 @@ impl WorkerPool {
     }
 
     pub fn attach_stream(&self, sid: StreamId) -> Option<(AttachedStreamGuard, UnboundedReceiver<KhronosValue>)> {
-        let r = self.mesophyll.get_connection(sid.worker_id)?;
-        r.attach_stream(sid.id)
+        let r = self.mesophyll.get_connection(sid.worker_id() as usize)?;
+        r.attach_stream(sid)
     }
 
     pub fn stream_message(&self, sid: StreamId, payload: KhronosValue) -> Result<(), crate::Error> {
-        let r = self.mesophyll.get_connection(sid.worker_id)
-        .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", sid.worker_id))?;
-        r.stream_message(sid.id.to_string(), payload)
+        let r = self.mesophyll.get_connection(sid.worker_id() as usize)
+        .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", sid.worker_id()))?;
+        r.stream_message(sid, payload)
     }
 }
 

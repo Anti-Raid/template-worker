@@ -42,7 +42,7 @@ message UpdateTenantState {
 }
 
 message StreamMessage {
-  string stream_id = 1; 
+  bytes stream_id = 1; 
   AnyValue payload = 2;
 }
 

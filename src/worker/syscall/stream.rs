@@ -1,9 +1,8 @@
 use khronos_ext::mlua_scheduler_ext::LuaSchedulerAsyncUserData;
 use khronos_runtime::{core::datetime::TimeDelta, rt::mluau::prelude::*, utils::khronos_value::KhronosValue};
-use rand::distr::{Alphanumeric, SampleString};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use crate::{geese::ratelimit::RlExceededError, worker::{syscall::SyscallHandler, workervmmanager::Id}};
+use crate::{geese::{ratelimit::RlExceededError, stream::StreamId}, worker::{syscall::SyscallHandler, workervmmanager::Id}};
 
 /// Stream syscalls
 #[derive(Debug)]
@@ -38,7 +37,7 @@ impl FromLua for StreamCall {
 }
 
 pub struct Stream {
-    id: String,
+    id: StreamId,
     send: UnboundedSender<KhronosValue>,
     recv: UnboundedReceiver<KhronosValue>
 }
@@ -46,7 +45,7 @@ pub struct Stream {
 impl LuaUserData for Stream {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("id", |lua, this, _: ()| {
-            lua.create_string(&this.id)
+            lua.create_string(&this.id.to_hex_array())
         });
 
         methods.add_method("send", |_, this, v: KhronosValue| {
@@ -99,11 +98,10 @@ impl StreamCall {
         match self {
             Self::NewStream {} => {
                 handler.ratelimits.runtime.check("NewStream", ()).map_err(RlExceededError)?;
-                let stream_id = format!("{};{}", handler.state.mesophyll_client.worker_id, Alphanumeric.sample_string(&mut rand::rng(), 96));
-                // Attach stream id to client
-                let (send, recv) = handler.state.mesophyll_client.attach_stream(stream_id.clone()).await;
+                let sid = StreamId::new_rand(handler.state.mesophyll_client.worker_id as u64);
+                let (send, recv) = handler.state.mesophyll_client.attach_stream(sid).await;
                 Ok(StreamResult::Stream {
-                    stream: Stream { id: stream_id, send, recv }
+                    stream: Stream { id: sid, send, recv }
                 })
             }
         }
