@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use rand::Rng;
+use rand::{CryptoRng, Rng, rngs::ThreadRng};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 const N: usize = 25;
@@ -24,7 +24,13 @@ impl StreamId {
         Self::new(worker_id, Self::gen_unique_id())
     }
 
-    pub fn gen_unique_id() -> [u8; N-8] {
+    pub fn gen_unique_id() -> [u8; N-8] {    
+        // StreamId is completely unsafe if rand::rng (ThreadRng) is not cryptographically secure, assert this at comptime
+        const _: () = {
+            const fn assert_crypto_rng<T: CryptoRng>() {}
+            assert_crypto_rng::<ThreadRng>();
+        };
+
         let mut rng = rand::rng();
         let mut unique_id = [0u8; N-8];
         rng.fill(&mut unique_id);
