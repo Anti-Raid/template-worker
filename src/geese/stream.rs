@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use rand::Rng;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 const N: usize = 25;
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -56,14 +57,6 @@ impl StreamId {
         hex::encode_to_slice(self.0, &mut s).unwrap();
         s
     }
-
-    pub fn to_hex_str(&self) -> String {
-        let mut s: [u8; N*2] = [0; N*2];
-        hex::encode_to_slice(self.0, &mut s).unwrap();
-
-        // SAFETY: the hex will always be utf8
-        str::from_utf8(&s).unwrap().to_string()
-    }
 }
 
 impl FromStr for StreamId {
@@ -81,5 +74,30 @@ impl FromStr for StreamId {
                 Err("invalid stream id [decode error]")
             }
         }
+    }
+}
+
+impl Serialize for StreamId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let harr = self.to_hex_array();
+    
+        // SAFETY: Hex encoding only produces valid ASCII (UTF-8 compatible) bytes.
+        let harr_str = unsafe { std::str::from_utf8_unchecked(&harr) };
+        
+        serializer.serialize_str(harr_str)
+    }
+}
+
+impl<'de> Deserialize<'de> for StreamId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Serde temporarily borrows the string from the raw JSON bytes
+        let s: &str = Deserialize::deserialize(deserializer)?;
+        std::str::FromStr::from_str(s).map_err(serde::de::Error::custom)
     }
 }

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::time::Duration;
 
 use axum::extract::WebSocketUpgrade;
@@ -173,11 +172,11 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
     ) -> Response {
         #[derive(Serialize, Deserialize)]
         pub enum WsMessage {
-            Sub { id: String }, // can be sent by either client or server
-            DropSub { id: String }, // can be sent by either client or server
+            Sub { id: StreamId }, // can be sent by either client or server
+            DropSub { id: StreamId }, // can be sent by either client or server
             Hb {}, // heartbeat, can be sent by either client or server
             Warn { msg: String }, // server only, will be ignored if sent by server rn
-            Msg { id: String, msg: CKhronosValue } // can be sent by either client or server
+            Msg { id: StreamId, msg: CKhronosValue } // can be sent by either client or server
         }
 
         impl WsMessage {
@@ -209,29 +208,26 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
                         };
                         match msg {
                             WsMessage::Sub { id } => {
-                                let sid = StreamId::from_str(&id)?;
-                                let Some((ag, rx)) = state.worker_pool.attach_stream(sid) else { 
+                                let Some((ag, rx)) = state.worker_pool.attach_stream(id) else { 
                                     ws_sender.send(WsMessage::Warn { msg: "Cannot attach this stream (already attached?)".to_string() }.to_msg()?).await?;
                                     continue 
                                 };
-                                active_guards.insert(sid, ag);
-                                multiplexed_receivers.insert(sid, UnboundedReceiverStream::new(rx));
+                                active_guards.insert(id, ag);
+                                multiplexed_receivers.insert(id, UnboundedReceiverStream::new(rx));
                             }
                             WsMessage::DropSub { id } => {
-                                let sid = StreamId::from_str(&id)?;
                                 // Dropping here will drop the AttachedStreamGuard hence also removing the mapping from mesophyll automatically
-                                multiplexed_receivers.remove(&sid);
-                                active_guards.remove(&sid);
+                                multiplexed_receivers.remove(&id);
+                                active_guards.remove(&id);
                             }
                             WsMessage::Hb {} | WsMessage::Warn { .. } => {},
                             WsMessage::Msg { id, msg } => {
-                                let sid = StreamId::from_str(&id)?;
-                                state.worker_pool.stream_message(sid, msg.0)?;
+                                state.worker_pool.stream_message(id, msg.0)?;
                             }
                         }
                     }
                     Some((id, kv)) = multiplexed_receivers.next() => {
-                        ws_sender.send(WsMessage::Msg { id: id.to_hex_str(), msg: CKhronosValue(kv) }.to_msg()?).await?;
+                        ws_sender.send(WsMessage::Msg { id, msg: CKhronosValue(kv) }.to_msg()?).await?;
                     }
                 }
             }
