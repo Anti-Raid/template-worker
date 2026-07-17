@@ -26,7 +26,7 @@ message Worker {
 
 message DispatchEvent {
   Id id = 1; 
-  AnyValue event_payload = 2;
+  AnyValue event_payload = 2; // contains event name, data, author and (optionally, the stream id as well)
 }
 
 message WTMMessageResponse {
@@ -41,12 +41,15 @@ message UpdateTenantState {
   AnyValue new_tenant_state = 2;
 }
 
+message StreamMessage {
+  string stream_id = 1; 
+  AnyValue payload = 2;
+}
+
 message MTWMessage { // master-to-worker message
   optional uint64 id = 1; // Unique identifier for the message, used for tracking and correlation if needed.
   oneof payload {
     // Dispatch a (custom) template event to a worker
-    // 
-    // Discord related events are dispatched via Sandwich
     DispatchEvent dispatch = 2;
 
     // Requests that a tenant be dropped
@@ -57,6 +60,8 @@ message MTWMessage { // master-to-worker message
 
     // Update the tenant state cache for a worker process
     UpdateTenantState update_tenant_state = 6;
+
+    StreamMessage stream_msg = 7; // todo: consider making this its own channel
   }
 }
 
@@ -65,6 +70,7 @@ message WTMMessage { // worker-to-master message
   oneof payload {
     Worker worker_ident = 2; // Authenticate the worker
     WTMMessageResponse resp = 3; // response to wtm message
+    StreamMessage stream_msg = 7; // todo: consider making this its own channel
   }
 }
 

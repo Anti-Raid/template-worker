@@ -26,7 +26,7 @@ impl FromLua for MetaCall {
             _ => {
                 Err(LuaError::FromLuaConversionError {
                     from: "table",
-                    to: "CdnCall".to_string(),
+                    to: "MetaCall".to_string(),
                     message: Some("invalid op provided".to_string()),
                 })
             }

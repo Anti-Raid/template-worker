@@ -1,8 +1,12 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::{geese::{state::{StateDbFlags, StateExecResponse, StateOp}, tenantstate::TenantState}, worker::{workerthread::WorkerThread, workervmmanager::Id}};
+use crate::{geese::{state::{StateDbFlags, StateExecResponse, StateOp}, tenantstate::TenantState}, mesophyll::STREAM_TIMEOUT, worker::{workerthread::WorkerThread, workervmmanager::Id}};
 use crate::mesophyll::server::pb;
 use khronos_runtime::{futures_util::{StreamExt, stream::FuturesUnordered}, utils::khronos_value::KhronosValue};
+use moka::future::Cache;
+use tokio::sync::mpsc::UnboundedSender;
+
+type AttachedStreams = Cache<String, UnboundedSender<KhronosValue>>;
 
 /// Mesophyll client
 #[derive(Clone)]
@@ -10,6 +14,7 @@ pub struct MesophyllClient {
     worker: pb::Worker,
     client: pb::mesophyll_master_client::MesophyllMasterClient<tonic::transport::Channel>,
     client_stream_tx: tokio::sync::mpsc::UnboundedSender<pb::WtmMessage>,
+    attached_streams: AttachedStreams
 }
 
 pub struct MesophyllClientStream {
@@ -42,6 +47,7 @@ impl MesophyllClient {
             worker,
             client,
             client_stream_tx: tx,
+            attached_streams: Cache::builder().time_to_idle(STREAM_TIMEOUT).build()
         };
         
         Ok((s, MesophyllClientStream { server_stream }))
@@ -81,6 +87,24 @@ impl MesophyllClient {
                                             let resp = wt.dispatch_event(id.to_real_id(), evt).await;
                                             (req_id, resp)
                                         });
+                                    },
+                                    pb::mtw_message::Payload::StreamMsg(sm) => { // master has *sent* the worker a new message, broadcast it!
+                                        if let Some(stream) = self_ref.attached_streams.get(&sm.stream_id).await {
+                                            let Some(payload) = sm.payload else {
+                                                log::error!("Mesophyll client received StreamMsg message with no payload");
+                                                continue;
+                                            };
+
+                                            let payload = match pb::AnyValue::to_real(&payload) {
+                                                Ok(ev) => ev,
+                                                Err(e) => {
+                                                    log::error!("Mesophyll client failed to convert payload to real value: {:?}", e);
+                                                    continue;
+                                                }
+                                            };
+
+                                            let _ = stream.send(payload);
+                                        }
                                     },
                                     pb::mtw_message::Payload::DropTenant(id) => {
                                         let wt = wt.clone();
@@ -189,5 +213,21 @@ impl MesophyllClient {
             .await
             .map_err(|e| e.to_string())?
             .into_inner())
+    }
+
+    /// Send a stream message from worker to master
+    pub fn stream_message(&self, stream_id: String, payload: KhronosValue) -> Result<(), crate::Error> {
+        let pb_payload = pb::AnyValue::from_real(&payload)?;
+
+        let msg = pb::WtmMessage {
+            payload: Some(pb::wtm_message::Payload::StreamMsg(pb::StreamMessage {
+                stream_id,
+                payload: Some(pb_payload),
+            })),
+            resp_id: None,
+        };
+        
+        self.client_stream_tx.send(msg).map_err(|e| format!("Failed to send stream message to master {}", e))?;
+        Ok(())
     }
 }

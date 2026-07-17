@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 /// Mesophyll provides a coordination layer between all the different workers along
 /// with the master process. It is the (WIP) replacement for WorkerProcessComm and uses
 /// WebSockets instead of HTTP2 for communication. This enables for stuff like the template 
@@ -10,3 +12,5 @@
 /// through projects like khronos dapi
 pub mod client;
 pub mod server;
+
+pub const STREAM_TIMEOUT: Duration = Duration::from_secs(60);

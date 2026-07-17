@@ -85,6 +85,7 @@ impl Stratum {
                 evt.event_name,
                 None,
                 evt.payload,
+                None
             ),
         )?;
 

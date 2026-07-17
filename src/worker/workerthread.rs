@@ -94,7 +94,7 @@ impl WorkerThread {
                                     if let Ok(reloaded) = res && !reloaded {
                                         let wd = worker.dispatch.clone();
                                         tokio::task::spawn_local(async move {
-                                            if let Err(e) = wd.dispatch_event_complex(id, "$UpdateTenantState", None, ts).await {
+                                            if let Err(e) = wd.dispatch_event_complex(id, "$UpdateTenantState", None, ts, None).await {
                                                 log::error!("failed to dispatch ts update: {e:?}");
                                             }
                                         });
