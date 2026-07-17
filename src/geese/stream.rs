@@ -57,6 +57,19 @@ impl StreamId {
         hex::encode_to_slice(self.0, &mut s).unwrap();
         s
     }
+
+    pub fn with_hex_str<R>(&self, cb: impl FnOnce(&str) -> R) -> R {
+        let harr = self.to_hex_array();
+        // SAFETY: Hex encoding only produces valid ASCII (UTF-8 compatible) bytes.
+        let harr_str = unsafe { std::str::from_utf8_unchecked(&harr) };
+        cb(harr_str)
+    }
+}
+
+impl std::fmt::Display for StreamId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.with_hex_str(|s| f.write_str(s))
+    }
 }
 
 impl FromStr for StreamId {
@@ -82,12 +95,7 @@ impl Serialize for StreamId {
     where
         S: Serializer,
     {
-        let harr = self.to_hex_array();
-    
-        // SAFETY: Hex encoding only produces valid ASCII (UTF-8 compatible) bytes.
-        let harr_str = unsafe { std::str::from_utf8_unchecked(&harr) };
-        
-        serializer.serialize_str(harr_str)
+        self.with_hex_str(move |s| serializer.serialize_str(s))
     }
 }
 
