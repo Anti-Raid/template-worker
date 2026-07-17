@@ -4,13 +4,14 @@ use crate::{geese::{state::{StateDbFlags, StateExecResponse, StateOp}, tenantsta
 use crate::mesophyll::server::pb;
 use khronos_runtime::{futures_util::{StreamExt, stream::FuturesUnordered}, utils::khronos_value::KhronosValue};
 use moka::future::Cache;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 type AttachedStreams = Cache<String, UnboundedSender<KhronosValue>>;
 
 /// Mesophyll client
 #[derive(Clone)]
 pub struct MesophyllClient {
+    pub worker_id: usize,
     worker: pb::Worker,
     client: pb::mesophyll_master_client::MesophyllMasterClient<tonic::transport::Channel>,
     client_stream_tx: tokio::sync::mpsc::UnboundedSender<pb::WtmMessage>,
@@ -44,6 +45,7 @@ impl MesophyllClient {
         log::info!("Mesophyll client connected and initialized with worker ID {}", worker_id);
 
         let s = Self {
+            worker_id,
             worker,
             client,
             client_stream_tx: tx,
@@ -213,6 +215,12 @@ impl MesophyllClient {
             .await
             .map_err(|e| e.to_string())?
             .into_inner())
+    }
+
+    pub async fn attach_stream(&self, stream_id: String) -> (UnboundedSender<KhronosValue>, UnboundedReceiver<KhronosValue>) {
+        let (tx, rx) = unbounded_channel();
+        self.attached_streams.insert(stream_id, tx.clone()).await;
+        (tx, rx)
     }
 
     /// Send a stream message from worker to master

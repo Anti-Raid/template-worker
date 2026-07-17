@@ -1,15 +1,24 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
+use axum::extract::WebSocketUpgrade;
+use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{extract::{State, FromRequestParts, Json}, Router, response::IntoResponse};
 use dapi::UserId;
+use khronos_runtime::futures_util::{SinkExt, StreamExt};
+use khronos_runtime::utils::khronos_value::CKhronosValue;
 use reqwest::{StatusCode, header};
 use reqwest::header::AUTHORIZATION;
+use serde::{Deserialize, Serialize};
+use tokio_stream::StreamMap;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tower_http::cors::MaxAge;
 use crate::master::syscall::bot::{MBotSyscall, MBotSyscallRet};
 use crate::master::syscall::{MSyscallArgs, MSyscallContext, MSyscallRet};
 use crate::master::syscall::{MSyscallError, MSyscallHandler, internal::auth as iauth};
+use crate::mesophyll::StreamId;
 
 impl IntoResponse for MSyscallRet {
     fn into_response(self) -> Response {
@@ -98,7 +107,7 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
         response
     }
 
-    pub(super) async fn msyscall(
+    async fn msyscall(
         user: OptionalAuthorizedUser,
         State(handler): State<MSyscallHandler>,
         Json(args): Json<MSyscallArgs>,
@@ -121,7 +130,7 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
         sig: String,
     }
 
-    pub(super) async fn get_presigned(
+    async fn get_presigned(
         State(handler): State<MSyscallHandler>,
         axum::extract::Query(p): axum::extract::Query<Presigned>
     ) -> impl IntoResponse {
@@ -157,12 +166,92 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
         }
     }
 
+    async fn ws(
+        ws: WebSocketUpgrade,
+        State(state): State<MSyscallHandler>,
+    ) -> Response {
+        #[derive(Serialize, Deserialize)]
+        pub enum WsMessage {
+            Sub { id: String }, // can be sent by either client or server
+            DropSub { id: String }, // can be sent by either client or server
+            Hb {}, // heartbeat, can be sent by either client or server
+            Warn { msg: String }, // server only, will be ignored if sent by server rn
+            Msg { id: String, msg: CKhronosValue } // can be sent by either client or server
+        }
+
+        impl WsMessage {
+            fn to_msg(&self) -> Result<Message, crate::Error> {
+                let s = serde_json::to_string(self)?;
+                Ok(Message::Text(s.into()))
+            }
+        }
+
+        async fn send_close_message(socket: &mut WebSocket, code: u16, reason: &str) {
+            _ = socket.send(Message::Close(Some(CloseFrame {
+                code: code,
+                reason: reason.into(),
+            })))
+            .await;
+        }
+
+        async fn handle_socket(socket: &mut WebSocket, state: MSyscallHandler) -> Result<(), crate::Error> {
+            let (mut ws_sender, mut ws_receiver) = socket.split();
+            let mut multiplexed_receivers = StreamMap::new();
+            let mut active_guards = HashMap::new();
+            loop {
+                tokio::select! {
+                    msg = ws_receiver.next() => {
+                        let Some(msg) = msg else { break };
+                        let msg = match msg? {
+                            Message::Text(b) => serde_json::from_slice::<WsMessage>(b.as_bytes())?,
+                            _ => continue
+                        };
+                        match msg {
+                            WsMessage::Sub { id } => {
+                                let sid = StreamId::new(id.clone()).ok_or("Failed to parse id")?;
+                                let Some((ag, rx)) = state.worker_pool.attach_stream(sid) else { 
+                                    ws_sender.send(WsMessage::Warn { msg: "Cannot attach this stream (already attached?)".to_string() }.to_msg()?).await?;
+                                    continue 
+                                };
+                                active_guards.insert(id.clone(), ag);
+                                multiplexed_receivers.insert(id, UnboundedReceiverStream::new(rx));
+                            }
+                            WsMessage::DropSub { id } => {
+                                // Dropping here will drop the AttachedStreamGuard hence also removing the mapping from mesophyll automatically
+                                multiplexed_receivers.remove(id.as_str());
+                                active_guards.remove(id.as_str());
+                            }
+                            WsMessage::Hb {} | WsMessage::Warn { .. } => {},
+                            WsMessage::Msg { id, msg } => {
+                                let sid = StreamId::new(id).ok_or("Failed to parse id")?;
+                                state.worker_pool.stream_message(sid, msg.0)?;
+                            }
+                        }
+                    }
+                    Some((id, kv)) = multiplexed_receivers.next() => {
+                        ws_sender.send(WsMessage::Msg { id, msg: CKhronosValue(kv) }.to_msg()?).await?;
+                    }
+                }
+            }
+            Ok(())
+        }
+
+        ws.on_upgrade(|mut socket| async move {
+            if let Err(e) = handle_socket(&mut socket, state).await {
+                send_close_message(&mut socket, 4000, &format!("Error occured: {e}")).await;
+            } else {
+                send_close_message(&mut socket, 1001, "Going away").await;
+            }
+        })
+    }
+
     let mut router = Router::new();
 
     router = router
         .route("/healthcheck", post(|| async { Json(()) }))
         .route("/msyscall", post(msyscall))
         .route("/blob", get(get_presigned))
+        .route("/ws", get(ws))
         .fallback(get(|| async {
             (
                 StatusCode::NOT_FOUND,

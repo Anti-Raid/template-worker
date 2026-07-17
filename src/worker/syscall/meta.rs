@@ -2,7 +2,7 @@ use khronos_runtime::{core::datetime::DateTime, rt::mluau::prelude::*};
 
 use crate::{geese::ratelimit::RlExceededError, worker::{syscall::SyscallHandler, workervmmanager::Id}};
 
-/// The core underlying syscall
+/// Metadata syscalls
 #[derive(Debug)]
 pub enum MetaCall {
     GetStats {},

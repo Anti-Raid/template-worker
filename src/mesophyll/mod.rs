@@ -13,4 +13,26 @@ use std::time::Duration;
 pub mod client;
 pub mod server;
 
-pub const STREAM_TIMEOUT: Duration = Duration::from_secs(60);
+pub const STREAM_TIMEOUT: Duration = Duration::from_secs(300);
+
+#[derive(Clone)]
+pub struct StreamId {
+    pub id: String,
+    pub worker_id: usize
+}
+
+impl StreamId {
+    fn extract_worker_id(stream_id: &str) -> Option<usize> {
+        let bits = stream_id.split_once(';');
+        if let Some((top, _)) = bits {
+            top.parse().ok()
+        } else {
+            None
+        }
+    }
+
+    pub fn new(id: String) -> Option<Self> {
+        let wid = Self::extract_worker_id(&id)?;
+        Some(Self { id, worker_id: wid })
+    }
+}

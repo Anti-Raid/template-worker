@@ -45,7 +45,7 @@ impl WorkerDispatch {
 
             let self_ref = self.clone();
             tokio::task::spawn_local(async move {
-                if let Err(e) = self_ref.dispatch_event_complex(id, "OnStartup", None, OnStartupData { reason: "worker_startup"}, None).await {
+                if let Err(e) = self_ref.dispatch_event_complex(id, "OnStartup", None, OnStartupData { reason: "worker_startup"}).await {
                     log::error!("Failed to dispatch startup event for ID {id:?}: {e}");
                 }
             });
@@ -54,11 +54,11 @@ impl WorkerDispatch {
 
     /// Dispatches an event to the appropriate VM based on the tenant ID
     pub async fn dispatch_event(&self, id: Id, event: SimpleEvent) -> LuaResult<KhronosValue> {
-        let (name, author, data, stream_id) = (event.name, event.author, event.data, event.stream_id);
-        self.dispatch_event_complex(id, &name, author.as_deref(), data, stream_id.as_deref()).await
+        let (name, author, data) = (event.name, event.author, event.data);
+        self.dispatch_event_complex(id, &name, author.as_deref(), data).await
     }
 
-    pub async fn dispatch_event_complex<Data: IntoLua>(&self, id: Id, name: &str, author: Option<&str>, data: Data, stream_id: Option<&str>) -> LuaResult<KhronosValue> {
+    pub async fn dispatch_event_complex<Data: IntoLua>(&self, id: Id, name: &str, author: Option<&str>, data: Data) -> LuaResult<KhronosValue> {
         let tenant_state = self.tenant_state.get_cached_tenant_state_for(id)
             .map_err(|e| mlua::Error::external(format!("Failed to get tenant state for ID {id:?}: {e}")))?;
 
@@ -74,7 +74,7 @@ impl WorkerDispatch {
             return Err(mlua::Error::external("Lua VM to dispatch to is broken"));
         }
 
-        match vm_data.runtime.call_in_scheduler::<_, KhronosValue>(vm_data.dispatch_func, Event { name, author, data, stream_id }).await {
+        match vm_data.runtime.call_in_scheduler::<_, KhronosValue>(vm_data.dispatch_func, Event { name, author, data }).await {
             Ok(result) => Ok(result),
             Err(e) => {
                 let err_str = e.to_string();
@@ -102,7 +102,6 @@ pub struct Event<'a, Data: IntoLua> {
     name: &'a str,
     author: Option<&'a str>,
     data: Data,
-    stream_id: Option<&'a str>
 }
 
 impl<'a, Data: IntoLua> IntoLua for Event<'a, Data> {
@@ -117,10 +116,6 @@ impl<'a, Data: IntoLua> IntoLua for Event<'a, Data> {
             "data",
             self.data
         )?;
-        match self.stream_id {
-            Some(stream_id) => tab.set("stream_id", stream_id)?,
-            None => {},
-        }
         tab.set_readonly(true);
         Ok(LuaValue::Table(tab))
     }
@@ -170,18 +165,16 @@ pub struct SimpleEvent {
     author: Option<String>,
     /// The inner data of the object
     data: SimpleEventData,
-    /// The stream id
-    stream_id: Option<String>
 }
 
 impl SimpleEvent {
     /// Create a new Event given a khronos value
-    pub fn new_khronos_value(name: String, author: Option<String>, data: KhronosValue, stream_id: Option<String>) -> Self {
-        Self { name, author, data: SimpleEventData::KhronosValue(data), stream_id }
+    pub fn new_khronos_value(name: String, author: Option<String>, data: KhronosValue) -> Self {
+        Self { name, author, data: SimpleEventData::KhronosValue(data) }
     }
 
     /// Create a new Event given a raw json string
-    pub fn new_json_string(name: String, author: Option<String>, data: String, stream_id: Option<String>) -> Self {
-        Self { name, author, data: SimpleEventData::JsonString(data), stream_id }
+    pub fn new_json_string(name: String, author: Option<String>, data: String) -> Self {
+        Self { name, author, data: SimpleEventData::JsonString(data) }
     }
 }

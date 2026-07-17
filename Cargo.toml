@@ -33,7 +33,7 @@ toml = "1"
 bytes = { version = "1", features = ["serde"] }
 
 # http
-axum = { version = "0.8", features = [] }
+axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.5", features = ["cors"] }
 
 # Mesophyll

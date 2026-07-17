@@ -1,14 +1,13 @@
 use khronos_runtime::futures_util::{Stream, StreamExt};
 use dapi::{UserId, GuildId};
-use moka::future::Cache;
 use tonic::Status;
-use crate::{geese::{state::{StateDb, StateDbFlags}, tenantstate::{TenantState, TenantStateDb}}, master::syscall::MSyscallHandler, mesophyll::STREAM_TIMEOUT, worker::{workerdispatch::SimpleEvent, workervmmanager::Id as RealId}};
+use crate::{geese::{state::{StateDb, StateDbFlags}, tenantstate::{TenantState, TenantStateDb}}, master::syscall::MSyscallHandler, worker::{workerdispatch::SimpleEvent, workervmmanager::Id as RealId}};
 use khronos_runtime::utils::khronos_value::KhronosValue as RealKhronosValue;
 use dashmap::DashMap;
 use std::{net::ToSocketAddrs, sync::OnceLock};
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::{mpsc::{self, UnboundedSender}, oneshot};
+use tokio::sync::{mpsc::{self, UnboundedReceiver, unbounded_channel}, oneshot};
 
 /// Internal transport layer
 pub(super) mod pb {
@@ -129,8 +128,6 @@ impl pb::WtmMessageResponse {
     }
 }
 
-type AttachedStreams = Cache<String, UnboundedSender<RealKhronosValue>>;
-
 #[derive(Clone)]
 pub struct MesophyllServer {
     conns: Arc<DashMap<usize, Arc<MesophyllServerConn>>>,
@@ -217,7 +214,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
                                 let _ = handler.send(der);
                             },
                             pb::wtm_message::Payload::StreamMsg(sm) => {
-                                if let Some(stream) = conn.attached_streams.get(&sm.stream_id).await {
+                                if let Some(stream) = conn.attached_streams.get(&sm.stream_id) {
                                     let Some(payload) = sm.payload else {
                                         log::error!("Mesophyll server received StreamMsg message with no payload");
                                         continue;
@@ -230,7 +227,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
                                             continue;
                                         }
                                     };
-
+                                    
                                     let _ = stream.send(payload);
                                 }
                             },
@@ -286,6 +283,8 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
     }
 }
 
+type AttachedStreams = Arc<DashMap<String, mpsc::UnboundedSender<RealKhronosValue>>>;
+
 #[derive(Clone)]
 pub struct MesophyllServerConn {
     id: u64,
@@ -309,7 +308,7 @@ impl Drop for MesophyllServerConn {
 impl MesophyllServerConn {
     fn new(id: u64, tx: mpsc::UnboundedSender<Result<pb::MtwMessage, Status>>) -> Self {
         let dispatch_response_handlers = Arc::new(DashMap::new());
-        Self { id, tx, dispatch_response_handlers, attached_streams: Cache::builder().time_to_idle(STREAM_TIMEOUT).build() }
+        Self { id, tx, dispatch_response_handlers, attached_streams: AttachedStreams::default() }
     }
 
     fn setup_handler(&self) -> (u64, DropG, oneshot::Receiver<pb::WtmMessageResponse>) {
@@ -369,6 +368,13 @@ impl MesophyllServerConn {
         Ok(())
     }
 
+    pub fn attach_stream(&self, stream_id: String) -> Option<(AttachedStreamGuard, UnboundedReceiver<RealKhronosValue>)> {
+        if self.attached_streams.contains_key(&stream_id) { return None }
+        let (tx, rx) = unbounded_channel();
+        self.attached_streams.insert(stream_id.to_string(), tx);
+        Some((AttachedStreamGuard { map: self.attached_streams.clone(), id: stream_id }, rx))
+    }
+
     pub fn stream_message(&self, stream_id: String, payload: RealKhronosValue) -> Result<(), crate::Error> {
         let pb_payload = pb::AnyValue::from_real(&payload)?;
 
@@ -382,6 +388,17 @@ impl MesophyllServerConn {
         
         self.tx.send(Ok(msg)).map_err(|e| Status::internal(format!("Failed to send stream message to worker {}: {}", self.id, e)))?;
         Ok(())
+    }
+}
+
+pub struct AttachedStreamGuard {
+    map: AttachedStreams,
+    pub id: String,
+}
+
+impl Drop for AttachedStreamGuard {
+    fn drop(&mut self) {
+        self.map.remove(&self.id);
     }
 }
 
