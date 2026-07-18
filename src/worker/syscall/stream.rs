@@ -1,13 +1,15 @@
-use khronos_ext::mlua_scheduler_ext::LuaSchedulerAsyncUserData;
-use khronos_runtime::{core::datetime::TimeDelta, rt::mluau::prelude::*, utils::khronos_value::KhronosValue};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use khronos_runtime::{rt::mluau::prelude::*, utils::khronos_value::KhronosValue};
 
 use crate::{geese::{ratelimit::RlExceededError, stream::StreamId}, worker::{syscall::SyscallHandler, workervmmanager::Id}};
 
 /// Stream syscalls
 #[derive(Debug)]
 pub enum StreamCall {
-    NewStream {},
+    New {},
+    Send {
+        stream: StreamId,
+        value: KhronosValue
+    }
 }
 
 impl FromLua for StreamCall {
@@ -22,8 +24,13 @@ impl FromLua for StreamCall {
 
         let typ: LuaString = tab.get("op")?;
         match typ.as_bytes().as_ref() {
-            b"NewStream" => {
-                Ok(Self::NewStream { })
+            b"New" => {
+                Ok(Self::New { })
+            },
+            b"Send" => {
+                let stream = tab.get("stream")?;
+                let value = tab.get("value")?;
+                Ok(Self::Send { stream, value })
             },
             _ => {
                 Err(LuaError::FromLuaConversionError {
@@ -36,73 +43,44 @@ impl FromLua for StreamCall {
     }
 }
 
-pub struct Stream {
-    id: StreamId,
-    send: UnboundedSender<KhronosValue>,
-    recv: UnboundedReceiver<KhronosValue>
-}
-
-impl LuaUserData for Stream {
-    fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("id", |lua, this, _: ()| {
-            lua.create_string(&this.id.to_hex_array())
-        });
-
-        methods.add_method("send", |_, this, v: KhronosValue| {
-            this.send.send(v).map_err(|x| LuaError::external(x.to_string()))?;
-            Ok(())
-        });
-
-        methods.add_scheduler_async_method_mut("recv", async |_, mut this, timeout: Option<LuaUserDataRef<TimeDelta>>| {
-            match timeout {
-                Some(t) => {
-                    let timeout = t.timedelta.to_std().map_err(LuaError::external)?;
-                    let res = tokio::time::timeout(timeout, this.recv.recv()).await.map_err(|x| LuaError::external(x.to_string()))?;
-                    Ok(res)
-                }
-                None => {
-                    Ok(this.recv.recv().await)
-                }
-            }
-        });
-
-        methods.add_method_mut("close", |_, this, _: ()| {
-            this.recv.close();
-            Ok(())
-        });
-    }
-}
-
 pub enum StreamResult {
     Stream {
-        stream: Stream
-    }
+        stream: StreamId
+    },
+    Sent,
 }
 
 impl IntoLua for StreamResult {
     fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
-        let table = lua.create_table()?;
         match self {
             Self::Stream { stream } => {
+            let table = lua.create_table()?;
                 table.set("op", "Stream")?;
-                table.set("stream", stream)?;
+                table.set("stream_id", stream)?;
+                table.set_readonly(true);
+                Ok(LuaValue::Table(table))
             },
+            Self::Sent {} => {
+                Ok(LuaNil)
+            }
         }
-        table.set_readonly(true); // We want StateExecResult's to be immutable
-        Ok(LuaValue::Table(table))
     }
 }
 
 impl StreamCall {
     pub(super) async fn exec(self, _id: Id, handler: &SyscallHandler) -> Result<StreamResult, crate::Error> {
         match self {
-            Self::NewStream {} => {
+            Self::New {} => {
                 handler.ratelimits.runtime.check("NewStream", ()).map_err(RlExceededError)?;
                 let sid = StreamId::new_rand(handler.state.mesophyll_client.worker_id as u64);
-                let (send, recv) = handler.state.mesophyll_client.attach_stream(sid).await;
+                handler.state.mesophyll_client.attach_stream(sid);
                 Ok(StreamResult::Stream {
-                    stream: Stream { id: sid, send, recv }
+                    stream: sid
                 })
+            },
+            Self::Send { stream, value } => {
+                handler.state.mesophyll_client.stream_message(stream, value)?;
+                Ok(StreamResult::Sent)
             }
         }
     }

@@ -1,12 +1,12 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::{geese::{state::{StateDbFlags, StateExecResponse, StateOp}, stream::StreamId, tenantstate::TenantState}, mesophyll::STREAM_TIMEOUT, worker::{workerthread::WorkerThread, workervmmanager::Id}};
+use crate::{geese::{state::{StateDbFlags, StateExecResponse, StateOp}, stream::StreamId, tenantstate::TenantState}, worker::{workerthread::WorkerThread, workervmmanager::Id}};
 use crate::mesophyll::server::pb;
+use dashmap::DashMap;
 use khronos_runtime::{futures_util::{StreamExt, stream::FuturesUnordered}, utils::khronos_value::KhronosValue};
-use moka::future::Cache;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::sync::broadcast;
 
-type AttachedStreams = Cache<StreamId, UnboundedSender<KhronosValue>>;
+type AttachedStreams = Arc<DashMap<StreamId, broadcast::Sender<KhronosValue>>>;
 
 /// Mesophyll client
 #[derive(Clone)]
@@ -49,7 +49,7 @@ impl MesophyllClient {
             worker,
             client,
             client_stream_tx: tx,
-            attached_streams: Cache::builder().time_to_idle(STREAM_TIMEOUT).build()
+            attached_streams: AttachedStreams::default().into()
         };
         
         Ok((s, MesophyllClientStream { server_stream }))
@@ -92,7 +92,7 @@ impl MesophyllClient {
                                     },
                                     pb::mtw_message::Payload::StreamMsg(sm) => { // master has *sent* the worker a new message, broadcast it!
                                         let Some(sid) = StreamId::try_from_slice(&sm.stream_id) else { continue; };
-                                        if let Some(stream) = self_ref.attached_streams.get(&sid).await {
+                                        if let Some(stream) = self_ref.attached_streams.get(&sid) {
                                             let Some(payload) = sm.payload else {
                                                 log::error!("Mesophyll client received StreamMsg message with no payload");
                                                 continue;
@@ -218,10 +218,9 @@ impl MesophyllClient {
             .into_inner())
     }
 
-    pub async fn attach_stream(&self, stream_id: StreamId) -> (UnboundedSender<KhronosValue>, UnboundedReceiver<KhronosValue>) {
-        let (tx, rx) = unbounded_channel();
-        self.attached_streams.insert(stream_id, tx.clone()).await;
-        (tx, rx)
+    pub fn attach_stream(&self, stream_id: StreamId) {
+        let tx= broadcast::Sender::new(25);
+        self.attached_streams.insert(stream_id, tx);
     }
 
     /// Send a stream message from worker to master

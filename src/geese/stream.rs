@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use khronos_ext::mluau_ext::prelude::*;
 use rand::{CryptoRng, Rng, rngs::ThreadRng};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -69,6 +70,26 @@ impl StreamId {
         // SAFETY: Hex encoding only produces valid ASCII (UTF-8 compatible) bytes.
         let harr_str = unsafe { std::str::from_utf8_unchecked(&harr) };
         cb(harr_str)
+    }
+}
+
+impl FromLua for StreamId {
+    fn from_lua(value: LuaValue, _: &Lua) -> LuaResult<Self> {
+        let LuaValue::String(s) = value else {
+            return Err(LuaError::FromLuaConversionError {
+                from: value.type_name(),
+                to: "StreamId".to_string(),
+                message: Some("expected a string".to_string()),
+            })
+        };
+
+        Self::try_from_slice(&s.as_bytes()).ok_or_else(|| LuaError::external("failed to convert to stream id"))
+    }
+}
+
+impl IntoLua for StreamId {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        lua.create_string(&self.to_hex_array()).map(LuaValue::String)
     }
 }
 

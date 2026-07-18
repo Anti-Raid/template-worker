@@ -270,7 +270,7 @@ impl WorkerVmManager {
             let gtab = rt.global_table().clone();
             rt.with_lua(|lua| {
                 gtab.set("_debug", lua.create_function(|_, values: LuaMultiValue| {
-                    khronos_runtime::utils::pp::pretty_print(values);
+                    println!("{}", khronos_runtime::utils::pp::pretty_print(values));
 
                     Ok(())
                 })?)?;

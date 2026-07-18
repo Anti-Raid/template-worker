@@ -45,19 +45,9 @@ const MIGRATIONS: [MigrationType; 14] = [
 ];
 
 #[derive(Embed, Debug)]
-#[folder = "$CARGO_MANIFEST_DIR/luau/twshell"]
+#[folder = "$CARGO_MANIFEST_DIR/luau/tw"]
 #[prefix = ""]
-pub struct TwShell;
-
-#[derive(Embed, Debug)]
-#[folder = "$CARGO_MANIFEST_DIR/luau/twshell/_luaurcvfs"]
-#[prefix = ""]
-pub struct LuaurcVfs;
-
-#[derive(Embed, Debug)]
-#[folder = "$CARGO_MANIFEST_DIR/luau/twshell/migrations"]
-#[prefix = ""]
-pub struct MigrationsFolder;
+pub struct TwLuau;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Migration {
@@ -76,7 +66,7 @@ async fn apply_luau_migration(pool: sqlx::PgPool, migration_name: String) -> Res
                 lua.sandbox(false)?;
                 let globals = lua.globals();
                 let print_fn = lua.create_function(|_, args: LuaMultiValue| {
-                    khronos_runtime::utils::pp::pretty_print(args);
+                    println!("{}", khronos_runtime::utils::pp::pretty_print(args));
                     Ok(())
                 })?;
                 globals.set("print", print_fn)?;
@@ -104,8 +94,7 @@ async fn apply_luau_migration(pool: sqlx::PgPool, migration_name: String) -> Res
 
     let rvfs = {
         let mut vfs = Vfs::new();
-        vfs.extend(create_memory_vfs_from_embedded::<LuaurcVfs>());
-        vfs.extend(create_memory_vfs_from_embedded::<TwShell>());
+        vfs.extend(create_memory_vfs_from_embedded::<TwLuau>());
         vfs.extend_ref(&TEMPLATING_TYPES);
         vfs
     };
