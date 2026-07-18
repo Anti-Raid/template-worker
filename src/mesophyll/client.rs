@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use crate::{geese::{state::{StateDbFlags, StateExecResponse, StateOp}, stream::LtcMessage, tenantstate::TenantState}, worker::{workerthread::WorkerThread, workervmmanager::Id}};
 use crate::mesophyll::server::pb;
@@ -49,7 +49,7 @@ impl MesophyllClient {
         Ok((s, MesophyllClientStream { server_stream }))
     }
 
-    pub fn listen(&self, stream: MesophyllClientStream, wt: Arc<WorkerThread>) {
+    pub fn listen(&self, stream: MesophyllClientStream, wt: WorkerThread) {
         let self_ref = self.clone();
         let mut server_stream = stream.server_stream;
         tokio::task::spawn(async move {

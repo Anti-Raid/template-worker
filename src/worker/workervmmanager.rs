@@ -16,6 +16,7 @@ use crate::mesophyll::client::MesophyllClient;
 use crate::worker::builtins::BUILTINS;
 use crate::worker::limits::TEMPLATE_GIVE_TIME;
 use crate::worker::syscall::SyscallHandler;
+use crate::worker::worker::WorkerFastPath;
 use crate::worker::workertenantstate::WorkerTenantState;
 
 use super::limits::Ratelimits;
@@ -184,13 +185,16 @@ impl<'a> IntoLua for BaseTenantData<'a> {
 pub struct WorkerVmManager {
     /// The VMs managed by this WorkerVmManager, keyed by their tenant ID
     vms: Rc<RefCell<HashMap<Id, VmState>>>,
+    /// Worker fast path
+    wfp: WorkerFastPath
 }
 
 impl WorkerVmManager {
     /// Creates a new WorkerVmManager with the given worker state
-    pub fn new() -> Self {
+    pub fn new(wfp: WorkerFastPath) -> Self {
         Self {
-            vms: RefCell::default().into()
+            vms: RefCell::default().into(),
+            wfp
         }
     }
 
@@ -218,8 +222,25 @@ impl WorkerVmManager {
 
         let tenant_state = wts.get_cached_tenant_state_for(id)
             .map_err(|e| LuaError::external(format!("Failed to get tenant state for ID {id:?}: {e}")))?;
+
+        // Setup streams + update fast path so dispatches know to send through fast path
         let (tx, rx) = unbounded_channel();
-        let lts = BaseTenantData { 
+        self.wfp.stream_to_luau.insert(id, tx.clone());
+
+        // Setup cleanup code
+        let weak_vms = Rc::downgrade(&self.vms);
+        let wfp = self.wfp.clone(); 
+        runtime.set_on_broken(Box::new(move || { 
+            wfp.stream_to_luau.remove(&id); // drop fast-path
+            if let Some(vms_rc) = weak_vms.upgrade() {
+                if let Ok(mut vms) = vms_rc.try_borrow_mut() {
+                    vms.remove(&id);
+                }
+            }
+        }));
+
+        // Setup vm dispatch function w/ base data
+        let btd = BaseTenantData { 
             id, 
             bot: worker_state.stratum.current_user().clone(), 
             dispatchable_events: &dapi::EVENT_LIST, 
@@ -237,7 +258,7 @@ impl WorkerVmManager {
             id
         );
 
-        let dispatch_func = func.call::<LuaFunction>((syscall_h, tenant_state, lts))?;
+        let dispatch_func = func.call::<LuaFunction>((syscall_h, tenant_state, btd))?;
 
         Ok(VmState {
             runtime,
@@ -249,10 +270,10 @@ impl WorkerVmManager {
     /// Removes the VM for the given tenant ID and cleans up its resources
     #[allow(dead_code)]
     pub fn remove_vm_for(&self, id: Id) -> Result<(), crate::Error> {
-        // Remove from map
+        self.wfp.stream_to_luau.remove(&id); // Drop fast-path *first*
         let cell_opt = self.vms.borrow_mut().remove(&id);
 
-        // If it existed and was initialized, mark it broken
+        // If it existed and was initialized, mark it broken to ensure cleanup code gets called
         if let Some(vm) = cell_opt {
             vm.runtime.mark_broken(true)?;
         }

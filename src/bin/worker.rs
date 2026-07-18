@@ -102,13 +102,11 @@ async fn main_impl(args: CmdArgs) {
         args.worker_debug
     );
 
-    let worker_thread = Arc::new(
-        WorkerThread::new(
+    let worker_thread = WorkerThread::new(
             worker_state,
             worker_id,
         )
-        .expect("Failed to create worker thread"),
-    );
+        .expect("Failed to create worker thread");
 
     // Start listening to the mesophyll server stream for events to dispatch to this worker thread
     meso_client.listen(meso_client_stream, worker_thread.clone());

@@ -29,7 +29,7 @@ impl Stratum {
     }
 
     /// Starts listening for discord events and pushing them to worker thread
-    pub async fn listen_discord_events(&self, wt: Arc<WorkerThread>, shutdown: watch::Receiver<bool>) {
+    pub async fn listen_discord_events(&self, wt: WorkerThread, shutdown: watch::Receiver<bool>) {
         loop {
             if *shutdown.borrow() {
                 return;
@@ -45,7 +45,7 @@ impl Stratum {
     }
 
     /// Helper method to start the event stream and listen in calling `discord_event_dispatch` for every message
-    async fn listen_discord_events_impl(&self, wt: Arc<WorkerThread>, shutdown: watch::Receiver<bool>) -> Result<(), crate::Error> {
+    async fn listen_discord_events_impl(&self, wt: WorkerThread, shutdown: watch::Receiver<bool>) -> Result<(), crate::Error> {
         let bot_id = self.current_user.id;
 
         let stream = self.event_stream(wt.id().try_into()?).await?;
