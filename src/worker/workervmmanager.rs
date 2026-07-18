@@ -1,14 +1,18 @@
 use dapi::controller::DiscordProviderContext;
 use dapi::types::User;
+use khronos_ext::mlua_scheduler_ext::LuaSchedulerAsyncUserData;
 use khronos_runtime::core::typesext::Vfs;
 use khronos_runtime::rt::{KhronosRuntime, RuntimeCreateOpts};
 use serde::{Deserialize, Serialize};
 use dapi::{GuildId, UserId};
 use stratum_common::worker_id_for_tenant;
+use tokio::sync::mpsc::{self, unbounded_channel};
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::{collections::HashMap, rc::Rc};
 use khronos_runtime::rt::mlua::prelude::*;
+use crate::geese::stream::CtlMessage;
+use crate::mesophyll::client::MesophyllClient;
 use crate::worker::builtins::BUILTINS;
 use crate::worker::limits::TEMPLATE_GIVE_TIME;
 use crate::worker::syscall::SyscallHandler;
@@ -117,7 +121,24 @@ impl IntoLua for Id {
 #[derive(Clone)]
 pub struct VmState {
     pub runtime: KhronosRuntime,
-    pub dispatch_func: LuaFunction
+    pub dispatch_func: LuaFunction,
+    pub stream_to_luau: mpsc::UnboundedSender<CtlMessage>
+}
+
+/// Stream sender
+struct StreamTx(Id, Arc<MesophyllClient>);
+impl LuaUserData for StreamTx {
+    fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("send", |_, this, msg| this.1.stream_message(this.0, msg).map_err(|x| LuaError::external(x.to_string())));
+    }
+}
+
+/// Stream reciever
+struct StreamRx(mpsc::UnboundedReceiver<CtlMessage>);
+impl LuaUserData for StreamRx {
+    fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
+        methods.add_scheduler_async_method_mut("recv", async |_, mut this, _: ()| Ok(this.0.recv().await));
+    }
 }
 
 struct BaseTenantData<'a> {
@@ -126,6 +147,8 @@ struct BaseTenantData<'a> {
     dispatchable_events: &'a [&'static str],
     base_vfs: &'a HashMap<String, Vfs>,
     support_server: &'a str,
+    stream_tx: StreamTx,
+    stream_rx: StreamRx,
     website: &'a str
 }
 
@@ -144,6 +167,8 @@ impl<'a> IntoLua for BaseTenantData<'a> {
         table.set("base_vfs", base_vfs_tab)?;
         table.set("support_server", self.support_server)?;
         table.set("website", self.website)?;
+        table.set("stream_tx", self.stream_tx)?;
+        table.set("stream_rx", self.stream_rx)?;
         table.set_readonly(true);
         Ok(LuaValue::Table(table))
     }
@@ -193,13 +218,16 @@ impl WorkerVmManager {
 
         let tenant_state = wts.get_cached_tenant_state_for(id)
             .map_err(|e| LuaError::external(format!("Failed to get tenant state for ID {id:?}: {e}")))?;
+        let (tx, rx) = unbounded_channel();
         let lts = BaseTenantData { 
             id, 
             bot: worker_state.stratum.current_user().clone(), 
             dispatchable_events: &dapi::EVENT_LIST, 
             base_vfs: &super::builtins::EXPOSED_VFS,
             support_server: &crate::CONFIG.support_server_invite,
-            website: &crate::CONFIG.frontend
+            website: &crate::CONFIG.frontend,
+            stream_tx: StreamTx(id, worker_state.mesophyll_client.clone()),
+            stream_rx: StreamRx(rx)
         };
 
         let syscall_h = SyscallHandler::new(
@@ -213,7 +241,8 @@ impl WorkerVmManager {
 
         Ok(VmState {
             runtime,
-            dispatch_func
+            dispatch_func,
+            stream_to_luau: tx
         })
     }
 

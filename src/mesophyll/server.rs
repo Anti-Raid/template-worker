@@ -1,10 +1,10 @@
 use khronos_runtime::futures_util::{Stream, StreamExt};
 use dapi::{UserId, GuildId};
 use tonic::Status;
-use crate::{geese::{state::{StateDb, StateDbFlags}, stream::StreamId, tenantstate::{TenantState, TenantStateDb}}, master::syscall::MSyscallHandler, worker::{workerdispatch::SimpleEvent, workervmmanager::Id as RealId}};
+use crate::{geese::{state::{StateDb, StateDbFlags}, stream::{CtlMessage, LtcMessage}, tenantstate::{TenantState, TenantStateDb}}, master::syscall::MSyscallHandler, worker::{workerdispatch::SimpleEvent, workervmmanager::Id as RealId}};
 use khronos_runtime::utils::khronos_value::KhronosValue as RealKhronosValue;
-use dashmap::DashMap;
-use std::{net::ToSocketAddrs, sync::OnceLock};
+use dashmap::{DashMap, Entry};
+use std::{collections::HashMap, net::ToSocketAddrs, sync::OnceLock};
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::{mpsc::{self, UnboundedReceiver, unbounded_channel}, oneshot};
@@ -214,22 +214,27 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
                                 let _ = handler.send(der);
                             },
                             pb::wtm_message::Payload::StreamMsg(sm) => {
-                                let Some(sid) = StreamId::try_from_slice(&sm.stream_id) else { continue; };
-                                if let Some(stream) = conn.attached_streams.get(&sid) {
+                                let Some(id) = sm.id else {
+                                    log::error!("Mesophyll server received StreamMsg message with no ID");
+                                    continue;
+                                };
+                                if let Some(stream) = conn.attached_streams.get(&id.to_real_id()) {
                                     let Some(payload) = sm.payload else {
                                         log::error!("Mesophyll server received StreamMsg message with no payload");
                                         continue;
                                     };
 
-                                    let payload = match pb::AnyValue::to_real(&payload) {
+                                    let payload = match pb::AnyValue::to_real::<LtcMessage>(&payload) {
                                         Ok(ev) => ev,
                                         Err(e) => {
                                             log::error!("Mesophyll server failed to convert payload to real value: {:?}", e);
                                             continue;
                                         }
                                     };
-                                    
-                                    let _ = stream.send(payload);
+
+                                    if let Some(stream) = stream.0.get(&payload.id()) {
+                                        let _ = stream.send(payload);
+                                    }
                                 }
                             },
                             pb::wtm_message::Payload::WorkerIdent(_) => {
@@ -284,7 +289,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
     }
 }
 
-type AttachedStreams = Arc<DashMap<StreamId, mpsc::UnboundedSender<RealKhronosValue>>>;
+type AttachedStreams = Arc<DashMap<RealId, (HashMap<usize, mpsc::UnboundedSender<LtcMessage>>, usize)>>;
 
 #[derive(Clone)]
 pub struct MesophyllServerConn {
@@ -369,19 +374,28 @@ impl MesophyllServerConn {
         Ok(())
     }
 
-    pub fn attach_stream(&self, stream_id: StreamId) -> Option<(AttachedStreamGuard, UnboundedReceiver<RealKhronosValue>)> {
-        if self.attached_streams.contains_key(&stream_id) { return None }
+    pub fn attach_stream(&self, id: RealId, user_id: UserId) -> Result<(AttachedStreamGuard, UnboundedReceiver<LtcMessage>), crate::Error> {
         let (tx, rx) = unbounded_channel();
-        self.attached_streams.insert(stream_id, tx);
-        Some((AttachedStreamGuard { map: self.attached_streams.clone(), id: stream_id }, rx))
+        let conn_id = {
+            let mut r = self.attached_streams.entry(id).or_default();
+
+            // Get a conn_id
+            let conn_id = r.1;
+            r.1 += 1;
+
+            r.0.insert(conn_id, tx);
+            conn_id
+        };
+        self.stream_message(id, CtlMessage::NewConn { user_id, id: conn_id })?;
+        Ok((AttachedStreamGuard { msc: self.clone(), id, conn_id }, rx))
     }
 
-    pub fn stream_message(&self, stream_id: StreamId, payload: RealKhronosValue) -> Result<(), crate::Error> {
+    pub fn stream_message(&self, id: RealId, payload: CtlMessage) -> Result<(), crate::Error> {
         let pb_payload = pb::AnyValue::from_real(&payload)?;
 
         let msg = pb::MtwMessage {
             payload: Some(pb::mtw_message::Payload::StreamMsg(pb::StreamMessage {
-                stream_id: stream_id.to_vec(),
+                id: Some(pb::Id::from_real_id(&id)),
                 payload: Some(pb_payload),
             })),
             id: None,
@@ -393,13 +407,20 @@ impl MesophyllServerConn {
 }
 
 pub struct AttachedStreamGuard {
-    map: AttachedStreams,
-    pub id: StreamId,
+    msc: MesophyllServerConn,
+    pub id: RealId,
+    pub conn_id: usize
 }
 
 impl Drop for AttachedStreamGuard {
     fn drop(&mut self) {
-        self.map.remove(&self.id);
+        let _ = self.msc.stream_message(self.id, CtlMessage::CloseConn { id: self.conn_id }); // try to send a CloseConn
+        if let Entry::Occupied(mut entry) = self.msc.attached_streams.entry(self.id) {
+            entry.get_mut().0.remove(&self.conn_id);
+            if entry.get().0.is_empty() {
+                entry.remove();
+            }
+        }
     }
 }
 

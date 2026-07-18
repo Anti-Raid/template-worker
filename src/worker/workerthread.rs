@@ -3,6 +3,7 @@ use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 use tokio::sync::oneshot::Sender as OneShotSender;
 use std::panic::AssertUnwindSafe;
 
+use crate::geese::stream::CtlMessage;
 use crate::geese::tenantstate::TenantState;
 use crate::worker::limits::MAX_VM_THREAD_STACK_SIZE;
 use crate::worker::workerdispatch::SimpleEvent;
@@ -28,6 +29,10 @@ enum WorkerThreadMessage {
         id: Id,
         event: SimpleEvent,
         tx: Option<OneShotSender<Result<KhronosValue, crate::Error>>>,
+    },
+    StreamMsg {
+        id: Id,
+        msg: CtlMessage
     },
 }
 
@@ -102,6 +107,12 @@ impl WorkerThread {
 
                                     let _ = tx.send(res.map_err(|e| e.to_string().into()));
                                 }
+                                WorkerThreadMessage::StreamMsg { id, msg } => {
+                                    match worker.vm_manager.get_vm_for(id, &worker.dispatch.worker_state, &worker.dispatch.tenant_state) {
+                                        Ok(v) => { let _ = v.stream_to_luau.send(msg); },
+                                        Err(e) => println!("Failed to get VM for ID {id:?}: {e}")
+                                    }
+                                }
                             }
                         }
                     });
@@ -139,6 +150,12 @@ impl WorkerThread {
 
     pub fn dispatch_event_nowait(&self, id: Id, event: SimpleEvent) -> Result<(), crate::Error> {
         self.tx.send(WorkerThreadMessage::DispatchEvent { id, event, tx: None })
+            .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
+        Ok(())
+    }
+
+    pub fn stream_msg(&self, id: Id, msg: CtlMessage) -> Result<(), crate::Error> {
+        self.tx.send(WorkerThreadMessage::StreamMsg { id, msg })
             .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
         Ok(())
     }

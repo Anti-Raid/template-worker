@@ -1,11 +1,10 @@
 mod cdn;
 mod discord;
 mod meta;
-mod stream;
 
 use std::sync::Arc;
 
-use crate::{geese::{ratelimit::RlExceededError, state::{FastStateReq, StateDbFlags, StateExecResult, StateOp}, tenantstate::TenantState}, worker::{limits::Ratelimits, syscall::{cdn::{CdnCall, CdnResult}, discord::ArDiscordProvider, meta::{MetaCall, MetaResult}, stream::{StreamCall, StreamResult}}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
+use crate::{geese::{ratelimit::RlExceededError, state::{FastStateReq, StateDbFlags, StateExecResult, StateOp}, tenantstate::TenantState}, worker::{limits::Ratelimits, syscall::{cdn::{CdnCall, CdnResult}, discord::ArDiscordProvider, meta::{MetaCall, MetaResult}}, workerstate::WorkerState, workertenantstate::WorkerTenantState, workervmmanager::Id}};
 use dapi::context::DiscordContext;
 use khronos_ext::mlua_scheduler_ext::LuaSchedulerAsyncUserData;
 use khronos_runtime::{primitives::lazy::Lazy, rt::mluau::prelude::*};
@@ -27,9 +26,6 @@ pub enum SyscallArgs {
     Meta {
         op: MetaCall
     },
-    Stream {
-        op: StreamCall
-    }
 }
 
 impl FromLua for SyscallArgs {
@@ -60,10 +56,6 @@ impl FromLua for SyscallArgs {
                 let op = tab.get("req")?;
                 Ok(Self::Meta { op })
             },
-            b"Stream" => {
-                let op = tab.get("req")?;
-                Ok(Self::Stream { op })
-            }
             _ => {
                 Err(LuaError::FromLuaConversionError {
                     from: "table",
@@ -91,9 +83,6 @@ pub enum SyscallRet {
     Meta {
         res: MetaResult
     },
-    Stream {
-        res: StreamResult
-    }
 }
 
 impl IntoLua for SyscallRet {
@@ -127,10 +116,6 @@ impl IntoLua for SyscallRet {
             }
             Self::Meta { res } => {
                 table.set("op", "Meta")?;
-                table.set("res", res)?;
-            }
-            Self::Stream { res } => {
-                table.set("op", "Stream")?;
                 table.set("res", res)?;
             }
         }
@@ -197,10 +182,6 @@ impl SyscallHandler {
             SyscallArgs::Meta { op } => {
                 let res = op.exec(self.id, self).await?;
                 Ok(SyscallRet::Meta { res })
-            }
-            SyscallArgs::Stream { op } => {
-                let res = op.exec(self.id, self).await?;
-                Ok(SyscallRet::Stream { res })
             }
         }
     }

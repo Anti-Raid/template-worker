@@ -42,8 +42,8 @@ message UpdateTenantState {
 }
 
 message StreamMessage {
-  bytes stream_id = 1; 
-  AnyValue payload = 2;
+  Id id = 1; 
+  AnyValue payload = 2; // either CtlMessage or LtcMessage
 }
 
 message MTWMessage { // master-to-worker message

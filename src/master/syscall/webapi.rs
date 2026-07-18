@@ -1,8 +1,7 @@
-use std::collections::HashMap;
 use std::time::Duration;
 
 use axum::extract::WebSocketUpgrade;
-use axum::extract::ws::{CloseFrame, Message, WebSocket};
+use axum::extract::ws::{CloseFrame, Message, Utf8Bytes, WebSocket};
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{extract::{State, FromRequestParts, Json}, Router, response::IntoResponse};
@@ -12,10 +11,9 @@ use khronos_runtime::utils::khronos_value::CKhronosValue;
 use reqwest::{StatusCode, header};
 use reqwest::header::AUTHORIZATION;
 use serde::{Deserialize, Serialize};
-use tokio_stream::StreamMap;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use tower_http::cors::MaxAge;
-use crate::geese::stream::StreamId;
+use crate::geese::stream::{CtlMessage, LtcMessage};
+use crate::geese::userticket::UserTicket;
 use crate::master::syscall::bot::{MBotSyscall, MBotSyscallRet};
 use crate::master::syscall::{MSyscallArgs, MSyscallContext, MSyscallRet};
 use crate::master::syscall::{MSyscallError, MSyscallHandler, internal::auth as iauth};
@@ -123,7 +121,7 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
     }
 
     #[derive(serde::Deserialize)]
-    struct Presigned {
+    struct Signature {
         #[serde(rename = "p")]
         payload: String,
         #[serde(rename = "s")]
@@ -132,7 +130,7 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
 
     async fn get_presigned(
         State(handler): State<MSyscallHandler>,
-        axum::extract::Query(p): axum::extract::Query<Presigned>
+        axum::extract::Query(p): axum::extract::Query<Signature>
     ) -> impl IntoResponse {
         enum Resp {
             Err(MSyscallError),
@@ -169,14 +167,18 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
     async fn ws(
         ws: WebSocketUpgrade,
         State(state): State<MSyscallHandler>,
+        axum::extract::Query(p): axum::extract::Query<Signature>
     ) -> Response {
+        let verified = match crate::geese::userticket::verify_userticket(&p.payload, &p.sig) {
+            Ok(v) => v,
+            Err(e) => return (StatusCode::UNAUTHORIZED, e.message()).into_response()
+        };
+
         #[derive(Serialize, Deserialize)]
         pub enum WsMessage {
-            Sub { id: StreamId }, // can be sent by either client or server
-            DropSub { id: StreamId }, // can be sent by either client or server
             Hb {}, // heartbeat, can be sent by either client or server
-            Warn { msg: String }, // server only, will be ignored if sent by server rn
-            Msg { id: StreamId, msg: CKhronosValue } // can be sent by either client or server
+            Ctl { msg: CKhronosValue }, // client->luau, client only
+            Ltc { msg: CKhronosValue }, // luau->client, server only
         }
 
         impl WsMessage {
@@ -186,18 +188,18 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
             }
         }
 
-        async fn send_close_message(socket: &mut WebSocket, code: u16, reason: &str) {
+        async fn send_close_message(socket: &mut WebSocket, code: u16, reason: Utf8Bytes) {
             _ = socket.send(Message::Close(Some(CloseFrame {
-                code: code,
-                reason: reason.into(),
+                code,
+                reason,
             })))
             .await;
         }
 
-        async fn handle_socket(socket: &mut WebSocket, state: MSyscallHandler) -> Result<(), crate::Error> {
+        async fn handle_socket(socket: &mut WebSocket, state: MSyscallHandler, ut: UserTicket) -> Result<(), crate::Error> {
             let (mut ws_sender, mut ws_receiver) = socket.split();
-            let mut multiplexed_receivers = StreamMap::new();
-            let mut active_guards = HashMap::new();
+            // Attach to ws
+            let (sg, mut rx) = state.worker_pool.attach_stream(ut.id, ut.user_id)?;
             loop {
                 tokio::select! {
                     msg = ws_receiver.next() => {
@@ -205,29 +207,29 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
                         let msg = match msg? {
                             Message::Text(b) => serde_json::from_slice::<WsMessage>(b.as_bytes())?,
                             _ => continue
-                        };
+                        };  
                         match msg {
-                            WsMessage::Sub { id } => {
-                                let Some((ag, rx)) = state.worker_pool.attach_stream(id) else { 
-                                    ws_sender.send(WsMessage::Warn { msg: "Cannot attach this stream (already attached?)".to_string() }.to_msg()?).await?;
-                                    continue 
-                                };
-                                active_guards.insert(id, ag);
-                                multiplexed_receivers.insert(id, UnboundedReceiverStream::new(rx));
+                            WsMessage::Hb {} => {
+                                ws_sender.send(WsMessage::Hb {}.to_msg()?).await?;
+                                continue 
+                            }, 
+                            WsMessage::Ctl { msg } => {
+                                let _ = state.worker_pool.stream_message(ut.id, CtlMessage::Msg { msg: msg.0, id: sg.conn_id });
                             }
-                            WsMessage::DropSub { id } => {
-                                // Dropping here will drop the AttachedStreamGuard hence also removing the mapping from mesophyll automatically
-                                multiplexed_receivers.remove(&id);
-                                active_guards.remove(&id);
-                            }
-                            WsMessage::Hb {} | WsMessage::Warn { .. } => {},
-                            WsMessage::Msg { id, msg } => {
-                                state.worker_pool.stream_message(id, msg.0)?;
-                            }
-                        }
+                            WsMessage::Ltc { .. } => return Err("Ltc is server-sent".into())
+                        } 
                     }
-                    Some((id, kv)) = multiplexed_receivers.next() => {
-                        ws_sender.send(WsMessage::Msg { id, msg: CKhronosValue(kv) }.to_msg()?).await?;
+                    Some(lmsg) = rx.recv() => {
+                        if lmsg.id() != sg.conn_id { continue }
+                        match lmsg {
+                            LtcMessage::Msg { msg, .. } => {
+                                ws_sender.send(WsMessage::Ltc { msg: CKhronosValue(msg) }.to_msg()?).await?;
+                                continue 
+                            }
+                            LtcMessage::Close { .. } => {
+                                break;
+                            },
+                        }
                     }
                 }
             }
@@ -235,10 +237,10 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
         }
 
         ws.on_upgrade(|mut socket| async move {
-            if let Err(e) = handle_socket(&mut socket, state).await {
-                send_close_message(&mut socket, 4000, &format!("Error occured: {e}")).await;
+            if let Err(e) = handle_socket(&mut socket, state, verified).await {
+                send_close_message(&mut socket, 4000, format!("Error occured: {e}").into()).await;
             } else {
-                send_close_message(&mut socket, 1001, "Going away").await;
+                send_close_message(&mut socket, 1001, Utf8Bytes::from_static("Going away")).await;
             }
         })
     }

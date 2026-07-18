@@ -37,13 +37,20 @@ export type MBotSyscall =
       data: CKhronosValue 
     }
   | {
+      /** Create a user ticket for stuff like the websocket API */
+      op: "UserTicket";
+      /** Tenant ID to bind to */
+      id: Id;
+    } 
+  | {
       /** Verify a presigned URL and return the decoded payload */
       op: "GetBlobData";
       /** Payload */
       payload: string;
       /** Signature */
       signature: string;
-  } | { 
+  } 
+  | { 
       /** Dispatch an event to a worker process with some safety checks removed (Secure only) */
       op: "AdminRelaxedDispatchEvent"; 
       /** Tenant ID to dispatch the event to */
@@ -144,6 +151,11 @@ export type MBotSyscallRet =
       op: "BlobData";
       /** The decoded payload data */
       data: RawKhronosValue;
+    } | {
+      /** User ticket */
+      op: "UserTicket";
+      payload: string;
+      sig: string;
     } | { 
       /** Generic success acknowledgement */
       op: "Ack" 

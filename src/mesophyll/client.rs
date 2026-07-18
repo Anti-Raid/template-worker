@@ -1,12 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::{geese::{state::{StateDbFlags, StateExecResponse, StateOp}, stream::StreamId, tenantstate::TenantState}, worker::{workerthread::WorkerThread, workervmmanager::Id}};
+use crate::{geese::{state::{StateDbFlags, StateExecResponse, StateOp}, stream::LtcMessage, tenantstate::TenantState}, worker::{workerthread::WorkerThread, workervmmanager::Id}};
 use crate::mesophyll::server::pb;
-use dashmap::DashMap;
 use khronos_runtime::{futures_util::{StreamExt, stream::FuturesUnordered}, utils::khronos_value::KhronosValue};
-use tokio::sync::broadcast;
-
-type AttachedStreams = Arc<DashMap<StreamId, broadcast::Sender<KhronosValue>>>;
 
 /// Mesophyll client
 #[derive(Clone)]
@@ -15,7 +11,6 @@ pub struct MesophyllClient {
     worker: pb::Worker,
     client: pb::mesophyll_master_client::MesophyllMasterClient<tonic::transport::Channel>,
     client_stream_tx: tokio::sync::mpsc::UnboundedSender<pb::WtmMessage>,
-    attached_streams: AttachedStreams
 }
 
 pub struct MesophyllClientStream {
@@ -49,7 +44,6 @@ impl MesophyllClient {
             worker,
             client,
             client_stream_tx: tx,
-            attached_streams: AttachedStreams::default().into()
         };
         
         Ok((s, MesophyllClientStream { server_stream }))
@@ -91,23 +85,25 @@ impl MesophyllClient {
                                         });
                                     },
                                     pb::mtw_message::Payload::StreamMsg(sm) => { // master has *sent* the worker a new message, broadcast it!
-                                        let Some(sid) = StreamId::try_from_slice(&sm.stream_id) else { continue; };
-                                        if let Some(stream) = self_ref.attached_streams.get(&sid) {
-                                            let Some(payload) = sm.payload else {
-                                                log::error!("Mesophyll client received StreamMsg message with no payload");
+                                        let Some(id) = sm.id else {
+                                            log::error!("Mesophyll client received StreamMsg message with no ID");
+                                            continue;
+                                        };
+                                        let Some(payload) = sm.payload else {
+                                            log::error!("Mesophyll client received StreamMsg message with no payload");
+                                            continue;
+                                        };
+
+                                        let payload = match pb::AnyValue::to_real(&payload) {
+                                            Ok(ev) => ev,
+                                            Err(e) => {
+                                                log::error!("Mesophyll client failed to convert payload to real value: {:?}", e);
                                                 continue;
-                                            };
-
-                                            let payload = match pb::AnyValue::to_real(&payload) {
-                                                Ok(ev) => ev,
-                                                Err(e) => {
-                                                    log::error!("Mesophyll client failed to convert payload to real value: {:?}", e);
-                                                    continue;
-                                                }
-                                            };
-
-                                            let _ = stream.send(payload);
-                                        }
+                                            }
+                                        };
+                                        if let Err(e) = wt.stream_msg(id.to_real_id(), payload) {
+                                            log::error!("Failed to stream msg to client w/ error {:?}", e)
+                                        };
                                     },
                                     pb::mtw_message::Payload::DropTenant(id) => {
                                         let wt = wt.clone();
@@ -218,18 +214,13 @@ impl MesophyllClient {
             .into_inner())
     }
 
-    pub fn attach_stream(&self, stream_id: StreamId) {
-        let tx= broadcast::Sender::new(25);
-        self.attached_streams.insert(stream_id, tx);
-    }
-
     /// Send a stream message from worker to master
-    pub fn stream_message(&self, stream_id: StreamId, payload: KhronosValue) -> Result<(), crate::Error> {
+    pub fn stream_message(&self, id: Id, payload: LtcMessage) -> Result<(), crate::Error> {
         let pb_payload = pb::AnyValue::from_real(&payload)?;
 
         let msg = pb::WtmMessage {
             payload: Some(pb::wtm_message::Payload::StreamMsg(pb::StreamMessage {
-                stream_id: stream_id.to_vec(),
+                id: Some(pb::Id::from_real_id(&id)),
                 payload: Some(pb_payload),
             })),
             resp_id: None,

@@ -14,11 +14,11 @@ use khronos_runtime::rt::mlua;
 #[derive(Clone)]
 pub struct WorkerDispatch {
     /// VM Manager for the worker
-    vm_manager: WorkerVmManager,
+    pub vm_manager: WorkerVmManager,
     /// Worker tenant state
-    tenant_state: WorkerTenantState,
+    pub tenant_state: WorkerTenantState,
     /// The state all VMs in the WorkerVmManager share
-    worker_state: WorkerState,
+    pub worker_state: WorkerState,
 }
 
 impl WorkerDispatch {

@@ -33,6 +33,10 @@ pub enum MBotSyscall {
         /// Data to send
         data: CKhronosValue
     },
+    UserTicket {
+        /// Tenant ID for the request
+        id: Id
+    },
     /// Verify a presigned URL and return the decoded payload
     GetBlobData {
         /// Payload 
@@ -106,6 +110,10 @@ pub enum MBotSyscallRet {
     BlobData {
         data: Vec<u8>,
         filename: String,
+    },
+    UserTicket {
+        payload: String,
+        sig: String
     },
     Ack,
 }
@@ -184,7 +192,6 @@ impl MBotSyscall {
                         if !hb[0] {
                             return Err(MSyscallError::BotNotOnGuild);
                         }
-                        // Ensure guild is in server
                     }
                     Id::User(id) => {
                         if user_id != id {
@@ -207,6 +214,26 @@ impl MBotSyscall {
                 .ok_or(MSyscallError::EntityNotFound { reason: "Blob not found" })?;
                 Ok(MBotSyscallRet::BlobData { data, filename })
             },
+            Self::UserTicket { id } => {
+                let user_id = ctx.into_user_id()?;
+                handler.limit(&ctx, "UserTicket")?;
+                match id {
+                    Id::Guild(id) => {
+                        // Ensure the bot is in the guild
+                        let hb = handler.has_bot(&[id]).await?;    
+                        if !hb[0] {
+                            return Err(MSyscallError::BotNotOnGuild);
+                        }
+                    }
+                    Id::User(id) => {
+                        if user_id != id {
+                            return Err(MSyscallError::InvalidEvent { reason: "Cannot create tickets to users who are not yourself" });
+                        }
+                    }
+                }
+                let (payload, sig) = crate::geese::userticket::create_userticket(id, user_id)?;
+                Ok(MBotSyscallRet::UserTicket { payload, sig }) 
+            }
             Self::AdminRelaxedDispatchEvent { id, name, data, allow_non_web_event_names, allow_self_event, mock_id } => {
                 if !ctx.is_secure() {
                     return Err(MSyscallError::ContextInsecure);
