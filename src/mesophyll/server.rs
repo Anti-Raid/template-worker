@@ -78,7 +78,7 @@ impl pb::Id {
 
 #[derive(Clone)]
 pub struct MesophyllServer {
-    conns: Arc<DashMap<usize, Arc<WorkerConn>>>,
+    conns: Arc<DashMap<usize, WorkerConnGuard>>,
     tenant_state_db: TenantStateDb,
     state_db: StateDb,
     num_workers: usize,
@@ -117,8 +117,8 @@ impl MesophyllServer {
         &self.sock_file
     }
 
-    pub fn get_connection(&self, worker_id: usize) -> Option<Arc<WorkerConn>> {
-        self.conns.get(&worker_id).map(|r| r.value().clone())
+    pub fn get_connection(&self, worker_id: usize) -> Option<WorkerConn> {
+        self.conns.get(&worker_id).map(|r| r.value().conn.clone())
     }
 
     fn verify_worker(&self, worker: u64) -> Result<usize, Status> {
@@ -171,7 +171,7 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         let client = pb::mesophyll_worker_client::MesophyllWorkerClient::connect(uri).await.map_err(|x| Status::internal(x.to_string()))?;
         let conn = WorkerConn::new(req.worker_id, client, self.attached_streams.clone());
 
-        self.conns.insert(wid, conn.into());
+        self.conns.insert(wid, WorkerConnGuard { conn });
 
         Ok(tonic::Response::new(pb::Empty {}))
     }
@@ -206,6 +206,22 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
 }
 
 type AttachedStreams = Arc<DashMap<RealId, (HashMap<usize, mpsc::UnboundedSender<LtcMessage>>, usize)>>;
+
+/// Internal struct to send a shutdown to workers if a new worker gets spinned in its place
+struct WorkerConnGuard {
+    conn: WorkerConn
+}
+
+// On drop, shutdown
+impl Drop for WorkerConnGuard {
+    fn drop(&mut self) {
+        log::info!("Worker with ID: {} disconnected, cleaning up connection", self.conn.id);
+        let mut cli = self.conn.client.clone();
+        tokio::spawn(async move {
+            let _ = cli.shutdown(pb::Empty {}).await;
+        });
+    }
+}
 
 #[derive(Clone)]
 pub struct WorkerConn {
@@ -291,17 +307,6 @@ impl WorkerConn {
         };
         cli.send_stream(msg).await.map_err(|e| e.to_string())?;
         Ok(())
-    }
-}
-
-// On drop, shutdown
-impl Drop for WorkerConn {
-    fn drop(&mut self) {
-        log::info!("Worker with ID: {} disconnected, cleaning up connection", self.id);
-        let mut cli = self.client.clone();
-        tokio::spawn(async move {
-            let _ = cli.shutdown(pb::Empty {}).await;
-        });
     }
 }
 

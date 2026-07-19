@@ -7,6 +7,7 @@
     import { encode } from '$lib/msyscall/khronosvalue';
     import { toDispatchResults, type Component, dispatchResultToSetting, type Page } from '$lib/events.parse';
     import SV2 from '$lib/sv2/SV2.svelte';
+    import StreamLogs from '$lib/StreamLogs.svelte';
 
 	let fetchingUserGuilds = $state(false)
 	let dispatchingGuildEvent = $state(false)
@@ -287,4 +288,6 @@
 			<SV2 template={tmplId} comps={page.components} />
 		{/each}
 	</div>
+
+	<StreamLogs id={{ type: "Guild", id: mps.state.selectedGuild.id }} />
 {/if}
