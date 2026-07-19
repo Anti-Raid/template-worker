@@ -130,7 +130,7 @@ pub struct VmState {
 struct StreamTx(Id, Arc<MesophyllClient>);
 impl LuaUserData for StreamTx {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("send", |_, this, msg| this.1.stream_message(this.0, msg).map_err(|x| LuaError::external(x.to_string())));
+        methods.add_scheduler_async_method("send", async |_, this, msg| this.1.stream_message(this.0, msg).await.map_err(|x| LuaError::external(x.to_string())));
     }
 }
 

@@ -199,7 +199,7 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
         async fn handle_socket(socket: &mut WebSocket, state: MSyscallHandler, ut: UserTicket) -> Result<(), crate::Error> {
             let (mut ws_sender, mut ws_receiver) = socket.split();
             // Attach to ws
-            let (sg, mut rx) = state.worker_pool.attach_stream(ut.id, ut.user_id)?;
+            let (sg, mut rx) = state.worker_pool.attach_stream(ut.id, ut.user_id).await?;
             loop {
                 tokio::select! {
                     msg = ws_receiver.next() => {
@@ -214,7 +214,7 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
                                 continue 
                             }, 
                             WsMessage::Ctl { msg } => {
-                                let _ = state.worker_pool.stream_message(ut.id, CtlMessage::Msg { msg: msg.0, id: sg.conn_id });
+                                let _ = state.worker_pool.stream_message(ut.id, CtlMessage::Msg { msg: msg.0, id: sg.conn_id }).await;
                             }
                             WsMessage::Ltc { .. } => return Err("Ltc is server-sent".into())
                         } 

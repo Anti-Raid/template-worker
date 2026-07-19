@@ -1,15 +1,13 @@
-use khronos_runtime::futures_util::{Stream, StreamExt};
 use dapi::{UserId, GuildId};
 use rand::distr::{Alphanumeric, SampleString};
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::Status;
-use crate::{geese::{state::{StateDb, StateDbFlags}, stream::{CtlMessage, LtcMessage}, tenantstate::{TenantState, TenantStateDb}}, master::syscall::MSyscallHandler, mesophyll::connman::{SockFile, new_sockfile}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id as RealId}};
+use crate::{geese::{state::{StateDb, StateDbFlags}, stream::{CtlMessage, LtcMessage}, tenantstate::{TenantState, TenantStateDb}}, mesophyll::connman::{SockFile, new_sockfile}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id as RealId}};
 use khronos_runtime::utils::khronos_value::KhronosValue as RealKhronosValue;
 use dashmap::{DashMap, Entry};
-use std::{collections::HashMap, sync::OnceLock};
-use std::pin::Pin;
+use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::{net::UnixListener, sync::{mpsc::{self, UnboundedReceiver, unbounded_channel}, oneshot}};
+use tokio::{net::UnixListener, sync::mpsc::{self, UnboundedReceiver, unbounded_channel}};
 
 /// Internal transport layer
 pub(super) mod pb {
@@ -78,77 +76,25 @@ impl pb::Id {
     }
 } 
 
-impl pb::Worker {
-    fn worker_id_usize(&self) -> Result<usize, Status> {
-        Ok(self.worker_id.try_into().map_err(|_e| tonic::Status::internal("WID not a u64"))?)
-    }
-
-    /// Validates the workers session against the Mesophyll server state
-    fn validate(&self, server: &MesophyllServer) -> Result<(), Status> {
-        let wid = self.worker_id_usize()?;
-        if wid > server.num_workers {
-            return Err(Status::permission_denied(format!("Invalid worker ID: {}, exceeds number of workers in pool", wid)));
-        }
-
-        if self.token != crate::CONFIG.mesophyll_token {
-            return Err(Status::permission_denied("Invalid token"));
-        }
-
-        Ok(())
-    }
-}
-
-impl pb::WtmMessageResponse {
-    pub fn from_real(result: Result<RealKhronosValue, crate::Error>) -> Self {
-        Self {
-            resp: Some(match result {
-                Ok(v) => {
-                    match pb::AnyValue::from_real_exec(&v) {
-                        Ok(v) => pb::wtm_message_response::Resp::Value(v),
-                        Err(e) => pb::wtm_message_response::Resp::Error(format!("Failed to convert dispatch result to AnyValue: {:?}", e)),
-                    }
-                },
-                Err(e) => pb::wtm_message_response::Resp::Error(e.to_string()),
-            })
-        }
-    }
-
-    pub fn to_real(self) -> Result<RealKhronosValue, crate::Error> {
-        match self.resp {
-            Some(pb::wtm_message_response::Resp::Value(v)) => v.to_real_exec(),
-            Some(pb::wtm_message_response::Resp::Error(e)) => Err(e.into()),
-            None => Err("WtmMessageResponse missing payload".into()),
-        }
-    }
-
-    pub fn ensure_ok(self) -> Result<(), crate::Error> {
-        match self.resp {
-            Some(pb::wtm_message_response::Resp::Value(_)) => Ok(()),
-            Some(pb::wtm_message_response::Resp::Error(e)) => Err(e.into()),
-            None => Err("WtmMessageResponse missing payload".into()),
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct MesophyllServer {
-    conns: Arc<DashMap<usize, Arc<MesophyllServerConn>>>,
+    conns: Arc<DashMap<usize, Arc<WorkerConn>>>,
     tenant_state_db: TenantStateDb,
     state_db: StateDb,
     num_workers: usize,
-    msyscall_handler: Arc<OnceLock<MSyscallHandler>>,
-    sock_file: Arc<SockFile>
+    sock_file: Arc<SockFile>,
+    attached_streams: AttachedStreams,
 }
 
 impl MesophyllServer {
     pub async fn new(num_workers: usize, pool: sqlx::PgPool) -> Result<Self, crate::Error> {
         let s = Self {
             conns: Arc::new(DashMap::new()),
-            msyscall_handler: Arc::new(OnceLock::new()),
             tenant_state_db: TenantStateDb::new(pool.clone()),
             state_db: StateDb::new(pool),
             num_workers,
-            sock_file: Arc::new(new_sockfile(Alphanumeric.sample_string(&mut rand::rng(), 16), Alphanumeric.sample_string(&mut rand::rng(), 16))?)
+            sock_file: Arc::new(new_sockfile(Alphanumeric.sample_string(&mut rand::rng(), 16), Alphanumeric.sample_string(&mut rand::rng(), 16))?),
+            attached_streams: AttachedStreams::default()
         };
 
         // Setup UDS stream
@@ -171,107 +117,28 @@ impl MesophyllServer {
         &self.sock_file
     }
 
-    pub fn set_msyscall_handler(&self, handler: MSyscallHandler) -> Result<(), crate::Error> {
-        self.msyscall_handler.set(handler).map_err(|_x| format!("msyscall handler already set"))?;
-        Ok(())
-    }
-
-    pub fn get_connection(&self, worker_id: usize) -> Option<Arc<MesophyllServerConn>> {
+    pub fn get_connection(&self, worker_id: usize) -> Option<Arc<WorkerConn>> {
         self.conns.get(&worker_id).map(|r| r.value().clone())
     }
 
-    fn verify_worker(&self, worker: Option<pb::Worker>) -> Result<usize, Status> {
-        let worker = worker.ok_or_else(|| Status::invalid_argument("Missing worker info in request"))?;
-        worker.validate(self)?;
-        Ok(worker.worker_id_usize()?)
+    fn verify_worker(&self, worker: u64) -> Result<usize, Status> {
+        let id = worker.try_into().map_err(|_e| tonic::Status::internal("WID not a u64"))?;
+        if id > self.num_workers {
+            return Err(Status::permission_denied(format!("Invalid worker ID: {}, exceeds number of workers in pool", id)));
+        }
+        Ok(id)
     }
 }
 
 #[tonic::async_trait]
 impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
-    type WorkerInitStream = Pin<Box<dyn Stream<Item = Result<pb::MtwMessage, Status>> + Send>>;
-
-    async fn worker_init(&self, request: tonic::Request<tonic::Streaming<pb::WtmMessage>>) -> Result<tonic::Response<Self::WorkerInitStream>, Status> {
-        let mut stream = request.into_inner();
-
-        let Some(Ok(pb::WtmMessage { payload: Some(p), resp_id: _ })) = stream.next().await else {
-            return Err(Status::invalid_argument("Failed to deserialize initial message"));
-        };
-
-        let wk = match p {
-            pb::wtm_message::Payload::WorkerIdent(worker) => {
-                worker.validate(self)?;
-                worker
-            },
-            _ => return Err(Status::invalid_argument("Expected first message to be Init")),
-        };
-
-        // Create a new connection for this worker
-        let (tx, rx) = mpsc::unbounded_channel();
-        let conn = Arc::new(MesophyllServerConn::new(wk.worker_id, tx));
-        self.conns.insert(wk.worker_id_usize()?, conn.clone());
-        tokio::spawn(async move {
-            while let Some(item) = stream.next().await {
-                match item {
-                    Ok(pb::WtmMessage { payload: Some(p), resp_id }) => {
-                        // Handle incoming messages here, potentially using resp_id to correlate responses
-                        let Some(resp_id) = resp_id else { continue };
-                        match p {
-                            pb::wtm_message::Payload::Resp(der) => {
-                                let Some((_, handler)) = conn.dispatch_response_handlers.remove(&resp_id) else {
-                                    continue;
-                                };
-                                let _ = handler.send(der);
-                            },
-                            pb::wtm_message::Payload::StreamMsg(sm) => {
-                                let Some(id) = sm.id else {
-                                    log::error!("Mesophyll server received StreamMsg message with no ID");
-                                    continue;
-                                };
-                                if let Some(stream) = conn.attached_streams.get(&id.to_real_id()) {
-                                    let Some(payload) = sm.payload else {
-                                        log::error!("Mesophyll server received StreamMsg message with no payload");
-                                        continue;
-                                    };
-
-                                    let payload = match pb::AnyValue::to_real::<LtcMessage>(&payload) {
-                                        Ok(ev) => ev,
-                                        Err(e) => {
-                                            log::error!("Mesophyll server failed to convert payload to real value: {:?}", e);
-                                            continue;
-                                        }
-                                    };
-
-                                    if let Some(stream) = stream.0.get(&payload.id()) {
-                                        let _ = stream.send(payload);
-                                    }
-                                }
-                            },
-                            pb::wtm_message::Payload::WorkerIdent(_) => {
-                                log::error!("Received unexpected WorkerIdent message from worker {}, ignoring", wk.worker_id);
-                                break;
-                            },
-                        }
-                    },
-                    Ok(_) => {
-                        log::warn!("Received message with no payload from worker {}", wk.worker_id);
-                    },
-                    Err(e) => {
-                        log::warn!("Error receiving message from worker {}: {}, waiting", wk.worker_id, e);
-                        break;
-                    }
-                }
-            }
-        });
-
-        let resp_stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
-        Ok(tonic::Response::new(Box::pin(resp_stream) as Self::WorkerInitStream))
-    }
-
     async fn exec_state_op(&self, request: tonic::Request<pb::WtmExecStateOp>) -> Result<tonic::Response<pb::AnyValue>, Status> {
         let req = request.into_inner();
-        self.verify_worker(req.worker)?;
+        let wid = self.verify_worker(req.worker_id)?;
         let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
+        if id.worker_id(self.num_workers) != wid {
+            return Err(Status::internal("ID expected worker_id and actual worker_id mismatched"));
+        }
         let state_op = req.state_op.ok_or_else(|| Status::invalid_argument("Missing state_op"))?.to_real()?;
         let sdb_flags = StateDbFlags::from_bits(req.flags).ok_or_else(|| Status::invalid_argument("Invalid flags"))?;
         match self.state_db.do_op(id, state_op, sdb_flags).await {
@@ -282,109 +149,108 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
 
     async fn list_tenant_states(&self, request: tonic::Request<pb::WtmListTenantStates>) -> Result<tonic::Response<pb::AnyValue>, Status> {
         let req = request.into_inner();
-        let wid = self.verify_worker(req.worker)?;
+        let wid = self.verify_worker(req.worker_id)?;
         match self.tenant_state_db.get_tenant_state(wid as i64, self.num_workers as i64).await {
             Ok(ts) => Ok(tonic::Response::new(pb::AnyValue::from_real(&ts)?)),
             Err(e) => Err(Status::internal(e.to_string())),
         }
     }
 
-    async fn base_worker_info(&self, request: tonic::Request<pb::Worker>) -> Result<tonic::Response<pb::MtwBaseWorkerInfo>, Status> {
-        let req = request.into_inner();
-        req.validate(self)?;
-
+    async fn base_worker_info(&self, _request: tonic::Request<pb::Empty>) -> Result<tonic::Response<pb::MtwBaseWorkerInfo>, Status> {
         Ok(tonic::Response::new(pb::MtwBaseWorkerInfo {
             num_workers: self.num_workers.try_into().map_err(|_e| Status::internal("num_workers exceeds u32 max"))?,
         }))
+    }
+
+    async fn register_worker(&self, request: tonic::Request<pb::WorkerIdent>) -> Result<tonic::Response<pb::Empty>, Status> {
+        let req = request.into_inner();
+        let wid = self.verify_worker(req.worker_id)?;
+
+        // We have an endpoint now to connect to the worker conn
+        let uri = tonic::transport::Endpoint::from_shared(format!("unix://{}", req.endpoint)).map_err(|x| Status::internal(x.to_string()))?;
+        let client = pb::mesophyll_worker_client::MesophyllWorkerClient::connect(uri).await.map_err(|x| Status::internal(x.to_string()))?;
+        let conn = WorkerConn::new(req.worker_id, client, self.attached_streams.clone());
+
+        self.conns.insert(wid, conn.into());
+
+        Ok(tonic::Response::new(pb::Empty {}))
+    }
+
+    async fn send_stream(&self, request: tonic::Request<pb::StreamMessage>) -> Result<tonic::Response<pb::Empty>, Status> {
+        let req = request.into_inner();
+        let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
+
+        if let Some(stream) = self.attached_streams.get(&id) {
+            let payload: LtcMessage = req.payload.ok_or_else(|| Status::invalid_argument("Missing payload"))?.to_real()?;
+            if let Some(stream) = stream.0.get(&payload.id()) {
+                let _ = stream.send(payload);
+            }
+        }
+        Ok(tonic::Response::new(pb::Empty {}))
     }
 }
 
 type AttachedStreams = Arc<DashMap<RealId, (HashMap<usize, mpsc::UnboundedSender<LtcMessage>>, usize)>>;
 
 #[derive(Clone)]
-pub struct MesophyllServerConn {
+pub struct WorkerConn {
     id: u64,
-    tx: mpsc::UnboundedSender<Result<pb::MtwMessage, Status>>,
-    attached_streams: AttachedStreams,
-    pub(super) dispatch_response_handlers: Arc<DashMap<u64, oneshot::Sender<pb::WtmMessageResponse>>>,
+    client: pb::mesophyll_worker_client::MesophyllWorkerClient<tonic::transport::Channel>,
+    attached_streams: AttachedStreams
 }
 
-// On drop, shutdown
-impl Drop for MesophyllServerConn {
-    fn drop(&mut self) {
-        log::info!("Worker with ID: {} disconnected, cleaning up connection", self.id);
-        // Send a shutdown message to the worker to clean up any resources on the worker side
-        let _ = self.tx.send(Ok(pb::MtwMessage {
-            payload: Some(pb::mtw_message::Payload::Shutdown("Worker disconnected".to_string())),
-            id: None,
-        }));
-    }
-}
-
-impl MesophyllServerConn {
-    fn new(id: u64, tx: mpsc::UnboundedSender<Result<pb::MtwMessage, Status>>) -> Self {
-        let dispatch_response_handlers = Arc::new(DashMap::new());
-        Self { id, tx, dispatch_response_handlers, attached_streams: AttachedStreams::default() }
-    }
-
-    fn setup_handler(&self) -> (u64, DropG, oneshot::Receiver<pb::WtmMessageResponse>) {
-        let (resp_tx, resp_rx) = oneshot::channel();
-        let resp_id = rand::random::<u64>();
-        self.dispatch_response_handlers.insert(resp_id, resp_tx);
-        let dg = DropG { resp_id, dispatch_response_handlers: self.dispatch_response_handlers.clone() };
-        (resp_id, dg, resp_rx)
+impl WorkerConn {
+    fn new(id: u64, client: pb::mesophyll_worker_client::MesophyllWorkerClient<tonic::transport::Channel>, attached_streams: AttachedStreams) -> Self {
+        Self { id, client, attached_streams }
     }
 
     pub async fn dispatch_event(&self, id: RealId, event: SimpleEvent) -> Result<RealKhronosValue, crate::Error> {
         let pb_event = pb::AnyValue::from_real(&event)?;
 
-        let (resp_id, _dg, resp_rx) = self.setup_handler();
-
-        let msg = pb::MtwMessage {
-            payload: Some(pb::mtw_message::Payload::Dispatch(pb::DispatchEvent {
-                id: Some(pb::Id::from_real_id(&id)),
-                event_payload: Some(pb_event),
-            })),
-            id: Some(resp_id),
+        let msg = pb::DispatchEventReq {
+            id: Some(pb::Id::from_real_id(&id)),
+            event_payload: Some(pb_event),
         };
-        
-        self.tx.send(Ok(msg)).map_err(|e| Status::internal(format!("Failed to send dispatch message to worker {}: {}", self.id, e)))?;
-        let resp = resp_rx.await?;
-        resp.to_real()
+
+        let mut cli = self.client.clone();
+        let resp = cli.dispatch_event(tonic::Request::new(msg))
+            .await
+            .map_err(|e| e.to_string())?
+            .into_inner();
+        resp.to_real_exec()
     }
     
     pub async fn drop_tenant(&self, id: RealId) -> Result<(), crate::Error> {
-        let (resp_id, _dg, resp_rx) = self.setup_handler();
-
-        let msg = pb::MtwMessage {
-            payload: Some(pb::mtw_message::Payload::DropTenant(pb::Id::from_real_id(&id))),
-            id: Some(resp_id),
-        };
-
-        self.tx.send(Ok(msg)).map_err(|e| Status::internal(format!("Failed to send drop tenant message to worker {}: {}", self.id, e)))?;
-        let resp = resp_rx.await?;
-        resp.ensure_ok()?;
+        let mut cli = self.client.clone();
+        cli.drop_tenant(pb::Id::from_real_id(&id))
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 
-    pub async fn update_tenant_state(&self, id: RealId, tenant_state: TenantState) -> Result<(), crate::Error> {
-        let (resp_id, _dg, resp_rx) = self.setup_handler();
-
-        let msg = pb::MtwMessage {
-            payload: Some(pb::mtw_message::Payload::UpdateTenantState(pb::UpdateTenantState {
-                id: Some(pb::Id::from_real_id(&id)),
-                new_tenant_state: Some(pb::AnyValue::from_real(&tenant_state)?)
-            })),
-            id: Some(resp_id),
+    pub async fn update_tenant_state(&self, id: RealId, tenant_state: TenantState) -> Result<bool, crate::Error> {
+        let msg = pb::UpdateTenantStateReq {
+            id: Some(pb::Id::from_real_id(&id)),
+            new_tenant_state: Some(pb::AnyValue::from_real(&tenant_state)?)
         };
+        let mut cli = self.client.clone();
+        let resp = cli.update_tenant_state(msg)
+            .await
+            .map_err(|e| e.to_string())?
+            .into_inner();
+        Ok(resp.b)
+    }
 
-        self.tx.send(Ok(msg)).map_err(|e| Status::internal(format!("Failed to send update tenant state message to worker {}: {}", self.id, e)))?;
-        let resp = resp_rx.await?;
-        resp.ensure_ok()?;
+    pub async fn shutdown(&self) -> Result<(), crate::Error> {
+        let mut cli = self.client.clone();
+        cli.shutdown(pb::Empty {})
+            .await
+            .map_err(|e| e.to_string())?
+            .into_inner();
         Ok(())
     }
 
-    pub fn attach_stream(&self, id: RealId, user_id: UserId) -> Result<(AttachedStreamGuard, UnboundedReceiver<LtcMessage>), crate::Error> {
+    pub async fn attach_stream(&self, id: RealId, user_id: UserId) -> Result<(AttachedStreamGuard, UnboundedReceiver<LtcMessage>), crate::Error> {
         let (tx, rx) = unbounded_channel();
         let conn_id = {
             let mut r = self.attached_streams.entry(id).or_default();
@@ -396,51 +262,55 @@ impl MesophyllServerConn {
             r.0.insert(conn_id, tx);
             conn_id
         };
-        self.stream_message(id, CtlMessage::NewConn { user_id, id: conn_id })?;
+        self.stream_message(id, CtlMessage::NewConn { user_id, id: conn_id }).await?;
         Ok((AttachedStreamGuard { msc: self.clone(), id, conn_id }, rx))
     }
 
-    pub fn stream_message(&self, id: RealId, payload: CtlMessage) -> Result<(), crate::Error> {
+    pub async fn stream_message(&self, id: RealId, payload: CtlMessage) -> Result<(), crate::Error> {
+        let mut cli = self.client.clone();
         let pb_payload = pb::AnyValue::from_real(&payload)?;
 
-        let msg = pb::MtwMessage {
-            payload: Some(pb::mtw_message::Payload::StreamMsg(pb::StreamMessage {
-                id: Some(pb::Id::from_real_id(&id)),
-                payload: Some(pb_payload),
-            })),
-            id: None,
+        let msg = pb::StreamMessage {
+            id: Some(pb::Id::from_real_id(&id)),
+            payload: Some(pb_payload),
         };
-        
-        self.tx.send(Ok(msg)).map_err(|e| Status::internal(format!("Failed to send stream message to worker {}: {}", self.id, e)))?;
+        cli.send_stream(msg).await.map_err(|e| e.to_string())?;
         Ok(())
     }
 }
 
+// On drop, shutdown
+impl Drop for WorkerConn {
+    fn drop(&mut self) {
+        log::info!("Worker with ID: {} disconnected, cleaning up connection", self.id);
+        let mut cli = self.client.clone();
+        tokio::spawn(async move {
+            let _ = cli.shutdown(pb::Empty {}).await;
+        });
+    }
+}
+
 pub struct AttachedStreamGuard {
-    msc: MesophyllServerConn,
+    msc: WorkerConn,
     pub id: RealId,
     pub conn_id: usize
 }
 
 impl Drop for AttachedStreamGuard {
     fn drop(&mut self) {
-        let _ = self.msc.stream_message(self.id, CtlMessage::CloseConn { id: self.conn_id }); // try to send a CloseConn
-        if let Entry::Occupied(mut entry) = self.msc.attached_streams.entry(self.id) {
-            entry.get_mut().0.remove(&self.conn_id);
+        let msc = self.msc.clone();
+        let id = self.id;
+        let conn_id = self.conn_id;
+
+        if let Entry::Occupied(mut entry) = msc.attached_streams.entry(id) {
+            entry.get_mut().0.remove(&conn_id);
             if entry.get().0.is_empty() {
                 entry.remove();
             }
         }
-    }
-}
 
-struct DropG {
-    resp_id: u64,
-    dispatch_response_handlers: Arc<DashMap<u64, oneshot::Sender<pb::WtmMessageResponse>>>
-}
-
-impl Drop for DropG {
-    fn drop(&mut self) {
-        self.dispatch_response_handlers.remove(&self.resp_id);
+        tokio::spawn(async move {
+            let _ = msc.stream_message(id, CtlMessage::CloseConn { id: conn_id }).await; // try to send a CloseConn
+        });
     }
 }

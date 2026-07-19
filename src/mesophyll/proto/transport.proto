@@ -17,26 +17,12 @@ message Id {
   TenantType tenant_type = 2;
 }
 
-message Worker {
-  // The worker ID
-  uint64 worker_id = 1;
-  // The token for the worker
-  string token = 2;
-}
-
-message DispatchEvent {
+message DispatchEventReq {
   Id id = 1; 
   AnyValue event_payload = 2; // contains event name, data, author and (optionally, the stream id as well)
 }
 
-message WTMMessageResponse {
-  oneof resp {
-    AnyValue value = 1; // msgpack khronos value
-    string error = 2;
-  }
-}
-
-message UpdateTenantState {
+message UpdateTenantStateReq {
   Id id = 1; 
   AnyValue new_tenant_state = 2;
 }
@@ -46,36 +32,8 @@ message StreamMessage {
   AnyValue payload = 2; // either CtlMessage or LtcMessage
 }
 
-message MTWMessage { // master-to-worker message
-  optional uint64 id = 1; // Unique identifier for the message, used for tracking and correlation if needed.
-  oneof payload {
-    // Dispatch a (custom) template event to a worker
-    DispatchEvent dispatch = 2;
-
-    // Requests that a tenant be dropped
-    Id drop_tenant = 4;
-
-    // Requests the worker shuts down due to another worker with the same ID coming online
-    string shutdown = 5;
-
-    // Update the tenant state cache for a worker process
-    UpdateTenantState update_tenant_state = 6;
-
-    StreamMessage stream_msg = 7; // todo: consider making this its own channel
-  }
-}
-
-message WTMMessage { // worker-to-master message
-  optional uint64 resp_id = 1; // If set, this corresponds to the id of the MasterToWorkerMessage being responded to.
-  oneof payload {
-    Worker worker_ident = 2; // Authenticate the worker
-    WTMMessageResponse resp = 3; // response to wtm message
-    StreamMessage stream_msg = 7; // todo: consider making this its own channel
-  }
-}
-
 message WTMListTenantStates {
-  Worker worker = 1;
+  uint64 worker_id = 1;
 }
 
 // Sent by the master to the worker to send over key data like number of workers in the pool etc.
@@ -84,19 +42,24 @@ message MTWBaseWorkerInfo {
 }
 
 message WTMExecStateOp {
-  Worker worker = 1;
+  uint64 worker_id = 1;
   Id id = 2;
   AnyValue state_op = 3;
   uint32 flags = 4;
 }
 
+message WorkerIdent {
+  // The worker ID
+  uint64 worker_id = 1;
+  // The workers unix domain socket path (TODO: switch this to vsock/tcp once/if we use kvm/firecracket/smolmachines in the future)
+  string endpoint = 2;
+}
+
+message Empty {}
+message Bool { bool b = 1; }
+
 // Mesophyll service (runs on master and called by worker)
 service MesophyllMaster {
-  // WorkerInit establishes a bidirectional stream between the master and worker. The master sends MasterToWorkerMessage messages to the worker, and the worker responds with WorkerToMasterMessage messages. 
-  //
-  // This stream remains open for the duration of the worker's lifecycle, allowing for continuous communication between the master and worker.
-  rpc WorkerInit(stream WTMMessage) returns (stream MTWMessage) {}
-
   // ExecStateOp is called by the worker to perform a state op
   //
   // @returns StateExecResponse? (msgpack encoded)
@@ -107,6 +70,31 @@ service MesophyllMaster {
   // @returns HashMap<Id, TenantState> (msgpack encoded)
   rpc ListTenantStates(WTMListTenantStates) returns (AnyValue) {}
 
-  // BaseWorkerInfo enables the worker to get common info from the master
-  rpc BaseWorkerInfo(Worker) returns (MTWBaseWorkerInfo) {}
+  // Base worker info
+  rpc BaseWorkerInfo(Empty) returns (MTWBaseWorkerInfo) {}
+
+  // RegisterWorker enables the worker to identify to the master
+  //
+  // Returns base info like num_workers etc
+  rpc RegisterWorker(WorkerIdent) returns (Empty) {}
+
+  // Send a stream message *to* the worker
+  rpc SendStream(StreamMessage) returns (Empty) {}
+}
+
+service MesophyllWorker {
+  // Dispatches an event to this worker
+  rpc DispatchEvent(DispatchEventReq) returns (AnyValue) {}
+
+  // Drop tenant
+  rpc DropTenant(Id) returns (Empty) {}
+
+  // Shutdown
+  rpc Shutdown(Empty) returns (Empty) {}
+
+  // Update tenant state
+  rpc UpdateTenantState(UpdateTenantStateReq) returns (Bool) {}
+
+  // Send a stream message *to* the master
+  rpc SendStream(StreamMessage) returns (Empty) {}
 }

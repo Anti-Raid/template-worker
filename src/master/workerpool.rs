@@ -171,22 +171,22 @@ impl WorkerPool {
         r.drop_tenant(id).await
     }
 
-    pub async fn update_tenant_state(&self, id: Id, ts: TenantState) -> Result<(), crate::Error> {
+    pub async fn update_tenant_state(&self, id: Id, ts: TenantState) -> Result<bool, crate::Error> {
         let worker_id = id.worker_id(self.pool_size);
         let r = self.mesophyll.get_connection(worker_id)
             .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", worker_id))?;
         r.update_tenant_state(id, ts).await
     }
 
-    pub fn attach_stream(&self, id: Id, user_id: UserId) -> Result<(AttachedStreamGuard, UnboundedReceiver<LtcMessage>), crate::Error> {
+    pub async fn attach_stream(&self, id: Id, user_id: UserId) -> Result<(AttachedStreamGuard, UnboundedReceiver<LtcMessage>), crate::Error> {
         let r = self.mesophyll.get_connection(id.worker_id(self.pool_size)).ok_or("Failed to get worker")?;
-        r.attach_stream(id, user_id)
+        r.attach_stream(id, user_id).await
     }
 
-    pub fn stream_message(&self, id: Id, payload: CtlMessage) -> Result<(), crate::Error> {
+    pub async fn stream_message(&self, id: Id, payload: CtlMessage) -> Result<(), crate::Error> {
         let r = self.mesophyll.get_connection(id.worker_id(self.pool_size))
         .ok_or_else(|| format!("No Mesophyll connection found for worker process with ID: {}", id.worker_id(self.pool_size)))?;
-        r.stream_message(id, payload)
+        r.stream_message(id, payload).await
     }
 }
 

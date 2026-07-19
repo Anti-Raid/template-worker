@@ -118,8 +118,6 @@ async fn main_impl(args: CmdArgs) {
         pg_pool,
     );
 
-    mesophyll_server.set_msyscall_handler(msyscall_handler.clone()).unwrap();
-
     tokio::task::spawn(async move {
         log::info!("Starting RPC server");
 

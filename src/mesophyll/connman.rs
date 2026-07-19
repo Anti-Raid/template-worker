@@ -12,6 +12,11 @@ pub fn new_sockfile(iname: String, name: String) -> Result<SockFile, crate::Erro
     Ok(SockFile { dir, sock, del_on_drop: true })
 }
 
+pub fn new_sockfile_rooted(dir: PathBuf, name: String) -> Result<SockFile, crate::Error> {
+    let sock = dir.join(&name);
+    Ok(SockFile { dir, sock, del_on_drop: true })
+}
+
 #[derive(Debug)]
 pub struct SockFile {
     pub dir: PathBuf,

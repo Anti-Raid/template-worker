@@ -104,7 +104,7 @@ async fn main_impl(args: CmdArgs) {
 
     let stratum = setup_discord().await;
 
-    let (meso_client, meso_client_stream) = MesophyllClient::new(worker_id, args.master_sockfile)
+    let meso_client = MesophyllClient::new(worker_id as u64, args.master_sockfile)
         .await
         .expect("Failed to create Mesophyll client");
 
@@ -116,13 +116,12 @@ async fn main_impl(args: CmdArgs) {
     );
 
     let worker_thread = WorkerThread::new(
-            worker_state,
-            worker_id,
-        )
-        .expect("Failed to create worker thread");
+        worker_state,
+        worker_id,
+    )
+    .expect("Failed to create worker thread");
 
-    // Start listening to the mesophyll server stream for events to dispatch to this worker thread
-    meso_client.listen(meso_client_stream, worker_thread.clone());
+    meso_client.set_wt(worker_thread.clone()).expect("Failed to set wt");
 
     // Start listening to stratum stream
     let (_shutdown_tx, shutdown_rx) = watch::channel(false);
