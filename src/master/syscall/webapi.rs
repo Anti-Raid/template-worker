@@ -169,6 +169,7 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
         State(state): State<MSyscallHandler>,
         axum::extract::Query(p): axum::extract::Query<Signature>
     ) -> Response {
+        const MAX_MISSED_HB: usize = 3;
         let verified = match crate::geese::userticket::verify_userticket(&p.payload, &p.sig) {
             Ok(v) => v,
             Err(e) => return (StatusCode::UNAUTHORIZED, e.message()).into_response()
@@ -200,8 +201,19 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
             let (mut ws_sender, mut ws_receiver) = socket.split();
             // Attach to ws
             let (sg, mut rx) = state.worker_pool.attach_stream(ut.id, ut.user_id).await?;
+            let mut hb_interval = tokio::time::interval(Duration::from_secs(30));
+            hb_interval.tick().await; // consume first immediate tick
+            let mut missed_heartbeats = 0;
+            
             loop {
                 tokio::select! {
+                    _ = hb_interval.tick() => {
+                        if missed_heartbeats > MAX_MISSED_HB {
+                            return Err("Client heartbeat timeout".into());
+                        }
+                        ws_sender.send(WsMessage::Hb {}.to_msg()?).await?;
+                        missed_heartbeats += 1;
+                    }
                     msg = ws_receiver.next() => {
                         let Some(msg) = msg else { break };
                         let msg = match msg? {
@@ -210,7 +222,7 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
                         };  
                         match msg {
                             WsMessage::Hb {} => {
-                                ws_sender.send(WsMessage::Hb {}.to_msg()?).await?;
+                                missed_heartbeats = 0;
                                 continue 
                             }, 
                             WsMessage::Ctl { msg } => {

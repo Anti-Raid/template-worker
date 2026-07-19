@@ -1,4 +1,6 @@
 import type { MSyscallArgs, MSyscallError, MSyscallRet } from "./syscall"
+import type { Id } from "./types/common";
+import { expand, decode, type KhronosValue, type CKhronosValue } from "./khronosvalue";
 
 export class Result<T, E> {
     #inner: { ok: true, res: T } | { ok: false, res: E }
@@ -139,3 +141,115 @@ export const errorString = (err: MSyscallError): string => {
             return `Ratelimited on bucket ${err.bucket}, requesting bucket of ${err.req_bucket} for ${err.retry_after} seconds`
     }
 }
+
+export class Stream {
+    private ws: WebSocket | null = null;
+    private reconnectTimer: number | null = null;
+    private shouldReconnect = true;
+
+    constructor(
+        private instanceUrl: string,
+        private auth: string | undefined,
+        private id: Id,
+        private onMessage: (msg: KhronosValue) => void,
+        private onStatusChange: (connected: boolean) => void
+    ) {
+        this.connect();
+    }
+
+    private async connect() {
+        if (!this.shouldReconnect) return;
+        
+        // 1. Obtain a userticket from the backend
+        const res = await msyscall(this.instanceUrl, this.auth, {
+            op: "Bot",
+            req: {
+                op: "UserTicket",
+                id: this.id
+            }
+        });
+        
+        if (!res.ok) {
+            console.error("Failed to get userticket for stream:", res.unwrapErr());
+            this.scheduleReconnect();
+            return;
+        }
+        
+        const data = res.unwrap();
+        if (data.op !== "Bot" || data.data.op !== "UserTicket") {
+            console.error("Invalid response for UserTicket");
+            this.scheduleReconnect();
+            return;
+        }
+        
+        const { payload, sig } = data.data;
+        
+        // 2. Build WebSocket URL
+        const wsUrl = new URL("/ws", this.instanceUrl);
+        wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
+        wsUrl.searchParams.set("p", payload);
+        wsUrl.searchParams.set("s", sig);
+        
+        const ws = new WebSocket(wsUrl.toString());
+        this.ws = ws;
+        
+        ws.onopen = () => {
+            this.onStatusChange(true);
+        };
+        
+        ws.onmessage = (event) => {
+            try {
+                const msg = JSON.parse(event.data);
+                if (msg.Hb) {
+                    // Send back heartbeat to keep alive
+                    ws.send(JSON.stringify({ Hb: {} }));
+                } else if (msg.Ltc) {
+                    // Decode Ltc message (Luau to Client)
+                    const expanded = expand(msg.Ltc.msg);
+                    const decoded = decode(expanded);
+                    this.onMessage(decoded);
+                }
+            } catch (err) {
+                console.error("Failed to parse WS message", err);
+            }
+        };
+        
+        ws.onclose = () => {
+            if (this.ws === ws) {
+                this.onStatusChange(false);
+                this.ws = null;
+                this.scheduleReconnect();
+            }
+        };
+        
+        ws.onerror = (err) => {
+            console.error("WS error:", err);
+            // The socket will eventually close and trigger onclose for reconnects
+        };
+    }
+    
+    private scheduleReconnect() {
+        if (!this.shouldReconnect) return;
+        if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+        // Exponential backoff or static 3s could be used. We'll use 3s.
+        this.reconnectTimer = setTimeout(() => this.connect(), 3000) as unknown as number;
+    }
+    
+    public send(msg: CKhronosValue) {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ Ctl: { msg } }));
+        } else {
+            console.warn("Attempted to send message while disconnected");
+        }
+    }
+    
+    public destroy() {
+        this.shouldReconnect = false;
+        if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+        if (this.ws) {
+            this.ws.close();
+            this.ws = null;
+        }
+    }
+}
+
