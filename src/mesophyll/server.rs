@@ -1,13 +1,15 @@
 use khronos_runtime::futures_util::{Stream, StreamExt};
 use dapi::{UserId, GuildId};
+use rand::distr::{Alphanumeric, SampleString};
+use tokio_stream::wrappers::UnixListenerStream;
 use tonic::Status;
-use crate::{geese::{state::{StateDb, StateDbFlags}, stream::{CtlMessage, LtcMessage}, tenantstate::{TenantState, TenantStateDb}}, master::syscall::MSyscallHandler, worker::{workerdispatch::SimpleEvent, workervmmanager::Id as RealId}};
+use crate::{geese::{state::{StateDb, StateDbFlags}, stream::{CtlMessage, LtcMessage}, tenantstate::{TenantState, TenantStateDb}}, master::syscall::MSyscallHandler, mesophyll::connman::{SockFile, new_sockfile}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id as RealId}};
 use khronos_runtime::utils::khronos_value::KhronosValue as RealKhronosValue;
 use dashmap::{DashMap, Entry};
-use std::{collections::HashMap, net::ToSocketAddrs, sync::OnceLock};
+use std::{collections::HashMap, sync::OnceLock};
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::{mpsc::{self, UnboundedReceiver, unbounded_channel}, oneshot};
+use tokio::{net::UnixListener, sync::{mpsc::{self, UnboundedReceiver, unbounded_channel}, oneshot}};
 
 /// Internal transport layer
 pub(super) mod pb {
@@ -135,6 +137,7 @@ pub struct MesophyllServer {
     state_db: StateDb,
     num_workers: usize,
     msyscall_handler: Arc<OnceLock<MSyscallHandler>>,
+    sock_file: Arc<SockFile>
 }
 
 impl MesophyllServer {
@@ -145,20 +148,27 @@ impl MesophyllServer {
             tenant_state_db: TenantStateDb::new(pool.clone()),
             state_db: StateDb::new(pool),
             num_workers,
+            sock_file: Arc::new(new_sockfile(Alphanumeric.sample_string(&mut rand::rng(), 16), Alphanumeric.sample_string(&mut rand::rng(), 16))?)
         };
 
-        let meso_addr = crate::CONFIG.mesophyll_server_bind_addr.to_socket_addrs()?.next().ok_or("Invalid Mesophyll server address")?;
+        // Setup UDS stream
+        let uds = UnixListener::bind(&s.sock_file.sock)?;
+        let uds_stream = UnixListenerStream::new(uds);
 
         let s_ref = s.clone();
         tokio::spawn(async move {
             tonic::transport::Server::builder()
             .add_service(pb::mesophyll_master_server::MesophyllMasterServer::new(s_ref))
-            .serve(meso_addr)
+            .serve_with_incoming(uds_stream)
             .await
             .unwrap();
         });
 
         Ok(s)
+    }
+
+    pub fn sock_file(&self) -> &Arc<SockFile> {
+        &self.sock_file
     }
 
     pub fn set_msyscall_handler(&self, handler: MSyscallHandler) -> Result<(), crate::Error> {

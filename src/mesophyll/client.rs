@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-
-use crate::{geese::{state::{StateDbFlags, StateExecResponse, StateOp}, stream::LtcMessage, tenantstate::TenantState}, worker::{workerthread::WorkerThread, workervmmanager::Id}};
+use std::sync::Arc;
+use crate::{geese::{state::{StateDbFlags, StateExecResponse, StateOp}, stream::LtcMessage, tenantstate::TenantState}, mesophyll::connman::SockFile, worker::{workerthread::WorkerThread, workervmmanager::Id}};
 use crate::mesophyll::server::pb;
 use khronos_runtime::{futures_util::{StreamExt, stream::FuturesUnordered}, utils::khronos_value::KhronosValue};
 
@@ -20,12 +20,12 @@ pub struct MesophyllClientStream {
 #[allow(dead_code)]
 impl MesophyllClient {
     /// Creates a new Mesophyll client
-    pub async fn new(worker_id: usize) -> Result<(Self, MesophyllClientStream), crate::Error> {
+    pub async fn new(worker_id: usize, master_sockfile: Arc<SockFile>) -> Result<(Self, MesophyllClientStream), crate::Error> {
         let worker = pb::Worker {
             worker_id: worker_id as u64,
             token: crate::CONFIG.mesophyll_token.clone(),
         };
-        let uri = tonic::transport::Endpoint::from_shared(format!("http://{}", crate::CONFIG.mesophyll_server_bind_addr))?; // TODO: Stop assuming http
+        let uri = tonic::transport::Endpoint::from_shared(format!("unix://{}", master_sockfile.sock.display()))?;
         let mut client = pb::mesophyll_master_client::MesophyllMasterClient::connect(uri).await?;
 
         // Start worker_init and identify to the server

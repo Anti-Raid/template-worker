@@ -139,6 +139,7 @@ async fn main_impl(args: CmdArgs) {
             // Kill the worker pool
             info!("Received SIGINT, shutting down worker pool");
             worker_pool.shutdown_all().await.expect("Failed to kill worker pool");
+            worker_pool.mesophyll().sock_file().drop_full();
         }
         _ = sigterm.recv() => {
             // Kill the worker pool

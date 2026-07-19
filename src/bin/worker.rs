@@ -1,6 +1,7 @@
 use log::debug;
 use tokio::sync::watch;
 use tw::mesophyll::client::MesophyllClient;
+use tw::mesophyll::connman::SockFile;
 use tw::setup_discord;
 use tw::worker::workerstate::WorkerState;
 use tw::worker::workerthread::WorkerThread;
@@ -19,6 +20,9 @@ struct CmdArgs {
 
     /// How many tokio threads to use for the workers main loop (note that each worker still uses a single WorkerThread for the actual luau vm's)
     pub tokio_threads: usize,
+
+    /// Mesophyll base path
+    pub master_sockfile: Arc<SockFile>
 }
 
 impl CmdArgs {
@@ -42,7 +46,16 @@ impl CmdArgs {
             .ok()
             .and_then(|s| Some(s.to_lowercase() == "true" || s == "1"))
             .unwrap_or(Self::WORKER_DEBUG);
-        Self { tokio_threads, worker_debug, worker_id }
+
+        let meso_dir = std::env::var("MESO_DIR")
+            .ok()
+            .expect("MESO_DIR must be set"); 
+        let meso_msock = std::env::var("MESO_MSOCK")
+            .ok()
+            .expect("MESO_MSOCK must be set");
+        let master_sockfile = Arc::new(SockFile::from_env(meso_dir.into(), meso_msock.into()));
+
+        Self { tokio_threads, worker_debug, worker_id, master_sockfile }
     }
 }
 
@@ -91,7 +104,7 @@ async fn main_impl(args: CmdArgs) {
 
     let stratum = setup_discord().await;
 
-    let (meso_client, meso_client_stream) = MesophyllClient::new(worker_id)
+    let (meso_client, meso_client_stream) = MesophyllClient::new(worker_id, args.master_sockfile)
         .await
         .expect("Failed to create Mesophyll client");
 

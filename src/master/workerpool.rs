@@ -6,6 +6,7 @@ use tokio::time::sleep;
 use crate::geese::stream::{CtlMessage, LtcMessage};
 use crate::geese::tenantstate::TenantState;
 use crate::master::workerprocesshandle::{ExpBackoff, WorkerProcessHandle};
+use crate::mesophyll::connman::SockFile;
 use crate::mesophyll::server::{AttachedStreamGuard, MesophyllServer};
 use crate::worker::workerdispatch::SimpleEvent;
 use crate::worker::workervmmanager::Id;
@@ -40,6 +41,7 @@ impl WorkerPool {
     /// The supervisor task monitors the worker processes for unexpected exits and respawns them, 
     /// and also listens for shutdown signals to gracefully kill the workers.
     pub fn new(pool_size: usize, worker_debug: bool, mesophyll: MesophyllServer) -> Self {
+        let sock_file = mesophyll.sock_file().clone();
         let mut workers = Vec::with_capacity(pool_size);
         let mut kill_switches = Vec::with_capacity(pool_size);
         let mut backoffs = Vec::with_capacity(pool_size);
@@ -53,7 +55,7 @@ impl WorkerPool {
         let (worker_ctrl_tx, worker_ctrl_rx) = mpsc::channel(pool_size);
 
         for id in 0..pool_size {
-            let handle = WorkerProcessHandle::new(id, worker_debug, backoffs[id].clone());
+            let handle = WorkerProcessHandle::new(id, worker_debug, backoffs[id].clone(), sock_file.clone());
             let (kill_tx, kill_rx) = oneshot::channel();
 
             workers.push(handle.clone());
@@ -87,6 +89,7 @@ impl WorkerPool {
                 backoffs,
                 is_shutting_down,
                 worker_debug,
+                sock_file
             ).await;
         });
 
@@ -101,7 +104,8 @@ impl WorkerPool {
         worker_ctrl_tx: mpsc::Sender<usize>, 
         backoffs: Vec<ExpBackoff>, // held permamently to track backoffs now
         is_shutting_down: Arc<AtomicBool>,
-        debug: bool
+        debug: bool,
+        sock_file: Arc<SockFile>
     ) {
         while let Some(dead_id) = worker_ctrl_rx.recv().await {
             if is_shutting_down.load(Ordering::Relaxed) {
@@ -110,7 +114,7 @@ impl WorkerPool {
 
             log::error!("Worker {} died. Trying to restart...", dead_id);
                 
-            let new_handle = WorkerProcessHandle::new(dead_id, debug, backoffs[dead_id].clone());
+            let new_handle = WorkerProcessHandle::new(dead_id, debug, backoffs[dead_id].clone(), sock_file.clone());
             let (new_kill_tx, new_kill_rx) = oneshot::channel();
 
             // Update the worker handle in the pool
@@ -147,6 +151,10 @@ impl WorkerPool {
         sleep(std::time::Duration::from_secs(5)).await; // wait for workers to shut down. TODO: make this more robust by tracking worker shutdowns in the supervisor loop
 
         Ok(())
+    }
+
+    pub fn mesophyll(&self) -> &MesophyllServer {
+        &self.mesophyll
     }
 
     pub async fn dispatch_event(&self, id: Id, event: SimpleEvent) -> Result<KhronosValue, crate::Error> {

@@ -2,7 +2,7 @@ use std::{sync::{Arc, RwLock}, time::{Duration, Instant}};
 
 use tokio::{process::Command, time::sleep};
 use tokio::sync::oneshot;
-use crate::CONFIG;
+use crate::{CONFIG, mesophyll::connman::SockFile};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Simple exponential backoff struct for worker restarts. 
@@ -80,16 +80,18 @@ pub struct WorkerProcessHandle {
     worker_debug: bool,
     status: StatusHolder,
     backoff: ExpBackoff,
+    master_sockfile: Arc<SockFile>
 }
 
 impl WorkerProcessHandle {
     /// Creates a new WorkerProcessHandle with the given ID and worker_debug flag
-    pub fn new(id: usize, worker_debug: bool, backoff: ExpBackoff) -> Self {
+    pub fn new(id: usize, worker_debug: bool, backoff: ExpBackoff, master_sockfile: Arc<SockFile>) -> Self {
         Self {
             id,
             worker_debug,
             status: StatusHolder::new(),
-            backoff
+            backoff,
+            master_sockfile
         }
     }
 
@@ -119,6 +121,9 @@ impl WorkerProcessHandle {
         if self.worker_debug {
             command.env("WORKER_DEBUG", "true");
         }
+        // Set mesophyll params for dir + master sock
+        command.env("MESO_DIR", &self.master_sockfile.dir);
+        command.env("MESO_MSOCK", &self.master_sockfile.sock);
 
         command.kill_on_drop(true);
 

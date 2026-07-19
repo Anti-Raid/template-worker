@@ -33,7 +33,6 @@ pub struct Config {
 
     // addresses
     pub template_worker_bind_addr: String,
-    pub mesophyll_server_bind_addr: String,
 
     // misc
     pub worker_path: PathBuf,
