@@ -121,6 +121,9 @@
         {:else}
             <TextBox id={el.id} label={el.label} description={el.description} placeholder={el.placeholder || "Enter some text here!"} bind:value={data[el.id]} readonly={el.disabled} />
         {/if}
+    {:else if el.type == "DateTime"}
+        <!--TODO: impl-->
+        <!--<Number id={el.id} label={el.label} description={el.description} placeholder={el.placeholder || "Enter a number here!"} bind:value={data[el.id]} readonly={el.disabled} />-->
     {:else if el.type == "Number"}
         <Number id={el.id} label={el.label} description={el.description} placeholder={el.placeholder || "Enter a number here!"} bind:value={data[el.id]} readonly={el.disabled} />
     {:else if el.type == "Array.Text"}
