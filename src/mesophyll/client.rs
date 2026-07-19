@@ -14,19 +14,19 @@ pub struct MesophyllClient {
     pub worker_id: u64,
     sock_file: Arc<SockFile>,
     client: pb::mesophyll_master_client::MesophyllMasterClient<tonic::transport::Channel>,
-    wt: OnceLock<WorkerThread>,
+    wt: Arc<OnceLock<WorkerThread>>,
 }
 
 impl MesophyllClient {
     pub async fn new(worker_id: u64, master_sockfile: Arc<SockFile>) -> Result<Self, crate::Error> {
         let uri = tonic::transport::Endpoint::from_shared(format!("unix://{}", master_sockfile.sock.display()))?;
-        let client = pb::mesophyll_master_client::MesophyllMasterClient::connect(uri).await?;
+        let mut client = pb::mesophyll_master_client::MesophyllMasterClient::connect(uri).await?;
 
         let s = Self {
             sock_file: Arc::new(new_sockfile_rooted(master_sockfile.dir.clone(), Alphanumeric.sample_string(&mut rand::rng(), 16))?),
             worker_id,
-            client,
-            wt: OnceLock::new()
+            client: client.clone(),
+            wt: OnceLock::new().into()
         };
 
         // Setup UDS stream
@@ -41,6 +41,18 @@ impl MesophyllClient {
             .await
             .unwrap();
         });
+
+        // Lastly, register the worker
+        loop {
+            let res = client.register_worker(pb::WorkerIdent { worker_id, endpoint: s.sock_file.sock.to_string_lossy().to_string() }).await;
+            match res {
+                Ok(_) => break,
+                Err(e) => {
+                    log::error!("Error registering worker: {e:?}");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            }
+        }
 
         Ok(s)
     }

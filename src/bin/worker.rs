@@ -121,6 +121,7 @@ async fn main_impl(args: CmdArgs) {
     )
     .expect("Failed to create worker thread");
 
+    log::info!("set_wt");
     meso_client.set_wt(worker_thread.clone()).expect("Failed to set wt");
 
     // Start listening to stratum stream
