@@ -109,8 +109,21 @@ impl MesophyllClient {
             payload: Some(pb_payload),
         })
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+        .into_inner();
+        Ok(())
+    }
 
+    /// Bulk send stream messages from worker to master
+    pub async fn bulk_stream_message(&self, id: Id, conn_ids: Vec<u64>, msg: khronos_runtime::utils::khronos_value::KhronosValue) -> Result<(), crate::Error> {
+        let mut cli = self.client.clone();
+        let pb_payload = pb::AnyValue::from_real(&msg)?;
+        let req = pb::BulkStreamMessage {
+            id: Some(pb::Id::from_real_id(&id)),
+            conn_ids,
+            payload: Some(pb_payload),
+        };
+        cli.bulk_send_stream(req).await.map_err(|e| e.to_string())?;
         Ok(())
     }
 }

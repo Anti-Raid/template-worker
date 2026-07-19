@@ -131,6 +131,17 @@ struct StreamTx(Id, Arc<MesophyllClient>);
 impl LuaUserData for StreamTx {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_scheduler_async_method("send", async |_, this, msg| this.1.stream_message(this.0, msg).await.map_err(|x| LuaError::external(x.to_string())));
+        methods.add_scheduler_async_method("pub", async |_, this, (conn_ids, msg): (Vec<u64>, khronos_runtime::utils::khronos_value::KhronosValue)| {
+            this.1.bulk_stream_message(this.0, conn_ids, msg).await.map_err(|x| LuaError::external(x.to_string()))
+        });
+        methods.add_method("pubsync", |_, this, (conn_ids, msg): (Vec<u64>, khronos_runtime::utils::khronos_value::KhronosValue)| {
+            let client = this.1.clone();
+            let id = this.0;
+            tokio::spawn(async move {
+                let _ = client.bulk_stream_message(id, conn_ids, msg).await;
+            });
+            Ok(())
+        });
     }
 }
 

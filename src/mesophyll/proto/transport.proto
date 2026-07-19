@@ -58,6 +58,12 @@ message WorkerIdent {
 message Empty {}
 message Bool { bool b = 1; }
 
+message BulkStreamMessage {
+  Id id = 1;
+  repeated uint64 conn_ids = 2;
+  AnyValue payload = 3;
+}
+
 // Mesophyll service (runs on master and called by worker)
 service MesophyllMaster {
   // ExecStateOp is called by the worker to perform a state op
@@ -80,6 +86,9 @@ service MesophyllMaster {
 
   // Send a stream message *to* the worker
   rpc SendStream(StreamMessage) returns (Empty) {}
+
+  // Bulk send stream messages to the master
+  rpc BulkSendStream(BulkStreamMessage) returns (Empty) {}
 }
 
 service MesophyllWorker {

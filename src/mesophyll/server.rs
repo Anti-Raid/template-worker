@@ -188,6 +188,21 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         }
         Ok(tonic::Response::new(pb::Empty {}))
     }
+
+    async fn bulk_send_stream(&self, request: tonic::Request<pb::BulkStreamMessage>) -> Result<tonic::Response<pb::Empty>, Status> {
+        let req = request.into_inner();
+        let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
+
+        if let Some(stream) = self.attached_streams.get(&id) {
+            let msg: RealKhronosValue = req.payload.ok_or_else(|| Status::invalid_argument("Missing payload"))?.to_real()?;
+            for conn_id in req.conn_ids {
+                if let Some(s) = stream.0.get(&(conn_id as usize)) {
+                    let _ = s.send(LtcMessage::Msg { msg: msg.clone(), id: conn_id as usize });
+                }
+            }
+        }
+        Ok(tonic::Response::new(pb::Empty {}))
+    }
 }
 
 type AttachedStreams = Arc<DashMap<RealId, (HashMap<usize, mpsc::UnboundedSender<LtcMessage>>, usize)>>;
