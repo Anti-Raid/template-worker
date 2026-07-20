@@ -1,3 +1,6 @@
+use std::borrow::Cow;
+
+use dapi::UserId;
 use khronos_runtime::primitives::LUA_SERIALIZE_OPTIONS;
 use khronos_runtime::rt::mlua::prelude::*;
 use khronos_runtime::{utils::khronos_value::KhronosValue};
@@ -55,10 +58,10 @@ impl WorkerDispatch {
     /// Dispatches an event to the appropriate VM based on the tenant ID
     pub async fn dispatch_event(&self, id: Id, event: SimpleEvent) -> LuaResult<KhronosValue> {
         let (name, author, data) = (event.name, event.author, event.data);
-        self.dispatch_event_complex(id, &name, author.as_deref(), data).await
+        self.dispatch_event_complex(id, &name, author, data).await
     }
 
-    pub async fn dispatch_event_complex<Data: IntoLua>(&self, id: Id, name: &str, author: Option<&str>, data: Data) -> LuaResult<KhronosValue> {
+    pub async fn dispatch_event_complex<Data: IntoLua>(&self, id: Id, name: &str, author: Option<UserId>, data: Data) -> LuaResult<KhronosValue> {
         let tenant_state = self.tenant_state.get_cached_tenant_state_for(id)
             .map_err(|e| mlua::Error::external(format!("Failed to get tenant state for ID {id:?}: {e}")))?;
 
@@ -100,7 +103,7 @@ impl WorkerDispatch {
 
 pub struct Event<'a, Data: IntoLua> {
     name: &'a str,
-    author: Option<&'a str>,
+    author: Option<UserId>,
     data: Data,
 }
 
@@ -109,7 +112,7 @@ impl<'a, Data: IntoLua> IntoLua for Event<'a, Data> {
         let tab = lua.create_table()?;
         tab.set("name", self.name)?;
         match self.author {
-            Some(author) => tab.set("author", author)?,
+            Some(author) => tab.set("author", author.to_string())?,
             None => {},
         }
         tab.set(
@@ -139,6 +142,7 @@ impl IntoLua for OnStartupData {
 enum SimpleEventData {
     KhronosValue(KhronosValue),
     JsonString(String),
+    FeedTicketRequest(Vec<String>)
 }
 
 impl IntoLua for SimpleEventData {
@@ -152,6 +156,12 @@ impl IntoLua for SimpleEventData {
                     .map_err(|e| LuaError::external(e))?;
                 lua.to_value_with(&value, LUA_SERIALIZE_OPTIONS)
             },
+            Self::FeedTicketRequest(topics) => {
+                let tab = lua.create_table_with_capacity(0, 2)?;
+                tab.set("topics", topics)?;
+                tab.set_readonly(true);
+                Ok(LuaValue::Table(tab))
+            }
         }
     }
 }
@@ -160,21 +170,26 @@ impl IntoLua for SimpleEventData {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct SimpleEvent {
     /// The name of the event
-    name: String,
+    name: Cow<'static, str>,
     /// The author of the event
-    author: Option<String>,
+    author: Option<UserId>,
     /// The inner data of the object
     data: SimpleEventData,
 }
 
 impl SimpleEvent {
     /// Create a new Event given a khronos value
-    pub fn new_khronos_value(name: String, author: Option<String>, data: KhronosValue) -> Self {
-        Self { name, author, data: SimpleEventData::KhronosValue(data) }
+    pub fn new_khronos_value(name: String, author: Option<UserId>, data: KhronosValue) -> Self {
+        Self { name: name.into(), author, data: SimpleEventData::KhronosValue(data) }
     }
 
     /// Create a new Event given a raw json string
-    pub fn new_json_string(name: String, author: Option<String>, data: String) -> Self {
-        Self { name, author, data: SimpleEventData::JsonString(data) }
+    pub fn new_json_string(name: String, author: Option<UserId>, data: String) -> Self {
+        Self { name: name.into(), author, data: SimpleEventData::JsonString(data) }
+    }
+
+    /// Create a new Event for a feed ticket request
+    pub fn new_feed_ticket_request(author: Option<UserId>, topics: Vec<String>) -> Self {
+        Self { name: "FeedTicketRequest".into(), author, data: SimpleEventData::FeedTicketRequest(topics) }
     }
 }

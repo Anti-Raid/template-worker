@@ -178,7 +178,7 @@ impl MBotSyscall {
                     }
                 }
 
-                let event = SimpleEvent::new_khronos_value(name, Some(user_id.to_string()), data);
+                let event = SimpleEvent::new_khronos_value(name, Some(user_id), data);
 
                 Ok(MBotSyscallRet::KhronosValue { data: handler.worker_pool.dispatch_event(id, event).await? })
             }
@@ -202,7 +202,7 @@ impl MBotSyscall {
                     }
                 }
 
-                let event = SimpleEvent::new_khronos_value(name, Some(user_id.to_string()), data.0);
+                let event = SimpleEvent::new_khronos_value(name, Some(user_id), data.0);
 
                 Ok(MBotSyscallRet::CKhronosValue { data: CKhronosValue(handler.worker_pool.dispatch_event(id, event).await?) })
             }
@@ -233,13 +233,9 @@ impl MBotSyscall {
                         }
                     }
                 }
-                
-                let topics_kv = KhronosValue::Map(
-                    vec![(KhronosValue::Text("topics".into()), KhronosValue::List(requested_topics.iter().map(|x| KhronosValue::Text(x.to_string().into())).collect()))]
-                );
 
                 // Check with luau by dispatching a FeedTicketRequest
-                let evt = SimpleEvent::new_khronos_value("FeedTicketRequest".to_string(), Some(user_id.to_string()), topics_kv);
+                let evt = SimpleEvent::new_feed_ticket_request(Some(user_id), requested_topics.clone());
                 handler.worker_pool.dispatch_event(id.into(), evt).await?;
 
                 let (payload, sig) = crate::geese::feedticket::create_feedticket(id, user_id, requested_topics)?;
@@ -275,7 +271,7 @@ impl MBotSyscall {
                     }
                 }
 
-                let event = SimpleEvent::new_khronos_value(name, Some(user_id.to_string()), data);
+                let event = SimpleEvent::new_khronos_value(name, Some(user_id), data);
 
                 Ok(MBotSyscallRet::KhronosValue { data: handler.worker_pool.dispatch_event(id, event).await? })
             }
