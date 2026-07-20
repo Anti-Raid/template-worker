@@ -1,3 +1,0 @@
-[submodule "luau/builtins"]
-	path = luau/builtins
-	url = https://github.com/anti-raid/builtins

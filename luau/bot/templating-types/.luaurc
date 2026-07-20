@@ -1,0 +1,15 @@
+{
+    "languageMode": "strict",
+    "lint": {
+        "*": true
+    },
+    "lintErrors": false,
+    "typeErrors": true,
+    "globals": [],
+    "aliases": {
+        "antiraid": "./@antiraid/",
+        "antiraid-core": "./@antiraid-core/",
+        "discord-types": "./discord-luau-corrections/",
+        "antiraid-ext": "./@antiraid-ext/"
+    }
+}

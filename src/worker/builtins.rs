@@ -5,13 +5,13 @@ use rust_embed::Embed;
 
 /// Builtins
 #[derive(Embed, Debug)]
-#[folder = "$CARGO_MANIFEST_DIR/luau/builtins"]
+#[folder = "$CARGO_MANIFEST_DIR/luau/bot"]
 #[prefix = ""]
 pub struct Builtins;
 
 /// To make uploads not need to upload all of ``templating-types`` and keep them up to date:
 #[derive(Embed, Debug)]
-#[folder = "$CARGO_MANIFEST_DIR/luau/builtins/templating-types"]
+#[folder = "$CARGO_MANIFEST_DIR/luau/bot/templating-types"]
 #[prefix = "templating-types/"]
 pub struct TemplatingTypes;
 
