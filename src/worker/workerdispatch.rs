@@ -89,7 +89,7 @@ impl WorkerDispatch {
     /// Saves a error directly to key-value API
     async fn save_error(&self, id: Id, error: String) -> Result<(), crate::Error> {
         let key = Alphanumeric.sample_string(&mut rand::rng(), 64);
-        let ops = vec![StateOp::KvSet { key, scope: Self::ERR_SCOPE.to_string(), value: KhronosValue::Text(error), blob: None }];
+        let ops = vec![StateOp::KvSet { key, scope: Self::ERR_SCOPE.into(), value: KhronosValue::Text(error.into()), blob: None }];
         let res = self.worker_state.mesophyll_client.exec_state_op(id, ops, StateDbFlags::WORKER_INITIATED).await?;
         if let Some(ref ts) = res.new_tenant_state {
             self.tenant_state.reload_for_tenant(id, ts)?;

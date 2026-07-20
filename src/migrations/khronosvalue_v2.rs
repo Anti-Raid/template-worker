@@ -103,7 +103,7 @@ impl From<KhronosValue> for KhronosProxy {
 
 fn from_v1(v: KhronosValue) -> KhronosValueV2 {
     match v {
-        KhronosValue::Text(t) => KhronosValueV2::Text(t),
+        KhronosValue::Text(t) => KhronosValueV2::Text(t.into()),
         KhronosValue::Integer(i) => {
             assert!(i < (2_i64).pow(53) && i > -(2_i64).pow(53));
             KhronosValueV2::Integer(i)
@@ -119,7 +119,7 @@ fn from_v1(v: KhronosValue) -> KhronosValueV2 {
         KhronosValue::Map(m) => {
             let mut arr = Vec::new();
             for (k, v) in m {
-                arr.push((KhronosValueV2::Text(k), from_v1(v)));
+                arr.push((KhronosValueV2::Text(k.into()), from_v1(v)));
             }
 
             KhronosValueV2::Map(arr)

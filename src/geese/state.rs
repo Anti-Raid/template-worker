@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use chrono::{DateTime, Utc};
 use khronos_runtime::primitives::blob::{Blob, BlobTaker};
 use khronos_runtime::{primitives::opaque::Opaque, rt::mlua::prelude::*};
@@ -32,7 +34,7 @@ pub enum StateOp {
     },
     KvSet {
         key: String,
-        scope: String,
+        scope: Cow<'static, str>,
         value: KhronosValue,
         blob: Option<bytes::Bytes>, // optional blob data
     },
@@ -177,10 +179,10 @@ impl FromLua for StateOp {
             },
             b"KvSet" => {
                 let key = tab.get("key")?;
-                let scope = tab.get("scope")?;
+                let scope: String = tab.get("scope")?;
                 let value = tab.get("value")?;
                 let blob = tab.get::<Option<BlobTaker>>("blob")?;
-                Ok(Self::KvSet { key, scope, value, blob: blob.map(|d| d.0.into()) })
+                Ok(Self::KvSet { key, scope: scope.into(), value, blob: blob.map(|d| d.0.into()) })
             },
             b"KvDelete" => {
                 let key = tab.get("key")?;

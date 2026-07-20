@@ -235,7 +235,7 @@ impl MBotSyscall {
                 }
                 
                 let topics_kv = KhronosValue::Map(
-                    vec![(KhronosValue::Text("topics".to_string()), KhronosValue::List(requested_topics.iter().map(|x| KhronosValue::Text(x.to_string())).collect()))]
+                    vec![(KhronosValue::Text("topics".into()), KhronosValue::List(requested_topics.iter().map(|x| KhronosValue::Text(x.to_string().into())).collect()))]
                 );
 
                 // Check with luau by dispatching a FeedTicketRequest
