@@ -242,8 +242,7 @@ impl MBotSyscall {
                 let evt = SimpleEvent::new_khronos_value("FeedTicketRequest".to_string(), Some(user_id.to_string()), topics_kv);
                 handler.worker_pool.dispatch_event(id.into(), evt).await?;
 
-                let topics_refs: Vec<&str> = requested_topics.iter().map(|s| s.as_str()).collect();
-                let (payload, sig) = crate::geese::feedticket::create_feedticket(id, user_id, topics_refs)?;
+                let (payload, sig) = crate::geese::feedticket::create_feedticket(id, user_id, requested_topics)?;
                 Ok(MBotSyscallRet::FeedTicket { payload, sig }) 
             }
             Self::AdminRelaxedDispatchEvent { id, name, data, allow_non_web_event_names, allow_self_event, mock_id } => {
