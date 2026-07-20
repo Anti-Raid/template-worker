@@ -27,11 +27,6 @@ message UpdateTenantStateReq {
   AnyValue new_tenant_state = 2;
 }
 
-message StreamMessage {
-  Id id = 1; 
-  AnyValue payload = 2; // either CtlMessage or LtcMessage
-}
-
 message WTMListTenantStates {
   uint64 worker_id = 1;
 }
@@ -58,9 +53,9 @@ message WorkerIdent {
 message Empty {}
 message Bool { bool b = 1; }
 
-message BulkStreamMessage {
+message PublishFeedMessage {
   Id id = 1;
-  repeated uint64 conn_ids = 2;
+  string topic = 2;
   AnyValue payload = 3;
 }
 
@@ -84,11 +79,8 @@ service MesophyllMaster {
   // Returns base info like num_workers etc
   rpc RegisterWorker(WorkerIdent) returns (Empty) {}
 
-  // Send a stream message *to* the worker
-  rpc SendStream(StreamMessage) returns (Empty) {}
-
-  // Bulk send stream messages to the master
-  rpc BulkSendStream(BulkStreamMessage) returns (Empty) {}
+  // Publish a feed message to a specific topic (handled by Master)
+  rpc PublishFeed(PublishFeedMessage) returns (Empty) {}
 }
 
 service MesophyllWorker {
@@ -103,7 +95,4 @@ service MesophyllWorker {
 
   // Update tenant state
   rpc UpdateTenantState(UpdateTenantStateReq) returns (Bool) {}
-
-  // Send a stream message *to* the master
-  rpc SendStream(StreamMessage) returns (Empty) {}
 }

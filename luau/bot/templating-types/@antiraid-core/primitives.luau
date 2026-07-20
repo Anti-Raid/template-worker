@@ -77,21 +77,12 @@ export type TemplateContext = {
     --- Event manager/'loop' of the context
     read loop: EventManager,
     
-    --- Stream manager for the context
-    read stream: StreamManager,
+    --- Feed manager for the context
+    read feed: FeedManager,
 }
 
-export type StreamClientPayload = {
-    t: "sub" | "unsub",
-    n: string,
-} | {
-    t: "msg",
-    n: string,
-    msg: any,
-}
-
-export type StreamManager = {
-    --- Publish a message to all connections subscribed to a specific topic
+export type FeedManager = {
+    --- Publish a message to a specific topic
     read publish: (topic: string, msg: any) -> (),
 }
 

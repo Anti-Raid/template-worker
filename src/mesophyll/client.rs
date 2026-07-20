@@ -1,7 +1,7 @@
 use std::time::Duration;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
-use crate::{geese::{state::{StateDbFlags, StateExecResponse, StateOp}, stream::LtcMessage, tenantstate::TenantState}, mesophyll::connman::{SockFile, new_sockfile_rooted}, worker::{workerthread::WorkerThread, workervmmanager::Id}};
+use crate::{geese::{state::{StateDbFlags, StateExecResponse, StateOp}, tenantstate::TenantState}, mesophyll::connman::{SockFile, new_sockfile_rooted}, worker::{workerthread::WorkerThread, workervmmanager::Id}};
 use crate::mesophyll::server::pb;
 use rand::distr::{Alphanumeric, SampleString};
 use tokio::net::UnixListener;
@@ -100,46 +100,23 @@ impl MesophyllClient {
             .into_inner())
     }
 
-    /// Send a stream message from worker to master
-    pub async fn stream_message(&self, id: Id, payload: LtcMessage) -> Result<(), crate::Error> {
-        let mut cli = self.client.clone();
-        let pb_payload = pb::AnyValue::from_real(&payload)?;
-        cli.send_stream(pb::StreamMessage {
-            id: Some(pb::Id::from_real_id(&id)),
-            payload: Some(pb_payload),
-        })
-        .await
-        .map_err(|e| e.to_string())?
-        .into_inner();
-        Ok(())
-    }
-
-    /// Bulk send stream messages from worker to master
-    pub async fn bulk_stream_message(&self, id: Id, conn_ids: Vec<u64>, msg: khronos_runtime::utils::khronos_value::KhronosValue) -> Result<(), crate::Error> {
+    /// Publish a feed message to a specific topic
+    pub async fn publish_feed(&self, id: Id, topic: &str, msg: khronos_runtime::utils::khronos_value::KhronosValue) -> Result<(), crate::Error> {
         let mut cli = self.client.clone();
         let pb_payload = pb::AnyValue::from_real(&msg)?;
-        let req = pb::BulkStreamMessage {
+        let req = pb::PublishFeedMessage {
             id: Some(pb::Id::from_real_id(&id)),
-            conn_ids,
+            topic: topic.to_string(),
             payload: Some(pb_payload),
         };
-        cli.bulk_send_stream(req).await.map_err(|e| e.to_string())?;
+        cli.publish_feed(req).await.map_err(|e| e.to_string())?;
         Ok(())
     }
 }
 
 #[tonic::async_trait]
 impl pb::mesophyll_worker_server::MesophyllWorker for MesophyllClient {
-    async fn send_stream(&self, request: tonic::Request<pb::StreamMessage>) -> Result<tonic::Response<pb::Empty>, Status> {
-        let req = request.into_inner();
-        let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
-        let evt = req.payload.ok_or_else(|| Status::invalid_argument("Missing payload"))?.to_real()?;
-        let wt = self.try_wt()?;
-        match wt.stream_msg(id, evt) {
-            Ok(_) => Ok(tonic::Response::new(pb::Empty {})),
-            Err(e) => Err(Status::internal(e.to_string())),
-        }
-    }
+
 
     async fn dispatch_event(&self, request: tonic::Request<pb::DispatchEventReq>) -> Result<tonic::Response<pb::AnyValue>, Status> {
         let req = request.into_inner();

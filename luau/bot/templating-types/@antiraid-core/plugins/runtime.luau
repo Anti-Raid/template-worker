@@ -101,42 +101,12 @@ export type Id = {
     read tenant_id: string
 }
 
-export type LtcMessage = {
-    op: "Msg",
-    msg: khronosvalue.KhronosValue,
-    id: number,
-} | {
-    op: "Close",
-    id: number,
-}
-
-export type CtlMessage = {
-    type: "NewConn",
-    id: number,
-    user_id: string,
-} | {
-    type: "CloseConn",
-    id: number,
-} | {
-    type: "Msg",
-    id: number,
-    msg: khronosvalue.KhronosValue,
-}
-
-export type StreamTx = {
-    --- @yields
-    send: (self: StreamTx, msg: LtcMessage) -> (),
-
+export type FeedTx = {
     --- @noyield
-    pubsync: (self: StreamTx, conn_ids: {number}, msg: any) -> (),
+    pubsync: (self: FeedTx, topic: string, msg: any) -> (),
     
     --- @yields
-    pub: (self: StreamTx, conn_ids: {number}, msg: any) -> ()
-}
-
-export type StreamRx = {
-    --- @yields
-    recv: (self: StreamRx) -> CtlMessage
+    pub: (self: FeedTx, topic: string, msg: any) -> ()
 }
 
 export type BaseTenantData = {
@@ -146,8 +116,7 @@ export type BaseTenantData = {
     read base_vfs: { [string]: typesext.Vfs },
     read support_server: string,
     read website: string,
-    read stream_tx: StreamTx,
-    read stream_rx: StreamRx,
+    read feed_tx: FeedTx,
 }
 
 export type StateOp = {

@@ -1,12 +1,5 @@
-use std::sync::Arc;
-
-use dashmap::DashMap;
-use tokio::sync::mpsc;
-
-use crate::geese::stream::CtlMessage;
 use crate::worker::workerstate::WorkerState;
 use crate::worker::workertenantstate::WorkerTenantState;
-use crate::worker::workervmmanager::Id;
 
 use super::workervmmanager::WorkerVmManager;
 use super::workerdispatch::WorkerDispatch;
@@ -23,12 +16,12 @@ pub struct Worker {
 
 #[derive(Default, Clone)]
 pub struct WorkerFastPath {
-    pub stream_to_luau: Arc<DashMap<Id, mpsc::UnboundedSender<CtlMessage>>>
+
 }
 
 impl Worker {
-    pub async fn new(state: WorkerState, wfp: WorkerFastPath) -> Result<Self, crate::Error> {        
-        let vm_manager = WorkerVmManager::new(wfp);
+    pub async fn new(state: WorkerState) -> Result<Self, crate::Error> {        
+        let vm_manager = WorkerVmManager::new();
         let wts = WorkerTenantState::new(state.mesophyll_client.clone(), vm_manager.clone()).await?;
                 
         // This will automatically fire key resumption tasks to all keys with resume flag upon creation

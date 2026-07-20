@@ -6,17 +6,15 @@ use khronos_runtime::rt::{KhronosRuntime, RuntimeCreateOpts};
 use serde::{Deserialize, Serialize};
 use dapi::{GuildId, UserId};
 use stratum_common::worker_id_for_tenant;
-use tokio::sync::mpsc::{self, unbounded_channel};
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::{collections::HashMap, rc::Rc};
 use khronos_runtime::rt::mlua::prelude::*;
-use crate::geese::stream::CtlMessage;
+
 use crate::mesophyll::client::MesophyllClient;
 use crate::worker::builtins::BUILTINS;
 use crate::worker::limits::TEMPLATE_GIVE_TIME;
 use crate::worker::syscall::SyscallHandler;
-use crate::worker::worker::WorkerFastPath;
 use crate::worker::workertenantstate::WorkerTenantState;
 
 use super::limits::Ratelimits;
@@ -123,33 +121,23 @@ impl IntoLua for Id {
 pub struct VmState {
     pub runtime: KhronosRuntime,
     pub dispatch_func: LuaFunction,
-    pub stream_to_luau: mpsc::UnboundedSender<CtlMessage>
 }
 
-/// Stream sender
-struct StreamTx(Id, Arc<MesophyllClient>);
-impl LuaUserData for StreamTx {
+/// Feed sender
+struct FeedTx(Id, Arc<MesophyllClient>);
+impl LuaUserData for FeedTx {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        methods.add_scheduler_async_method("send", async |_, this, msg| this.1.stream_message(this.0, msg).await.map_err(|x| LuaError::external(x.to_string())));
-        methods.add_scheduler_async_method("pub", async |_, this, (conn_ids, msg): (Vec<u64>, khronos_runtime::utils::khronos_value::KhronosValue)| {
-            this.1.bulk_stream_message(this.0, conn_ids, msg).await.map_err(|x| LuaError::external(x.to_string()))
+        methods.add_scheduler_async_method("pub", async |_, this, (topic, msg): (String, khronos_runtime::utils::khronos_value::KhronosValue)| {
+            this.1.publish_feed(this.0, &topic, msg).await.map_err(|x| LuaError::external(x.to_string()))
         });
-        methods.add_method("pubsync", |_, this, (conn_ids, msg): (Vec<u64>, khronos_runtime::utils::khronos_value::KhronosValue)| {
+        methods.add_method("pubsync", |_, this, (topic, msg): (String, khronos_runtime::utils::khronos_value::KhronosValue)| {
             let client = this.1.clone();
             let id = this.0;
             tokio::spawn(async move {
-                let _ = client.bulk_stream_message(id, conn_ids, msg).await;
+                let _ = client.publish_feed(id, &topic, msg).await;
             });
             Ok(())
         });
-    }
-}
-
-/// Stream reciever
-struct StreamRx(mpsc::UnboundedReceiver<CtlMessage>);
-impl LuaUserData for StreamRx {
-    fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        methods.add_scheduler_async_method_mut("recv", async |_, mut this, _: ()| Ok(this.0.recv().await));
     }
 }
 
@@ -159,8 +147,7 @@ struct BaseTenantData<'a> {
     dispatchable_events: &'a [&'static str],
     base_vfs: &'a HashMap<String, Vfs>,
     support_server: &'a str,
-    stream_tx: StreamTx,
-    stream_rx: StreamRx,
+    feed_tx: FeedTx,
     website: &'a str
 }
 
@@ -179,8 +166,7 @@ impl<'a> IntoLua for BaseTenantData<'a> {
         table.set("base_vfs", base_vfs_tab)?;
         table.set("support_server", self.support_server)?;
         table.set("website", self.website)?;
-        table.set("stream_tx", self.stream_tx)?;
-        table.set("stream_rx", self.stream_rx)?;
+        table.set("feed_tx", self.feed_tx)?;
         table.set_readonly(true);
         Ok(LuaValue::Table(table))
     }
@@ -196,16 +182,13 @@ impl<'a> IntoLua for BaseTenantData<'a> {
 pub struct WorkerVmManager {
     /// The VMs managed by this WorkerVmManager, keyed by their tenant ID
     vms: Rc<RefCell<HashMap<Id, VmState>>>,
-    /// Worker fast path
-    wfp: WorkerFastPath
 }
 
 impl WorkerVmManager {
     /// Creates a new WorkerVmManager with the given worker state
-    pub fn new(wfp: WorkerFastPath) -> Self {
+    pub fn new() -> Self {
         Self {
             vms: RefCell::default().into(),
-            wfp
         }
     }
 
@@ -234,15 +217,11 @@ impl WorkerVmManager {
         let tenant_state = wts.get_cached_tenant_state_for(id)
             .map_err(|e| LuaError::external(format!("Failed to get tenant state for ID {id:?}: {e}")))?;
 
-        // Setup streams + update fast path so dispatches know to send through fast path
-        let (tx, rx) = unbounded_channel();
-        self.wfp.stream_to_luau.insert(id, tx.clone());
+
 
         // Setup cleanup code
         let weak_vms = Rc::downgrade(&self.vms);
-        let wfp = self.wfp.clone(); 
         runtime.set_on_broken(Box::new(move || { 
-            wfp.stream_to_luau.remove(&id); // drop fast-path
             if let Some(vms_rc) = weak_vms.upgrade() {
                 if let Ok(mut vms) = vms_rc.try_borrow_mut() {
                     vms.remove(&id);
@@ -258,8 +237,7 @@ impl WorkerVmManager {
             base_vfs: &super::builtins::EXPOSED_VFS,
             support_server: &crate::CONFIG.support_server_invite,
             website: &crate::CONFIG.frontend,
-            stream_tx: StreamTx(id, worker_state.mesophyll_client.clone()),
-            stream_rx: StreamRx(rx)
+            feed_tx: FeedTx(id, worker_state.mesophyll_client.clone()),
         };
 
         let syscall_h = SyscallHandler::new(
@@ -274,14 +252,12 @@ impl WorkerVmManager {
         Ok(VmState {
             runtime,
             dispatch_func,
-            stream_to_luau: tx
         })
     }
 
     /// Removes the VM for the given tenant ID and cleans up its resources
     #[allow(dead_code)]
     pub fn remove_vm_for(&self, id: Id) -> Result<(), crate::Error> {
-        self.wfp.stream_to_luau.remove(&id); // Drop fast-path *first*
         let cell_opt = self.vms.borrow_mut().remove(&id);
 
         // If it existed and was initialized, mark it broken to ensure cleanup code gets called

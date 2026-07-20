@@ -142,16 +142,17 @@ export const errorString = (err: MSyscallError): string => {
     }
 }
 
-export class Stream {
+export class FeedClient {
     private ws: WebSocket | null = null;
-    private reconnectTimer: number | null = null;
     private shouldReconnect = true;
+    private reconnectTimer: number | null = null;
 
     constructor(
         private instanceUrl: string,
         private auth: string | undefined,
         private id: Id,
-        private onMessage: (msg: KhronosValue) => void,
+        private topics: string[],
+        private onMessage: (topic: string, msg: KhronosValue) => void,
         private onStatusChange: (connected: boolean) => void
     ) {
         this.connect();
@@ -160,24 +161,25 @@ export class Stream {
     private async connect() {
         if (!this.shouldReconnect) return;
         
-        // 1. Obtain a userticket from the backend
+        // 1. Obtain a feedticket from the backend
         const res = await msyscall(this.instanceUrl, this.auth, {
             op: "Bot",
             req: {
-                op: "UserTicket",
-                id: this.id
+                op: "FeedTicket",
+                id: this.id,
+                topics: this.topics
             }
         });
         
         if (!res.ok) {
-            console.error("Failed to get userticket for stream:", res.unwrapErr());
+            console.error("Failed to get feedticket for stream:", res.unwrapErr());
             this.scheduleReconnect();
             return;
         }
         
         const data = res.unwrap();
-        if (data.op !== "Bot" || data.data.op !== "UserTicket") {
-            console.error("Invalid response for UserTicket");
+        if (data.op !== "Bot" || data.data.op !== "FeedTicket") {
+            console.error("Invalid response for FeedTicket");
             this.scheduleReconnect();
             return;
         }
@@ -203,11 +205,11 @@ export class Stream {
                 if (msg.Hb) {
                     // Send back heartbeat to keep alive
                     ws.send(JSON.stringify({ Hb: {} }));
-                } else if (msg.Ltc) {
-                    // Decode Ltc message (Luau to Client)
-                    const expanded = expand(msg.Ltc.msg);
+                } else if (msg.Feed) {
+                    // Decode Feed message (server to client)
+                    const expanded = expand(msg.Feed.msg);
                     const decoded = decode(expanded);
-                    this.onMessage(decoded);
+                    this.onMessage(msg.Feed.topic, decoded);
                 }
             } catch (err) {
                 console.error("Failed to parse WS message", err);
@@ -235,12 +237,8 @@ export class Stream {
         this.reconnectTimer = setTimeout(() => this.connect(), 3000) as unknown as number;
     }
     
-    public send(msg: CKhronosValue) {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify({ Ctl: { msg } }));
-        } else {
-            console.warn("Attempted to send message while disconnected");
-        }
+    public send(_msg: CKhronosValue) {
+        throw new Error("Feed is read-only");
     }
     
     public destroy() {

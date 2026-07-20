@@ -74,7 +74,7 @@ local function setup(commands: {[string]: context.Command} | {context.Command}, 
                 local ok, cerr = xpcall(command.autocompleter, errorHandler.errorHandler, cctx)
                 if not ok then 
                     local err = (cerr :: any) :: errorHandler.HandledError
-                    ctx.stream.publish("debug", { message = err, source = "<framework>" })
+                    ctx.feed.publish("debug", { message = err, source = "<framework>" })
                     return
                 end
 

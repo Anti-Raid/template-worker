@@ -33,9 +33,11 @@ pub enum MBotSyscall {
         /// Data to send
         data: CKhronosValue
     },
-    UserTicket {
+    FeedTicket {
         /// Tenant ID for the request
-        id: Id
+        id: Id,
+        /// The topics the user is requesting to subscribe to
+        requested_topics: Vec<String>
     },
     /// Verify a presigned URL and return the decoded payload
     GetBlobData {
@@ -111,7 +113,7 @@ pub enum MBotSyscallRet {
         data: Vec<u8>,
         filename: String,
     },
-    UserTicket {
+    FeedTicket {
         payload: String,
         sig: String
     },
@@ -214,9 +216,9 @@ impl MBotSyscall {
                 .ok_or(MSyscallError::EntityNotFound { reason: "Blob not found" })?;
                 Ok(MBotSyscallRet::BlobData { data, filename })
             },
-            Self::UserTicket { id } => {
+            Self::FeedTicket { id, requested_topics } => {
                 let user_id = ctx.into_user_id()?;
-                handler.limit(&ctx, "UserTicket")?;
+                handler.limit(&ctx, "FeedTicket")?;
                 match id {
                     Id::Guild(id) => {
                         // Ensure the bot is in the guild
@@ -231,8 +233,18 @@ impl MBotSyscall {
                         }
                     }
                 }
-                let (payload, sig) = crate::geese::userticket::create_userticket(id, user_id)?;
-                Ok(MBotSyscallRet::UserTicket { payload, sig }) 
+                let topics_json = serde_json::json!({
+                    "topics": requested_topics
+                }).to_string();
+                let evt = SimpleEvent::new_json_string("FeedTicketRequest".to_string(), Some(user_id.to_string()), topics_json);
+                let res = handler.worker_pool.dispatch_event(id.into(), evt).await;
+                if res.is_err() {
+                    return Err(MSyscallError::Unauthorized { reason: "Worker rejected ticket request" });
+                }
+
+                let topics_refs: Vec<&str> = requested_topics.iter().map(|s| s.as_str()).collect();
+                let (payload, sig) = crate::geese::feedticket::create_feedticket(id, user_id, &topics_refs)?;
+                Ok(MBotSyscallRet::FeedTicket { payload, sig }) 
             }
             Self::AdminRelaxedDispatchEvent { id, name, data, allow_non_web_event_names, allow_self_event, mock_id } => {
                 if !ctx.is_secure() {

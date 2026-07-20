@@ -88,9 +88,7 @@ local function TemplateManager(ctx: Primitives.TemplateContext, expose: {[string
         end
         base.print = function(...)
             local str = (typesext.fmtpretty :: any)(...)
-            if ctx.stream then
-                ctx.stream.publish("print", { type = "Log", message = str, source = tmplName })
-            end
+            ctx.feed.publish("print", { type = "Log", message = str, source = tmplName })
         end
         return base
     end

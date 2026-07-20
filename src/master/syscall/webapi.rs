@@ -12,8 +12,7 @@ use reqwest::{StatusCode, header};
 use reqwest::header::AUTHORIZATION;
 use serde::{Deserialize, Serialize};
 use tower_http::cors::MaxAge;
-use crate::geese::stream::{CtlMessage, LtcMessage};
-use crate::geese::userticket::UserTicket;
+use crate::geese::feedticket::FeedTicket;
 use crate::master::syscall::bot::{MBotSyscall, MBotSyscallRet};
 use crate::master::syscall::{MSyscallArgs, MSyscallContext, MSyscallRet};
 use crate::master::syscall::{MSyscallError, MSyscallHandler, internal::auth as iauth};
@@ -170,7 +169,7 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
         axum::extract::Query(p): axum::extract::Query<Signature>
     ) -> Response {
         const MAX_MISSED_HB: usize = 3;
-        let verified = match crate::geese::userticket::verify_userticket(&p.payload, &p.sig) {
+        let verified = match crate::geese::feedticket::verify_feedticket(&p.payload, &p.sig) {
             Ok(v) => v,
             Err(e) => return (StatusCode::UNAUTHORIZED, e.message()).into_response()
         };
@@ -178,8 +177,7 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
         #[derive(Serialize, Deserialize)]
         pub enum WsMessage {
             Hb {}, // heartbeat, can be sent by either client or server
-            Ctl { msg: CKhronosValue }, // client->luau, client only
-            Ltc { msg: CKhronosValue }, // luau->client, server only
+            Feed { topic: String, msg: CKhronosValue }, // server->client
         }
 
         impl WsMessage {
@@ -197,10 +195,15 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
             .await;
         }
 
-        async fn handle_socket(socket: &mut WebSocket, state: MSyscallHandler, ut: UserTicket) -> Result<(), crate::Error> {
+        async fn handle_socket(socket: &mut WebSocket, state: MSyscallHandler, ut: FeedTicket) -> Result<(), crate::Error> {
             let (mut ws_sender, mut ws_receiver) = socket.split();
-            // Attach to ws
-            let (sg, mut rx) = state.worker_pool.attach_stream(ut.id, ut.user_id).await?;
+            
+            let (_sg, receivers) = state.worker_pool.subscribe_topics(ut.id, &ut.subscribed_topics).await?;
+            let mut stream_map = tokio_stream::StreamMap::new();
+            for (topic, rx) in receivers {
+                stream_map.insert(topic, tokio_stream::wrappers::BroadcastStream::new(rx));
+            }
+
             let mut hb_interval = tokio::time::interval(Duration::from_secs(30));
             hb_interval.tick().await; // consume first immediate tick
             let mut missed_heartbeats = 0;
@@ -225,23 +228,11 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
                                 missed_heartbeats = 0;
                                 continue 
                             }, 
-                            WsMessage::Ctl { msg } => {
-                                let _ = state.worker_pool.stream_message(ut.id, CtlMessage::Msg { msg: msg.0, id: sg.conn_id }).await;
-                            }
-                            WsMessage::Ltc { .. } => return Err("Ltc is server-sent".into())
+                            WsMessage::Feed { .. } => return Err("Feed is server-sent".into())
                         } 
                     }
-                    Some(lmsg) = rx.recv() => {
-                        if lmsg.id() != sg.conn_id { continue }
-                        match lmsg {
-                            LtcMessage::Msg { msg, .. } => {
-                                ws_sender.send(WsMessage::Ltc { msg: CKhronosValue(msg) }.to_msg()?).await?;
-                                continue 
-                            }
-                            LtcMessage::Close { .. } => {
-                                break;
-                            },
-                        }
+                    Some((topic, Ok(msg))) = stream_map.next() => {
+                        ws_sender.send(WsMessage::Feed { topic, msg: CKhronosValue(msg) }.to_msg()?).await?;
                     }
                 }
             }

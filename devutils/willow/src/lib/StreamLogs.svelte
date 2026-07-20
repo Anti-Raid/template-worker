@@ -1,8 +1,7 @@
 <script lang="ts">
-    import { Stream } from '$lib/msyscall';
+    import { FeedClient } from '$lib/msyscall';
     import { auth } from '$lib/auth.svelte';
     import type { KhronosValue } from '$lib/msyscall/khronosvalue';
-    import { encode, dexpand } from '$lib/msyscall/khronosvalue';
     import type { Id } from '$lib/msyscall/types/common';
     import MultiTextBox from '$lib/MultiTextBox.svelte';
 
@@ -11,11 +10,10 @@
     let logs = $state<{type: string, msg: string}[]>([]);
     let connected = $state(false);
     let isStreaming = $state(false);
-    let client: Stream | null = null;
+    let client: FeedClient | null = null;
     let logContainer: HTMLDivElement | undefined = $state();
     
     let topics = $state<string[]>(['print']);
-    let activeSubscriptions = new Set<string>();
 
     function prettyPrint(val: any): string {
         if (val instanceof Map) {
@@ -50,40 +48,22 @@
         }
         
         logs = []; // Clear logs when switching or starting
-        activeSubscriptions.clear();
-        
-        client = new Stream(
+        client = new FeedClient(
             auth.instanceUrl,
             auth.token || undefined,
             id,
-            (msg: KhronosValue) => {
-                if (msg instanceof Map) {
-                    const t = msg.get('t');
-                    const n = msg.get('n');
-                    const text = msg.get('msg');
-                    
-                    if (t === 'msg' && typeof text !== 'undefined') {
-                        const topic = String(n);
-                        if (topics.includes(topic)) {
-                            logs.push({ type: topic, msg: prettyPrint(text) });
-                            logs = [...logs];
-                            if (logContainer) {
-                                setTimeout(() => {
-                                    if (logContainer) logContainer.scrollTop = logContainer.scrollHeight;
-                                }, 0);
-                            }
-                        }
-                    }
+            $state.snapshot(topics),
+            (topic: string, msg: KhronosValue) => {
+                logs.push({ type: topic, msg: prettyPrint(msg) });
+                logs = [...logs];
+                if (logContainer) {
+                    setTimeout(() => {
+                        if (logContainer) logContainer.scrollTop = logContainer.scrollHeight;
+                    }, 0);
                 }
             },
             (status: boolean) => {
                 connected = status;
-                if (status && client) {
-                    for (const topic of topics) {
-                        client.send(dexpand(encode({ t: "sub", n: topic })));
-                        activeSubscriptions.add(topic);
-                    }
-                }
             }
         );
 
@@ -93,29 +73,6 @@
                 client = null;
             }
         };
-    });
-
-    // Handle topic changes
-    $effect(() => {
-        if (connected && client) {
-            const currentTopics = new Set(topics);
-            
-            // Sub to new topics
-            for (const topic of currentTopics) {
-                if (!activeSubscriptions.has(topic)) {
-                    client.send(dexpand(encode({ t: "sub", n: topic })));
-                    activeSubscriptions.add(topic);
-                }
-            }
-            
-            // Unsub from removed topics
-            for (const topic of activeSubscriptions) {
-                if (!currentTopics.has(topic)) {
-                    client.send(dexpand(encode({ t: "unsub", n: topic })));
-                    activeSubscriptions.delete(topic);
-                }
-            }
-        }
     });
 </script>
 

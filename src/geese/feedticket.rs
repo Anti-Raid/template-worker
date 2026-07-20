@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{CONFIG, worker::workervmmanager::Id};
 
-pub const UT_EXPIRATION_SECONDS: u64 = 90; // 90 seconds expiry
+pub const FT_EXPIRATION_SECONDS: u64 = 90; // 90 seconds expiry
 
 // Type alias for convenience
 type HmacSha256 = Hmac<Sha256>;
@@ -33,10 +33,12 @@ struct Payload<'a> {
     tenant_id: &'a str,
     user_id: u64,
     expires_at: u64,
+    #[serde(borrow)]
+    subscribed_topics: Vec<&'a str>,
 }
 
-fn construct_payload(tenant_type: &str, tenant_id: &str, user_id: u64, expires_at: u64) -> Result<Vec<u8>, crate::Error> {
-    rmp_serde::to_vec(&Payload { tenant_type, tenant_id, user_id, expires_at })
+fn construct_payload(tenant_type: &str, tenant_id: &str, user_id: u64, expires_at: u64, subscribed_topics: &[&str]) -> Result<Vec<u8>, crate::Error> {
+    rmp_serde::to_vec(&Payload { tenant_type, tenant_id, user_id, expires_at, subscribed_topics: subscribed_topics.to_vec() })
         .map_err(|e| format!("Failed to serialize payload: {}", e).into())
 }
 
@@ -46,14 +48,14 @@ fn decode_payload(payload: &[u8]) -> Result<Payload<'_>, crate::Error> {
 }
 
 /// Generates a presigned URL that is valid for `expires_in_seconds`
-pub fn create_userticket(tid: Id, user_id: UserId) -> Result<(String, String), crate::Error> {
+pub fn create_feedticket(tid: Id, user_id: UserId, subscribed_topics: &[&str]) -> Result<(String, String), crate::Error> {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-    let expires_at = now + UT_EXPIRATION_SECONDS;
+    let expires_at = now + FT_EXPIRATION_SECONDS;
 
     // The payload we are signing
     let ttype = tid.tenant_type();
     let tid = tid.tenant_id();
-    let payload = construct_payload(&ttype, &tid, user_id.get(), expires_at)?;
+    let payload = construct_payload(&ttype, &tid, user_id.get(), expires_at, subscribed_topics)?;
 
     let mut mac = HmacSha256::new_from_slice(CONFIG.blob_token.as_bytes()).expect("HMAC accepts keys of any size");
     mac.update(&payload);
@@ -64,13 +66,14 @@ pub fn create_userticket(tid: Id, user_id: UserId) -> Result<(String, String), c
     Ok((payload, signature))
 }
 
-pub struct UserTicket {
+pub struct FeedTicket {
     pub id: Id,
-    pub user_id: UserId
+    pub user_id: UserId,
+    pub subscribed_topics: Vec<String>
 }
 
 /// Verifies that a given signature is valid and has not expired
-pub fn verify_userticket(provided_payload: &str, provided_signature: &str) -> Result<UserTicket, VerifyError> {    
+pub fn verify_feedticket(provided_payload: &str, provided_signature: &str) -> Result<FeedTicket, VerifyError> {    
     // Decode the payload from hex
     let payload_bytes = hex::decode(provided_payload).map_err(|_| VerifyError::InvalidSignature)?;
     
@@ -94,8 +97,9 @@ pub fn verify_userticket(provided_payload: &str, provided_signature: &str) -> Re
         return Err(VerifyError::Expired);
     }
 
-    Ok(UserTicket {
+    Ok(FeedTicket {
         id: Id::from_parts(payload.tenant_type, payload.tenant_id).ok_or(VerifyError::InvalidSignature)?,
-        user_id: UserId::new(payload.user_id)
+        user_id: UserId::new(payload.user_id),
+        subscribed_topics: payload.subscribed_topics.into_iter().map(|s| s.to_string()).collect()
     })
 }

@@ -2,12 +2,11 @@ use dapi::{UserId, GuildId};
 use rand::distr::{Alphanumeric, SampleString};
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::Status;
-use crate::{geese::{state::{StateDb, StateDbFlags}, stream::{CtlMessage, LtcMessage}, tenantstate::{TenantState, TenantStateDb}}, mesophyll::connman::{SockFile, new_sockfile}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id as RealId}};
+use crate::{geese::{state::{StateDb, StateDbFlags}, tenantstate::{TenantState, TenantStateDb}}, mesophyll::connman::{SockFile, new_sockfile}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id as RealId}};
 use khronos_runtime::utils::khronos_value::KhronosValue as RealKhronosValue;
-use dashmap::{DashMap, Entry};
-use std::collections::HashMap;
+use dashmap::DashMap;
 use std::sync::Arc;
-use tokio::{net::UnixListener, sync::mpsc::{self, UnboundedReceiver, unbounded_channel}};
+use tokio::{net::UnixListener, sync::broadcast};
 
 /// Internal transport layer
 pub(super) mod pb {
@@ -94,7 +93,7 @@ impl MesophyllServer {
             state_db: StateDb::new(pool),
             num_workers,
             sock_file: Arc::new(new_sockfile(Alphanumeric.sample_string(&mut rand::rng(), 16), Alphanumeric.sample_string(&mut rand::rng(), 16))?),
-            attached_streams: AttachedStreams::default()
+            attached_streams: Arc::new(DashMap::new()),
         };
 
         // Setup UDS stream
@@ -176,36 +175,21 @@ impl pb::mesophyll_master_server::MesophyllMaster for MesophyllServer {
         Ok(tonic::Response::new(pb::Empty {}))
     }
 
-    async fn send_stream(&self, request: tonic::Request<pb::StreamMessage>) -> Result<tonic::Response<pb::Empty>, Status> {
+    async fn publish_feed(&self, request: tonic::Request<pb::PublishFeedMessage>) -> Result<tonic::Response<pb::Empty>, Status> {
         let req = request.into_inner();
         let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
 
-        if let Some(stream) = self.attached_streams.get(&id) {
-            let payload: LtcMessage = req.payload.ok_or_else(|| Status::invalid_argument("Missing payload"))?.to_real()?;
-            if let Some(stream) = stream.0.get(&payload.id()) {
-                let _ = stream.send(payload);
-            }
-        }
-        Ok(tonic::Response::new(pb::Empty {}))
-    }
-
-    async fn bulk_send_stream(&self, request: tonic::Request<pb::BulkStreamMessage>) -> Result<tonic::Response<pb::Empty>, Status> {
-        let req = request.into_inner();
-        let id = req.id.ok_or_else(|| Status::invalid_argument("Missing ID"))?.to_real_id();
-
-        if let Some(stream) = self.attached_streams.get(&id) {
-            let msg: RealKhronosValue = req.payload.ok_or_else(|| Status::invalid_argument("Missing payload"))?.to_real()?;
-            for conn_id in req.conn_ids {
-                if let Some(s) = stream.0.get(&(conn_id as usize)) {
-                    let _ = s.send(LtcMessage::Msg { msg: msg.clone(), id: conn_id as usize });
-                }
+        if let Some(tenant_streams) = self.attached_streams.get(&id) {
+            if let Some(tx) = tenant_streams.get(&req.topic) {
+                let payload: RealKhronosValue = req.payload.ok_or_else(|| Status::invalid_argument("Missing payload"))?.to_real()?;
+                let _ = tx.send(payload);
             }
         }
         Ok(tonic::Response::new(pb::Empty {}))
     }
 }
 
-type AttachedStreams = Arc<DashMap<RealId, (HashMap<usize, mpsc::UnboundedSender<LtcMessage>>, usize)>>;
+type AttachedStreams = Arc<DashMap<RealId, DashMap<String, broadcast::Sender<RealKhronosValue>>>>;
 
 /// Internal struct to send a shutdown to workers if a new worker gets spinned in its place
 struct WorkerConnGuard {
@@ -281,56 +265,38 @@ impl WorkerConn {
         Ok(())
     }
 
-    pub async fn attach_stream(&self, id: RealId, user_id: UserId) -> Result<(AttachedStreamGuard, UnboundedReceiver<LtcMessage>), crate::Error> {
-        let (tx, rx) = unbounded_channel();
-        let conn_id = {
-            let mut r = self.attached_streams.entry(id).or_default();
+    pub async fn subscribe_topics(&self, id: RealId, topics: &[String]) -> Result<(TopicGuard, Vec<(String, broadcast::Receiver<RealKhronosValue>)>), crate::Error> {
+        let tenant_streams = self.attached_streams.entry(id).or_default();
+        let mut receivers = Vec::new();
 
-            // Get a conn_id
-            let conn_id = r.1;
-            r.1 += 1;
-
-            r.0.insert(conn_id, tx);
-            conn_id
-        };
-        self.stream_message(id, CtlMessage::NewConn { user_id, id: conn_id }).await?;
-        Ok((AttachedStreamGuard { msc: self.clone(), id, conn_id }, rx))
-    }
-
-    pub async fn stream_message(&self, id: RealId, payload: CtlMessage) -> Result<(), crate::Error> {
-        let mut cli = self.client.clone();
-        let pb_payload = pb::AnyValue::from_real(&payload)?;
-
-        let msg = pb::StreamMessage {
-            id: Some(pb::Id::from_real_id(&id)),
-            payload: Some(pb_payload),
-        };
-        cli.send_stream(msg).await.map_err(|e| e.to_string())?;
-        Ok(())
-    }
-}
-
-pub struct AttachedStreamGuard {
-    msc: WorkerConn,
-    pub id: RealId,
-    pub conn_id: usize
-}
-
-impl Drop for AttachedStreamGuard {
-    fn drop(&mut self) {
-        let msc = self.msc.clone();
-        let id = self.id;
-        let conn_id = self.conn_id;
-
-        if let Entry::Occupied(mut entry) = msc.attached_streams.entry(id) {
-            entry.get_mut().0.remove(&conn_id);
-            if entry.get().0.is_empty() {
-                entry.remove();
-            }
+        for topic in topics {
+            let rx = {
+                let tx = tenant_streams.entry(topic.clone()).or_insert_with(|| broadcast::channel(256).0);
+                tx.subscribe()
+            };
+            receivers.push((topic.clone(), rx));
         }
 
-        tokio::spawn(async move {
-            let _ = msc.stream_message(id, CtlMessage::CloseConn { id: conn_id }).await; // try to send a CloseConn
-        });
+        Ok((TopicGuard { msc: self.clone(), id, topics: topics.to_vec() }, receivers))
+    }
+}
+
+pub struct TopicGuard {
+    msc: WorkerConn,
+    pub id: RealId,
+    pub topics: Vec<String>
+}
+
+impl Drop for TopicGuard {
+    fn drop(&mut self) {
+        if let Some(tenant) = self.msc.attached_streams.get(&self.id) {
+            for topic in &self.topics {
+                tenant.remove_if(topic, |_, tx| tx.receiver_count() == 0);
+            }
+            if tenant.is_empty() {
+                drop(tenant);
+                self.msc.attached_streams.remove_if(&self.id, |_, tenant| tenant.is_empty());
+            }
+        }
     }
 }

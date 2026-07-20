@@ -24,7 +24,7 @@ local function EventManager(ctx: Primitives.TemplateContext): Primitives.EventMa
         }), {
             print = function(...)
                 local str = (typesext.fmtpretty :: any)(...)
-                ctx.stream.publish("print", { type = "Log", message = str, source = "builtins" })
+                ctx.feed.publish("print", { type = "Log", message = str, source = "builtins" })
             end
         })
     } -- map of all attached isolates
@@ -87,12 +87,12 @@ local function EventManager(ctx: Primitives.TemplateContext): Primitives.EventMa
 
     local function dispatch(event: Primitives.Event): {Primitives.DispatchResult}
         if attachedisolatescount == 0 then return {} end -- unlikely but could happen
-        ctx.stream.publish("debug", "Dispatching event " .. event.name)
+        ctx.feed.publish("debug", "Dispatching event " .. event.name)
         local results = table.create<<Primitives.DispatchResult>>(attachedisolatescount)
         for _, isol in attachedisolates do 
             local ret = _runEventResult(isol, ctx, event)
             if ret.type == "err" then
-                ctx.stream.publish("debug", { message = ret.value, source = isol.id })
+                ctx.feed.publish("debug", { message = ret.value, source = isol.id })
             end
             table.insert(results, ret)
         end
@@ -135,70 +135,12 @@ local function EventManager(ctx: Primitives.TemplateContext): Primitives.EventMa
 end
 
 --- @noyield
-local function StreamManager(ctx: Primitives.TemplateContext): Primitives.StreamManager
-    local connections: {[number]: string} = {}
-    local subscriptions: {[string]: {[number]: boolean}} = {}
-    local stream_tx = ctx.btd().stream_tx
-    local stream_rx = ctx.btd().stream_rx
+local function FeedManager(ctx: Primitives.TemplateContext): Primitives.FeedManager
+    local feed_tx = ctx.btd().feed_tx
 
-    local function close(id: number)
-        stream_tx:send({ op = "Close", id = id })
-    end
-    
     local function publish(topic: string, msg: any)
-        local subs = subscriptions[topic]
-        if not subs then return end
-        local conn_ids = {}
-        local payload: Primitives.StreamClientPayload = { t = "msg" :: "msg", n = topic, msg = msg }
-        for id, _ in subs do
-            table.insert(conn_ids, id)
-        end
-        stream_tx:pubsync(conn_ids, payload)
+        feed_tx:pubsync(topic, msg)
     end
-    
-    local function start_background_task()
-        task.spawn(function()
-            local ok, _err = pcall(function()
-                while true do
-                    local msg = stream_rx:recv()
-                    if not msg then break end
-                    
-                    if msg.type == "NewConn" then
-                        connections[msg.id] = msg.user_id
-                    elseif msg.type == "CloseConn" then
-                        connections[msg.id] = nil
-                        for _, subs in subscriptions do
-                            subs[msg.id] = nil
-                        end
-                    elseif msg.type == "Msg" then
-                        local payload = msg.msg :: Primitives.StreamClientPayload
-                        if type(payload) == "table" and type(payload.n) == "string" then
-                            if payload.t == "sub" then
-                                local topic = payload.n
-                                if not subscriptions[topic] then subscriptions[topic] = {} end
-                                subscriptions[topic][msg.id] = true
-                            elseif payload.t == "unsub" then
-                                local topic = payload.n
-                                if subscriptions[topic] then subscriptions[topic][msg.id] = nil end
-                            elseif payload.t == "msg" and payload.msg ~= nil then
-                                -- Message routing can be added here if needed in the future
-                            else
-                                close(msg.id)
-                            end
-                        else
-                            close(msg.id)
-                        end
-                    end
-                end
-            end)
-            
-            if not ok then
-                task.wait(1)
-                start_background_task()
-            end
-        end)
-    end
-    start_background_task()
     
     return table.freeze({
         publish = publish
@@ -226,23 +168,23 @@ local function newinitloop(syscall: runtime.RawSyscall, ts: runtime.TenantState,
     local function dotenantstate() return tenantstate end
     local eventmanager: Primitives.EventManager
     local discord: Discord.DiscordClient
-    local streammanager: Primitives.StreamManager
+    local feedmanager: Primitives.FeedManager
     local ctx: Primitives.TemplateContext = {
         syscall = dosyscall,
         btd = dobtd,
         tenantstate = dotenantstate,
         loop = eventmanager,
         discord = discord,
-        stream = streammanager,
+        feed = feedmanager,
     }
     eventmanager = EventManager(ctx)
     discord = Discord(ctx)
-    streammanager = StreamManager(ctx)
+    feedmanager = FeedManager(ctx)
 
     local ctxany = ctx :: any
     ctxany.discord = discord
     ctxany.loop = eventmanager
-    ctxany.stream = streammanager
+    ctxany.feed = feedmanager
     
     return table.freeze{ctx=ctx, updatetenantstate = function(newts: runtime.TenantState) tenantstate = newts end}    
 end
@@ -250,6 +192,6 @@ end
 return {
     newinitloop = newinitloop,
     EventManager = EventManager,
-    StreamManager = StreamManager,
+    FeedManager = FeedManager,
     Discord = Discord
 }

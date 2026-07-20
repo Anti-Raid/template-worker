@@ -3,10 +3,9 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender as OneShotSender;
 use std::panic::AssertUnwindSafe;
 
-use crate::geese::stream::CtlMessage;
+
 use crate::geese::tenantstate::TenantState;
 use crate::worker::limits::MAX_VM_THREAD_STACK_SIZE;
-use crate::worker::worker::WorkerFastPath;
 use crate::worker::workerdispatch::SimpleEvent;
 use crate::worker::workerstate::WorkerState;
 use super::{worker::Worker, workervmmanager::Id};
@@ -31,10 +30,6 @@ enum WorkerThreadMessage {
         event: SimpleEvent,
         tx: Option<OneShotSender<Result<KhronosValue, crate::Error>>>,
     },
-    StreamMsg {
-        id: Id,
-        msg: CtlMessage
-    },
 }
 
 /// WorkerThread provides a simple thread implementation in which a ``Worker`` runs in its own thread with messages
@@ -45,26 +40,22 @@ pub struct WorkerThread {
     tx: UnboundedSender<WorkerThreadMessage>,
     /// The id of the worker thread, used for routing
     id: usize,
-    /// Fast-path for stream_msg etc.
-    wfp: WorkerFastPath,
 }
 
 impl WorkerThread {
     /// Creates a new WorkerThread with the given cache data and worker state
     pub fn new(state: WorkerState, id: usize) -> Result<Self, crate::Error> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-
-        let wfp = WorkerFastPath::default(); // shared fast-path between workerthread and inner
         
-        Self::create_thread(id, state, wfp.clone(), rx)?;
+        Self::create_thread(id, state, rx)?;
         
-        let worker_thread = Self { tx, id, wfp };
+        let worker_thread = Self { tx, id };
 
        Ok(worker_thread)
     }
 
     /// `id` is the worker thread ID, used for routing. `state` is the state to create the worker with. `rx` is the channel receiver for receiving messages from the worker thread.
-    fn create_thread(id: usize, state: WorkerState, wfp: WorkerFastPath, mut rx: UnboundedReceiver<WorkerThreadMessage>) -> Result<(), crate::Error> {
+    fn create_thread(id: usize, state: WorkerState, mut rx: UnboundedReceiver<WorkerThreadMessage>) -> Result<(), crate::Error> {
         std::thread::Builder::new()
             .name(format!("lua-vm-threadpool-{id}"))
             .stack_size(MAX_VM_THREAD_STACK_SIZE)
@@ -76,7 +67,7 @@ impl WorkerThread {
                         .expect("Failed to create tokio runtime");
 
                     rt.block_on(async move {
-                        let worker = Worker::new(state, wfp).await.expect("Failed to setup worker");
+                        let worker = Worker::new(state).await.expect("Failed to setup worker");
 
                         // Listen to messages and handle them
                         while let Some(msg) = rx.recv().await {
@@ -111,12 +102,7 @@ impl WorkerThread {
 
                                     let _ = tx.send(res.map_err(|e| e.to_string().into()));
                                 }
-                                WorkerThreadMessage::StreamMsg { id, msg } => {
-                                    match worker.vm_manager.get_vm_for(id, &worker.dispatch.worker_state, &worker.dispatch.tenant_state) {
-                                        Ok(v) => { let _ = v.stream_to_luau.send(msg); },
-                                        Err(e) => println!("Failed to get VM for ID {id:?}: {e}")
-                                    }
-                                }
+
                             }
                         }
                     });
@@ -158,17 +144,7 @@ impl WorkerThread {
         Ok(())
     }
 
-    pub fn stream_msg(&self, id: Id, msg: CtlMessage) -> Result<(), crate::Error> {
-        // Fast-path: avoid WorkerThread and perform direct dispatch if possible
-        if let Some(tx) = self.wfp.stream_to_luau.get(&id) {
-            tx.send(msg).map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
-            return Ok(())
-        }
 
-        self.tx.send(WorkerThreadMessage::StreamMsg { id, msg })
-            .map_err(|e| format!("Failed to send message to worker thread: {e}"))?;
-        Ok(())
-    }
 
     pub async fn drop_tenant(&self, id: Id) -> Result<(), crate::Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
