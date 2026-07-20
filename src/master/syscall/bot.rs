@@ -233,17 +233,17 @@ impl MBotSyscall {
                         }
                     }
                 }
-                let topics_json = serde_json::json!({
-                    "topics": requested_topics
-                }).to_string();
-                let evt = SimpleEvent::new_json_string("FeedTicketRequest".to_string(), Some(user_id.to_string()), topics_json);
-                let res = handler.worker_pool.dispatch_event(id.into(), evt).await;
-                if res.is_err() {
-                    return Err(MSyscallError::Unauthorized { reason: "Worker rejected ticket request" });
-                }
+                
+                let topics_kv = KhronosValue::Map(
+                    vec![(KhronosValue::Text("topics".to_string()), KhronosValue::List(requested_topics.iter().map(|x| KhronosValue::Text(x.to_string())).collect()))]
+                );
+
+                // Check with luau by dispatching a FeedTicketRequest
+                let evt = SimpleEvent::new_khronos_value("FeedTicketRequest".to_string(), Some(user_id.to_string()), topics_kv);
+                handler.worker_pool.dispatch_event(id.into(), evt).await?;
 
                 let topics_refs: Vec<&str> = requested_topics.iter().map(|s| s.as_str()).collect();
-                let (payload, sig) = crate::geese::feedticket::create_feedticket(id, user_id, &topics_refs)?;
+                let (payload, sig) = crate::geese::feedticket::create_feedticket(id, user_id, topics_refs)?;
                 Ok(MBotSyscallRet::FeedTicket { payload, sig }) 
             }
             Self::AdminRelaxedDispatchEvent { id, name, data, allow_non_web_event_names, allow_self_event, mock_id } => {

@@ -37,8 +37,8 @@ struct Payload<'a> {
     subscribed_topics: Vec<&'a str>,
 }
 
-fn construct_payload(tenant_type: &str, tenant_id: &str, user_id: u64, expires_at: u64, subscribed_topics: &[&str]) -> Result<Vec<u8>, crate::Error> {
-    rmp_serde::to_vec(&Payload { tenant_type, tenant_id, user_id, expires_at, subscribed_topics: subscribed_topics.to_vec() })
+fn construct_payload(tenant_type: &str, tenant_id: &str, user_id: u64, expires_at: u64, subscribed_topics: Vec<&str>) -> Result<Vec<u8>, crate::Error> {
+    rmp_serde::to_vec(&Payload { tenant_type, tenant_id, user_id, expires_at, subscribed_topics })
         .map_err(|e| format!("Failed to serialize payload: {}", e).into())
 }
 
@@ -48,7 +48,7 @@ fn decode_payload(payload: &[u8]) -> Result<Payload<'_>, crate::Error> {
 }
 
 /// Generates a presigned URL that is valid for `expires_in_seconds`
-pub fn create_feedticket(tid: Id, user_id: UserId, subscribed_topics: &[&str]) -> Result<(String, String), crate::Error> {
+pub fn create_feedticket(tid: Id, user_id: UserId, subscribed_topics: Vec<&str>) -> Result<(String, String), crate::Error> {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
     let expires_at = now + FT_EXPIRATION_SECONDS;
 
