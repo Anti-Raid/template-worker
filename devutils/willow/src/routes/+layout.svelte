@@ -1,166 +1,70 @@
 <script lang="ts">
 	import './layout.css';
 	import favicon from '$lib/assets/favicon.svg';
-	import TextBox from '$lib/TextBox.svelte';
-	import Button from '$lib/Button.svelte';
-	import { auth } from '$lib/auth.svelte';
+    import { auth } from '$lib/auth.svelte';
+    import { config } from '$lib/config';
     import { resolve } from '$app/paths';
 
 	let { children } = $props();
-	let isLoggingIn = $state(false);
-	let loginState = $state("Prepare");
-	let loginError = $state("");
-	const login = async () => {
-		loginState = "GetBotConfig"
-		let bcfg = await auth.getBotConfig()
-		loginState = "WaitForUserOauth"
-		let loginUrl = `https://discord.com/api/oauth2/authorize?client_id=${bcfg.client_id}&scope=identify%20guilds&redirect_uri=${window.location.origin}/authorize&response_type=code`
-		const popup = window.open(loginUrl, "Oauth2 Login", "popup")
-		if (!popup) {
-			throw new Error("Popup blocked! Please allow popups for this site.");
-		}
-		// Wait for popup to be done with promises
-		const authData: string = await new Promise((resolve, reject) => {   
-			// Poll for popup closed 
-            const checkPopup = setInterval(() => {
-                if (popup.closed) {
-                    clearInterval(checkPopup);
-                    window.removeEventListener("message", messageListener);
-                    reject(new Error("Login popup closed"));
-                }
-            }, 500);
-
-            const messageListener = (event: MessageEvent<any>) => {
-                if (event.origin !== window.location.origin) return;
-
-                if (event.data && event.data.op === "GotCode") {
-                    clearInterval(checkPopup);
-                    window.removeEventListener("message", messageListener);
-                    popup.close(); // Close the popup for the user
-                    resolve(event.data.code); // Resolve the promise with the auth code
-                }
-            };
-
-            window.addEventListener("message", messageListener);
-        });
-
-		if(authData == null) {
-			throw new Error("User cancelled login request?")
-		}
-
-		loginState = `GotCode(${authData})`
-
-		// Get API session
-		let sess = await auth.createLoginSession(authData, `${window.location.origin}/authorize`)
-		if(!sess.user) throw new Error("CreateLoginSession did not return a user as it is required to!")
-		auth.session = {session: sess.session, token: sess.token, user: sess.user}
-		auth.save()
-
-		// wipe existing error states
-		checkAuthStatus = null
-		loginError = ""
-	}
-
-	let checkAuthStatus: boolean | null = $state(null);
+    let showUserMenu = $state(false);
 </script>
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </svelte:head>
 
-<header class="p-4 border-b">
-	<h1 class="text-2xl font-bold"><a href={resolve('/')}>willow</a></h1>
-</header>
+<div class="min-h-screen bg-gray-50 font-['Inter',sans-serif] text-gray-900 flex flex-col">
+    <header class="bg-white/80 backdrop-blur-md border-b border-gray-200 sticky top-0 z-50 transition-all shadow-sm">
+        <div class="max-w-[1600px] mx-auto px-4 h-16 flex items-center justify-between w-full">
+            <div class="flex items-center gap-2">
+                <img src="/logo.webp" alt="AntiRaid" class="w-8 h-8 rounded-lg shadow-sm" />
+                <h1 class="text-xl font-bold tracking-tight text-gray-900"><a href={resolve('/')}>AntiRaid</a></h1>
+            </div>
+            
+            <div class="flex items-center gap-4">
+                <a href={config.inviteUrl} target="_blank" class="text-sm font-medium bg-blue-100 hover:bg-blue-200 text-blue-700 px-4 py-2 rounded-lg transition-colors border border-blue-200 flex items-center">
+                    Invite Bot
+                </a>
+                {#if auth.session}
+                    <div class="relative">
+                        <button 
+                            class="flex items-center gap-3 bg-gray-50/80 hover:bg-gray-100 px-3 py-1.5 rounded-full border border-gray-200 shadow-sm transition-colors cursor-pointer"
+                            onclick={() => showUserMenu = !showUserMenu}
+                        >
+                            {#if auth.session.user.avatar}
+                                <img 
+                                    src={`https://cdn.discordapp.com/avatars/${auth.session.user.id}/${auth.session.user.avatar}.png`} 
+                                    alt={auth.session.user.username} 
+                                    class="w-8 h-8 rounded-full shadow-sm"
+                                />
+                            {:else}
+                                <div class="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-sm">
+                                    {auth.session.user.username.substring(0, 1).toUpperCase()}
+                                </div>
+                            {/if}
+                            <div class="hidden sm:block text-sm font-medium">
+                                {auth.session.user.global_name ?? auth.session.user.username}
+                            </div>
+                            <svg class="w-4 h-4 text-gray-500 {showUserMenu ? 'rotate-180' : ''} transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                        </button>
+                        {#if showUserMenu}
+                            <div class="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-lg border border-gray-100 py-1 z-50">
+                                <button 
+                                    class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 hover:text-red-700 transition-colors flex items-center gap-2"
+                                    onclick={() => { auth.session = null; auth.save(); showUserMenu = false; }}>
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                                    Logout
+                                </button>
+                            </div>
+                        {/if}
+                    </div>
+                {/if}
+            </div>
+        </div>
+    </header>
 
-<main class="p-4 max-w-6xl mx-auto">
-	<div class="mb-8 flex flex-col gap-2">
-		{#if !auth.session}
-			<div class="flex items-end gap-2">
-				<div class="flex-1">
-					<TextBox 
-						id="instance-url"
-						label="Instance URL" 
-						placeholder="https://your-instance.com" 
-						bind:value={auth.instanceUrl}
-					/>
-				</div>
-			</div>
-			<hr />
-			<Button onclick={async () => {
-				isLoggingIn = true
-				try {
-					await login()
-				} catch (err) {
-					console.error(err)
-					loginError = err ? err.toString() : "Unknown error"
-					// TODO: Handle error
-				}
-				isLoggingIn = false
-			}} class="mb-4">
-				{isLoggingIn ? "Logging In..." : "Login"}
-			</Button>
-			{#if isLoggingIn}
-				<p>Login State: {loginState}</p>
-			{/if}
-			{#if loginError}
-				<p class="text-red-700">{loginError}</p>
-			{/if}
-		{:else}
-			<div class="flex items-end gap-2">
-				<div class="flex-1">
-					<TextBox 
-						id="instance-url"
-						label="Instance URL" 
-						placeholder="https://your-instance.com" 
-						value={auth.instanceUrl}
-						readonly
-					/>
-				</div>
-			</div>
-			<Button onclick={() => {
-				auth.session = null
-				auth.save()
-			}} class="mb-4">
-				Logout
-			</Button>
-			<div class="flex items-center gap-4 p-4 border rounded-lg bg-gray-50 mb-4">
-				{#if auth.session.user.avatar}
-					<img 
-						src={`https://cdn.discordapp.com/avatars/${auth.session.user.id}/${auth.session.user.avatar}.png`} 
-						alt={auth.session.user.username} 
-						class="w-12 h-12 rounded-full shadow-sm"
-					/>
-				{:else}
-					<div class="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-lg">
-						{auth.session.user.username.substring(0, 1).toUpperCase()}
-					</div>
-				{/if}
-				<div class="flex-1 min-w-0">
-					<div class="flex items-baseline gap-2">
-						<span class="font-bold text-gray-900 truncate">
-							{auth.session.user.global_name ?? auth.session.user.username}
-						</span>
-						{#if auth.session.user.global_name}
-							<span class="text-sm text-gray-500 truncate">@{auth.session.user.username}</span>
-						{/if}
-					</div>
-					<p class="text-xs text-gray-400 font-mono truncate">{auth.session.user.id}</p>
-				</div>
-			</div>
-			<Button onclick={async () => {
-				let isAuthorized = await auth.checkAuth()
-				checkAuthStatus = isAuthorized
-			}} class="mb-4">
-				Check Auth
-			</Button>
-
-			{#if checkAuthStatus}
-				<p class="text-green-400">Session valid!</p>
-			{:else if checkAuthStatus != null}
-				<p class="text-red-400">Session invalid! Logout and login?</p>
-			{/if}
-		{/if}
-	</div>
-
-	{@render children()}
-</main>
+    <div class="flex-1 w-full">
+        {@render children()}
+    </div>
+</div>

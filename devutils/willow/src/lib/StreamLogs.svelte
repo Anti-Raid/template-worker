@@ -1,6 +1,7 @@
 <script lang="ts">
     import { FeedClient } from '$lib/msyscall';
     import { auth } from '$lib/auth.svelte';
+    import { config } from '$lib/config';
     import type { KhronosValue } from '$lib/msyscall/khronosvalue';
     import type { Id } from '$lib/msyscall/types/common';
     import MultiTextBox from '$lib/MultiTextBox.svelte';
@@ -49,7 +50,7 @@
         
         logs = []; // Clear logs when switching or starting
         client = new FeedClient(
-            auth.instanceUrl,
+            config.instanceUrl,
             auth.token || undefined,
             id,
             $state.snapshot(topics),

@@ -25,8 +25,7 @@ const defaultState: State = {
     baseGuildDatasFetchErrors: {},
     dispatchEvent: { event: "", data: {Nil: null}},
     settings: {},
-    settingsErr: []
-    
+    settingsErr: [],
 }
 export const stateKey = "mainpagestate.willowv1"
 

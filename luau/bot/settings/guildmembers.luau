@@ -13,7 +13,7 @@ local createform = settings.FormBuilder()
 local updateform = settings.FormBuilder()
 :text("user_id", "User", { disabled = true }, {type="Member"})
 :array_text("perm_overrides", "Permission Overrides")
-:text("created_at", "Created At", { disabled = true })
+:datetime("created_at", "Created At", { disabled = true })
 :button("delete", "Remove Member Permissions", "Danger", false) -- delete the setting
 :button("update", "Update Permissions", "Primary", true)
 

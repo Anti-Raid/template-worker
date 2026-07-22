@@ -6,7 +6,7 @@ import type { UserSession } from './msyscall/types/auth';
 import type { Id } from './msyscall/types/common';
 import type { PartialUser } from './msyscall/types/discord';
 
-const defaultInstanceUrl = "http://localhost:60000"
+import { config } from './config';
 
 export interface Session {
     session: UserSession;
@@ -29,7 +29,6 @@ const tryGetSession = (): Session | null => {
 }
 
 class Auth {
-	instanceUrl = $state(browser ? localStorage.getItem('instance_url') ?? defaultInstanceUrl : defaultInstanceUrl);
 	session = $state(tryGetSession());
 	token = $derived(this.session?.token ?? null)
 
@@ -40,16 +39,15 @@ class Auth {
 			} else {
 				localStorage.removeItem("session")
 			}
-			localStorage.setItem('instance_url', this.instanceUrl);
 		}
 	}
 
 	async msyscall(call: MSyscallArgs): Promise<Result<MSyscallRet, MSyscallError>> {
-		if(!this.instanceUrl) {
+		if(!config.instanceUrl) {
 			let e: MSyscallError = {op: "Generic", message: "No instance URL set"}
 			return new Result({ok: false, res: e as any})
 		}
-		return await msyscall(this.instanceUrl, this.token ?? undefined, call)
+		return await msyscall(config.instanceUrl, this.token ?? undefined, call)
 	}
 
 	async checkAuth(): Promise<boolean> {
