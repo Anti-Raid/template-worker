@@ -114,12 +114,12 @@
 						</button>
 					</div>
 
-					<header class="flex items-center justify-between mb-6 border-b border-gray-50">
+					<header class="flex items-center justify-between py-2.5 px-3 border-b border-gray-100 bg-gray-50/50 -mx-3 -mt-3 rounded-t-3xl">
 						<div class="flex flex-col gap-0.5">
-							<h3 id="form-title-{form.id}" class="text-sm font-black uppercase tracking-widest text-gray-400">
+							<h3 id="form-title-{form.id}" class="text-sm font-bold uppercase tracking-wider text-gray-700">
 								{form.title || 'Untitled Form'}
 							</h3>
-							<code class="text-[10px] text-gray-400 font-mono">ID: {form.id}</code>
+							<code class="text-[10px] text-gray-400 font-mono bg-gray-100 px-1 rounded w-max">ID: {form.id}</code>
 						</div>
 						
 						<span class="flex items-center gap-1.5 px-2.5 py-1 bg-blue-600 text-white animate-pulse rounded-full text-[10px] font-black uppercase tracking-wider border border-blue-100/50 shadow-sm transition-colors">
@@ -141,18 +141,22 @@
 					class="p-3 border rounded-3xl bg-white shadow-sm border-gray-200 animate-in fade-in slide-in-from-bottom-2 duration-300 relative group transition-all"
 					aria-labelledby="form-title-{form.id}"
 				>
-					<header class="flex items-center justify-between mb-6 border-b border-gray-50">
-						<div class="flex flex-col gap-0.5">
-							<h3 id="form-title-{form.id}" class="text-sm font-black uppercase tracking-widest text-gray-400">
-								{form.title || 'Untitled Form'}
-							</h3>
-							<code class="text-[10px] text-gray-400 font-mono">ID: {form.id}</code>
+					<details class="group/form">
+						<summary class="flex items-center justify-between cursor-pointer select-none py-2.5 px-3 border-b border-gray-100 hover:bg-gray-50/50 -mx-3 -mt-3 rounded-t-3xl transition-colors">
+							<div class="flex items-center gap-2">
+								<svg class="w-4 h-4 text-gray-400 group-open/form:rotate-90 transition-transform shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+								<div class="flex flex-col gap-0.5">
+									<h3 id="form-title-{form.id}" class="text-sm font-bold uppercase tracking-wider text-gray-700 group-hover/form:text-blue-600 transition-colors">
+										{form.title || 'Untitled Form'}
+									</h3>
+									<code class="text-[10px] text-gray-400 font-mono bg-gray-100 px-1 rounded w-max">ID: {form.id}</code>
+								</div>
+							</div>
+						</summary>
+						<div class="pt-5 flex flex-col gap-5 transition-all">
+							<FormInner template={template} form={forms} formid={form.id} formidx={i} formsetid={id} actions={actions}/>
 						</div>
-					</header>
-
-					<div class="flex flex-col gap-5 transition-all">
-						<FormInner template={template} form={forms} formid={form.id} formidx={i} formsetid={id} actions={actions}/>
-					</div>
+					</details>
 				</section>
 			{/each}
 		{/if}

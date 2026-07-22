@@ -145,16 +145,20 @@
 {/each}
 
 {#each actions as a, i}
-    <Button disabled={clickedBtns[i] === null} onclick={async () => {
-        clickedBtns[i] = null
-        try {
-            await submit(a.id, a.send_form)
-            delete clickedBtns[i]
-        } catch (err) {
-            clickedBtns[i] = err?.toString() || "Unknown error sending action"
-        }
-    }}>
-        {a.text} ({a.style})
+    <Button 
+        variant={a.style.toLowerCase()}
+        disabled={clickedBtns[i] === null} 
+        onclick={async () => {
+            clickedBtns[i] = null
+            try {
+                await submit(a.id, a.send_form)
+                delete clickedBtns[i]
+            } catch (err) {
+                clickedBtns[i] = err?.toString() || "Unknown error sending action"
+            }
+        }}
+    >
+        {a.text}
     </Button>
     {#if typeof clickedBtns[i] === "string"}
         <ErrorBox error={clickedBtns[i]}/>
