@@ -2071,7 +2071,7 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 [[package]]
 name = "luau0-src"
 version = "0.18.3+luau730"
-source = "git+https://github.com/mluau/luau-src-rs#3f2e15d5bcde8466c30229c43dd6aaa70aedbe75"
+source = "git+https://github.com/mluau/luau-src-rs#4a4db7e119aa7e1e5811231401b90dc65a0a3512"
 dependencies = [
  "cc",
 ]
@@ -4005,9 +4005,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-stream"
-version = "0.1.18"
+version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32da49809aab5c3bc678af03902d4ccddea2a87d028d86392a4b1560c6906c70"
+checksum = "a3d06f0b082ba57c26b79407372e57cf2a1e28124f78e9479fe80322cf53420b"
 dependencies = [
  "futures-core",
  "pin-project-lite",
