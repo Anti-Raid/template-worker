@@ -25,7 +25,7 @@ local function fetchAsset(ctx: Primitives.TemplateContext, g: apitypes.GuildObje
         error(`Unknown asset type: {icon}`)
     end
 
-    return cdn(ctx).downloadfromdiscordasblob(url)
+    return cdn(ctx).downloadfromdiscord(url)
 end
 
 local function fetchAssets(ctx: Primitives.TemplateContext, g: apitypes.GuildObject, assets: {Asset}): {[Asset]: blob.Blob?}

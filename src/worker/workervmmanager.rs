@@ -292,7 +292,9 @@ impl WorkerVmManager {
             RuntimeCreateOpts {
                 disable_task_lib: false,
                 time_limit: Some(MAX_TEMPLATES_EXECUTION_TIME),
-                give_time: TEMPLATE_GIVE_TIME
+                give_time: TEMPLATE_GIVE_TIME,
+                wasm_max_fuel_per_slice: None,
+                wasm_max_memory_bytes: None,
             },
             None::<(fn(&Lua, LuaThread) -> Result<(), LuaError>, fn(LuaLightUserData) -> ())>,
             // We start with builtins *always* as the root template, the builtins root template then spawns in all other templates to dispatch

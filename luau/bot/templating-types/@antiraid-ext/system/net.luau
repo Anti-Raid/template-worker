@@ -1,6 +1,5 @@
 --!strict
 local datetime = require("@antiraid/datetime")
-local blob = require("@antiraid-core/blob")
 local runtime = require("@antiraid-core/plugins/runtime")
 local Primitives = require"@antiraid-core/primitives"
 
@@ -33,42 +32,25 @@ local function metacall(ctx: Primitives.TemplateContext, req: runtime.MetaCall):
 end
 
 export type Cdn = {    
-    read downloadfromdiscordasbuffer: (url: string) -> buffer,
-    read downloadfromdiscordasblob: (url: string) -> blob.Blob,
+    read downloadfromdiscord: (url: string) -> buffer,
 }
 
 local function Cdn(ctx: Primitives.TemplateContext): Cdn 
-    local function downloadfromdiscordasbuffer(url: string): buffer
+    local function downloadfromdiscord(url: string): buffer
         local res = cdncall(ctx, {
             op = "DownloadFile",
-            url = url,
-            as_buffer = true
+            url = url
         })
 
         if res.op ~= "Buffer" then
-            error(`[Cdn] downloadfromdiscordasbuffer failed: unexpected response '{res.op}'`, 2)
-        end
-
-        return res.data
-    end
-
-    local function downloadfromdiscordasblob(url: string): blob.Blob
-        local res = cdncall(ctx, {
-            op = "DownloadFile",
-            url = url,
-            as_buffer = false
-        })
-
-        if res.op ~= "Blob" then
-            error(`[Cdn] downloadfromdiscordasblob failed: unexpected response '{res.op}'`, 2)
+            error(`[Cdn] downloadfromdiscord failed: unexpected response '{res.op}'`, 2)
         end
 
         return res.data
     end
 
     return table.freeze{
-        downloadfromdiscordasbuffer = downloadfromdiscordasbuffer,
-        downloadfromdiscordasblob = downloadfromdiscordasblob
+        downloadfromdiscord = downloadfromdiscord,
     }
 end
 

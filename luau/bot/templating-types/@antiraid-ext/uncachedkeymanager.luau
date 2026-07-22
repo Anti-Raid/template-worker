@@ -32,7 +32,7 @@ export type SignedUrl = {
 --- An uncached key manager provides methods to add, remove and check keys with *no* caching
 export type UncachedKeyManager<T> = {
     --- Inserts or updates a new key
-    read set: (key: string, data: T, blob: blob.BlobTaker?) -> (),
+    read set: (key: string, data: T, blob: blob.Blob?) -> (),
 
     --- Removes a key
     read remove: (key: string) -> (),
@@ -68,7 +68,7 @@ local function UncachedKeyManager<T>(ctx: Primitives.TemplateContext, basescope:
         ctx.syscall({op="State", ops={{ op = "KvDelete", key = key, scope = basescope }}})
     end
 
-    local function set(key: string, data: T, blob: blob.BlobTaker?)
+    local function set(key: string, data: T, blob: blob.Blob?)
         ctx.syscall({op="State", ops={{ op = "KvSet", key = key, scope = basescope, value = data, blob = blob }}})
     end
 

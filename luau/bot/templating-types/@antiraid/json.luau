@@ -11,7 +11,7 @@ end
 --- @param jsonstring: string (The JSON string or buffer containing the JSON data to parse.)
 --- @return any (The Lua value represented by the JSON string.)
 --- Parses a JSON string and returns the corresponding Lua value.
-local function fromjsonstring(jsonstring: blob.BlobTaker): any
+local function fromjsonstring(jsonstring: blob.Blob): any
     error("Implemented internally in AntiRaid runtime!")
 end
 

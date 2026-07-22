@@ -140,7 +140,7 @@ export type StateOp = {
     key: string,
     scope: string,
     value: khronosvalue.KhronosValue,
-    blob: blob.BlobTaker?
+    blob: blob.Blob?
 } | {
     op: "KvDelete",
     key: string,
@@ -179,8 +179,11 @@ export type StateOp = {
     scope: string
 }
 
-export type CdnCall = { op: "DownloadFile", url: string, as_buffer: boolean } -- only discord cdn urls are supported
-export type CdnResult = { op: "Blob", data: blob.Blob } | { op: "Buffer", data: buffer }
+export type CdnCall = { op: "DownloadFile", url: string } -- only discord cdn urls are supported
+export type CdnResult = {
+    op: "Buffer",
+    data: buffer
+}
 
 export type MetaCall = { op: "GetStats" } 
 export type MetaResult = { op: "Stats", total_guilds: number, total_users: number, last_started_at: datetime.DateTime, } 

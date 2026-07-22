@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use khronos_runtime::{primitives::blob::Blob, rt::mluau::prelude::*};
+use khronos_runtime::rt::mluau::prelude::*;
 use reqwest::Url;
 
 use crate::{geese::ratelimit::RlExceededError, worker::{limits::MAX_ATTACHMENT_SIZE, syscall::SyscallHandler, workervmmanager::Id}};
@@ -9,7 +9,6 @@ use crate::{geese::ratelimit::RlExceededError, worker::{limits::MAX_ATTACHMENT_S
 pub enum CdnCall {
     DownloadFile {
         url: String,
-        as_buffer: bool
     },
 }
 
@@ -27,8 +26,7 @@ impl FromLua for CdnCall {
         match typ.as_bytes().as_ref() {
             b"DownloadFile" => {
                 let url = tab.get("url")?;
-                let as_buffer = tab.get("as_buffer")?;
-                Ok(CdnCall::DownloadFile { url, as_buffer })
+                Ok(CdnCall::DownloadFile { url })
             },
             _ => {
                 Err(LuaError::FromLuaConversionError {
@@ -42,9 +40,6 @@ impl FromLua for CdnCall {
 }
 
 pub enum CdnResult {
-    Blob {
-        data: Bytes
-    },
     Buffer {
         data: Bytes
     }
@@ -54,13 +49,9 @@ impl IntoLua for CdnResult {
     fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
         let table = lua.create_table()?;
         match self {
-            Self::Blob { data } => {
-                table.set("op", "Blob")?;
-                table.set("data", Blob { data: data.into() })?;
-            },
             Self::Buffer { data } => {
                 table.set("op", "Buffer")?;
-                table.set("data", lua.create_buffer(data)?)?;
+                table.set("data", lua.create_external_buffer(data)?)?;
             }
         }
         table.set_readonly(true); // We want StateExecResult's to be immutable
@@ -71,7 +62,7 @@ impl IntoLua for CdnResult {
 impl CdnCall {
     pub(super) async fn exec(self, _id: Id, handler: &SyscallHandler) -> Result<CdnResult, crate::Error> {
         match self {
-            Self::DownloadFile { url, as_buffer } => {
+            Self::DownloadFile { url } => {
                 handler.ratelimits.cdn.check("DownloadFile", ()).map_err(RlExceededError)?;
                 if !url.is_ascii() {
                     return Err("Url must be ascii-only".into());
@@ -116,11 +107,7 @@ impl CdnCall {
                     return Err(format!("Max attachment size of {MAX_ATTACHMENT_SIZE} reached").into());
                 }
 
-                if as_buffer {
-                    Ok(CdnResult::Buffer { data: bytes })
-                } else {
-                    Ok(CdnResult::Blob { data: bytes })
-                }
+                Ok(CdnResult::Buffer { data: bytes })
             }
         }
     }

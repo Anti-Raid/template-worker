@@ -56,7 +56,7 @@ local function loadBackupBlob(src: types.RestoreSource, blob: blob.Blob, enckey:
         data = datamgmt.aes256decrypt(blob, enckey)
     end
 
-    local blobsize = #blob
+    local blobsize = buffer.len(blob)
     local tarArchive = datamgmt.TarArchive(data)
 
     local coreData: types.CoreBackupData
@@ -118,7 +118,7 @@ local function loadBackupFile(ctx: Primitives.TemplateContext, src: types.Restor
     updater.addStatus("Loading backup data...")
     local blob = nil
     if src.type == "attachment" then 
-        blob = net.Cdn(ctx).downloadfromdiscordasblob(src.url)
+        blob = net.Cdn(ctx).downloadfromdiscord(src.url)
     else 
         local backupmetadata = getbackupmetadata(ctx)
         local backupData = backupmetadata.getwithblob(src.key)
@@ -133,7 +133,7 @@ local function loadBackupFile(ctx: Primitives.TemplateContext, src: types.Restor
     end
     assert(blob, "Failed to download backup file from source: " .. src.type)
     blob = blob :: blob.Blob
-    updater.addStatus("Downloaded backup file of size " .. #blob .. " bytes")
+    updater.addStatus("Downloaded backup file of size " .. buffer.len(blob) .. " bytes")
     local loadedBackup = loadBackupBlob(src, blob, enckey)
     updater.addStatus("Parsed backup data successfully")
 

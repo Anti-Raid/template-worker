@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use chrono::{DateTime, Utc};
-use khronos_runtime::primitives::blob::{Blob, BlobTaker};
+use khronos_runtime::primitives::blob::Blob;
 use khronos_runtime::{primitives::opaque::Opaque, rt::mlua::prelude::*};
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use khronos_runtime::core::datetime::DateTime as LuaDateTime;
@@ -181,8 +181,8 @@ impl FromLua for StateOp {
                 let key = tab.get("key")?;
                 let scope: String = tab.get("scope")?;
                 let value = tab.get("value")?;
-                let blob = tab.get::<Option<BlobTaker>>("blob")?;
-                Ok(Self::KvSet { key, scope: scope.into(), value, blob: blob.map(|d| d.0.into()) })
+                let blob = tab.get::<Option<Blob>>("blob")?;
+                Ok(Self::KvSet { key, scope: scope.into(), value, blob: blob.map(|d| d.0) })
             },
             b"KvDelete" => {
                 let key = tab.get("key")?;
@@ -659,7 +659,7 @@ impl IntoLua for StateExecResult {
                 table.set("value", l.value)?;
                 table.set("created_at", LuaDateTime::from_utc(l.created_at))?;
                 table.set("last_updated_at", LuaDateTime::from_utc(l.last_updated_at))?;
-                table.set("blob", blob.map(|blob| Blob { data: blob }))?;
+                table.set("blob", blob.map(|blob| Blob(blob)))?;
             }
             Self::KvSignUrl { url, expiry } => {
                 table.set("op", "KvSignUrl")?;

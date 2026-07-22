@@ -37,10 +37,10 @@ export type SignedUrl = {
 --- Note that the associated data present should be small in size as all keys are loaded into memory.
 export type KeyManager<T> = {
     --- Makes a new key, returning the generated key
-    read add: (data: T, key: string?, blob: blob.BlobTaker?) -> string,
+    read add: (data: T, key: string?, blob: blob.Blob?) -> string,
 
     --- Updates the data associated with a key. Does not affect anything but the data.
-    read updatedata: (key: string, data: T, blob: blob.BlobTaker?) -> (),
+    read updatedata: (key: string, data: T, blob: blob.Blob?) -> (),
 
     --- Removes a key
     read remove: (key: string) -> (),
@@ -111,7 +111,7 @@ local function KeyManager<T>(
         return key
     end
 
-    local function add(data: T, ckey: string?, blob: blob.BlobTaker?)
+    local function add(data: T, ckey: string?, blob: blob.Blob?)
         local key = ckey or _createkey()
         assert(not exists(key), `Generated key \`{key}\` already exists`)
 
@@ -129,7 +129,7 @@ local function KeyManager<T>(
         return key
     end
 
-    local function updatedata(key: string, data: T, blob: blob.BlobTaker?)
+    local function updatedata(key: string, data: T, blob: blob.Blob?)
         if not exists(key) then
             return
         end
