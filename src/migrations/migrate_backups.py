@@ -80,12 +80,24 @@ async def migrate():
             print(f"Migrating row {row}")
             keyid = row["id"]
             owner_id = row["owner_id"]
-            filename = row["value"]["filename"]
-            resp = s3_client.get_object(Bucket="antiraid.guilds", Key=f"{owner_id}/{filename}")
-            blob = resp["Body"].read() # Note to self: if this fails, 
+            val = row["value"]["Map"]
+            filename = None
+            for vk, vv in val:
+                if "Text" in vk and vk["Text"] == "filename":
+                    filename = vv["Text"]
+            assert filename, "no filename found"
+            try:
+                resp = s3_client.get_object(Bucket="antiraid.guilds", Key=f"{owner_id}/{filename}")
+                blob = resp["Body"].read() # Note to self: if this fails, 
+            except Exception as e:
+                if "NoSuchKey" in str(e):
+                    print("Dropping non-existant blob key")
+                    await conn.execute("DELETE FROM tenant_kv WHERE id = $1", keyid)
+                    continue
+                raise e
             if len(blob) > MAX_BLOB_SIZE:
                 raise RuntimeError(f"{filename} (Size: {len(blob)} bytes exceeds limit)")
-            await conn.execute("UPDATE tenant_kv SET blob = $2, value = $3, key = $4 WHERE id = $1", keyid, blob, {"Map": [[{"Text": "createdby"}, "Null"]]}, filename)
+            await conn.execute("UPDATE tenant_kv SET blob = $2, key = $3 WHERE id = $1", keyid, blob, keyid+"_"+filename)
 
 if __name__ == "__main__":
     asyncio.run(migrate())

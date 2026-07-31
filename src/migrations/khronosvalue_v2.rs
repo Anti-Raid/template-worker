@@ -104,10 +104,7 @@ impl From<KhronosValue> for KhronosProxy {
 fn from_v1(v: KhronosValue) -> KhronosValueV2 {
     match v {
         KhronosValue::Text(t) => KhronosValueV2::Text(t.into()),
-        KhronosValue::Integer(i) => {
-            assert!(i < (2_i64).pow(53) && i > -(2_i64).pow(53));
-            KhronosValueV2::Integer(i)
-        },
+        KhronosValue::Integer(i) => KhronosValueV2::Integer(i),
         KhronosValue::UnsignedInteger(u) => {
             assert!(u < i64::MAX as u64);
             KhronosValueV2::Integer(u as i64)

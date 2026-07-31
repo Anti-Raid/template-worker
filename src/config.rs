@@ -20,7 +20,6 @@ pub struct Config {
     pub postgres_url: String,
     pub proxy: String,
     pub support_server_invite: String,
-    pub default_error_channel: ChannelId,
     pub mesophyll_token: String,
     pub blob_token: String,
     pub stratum_server: String,

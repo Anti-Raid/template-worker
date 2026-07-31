@@ -30,9 +30,10 @@ local function new(id: string, vfs: typesext.Vfs, expose: {[any]: any}): Isolate
     -- Create a proxy require method with /init.luau as the chunk name
     --
     -- Required for require to start requiring from /
-    local proxyrequirefuncchunk = luau.load("local requirer = ...; return function(...) return requirer(...) end")
-    proxyrequirefuncchunk.chunk_name = "/init.luau"
-    local proxyrequirefunc = proxyrequirefuncchunk:call(requirefunc)
+    local proxyrequirefunc = luau.call({
+	    code="local requirer = ...; return function(...) return requirer(...) end",
+	    chunk_name = "/init.luau"
+    }, requirefunc)
     
     globaltable.require = requirefunc -- Expose our custom require function
 

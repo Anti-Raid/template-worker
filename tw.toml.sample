@@ -13,7 +13,6 @@ allowed_redirects = [
 postgres_url = "postgres:///antiraid"
 proxy = "http://localhost:3221"
 support_server_invite = ""
-default_error_channel = ""
 mesophyll_token = "MYTOKENHERE"
 blob_token = "MYTOKENHERE"
 stratum_server = ""
