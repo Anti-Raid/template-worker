@@ -116,8 +116,8 @@ local function run(data: data.CommandContext): nil
             end
         })
         return nil    
-    elseif cmdname == "add" then
-        data.interaction.assertpermission("honeypots.add")
+    elseif cmdname == "setup" then
+        data.interaction.assertpermission("honeypots.setup")
 
         local channelid = data.args.channelid("channelid")
         local botallowed = data.args.boolean("botallowed")
