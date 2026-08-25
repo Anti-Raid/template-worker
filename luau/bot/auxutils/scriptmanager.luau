@@ -74,8 +74,8 @@ local function TemplateManager(ctx: Primitives.TemplateContext, expose: {[string
             created_at = item.createdat,
             last_updated_at = item.lastupdatedat,
             paused = item.value.paused,
-            vfs = typesext.Vfs.newoverlay({
-                item.value.content, -- newoverlay automatically handles memoryvfs
+            vfs = typesext.createvfsoverlay({
+                item.value.content, -- createvfsoverlay automatically handles memoryvfs
                 VfsTemplatingTypes,
             })
         }

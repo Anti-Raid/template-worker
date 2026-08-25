@@ -18,7 +18,7 @@ local function EventManager(ctx: Primitives.TemplateContext): Primitives.EventMa
     local eventrefmu = MutexFn() -- Mutex for synchronizing access to event refs
     local exposedvfs = ctx.btd().base_vfs
     local attachedisolates: {[string]: Primitives.Dispatchable} = {
-        ["builtins"] = isolate.new("builtins", typesext.Vfs.newoverlay({
+        ["builtins"] = isolate.new("builtins", typesext.createvfsoverlay({
             exposedvfs.Builtins or error("Internal error: Builtins VFS not found in exposed VFSs"),
             exposedvfs.TemplatingTypes or error("Internal error: TemplatingTypes VFS not found in exposed VFSs"),
         }), {

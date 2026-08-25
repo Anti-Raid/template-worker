@@ -7,15 +7,13 @@ export type i64 = number | integer
 --- Opaque object that cannot be read by Luau
 export type Opaque = { __phantom: "opaque" }
 
---- A MemoryVfs type that can be made into a real Vfs using Vfs.newoverlay
+--- A MemoryVfs type that can be made into a real Vfs using createvfsoverlay
 export type MemoryVfs = {
     data: {[string]: string},
     __phantom: "MemoryVfs"
 }
 
 export type Vfs = {
-    --- Given a set of Vfs's (which may either be a existing vfs provided by rust or a lazy string map created using `newlazystringmap` or stored within key-value API), creates an overlay Vfs
-    newoverlay: (vfss: {Vfs | MemoryVfs | Opaque}) -> Vfs,
     --- Creates a require function that can be used to require files from the Vfs
     createrequirefunction: (self: Vfs, cacheprefix: string, global_table: {[any]: any}) -> (string) -> ...any,
 }
@@ -34,8 +32,13 @@ end
 
 --- Given a value, returns a lazy string map (Lazy<{ [string]: string }>)
 ---
---- The result of this can be passed to APIs like Vfs.newoverlay
+--- The result of this can be passed to APIs like createvfsoverlay
 local function createvfs(value: { [string]: string }): lazy.Lazy<MemoryVfs>
+    error("Implemented internally in AntiRaid runtime!")
+end
+
+--- Given a set of Vfs's (which may either be a existing vfs provided by rust or a lazy string map created using `newlazystringmap` or stored within key-value API), creates an overlay Vfs
+local function createvfsoverlay(vfss: {Vfs | MemoryVfs | Opaque}): Vfs 
     error("Implemented internally in AntiRaid runtime!")
 end
 
@@ -47,11 +50,6 @@ local function createglobalproxy(): {[any]: any}
     error("Implemented internally in AntiRaid runtime!")
 end
 
---- Note: this is a proxy type and as such, only static methods can be called on it
----
---- Only for advanced use-cases
-local Vfs = {} :: Vfs
-
 --- Pretty prints `...` to a string
 local function fmtpretty(...): string
     error("Implemented internally in AntiRaid runtime!")
@@ -61,6 +59,6 @@ return {
     randstring = randstring,
     createglobalproxy = createglobalproxy,
     createvfs = createvfs,
-    Vfs = Vfs,
+    createvfsoverlay = createvfsoverlay,
     fmtpretty = fmtpretty
 }

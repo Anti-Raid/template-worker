@@ -103,7 +103,7 @@ impl IntoLua for SyscallRet {
                 res_table.set("op", op)?;
                 if mrm.is_primitive_response {
                     let v = lua.to_value_with(&res, khronos_runtime::primitives::LUA_SERIALIZE_OPTIONS)?;
-                    if !v.is_null() {
+                    if !v.is_nil() {
                         res_table.set("res", v)?;
                     }
                 } else {
