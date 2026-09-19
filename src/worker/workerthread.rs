@@ -144,8 +144,6 @@ impl WorkerThread {
         Ok(())
     }
 
-
-
     pub async fn drop_tenant(&self, id: Id) -> Result<(), crate::Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.tx.send(WorkerThreadMessage::DropTenant { id, tx })
