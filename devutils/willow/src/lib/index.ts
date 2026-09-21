@@ -8,3 +8,4 @@ export { default as MultiSelect } from './MultiSelect.svelte';
 export { default as MultiTextBox } from './MultiTextBox.svelte';
 export { default as KhronosValue } from './KhronosValue.svelte';
 export { default as Number } from './Number.svelte';
+export * from './sv2/sv2.anima';

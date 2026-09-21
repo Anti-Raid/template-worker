@@ -14,7 +14,8 @@
     import MultiTextBox from '$lib/MultiTextBox.svelte';
     import Toggle from '$lib/Toggle.svelte';
     import * as anima from 'animalang';
-    import { ExposedProps, isTruthy, type Closure } from 'animalang';
+    import { Table, isTruthy, common } from 'animalang';
+    type Closure = common.AbstractClosure;
 
 	let { template, form, formid, formidx, actions, formsetid }: {
         template: string,
@@ -41,7 +42,7 @@
 
     const visibleElements = $derived.by(() => {
         console.log("rerender")
-        const props = new ExposedProps(data)
+        const props = data instanceof Table ? data : (data ? Table.fromObject(data, true) : new Table());
         const flattenVisible = (elems: FormElement[]): FormElement[] => {
             const result: FormElement[] = [];
             
@@ -70,7 +71,7 @@
 
     const gatherData = (rec: Record<string, any>, elems: FormElement[]) => {
         const sourceData = mps.state.settings[template].formdata[formsetid][formidx].data;
-        const props = new ExposedProps(sourceData)
+        const props = sourceData instanceof Table ? sourceData : (sourceData ? Table.fromObject(sourceData, true) : new Table());
         for(const elem of elems) {
             if (elem.type == "DisplayElement") continue
             if (elem.type === "Branch") {
