@@ -93,12 +93,10 @@ impl CdnCall {
 
                 let resp = handler.state.reqwest.get(parsed_url).send().await?;
                 
-                let Some(content_length) = get_content_length_from_headers(&resp) else {
-                    return Err("No content length set".into());
-                };
-
-                if content_length > MAX_ATTACHMENT_SIZE {
-                    return Err(format!("Max attachment size of {MAX_ATTACHMENT_SIZE} reached").into());
+                if let Some(content_length) = get_content_length_from_headers(&resp) {
+                    if content_length > MAX_ATTACHMENT_SIZE {
+                        return Err(format!("Max attachment size of {MAX_ATTACHMENT_SIZE} reached").into());
+                    }
                 }
 
                 let bytes = resp.bytes().await?;

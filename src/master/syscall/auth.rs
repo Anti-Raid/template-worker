@@ -168,7 +168,7 @@ impl MAuthSyscall {
                             name: None,
                             created_at: Utc::now(),
                             expiry: session.expires_at,
-                            r#type: "login".to_string(),
+                            r#type: if app_login { "app_login".to_string() } else { "login".to_string() },
                         },
                         token: session.token,
                         user: Some(user_info)
@@ -186,7 +186,7 @@ impl MAuthSyscall {
                 let session = iauth::create_web_session(
                     &handler.pool,
                     &user_id.to_string(),
-                    Some(name),
+                    Some(name.clone()),
                     iauth::SessionType::Api {
                         expires_at: Utc::now() + chrono::Duration::seconds(expiry),
                     },
@@ -198,7 +198,7 @@ impl MAuthSyscall {
                         session: UserSession {
                             id: session.session_id,
                             user_id: user_id.to_string(),
-                            name: None,
+                            name: Some(name),
                             created_at: Utc::now(),
                             expiry: session.expires_at,
                             r#type: "api".to_string(),

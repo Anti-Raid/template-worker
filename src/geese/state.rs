@@ -474,7 +474,7 @@ impl StateDb {
             }
             StateOp::UnsubscribeEvent { event, system } => {
                 if DEFAULT_EVENTS.contains(&event.as_str()) {
-                    return Err("Cannot subscribe to default event".into())
+                    return Err("Cannot unsubscribe from default event".into())
                 }
 
                 let res = sqlx::query(

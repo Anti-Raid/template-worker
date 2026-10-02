@@ -58,12 +58,16 @@ pub async fn check_web_auth(
         state: String,
     }
 
-    let user_state: UserState = sqlx::query_as(
+    let user_state: Option<UserState> = sqlx::query_as(
         "SELECT state FROM users WHERE user_id = $1",
     )
     .bind(auth.user_id.clone())
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await?;
+
+    let Some(user_state) = user_state else {
+        return Ok(AuthResponse::InvalidToken);
+    };
 
     if user_state.state == "banned" {
         return Ok(AuthResponse::ApiBanned {
@@ -235,6 +239,7 @@ pub async fn get_user_access_token(handler: &MSyscallHandler, user_id: &str) -> 
 
         let token_response: OauthTokenResponse = resp.json().await?;
         token_response.save(&mut *tx, user_id).await?;
+        tx.commit().await?;
 
         return Ok(token_response.access_token)
     }

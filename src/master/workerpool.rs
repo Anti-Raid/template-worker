@@ -139,10 +139,12 @@ impl WorkerPool {
     /// Explicitly kills all workers with open kill switches
     pub async fn shutdown_all(&self) -> Result<(), crate::Error> {
         self.is_shutting_down.store(true, Ordering::SeqCst);
-        let mut kills_guard = self.kill_switches.lock();
-        for kill_opt in kills_guard.iter_mut() {
-            if let Some(tx) = kill_opt.take() {
-                let _ = tx.send(());
+        {
+            let mut kills_guard = self.kill_switches.lock();
+            for kill_opt in kills_guard.iter_mut() {
+                if let Some(tx) = kill_opt.take() {
+                    let _ = tx.send(());
+                }
             }
         }
 

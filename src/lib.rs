@@ -1,7 +1,8 @@
 pub mod config;
 pub mod mesophyll;
 pub mod worker;
-pub mod migrations;
+pub mod db;
+pub use db::migrations;
 pub mod geese;
 pub mod master;
 

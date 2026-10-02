@@ -51,11 +51,13 @@ impl MDiscordSyscall {
                     // Check for guilds cache
                     let cached_guilds = sqlx::query("SELECT guilds_cache FROM users WHERE user_id = $1")
                         .bind(user_id.to_string())
-                        .fetch_one(&handler.pool)
+                        .fetch_optional(&handler.pool)
                         .await?;
 
-                    if let Some(cached_guilds_data) = cached_guilds.try_get::<Option<serde_json::Value>, _>(0)? {
-                        guilds_cache = Some(serde_json::from_value::<Vec<DashboardGuild>>(cached_guilds_data)?);
+                    if let Some(row) = cached_guilds {
+                        if let Some(cached_guilds_data) = row.try_get::<Option<serde_json::Value>, _>(0)? {
+                            guilds_cache = Some(serde_json::from_value::<Vec<DashboardGuild>>(cached_guilds_data)?);
+                        }
                     }
                 }
 

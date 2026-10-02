@@ -122,7 +122,7 @@ impl MesophyllServer {
 
     fn verify_worker(&self, worker: u64) -> Result<usize, Status> {
         let id = worker.try_into().map_err(|_e| tonic::Status::internal("WID not a u64"))?;
-        if id > self.num_workers {
+        if id >= self.num_workers {
             return Err(Status::permission_denied(format!("Invalid worker ID: {}, exceeds number of workers in pool", id)));
         }
         Ok(id)
