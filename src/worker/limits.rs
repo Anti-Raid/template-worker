@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use crate::geese::ratelimit::Ratelimiter;
 
-pub const MAX_TEMPLATE_MEMORY_USAGE: usize = 1024 * 1024 * 25; // 25MB maximum memory
+pub const MAX_TEMPLATE_MEMORY_USAGE: isize = 1024 * 1024 * 25; // 25MB maximum memory
 pub const MAX_ATTACHMENT_SIZE: usize = 1024 * 1024 * 5; // 5MB maximum memory
 pub const MAX_VM_THREAD_STACK_SIZE: usize = 1024 * 1024 * 25; // 25MB maximum memory
 pub const MAX_TEMPLATES_EXECUTION_TIME: Duration = Duration::from_secs(10); // 10 seconds maximum execution time before sched yield must happen

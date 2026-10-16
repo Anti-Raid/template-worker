@@ -782,7 +782,7 @@ dependencies = [
 [[package]]
 name = "dapi"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#446a55c947238455d9569fd161549a626a2c2a6e"
+source = "git+https://github.com/anti-raid/khronos#4faf82557896d4fbd957205b26b7b98feef775be"
 dependencies = [
  "bitflags 2.13.1",
  "chrono",
@@ -1016,17 +1016,6 @@ name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
-
-[[package]]
-name = "erased-serde"
-version = "0.4.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2add8a07dd6a8d93ff627029c51de145e12686fbc36ecb298ac22e74cf02dec"
-dependencies = [
- "serde",
- "serde_core",
- "typeid",
-]
 
 [[package]]
 name = "errno"
@@ -1928,7 +1917,7 @@ dependencies = [
 [[package]]
 name = "khronos_ext"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#446a55c947238455d9569fd161549a626a2c2a6e"
+source = "git+https://github.com/anti-raid/khronos#4faf82557896d4fbd957205b26b7b98feef775be"
 dependencies = [
  "chrono",
  "khronos_runtime",
@@ -1943,7 +1932,7 @@ dependencies = [
 [[package]]
 name = "khronos_runtime"
 version = "1.0.0"
-source = "git+https://github.com/anti-raid/khronos#446a55c947238455d9569fd161549a626a2c2a6e"
+source = "git+https://github.com/anti-raid/khronos#4faf82557896d4fbd957205b26b7b98feef775be"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -2019,7 +2008,7 @@ dependencies = [
 [[package]]
 name = "linkify"
 version = "0.11.0"
-source = "git+https://github.com/robinst/linkify#b663d4e71ddf5127059e4e1f4719a924547b0f50"
+source = "git+https://github.com/robinst/linkify#4e082ce42ccd9fe11c742a73b5bd3bb21b415a26"
 dependencies = [
  "memchr",
 ]
@@ -2056,14 +2045,6 @@ name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
-
-[[package]]
-name = "luau0-src"
-version = "0.18.3+luau730"
-source = "git+https://github.com/mluau/luau-src-rs#62b35bc3c2c076319693f2019b3d67123be08193"
-dependencies = [
- "cc",
-]
 
 [[package]]
 name = "mach2"
@@ -2142,23 +2123,20 @@ dependencies = [
 [[package]]
 name = "mlua-sys"
 version = "0.9.0"
-source = "git+https://github.com/mluau/mluau#0938ddf2fb1d41114c50fe34115a8f247ff3c728"
+source = "git+https://github.com/mluau/mluau#42dac0d46acfebb7b4153692a60aaa15aefc8632"
 dependencies = [
  "cc",
  "cfg-if",
- "luau0-src",
  "pkg-config",
 ]
 
 [[package]]
 name = "mlua_scheduler"
 version = "1.0.0"
-source = "git+https://github.com/mluau/scheduler#bb758eedec07f48c85b1b44c112a49221ee63ef3"
+source = "git+https://github.com/mluau/scheduler#f0a124e4831b71985011bfb7b55a5bd6e2647fa1"
 dependencies = [
  "futures-util",
- "log",
  "mluau",
- "rustc-hash 2.1.3",
  "tokio",
  "tokio-util",
 ]
@@ -2166,20 +2144,16 @@ dependencies = [
 [[package]]
 name = "mluau"
 version = "0.11.5"
-source = "git+https://github.com/mluau/mluau#0938ddf2fb1d41114c50fe34115a8f247ff3c728"
+source = "git+https://github.com/mluau/mluau#42dac0d46acfebb7b4153692a60aaa15aefc8632"
 dependencies = [
  "bstr",
  "bytes",
  "either",
- "erased-serde",
  "libc",
  "mlua-sys",
  "num-traits",
- "parking_lot",
  "rustc-hash 2.1.3",
- "rustversion",
  "serde",
- "serde-value",
 ]
 
 [[package]]
@@ -2363,15 +2337,6 @@ name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
-
-[[package]]
-name = "ordered-float"
-version = "2.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68f19d67e5a2795c94e73e0bb1cc1a7edeb2e28efd39e2e1c9b7a40c1108b11c"
-dependencies = [
- "num-traits",
-]
 
 [[package]]
 name = "parking"
@@ -3294,16 +3259,6 @@ checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 dependencies = [
  "serde_core",
  "serde_derive",
-]
-
-[[package]]
-name = "serde-value"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
-dependencies = [
- "ordered-float",
- "serde",
 ]
 
 [[package]]
@@ -4312,12 +4267,6 @@ dependencies = [
  "tower-http 0.5.2",
  "uuid",
 ]
-
-[[package]]
-name = "typeid"
-version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc7d623258602320d5c55d1bc22793b57daff0ec7efc270ea7d55ce1d5f5471c"
 
 [[package]]
 name = "typenum"
