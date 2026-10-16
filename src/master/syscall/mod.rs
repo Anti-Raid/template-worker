@@ -215,6 +215,7 @@ impl MSyscallHandler {
 
         let ll1 = Ratelimiter::limit(3, Duration::from_secs(5));
         let lb1 = Ratelimiter::limit(3, Duration::from_secs(5));
+        let gbu1 = Ratelimiter::limit(5, Duration::from_secs(30));
 
         // Create the clock
         let clock = QuantaClock::default();
@@ -226,7 +227,8 @@ impl MSyscallHandler {
                 "GetGuildInfo" => vec![ggi1],
                 "SearchGuildMembers" => vec![sgm1, sgm2],
                 "ListLockdowns" => vec![ll1],
-                "ListBackups" => vec![lb1]
+                "ListBackups" => vec![lb1],
+                "GetBackupUrl" => vec![gbu1]
             ),
             clock,
         })

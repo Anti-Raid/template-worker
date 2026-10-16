@@ -2,20 +2,29 @@ use chrono::{DateTime, Utc};
 use dapi::{GuildId, Permissions, types::PartialGuild};
 use khronos_runtime::utils::khronos_value::KhronosValue;
 use serde::{Deserialize, Serialize};
+use crate::geese::urlsign;
+use crate::worker::workervmmanager::Id;
 use crate::master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::guild::{GuildBackup, GuildLockdown}};
+
+/// Backup metadata and the backup blob share one tenant_kv row in this scope
+const BACKUP_SCOPE: &str = "builtins.backups.metadata";
+/// How long a backup download link stays valid, in seconds
+const BACKUP_URL_EXPIRY: u64 = 300;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "op")]
 pub enum MGuildSyscall {
     ListLockdowns { guild_id: GuildId },
-    ListBackups { guild_id: GuildId }
+    ListBackups { guild_id: GuildId },
+    GetBackupUrl { guild_id: GuildId, id: String }
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "op")]
 pub enum MGuildSyscallRet {
     Lockdowns { lockdowns: Vec<GuildLockdown> },
-    Backups { backups: Vec<GuildBackup> }
+    Backups { backups: Vec<GuildBackup> },
+    BackupUrl { url: String }
 }
 
 impl MGuildSyscall {
@@ -42,13 +51,23 @@ impl MGuildSyscall {
                 #[derive(sqlx::FromRow)]
                 struct Rw { key: String, value: serde_json::Value, size: Option<i64>, created_at: DateTime<Utc>, last_updated_at: DateTime<Utc> }
                 let rows: Vec<Rw> = sqlx::query_as("SELECT key, value, octet_length(blob)::bigint AS size, created_at, last_updated_at FROM tenant_kv WHERE owner_id = $1 AND owner_type = 'guild' AND scope = $2 ORDER BY created_at DESC LIMIT $3")
-                    .bind(guild_id.to_string()).bind("builtins.backups.metadata").bind(1000i64)
+                    .bind(guild_id.to_string()).bind(BACKUP_SCOPE).bind(1000i64)
                     .fetch_all(&handler.pool).await?;
                 let backups = rows.into_iter().map(|r| GuildBackup {
                     created_by: serde_json::from_value::<KhronosValue>(r.value).ok().and_then(|v| tf(&v, "createdby")),
                     id: r.key, size: r.size, created_at: r.created_at, last_updated_at: r.last_updated_at,
                 }).collect();
                 Ok(MGuildSyscallRet::Backups { backups })
+            }
+            Self::GetBackupUrl { guild_id, id } => {
+                handler.limit(&ctx, "GetBackupUrl")?;
+                chk(handler, ctx, guild_id).await?;
+                let exists: Option<bool> = sqlx::query_scalar("SELECT blob IS NOT NULL FROM tenant_kv WHERE owner_id = $1 AND owner_type = 'guild' AND scope = $2 AND key = $3")
+                    .bind(guild_id.to_string()).bind(BACKUP_SCOPE).bind(&id)
+                    .fetch_optional(&handler.pool).await?;
+                if exists != Some(true) { return Err(MSyscallError::EntityNotFound { reason: "Backup not found" }) }
+                let url = urlsign::create_url(Id::Guild(guild_id), &id, BACKUP_SCOPE, BACKUP_URL_EXPIRY)?;
+                Ok(MGuildSyscallRet::BackupUrl { url })
             }
         }
     }
