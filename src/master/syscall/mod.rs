@@ -3,6 +3,7 @@ pub mod discord;
 pub mod types;
 pub mod bot;
 pub mod gkv;
+pub mod guild;
 pub mod webapi;
 pub(super) mod internal;
 
@@ -16,7 +17,7 @@ use dapi::{GuildId, UserId};
 use crate::geese::ratelimit::Ratelimiter;
 use crate::geese::state::StateDb;
 use crate::geese::tenantstate::TenantStateDb;
-use crate::{geese::stratum::Stratum, master::{syscall::{auth::{AuthError, MAuthSyscall, MAuthSyscallRet}, bot::{MBotSyscall, MBotSyscallRet}, discord::{MDiscordSyscall, MDiscordSyscallRet}, gkv::{MGkvSyscall, MGkvSyscallRet}, types::bot::BotStatus}, workerpool::WorkerPool}};
+use crate::{geese::stratum::Stratum, master::{syscall::{auth::{AuthError, MAuthSyscall, MAuthSyscallRet}, bot::{MBotSyscall, MBotSyscallRet}, discord::{MDiscordSyscall, MDiscordSyscallRet}, gkv::{MGkvSyscall, MGkvSyscallRet}, guild::{MGuildSyscall, MGuildSyscallRet}, types::bot::BotStatus}, workerpool::WorkerPool}};
 
 /// The context in which the syscall is executing in
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -96,6 +97,9 @@ pub enum MSyscallArgs {
     /// A global-kv specific syscall
     Gkv {
         req: MGkvSyscall
+    },
+    Guild {
+        req: MGuildSyscall
     }
 }
 
@@ -113,6 +117,9 @@ pub enum MSyscallRet {
     },
     Gkv {
         data: MGkvSyscallRet
+    },
+    Guild {
+        data: MGuildSyscallRet
     }
 }
 
@@ -206,6 +213,9 @@ impl MSyscallHandler {
         let sgm1 = Ratelimiter::limit(1, Duration::from_secs(4));
         let sgm2 = Ratelimiter::limit(5, Duration::from_mins(1));
 
+        let ll1 = Ratelimiter::limit(3, Duration::from_secs(5));
+        let lb1 = Ratelimiter::limit(3, Duration::from_secs(5));
+
         // Create the clock
         let clock = QuantaClock::default();
 
@@ -214,7 +224,9 @@ impl MSyscallHandler {
             per_bucket: indexmap::indexmap!(
                 "GetUserGuilds__Refresh" => vec![gug_refresh1],
                 "GetGuildInfo" => vec![ggi1],
-                "SearchGuildMembers" => vec![sgm1, sgm2]
+                "SearchGuildMembers" => vec![sgm1, sgm2],
+                "ListLockdowns" => vec![ll1],
+                "ListBackups" => vec![lb1]
             ),
             clock,
         })
@@ -302,6 +314,9 @@ impl MSyscallHandler {
             }
             MSyscallArgs::Gkv { req } => {
                 Ok(MSyscallRet::Gkv { data: req.exec(self, ctx).await? })
+            }
+            MSyscallArgs::Guild { req } => {
+                Ok(MSyscallRet::Guild { data: req.exec(self, ctx).await? })
             }
         }
     }
