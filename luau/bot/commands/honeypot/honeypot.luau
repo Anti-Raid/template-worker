@@ -128,7 +128,7 @@ local function run(data: data.CommandContext): nil
             return data.interaction.replysimpleembed("Invalid punishment", "Punishment must be either 'ban' or 'kick'.", units.RED_COLOR)
         end
         
-        if not channelid or not botallowed or not punishment then
+        if not channelid or botallowed == nil or not punishment then
             return data.interaction.replysimpleembed("Error processing command", "Something went wrong while trying to find options. Please try again?", units.RED_COLOR) 
         end
         

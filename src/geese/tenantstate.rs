@@ -170,6 +170,8 @@ impl IntoLua for TenantState {
 }
 
 // DEFAULT_EVENTS is handled by WorkerDispatch directly
-pub static DEFAULT_EVENTS: [&str; 4] = [
-    "INTERACTION_CREATE", "WebSettings", "$UpdateTenantState", "FeedTicketRequest"
+pub static DEFAULT_EVENTS: [&str; 9] = [
+    "INTERACTION_CREATE", "WebSettings", "$UpdateTenantState", "FeedTicketRequest",
+    // Dashboard actions for the built-in features (luau/bot/auxutils/web)
+    "WebLockdowns", "WebBackups", "WebHoneypots", "WebAuditLogs", "WebModeration"
 ];
