@@ -5,6 +5,7 @@ local settings = require "./settings/settings"
 local afkhandler = require"./auxutils/afkhandler"
 local honeypothandler = require"./auxutils/honeypothandler"
 local managers = require"./auxutils/managers/managers"
+local web = require"./auxutils/web/web"
 local Framework = require"@antiraid-ext/frameworkv2"
 
 -- Audit log event handlers
@@ -32,5 +33,7 @@ return Framework.setup(
     auditlogKick,
     auditlogUnban,
     auditlogStingCreated,
-    auditlogStingDelete
+    auditlogStingDelete,
+    -- Dashboard actions (must stay last so every handler is passed through)
+    table.unpack(web)
 )

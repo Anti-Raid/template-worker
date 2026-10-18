@@ -1,8 +1,7 @@
 local apitypes = require "@discord-types/apiTypes"
 local Primitives = require "@antiraid-core/primitives"
-local HoneypotManager = require "./honeypotmanager"
+local managers = require "./managers/managers"
 
-local honeypotManager: HoneypotManager.HoneypotManager? = nil
 local function honeypotHandler(msg: apitypes.MessageObject, ctx: Primitives.TemplateContext): ()
     -- Honeypots
     if not msg.author then return end
@@ -15,11 +14,8 @@ local function honeypotHandler(msg: apitypes.MessageObject, ctx: Primitives.Temp
     local mentions = (msg.mentions or {}) :: {apitypes.UserObject}
     if #mentions > 5 then return end -- Only 3 mention allowed for AFK
 
-    if not honeypotManager then
-        honeypotManager = HoneypotManager(ctx)
-    end
-    assert(honeypotManager, "Internal error: HoneypotManager is nil")
-    local honeypots = honeypotManager.list()
+    -- Share the managers' instance so honeypots added or removed later (by command or dashboard) take effect
+    local honeypots = managers.getmanagers(ctx).honeypotmanager.list()
     for _, honeypot in honeypots do
         if msg.channel_id == honeypot.channelid then
             if msg.author.bot and honeypot.botallowed then break end -- Ignore clearly bot messages if bots are allowed in the honeypot
