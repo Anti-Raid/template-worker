@@ -7,9 +7,18 @@ local sb = require"@antiraid-ext/utils/statusbuffer"
 local tempbutton = require"@antiraid-ext/frameworkv2/tempbutton"
 local inspectimpl = require"../../auxutils/backups/restore/inspect"
 
+--- Backup contents may only be read by users who can create or restore backups (matches the dashboard)
+local function assertcanreadbackups(data: data.CommandContext)
+    if not pcall(data.interaction.assertpermission, "backups.restore") then
+        data.interaction.assertpermission("backups.create")
+    end
+end
+
 local EMBED_EXPIRY = datetime.timedelta_minutes(5)
 
 local function inspect(data: data.CommandContext): nil
+    assertcanreadbackups(data)
+
     local enckey: string? = nil
     local source: backupTypes.RestoreSource? = nil
 

@@ -56,6 +56,15 @@ local command = commandBuilder.new({
 )
 :build()
 
+--- Limits on reminders
+---
+--- All reminders of a guild are kept in memory and reloaded in a single request on startup,
+--- so both their number and their size must stay bounded
+local MAX_MESSAGE_LENGTH = 1000
+local MAX_REMINDER_SECONDS = 365 * 24 * 60 * 60 -- 1 year
+local MAX_REMINDERS_PER_USER = 25
+local MAX_REMINDERS_PER_GUILD = 1000
+
 local function run(data: data.CommandContext): nil
     local user = data.interaction.user()
     local message: string? = data.args.string("message")
@@ -78,8 +87,48 @@ local function run(data: data.CommandContext): nil
 
     assert(message, "message option is required") -- should never fail since we set it as required in the command definition
 
-    local dt = datetime.UTC:now() + datetime.timedelta_seconds(stime or 1)
-    kexs.getmanagers(data.ctx).remindmeexpiry.addat(dt, {
+    local function replylimiterror(description: string): nil
+        data.interaction.reply{
+            embeds = {
+                {
+                    title = "Cannot create reminder",
+                    description = description,
+                    color = units.RED_COLOR
+                },
+            },
+            ephemeral = isResponseEphemeral
+        }
+        return nil
+    end
+
+    if #message > MAX_MESSAGE_LENGTH then
+        return replylimiterror(`Reminder messages can be at most {MAX_MESSAGE_LENGTH} characters long.`)
+    end
+
+    if stime <= 0 or stime > MAX_REMINDER_SECONDS then
+        return replylimiterror("Reminders must be set for a time in the future that is at most 1 year away.")
+    end
+
+    local remindmeexpiry = kexs.getmanagers(data.ctx).remindmeexpiry
+
+    local guildCount, userCount = 0, 0
+    for _, record in remindmeexpiry.list() do
+        guildCount += 1
+        if record.value.userid == user.id then
+            userCount += 1
+        end
+    end
+
+    if userCount >= MAX_REMINDERS_PER_USER then
+        return replylimiterror(`You can have at most {MAX_REMINDERS_PER_USER} active reminders in this server.`)
+    end
+
+    if guildCount >= MAX_REMINDERS_PER_GUILD then
+        return replylimiterror(`This server has reached the maximum of {MAX_REMINDERS_PER_GUILD} active reminders.`)
+    end
+
+    local dt = datetime.UTC:now() + datetime.timedelta_seconds(stime)
+    remindmeexpiry.addat(dt, {
         userid = user.id,
         channelid = data.interaction.interaction.channel_id or error("Channel ID is nil"),
         message = message,

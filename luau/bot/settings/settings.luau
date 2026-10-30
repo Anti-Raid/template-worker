@@ -64,7 +64,7 @@ local dummyform = sb.FormBuilder()
 local handler: ctx.SettingsHandler = {
     fetchpage = function(ctx: ctx.SettingsFetchPageContext): settings.Page 
         local sb = sb.PageBuilder(ctx.framework)
-        gm.fetch(sb) -- fetch guild members
+        gm.fetch(sb, ctx.author) -- fetch guild members (requires view permission)
 
         -- dummy reorderable form
         sb

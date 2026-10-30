@@ -4,9 +4,10 @@ local units = require"@antiraid-ext/frameworkv2/unit"
 local sb = require"@antiraid-ext/utils/statusbuffer"
 local tempbutton = require"@antiraid-ext/frameworkv2/tempbutton"
 local managers = require "../../auxutils/managers/managers"
+local modhierarchy = require"@antiraid-ext/utils/modhierarchy"
 
 local function restore(data: data.CommandContext): nil
-    data.interaction.assertpermission("backups.restore")
+    modhierarchy.assertDiscordAdministrator(data.interaction.assertpermission("backups.restore"))
     local managers = managers.getmanagers(data.ctx)
 
     local opts: backupTypes.BackupRestoreOpts = {

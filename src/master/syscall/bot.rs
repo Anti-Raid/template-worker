@@ -6,6 +6,11 @@ use serde::{Deserialize, Serialize};
 use dapi::UserId;
 use crate::{geese::{state::{StateDbFlags, StateExecResult, StateOp}, tenantstate::{ModFlags, TenantState}}, master::syscall::{MSyscallContext, MSyscallError, MSyscallHandler, types::bot::{BotStatus, ShardConn}}, worker::{workerdispatch::SimpleEvent, workervmmanager::Id}};
 
+/// Maximum number of distinct topics a single feed ticket may request
+const MAX_FEED_TOPICS: usize = 16;
+/// Maximum length (in bytes) of a single feed topic name
+const MAX_FEED_TOPIC_LEN: usize = 64;
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "op")]
 pub enum MBotSyscall {
@@ -162,14 +167,17 @@ impl MBotSyscall {
                     return Err(MSyscallError::InvalidEvent { reason: "Event name must start with Web"});
                 }
                 let user_id = ctx.into_user_id()?;
+                handler.limit(&ctx, "DispatchEvent")?;
                 match id {
                     Id::Guild(id) => {
-                        // Ensure the bot is in the guild
-                        let hb = handler.has_bot_single(id).await?;    
-                        if !hb {
+                        // Ensure the bot is in the guild and the caller is a member of it
+                        //
+                        // Web event handlers may expose guild data, so non-members must never reach them
+                        if !ctx.is_secure() {
+                            handler.ensure_guild_member(id, user_id).await?;
+                        } else if !handler.has_bot_single(id).await? {
                             return Err(MSyscallError::BotNotOnGuild);
                         }
-                        // Ensure guild is in server
                     }
                     Id::User(id) => {
                         if user_id != id {
@@ -187,11 +195,13 @@ impl MBotSyscall {
                     return Err(MSyscallError::InvalidEvent { reason: "Event name must start with Web"});
                 }
                 let user_id = ctx.into_user_id()?;
+                handler.limit(&ctx, "DispatchEvent")?;
                 match id {
                     Id::Guild(id) => {
-                        // Ensure the bot is in the guild
-                        let hb = handler.has_bot(&[id]).await?;    
-                        if !hb[0] {
+                        // Ensure the bot is in the guild and the caller is a member of it
+                        if !ctx.is_secure() {
+                            handler.ensure_guild_member(id, user_id).await?;
+                        } else if !handler.has_bot_single(id).await? {
                             return Err(MSyscallError::BotNotOnGuild);
                         }
                     }
@@ -219,13 +229,24 @@ impl MBotSyscall {
             Self::FeedTicket { id, requested_topics } => {
                 let user_id = ctx.into_user_id()?;
                 handler.limit(&ctx, "FeedTicket")?;
+
+                // Bound the topic list: every topic allocates a broadcast channel on the master
+                // for the lifetime of the websocket connection
+                let mut requested_topics = requested_topics;
+                requested_topics.sort();
+                requested_topics.dedup();
+                if requested_topics.is_empty() || requested_topics.len() > MAX_FEED_TOPICS {
+                    return Err(MSyscallError::InvalidEvent { reason: "Between 1 and 16 distinct topics must be requested" });
+                }
+                if requested_topics.iter().any(|t| t.is_empty() || t.len() > MAX_FEED_TOPIC_LEN) {
+                    return Err(MSyscallError::InvalidEvent { reason: "Topic names must be between 1 and 64 bytes long" });
+                }
+
                 match id {
                     Id::Guild(id) => {
-                        // Ensure the bot is in the guild
-                        let hb = handler.has_bot(&[id]).await?;    
-                        if !hb[0] {
-                            return Err(MSyscallError::BotNotOnGuild);
-                        }
+                        // Guild feeds carry template output and error tracebacks, so require the same
+                        // membership + Manage Server/Administrator check as the other guild syscalls
+                        super::guild::chk(handler, ctx, id).await?;
                     }
                     Id::User(id) => {
                         if user_id != id {

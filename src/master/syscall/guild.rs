@@ -73,7 +73,7 @@ impl MGuildSyscall {
     }
 }
 
-async fn chk(handler: &MSyscallHandler, ctx: MSyscallContext, guild_id: GuildId) -> Result<(), MSyscallError> {
+pub(super) async fn chk(handler: &MSyscallHandler, ctx: MSyscallContext, guild_id: GuildId) -> Result<(), MSyscallError> {
     if ctx.is_secure() { return Ok(()) }
     let user_id = ctx.into_user_id()?;
     if !handler.has_bot_single(guild_id).await? { return Err(MSyscallError::BotNotOnGuild) }

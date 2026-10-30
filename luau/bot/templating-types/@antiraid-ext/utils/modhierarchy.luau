@@ -1,6 +1,8 @@
 local kc = require "@antiraid-core/kittycat"
 local Primitives = require "@antiraid-core/primitives"
 local userinfo = require "./userinfo"
+local discordpermcalc = require "./discordpermcalc"
+local permissions = require "@discord-types/permission"
 
 --- Errors if the moderator does not have cap `cap`. For most cases, `InteractionManager.assertpermission` is a better higher-level API to use here
 local function canModeratorDo(userinfo: userinfo.UserInfo, cap: string) 
@@ -51,7 +53,23 @@ local function canModeratorAffectTarget(ctx: Primitives.TemplateContext, userinf
     })
 end
 
+--- Errors unless the user is the guild owner or holds the Discord Administrator permission.
+---
+--- Required for actions that apply arbitrary Discord permissions using the bot's authority (e.g. backup
+--- restore can create roles and permission overwrites with any permission the bot itself holds), so that
+--- an AntiRaid capability alone cannot be used to gain Discord permissions the user does not already have
+local function assertDiscordAdministrator(userinfo: userinfo.UserInfo)
+    if userinfo.guild_owner_id == userinfo.userid then
+        return
+    end
+
+    if not discordpermcalc.HasPermission(integer.fromstring(userinfo.discord_permissions), permissions.Permissions.Administrator) then
+        error("This action requires the Discord Administrator permission (in addition to the AntiRaid permission) as it can apply any Discord permission to roles and channels")
+    end
+end
+
 return {
+    assertDiscordAdministrator = assertDiscordAdministrator,
     canModeratorAffectTarget = canModeratorAffectTarget,
     canModeratorDo = canModeratorDo,
     canBotDoInChannel = canBotDoInChannel,

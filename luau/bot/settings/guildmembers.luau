@@ -17,8 +17,8 @@ local updateform = settings.FormBuilder()
 :button("delete", "Remove Member Permissions", "Danger", false) -- delete the setting
 :button("update", "Update Permissions", "Primary", true)
 
-local function view(data: data.Framework) 
-    verifyMemberPermOverrideChange({op = "View"})
+local function view(data: data.Framework, author: string) 
+    verifyMemberPermOverrideChange({op = "View" :: "View", author = author, authorUserInfo = data.userinfomanager.get(author)})
 
     local result = setmetatable({}, array_metatable)
 
@@ -90,7 +90,7 @@ local function update(ctx: data.SettingsFormActionContext)
     end
 end
 
-local function fetch(p: settings.PageBuilder<data.Framework>)
+local function fetch(p: settings.PageBuilder<data.Framework>, author: string)
     p
     :section("mp", "Member Permissions", "Manage what your members can do on AntiRaid", function(sb: settings.SectionBuilder<data.Framework>)
         sb
@@ -112,7 +112,7 @@ local function fetch(p: settings.PageBuilder<data.Framework>)
         user_id = "",
         perm_overrides = setmetatable({}, array_metatable)
     } })
-    local mpd = view(p.data)
+    local mpd = view(p.data, author)
     for _, mp in mpd do 
         p:addformdata("mp_update", { id = mp.user_id, title = mp.user_id, data = mp :: any })
     end

@@ -38,6 +38,18 @@ local function LockdownSet(ctx: Primitives.TemplateContext): LockdownSet
 
     local criticalroles = utils.getCriticalRoles(guild_data.guild, settings.member_roles)
 
+    --- Refetches the guild's roles and channels.
+    ---
+    --- The LockdownSet lives as long as the VM, so the guild data must be refreshed before every
+    --- operation. Otherwise permission snapshots taken in setup (and the permissions written back
+    --- on create/revert/autofix) would come from stale data and could re-grant permissions that were
+    --- changed on Discord after the VM started.
+    local function _refresh()
+        guild_data = guilddata.guildData(ctx)
+        criticalroles = utils.getCriticalRoles(guild_data.guild, settings.member_roles)
+        self.guild_data = guild_data
+    end
+
     -- The base lockdown mode data
     local function _basemodedata(lockdowns: {mode.Lockdown}): mode.BaseLockdownModeData
         return {
@@ -85,6 +97,7 @@ local function LockdownSet(ctx: Primitives.TemplateContext): LockdownSet
     end
 
     local function test(mode: mode.LockdownMode): string? 
+        _refresh()
         -- Test new lockdown if no_apply_test is false
         if not settings.no_apply_test then
             return mode.test(_basemodedata(lockdownmanager.list()))
@@ -94,6 +107,8 @@ local function LockdownSet(ctx: Primitives.TemplateContext): LockdownSet
 
     --- Adds a lockdown to the set returning the created lockdown
     local function apply(mode: mode.LockdownMode, reason: string): mode.Lockdown
+        _refresh()
+
         -- Setup the lockdown
         local lockdowns = lockdownmanager.list()
         local data = mode.setup(_basemodedata(lockdowns))
@@ -161,12 +176,14 @@ local function LockdownSet(ctx: Primitives.TemplateContext): LockdownSet
 
     --- Removes a lockdown from the set
     local function remove(id: string): mode.Lockdown
+        _refresh()
         local lockdowns = lockdownmanager.list()
         return _remove(lockdowns, id)
     end
 
     -- Remove all lockdowns in order of specificity
     local function removeall()
+        _refresh()
         local lockdowns = lockdownmanager.list()
         -- Sort the lockdowns by specificity in descending order
         _sort(lockdowns)
@@ -186,6 +203,7 @@ local function LockdownSet(ctx: Primitives.TemplateContext): LockdownSet
 
     --- Run the autofixer for a lockdown mode
     local function autofix(mode: mode.LockdownMode)
+        _refresh()
         mode.autofix(_basemodedata(lockdownmanager.list()))
         return nil
     end

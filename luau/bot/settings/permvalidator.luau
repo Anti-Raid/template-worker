@@ -3,7 +3,9 @@ local UserInfo = require"@antiraid-ext/utils/userinfo"
 local kc = require "@antiraid-core/kittycat"
 
 export type VerifyMemberOpts = {
-    op: "View"
+    op: "View",
+    author: discord.Snowflake,
+    authorUserInfo: UserInfo.UserInfo,
 } | {
     op: "Set",
     author: discord.Snowflake,
@@ -18,12 +20,19 @@ export type VerifyMemberOpts = {
 }
 
 local function verifyMemberPermOverrideChange(vp: VerifyMemberOpts) 
-    if vp.op == "View" then 
-        return -- For now, we do not limit view access to guild members API
-    end
-
     if vp.authorUserInfo.guild_owner_id == vp.author then
         return -- No further checks needed, owner can do anything, early return
+    end
+
+    if vp.op == "View" then 
+        -- Viewing reveals every member's AntiRaid permissions, so it requires either the dedicated
+        -- view permission or the permission to update overrides
+        local perms = vp.authorUserInfo.kittycat_resolved_permissions
+        if not kc.has_perm(perms, kc.Permission.from_string("guild_members.view_permission_overrides"))
+            and not kc.has_perm(perms, kc.Permission.from_string("guild_members.update_permission_overrides")) then
+            error("You do not have permission to view guild member permission overrides. Please ask an administrator to give you the 'guild_members.view_permission_overrides' permission.")
+        end
+        return
     end
 
     if vp.op == "Set" then 

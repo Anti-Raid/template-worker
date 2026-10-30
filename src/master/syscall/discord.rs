@@ -153,8 +153,16 @@ impl MDiscordSyscall {
                 let mut channels_with_permissions = Vec::with_capacity(channels.len());
 
                 for channel in channels {
+                    let user_perms = guild.user_permissions_in(&channel, &member);
+
+                    // Do not disclose channels the member cannot see on Discord itself
+                    // (owner/administrator resolve to all permissions)
+                    if !user_perms.contains(dapi::Permissions::VIEW_CHANNEL) {
+                        continue;
+                    }
+
                     channels_with_permissions.push(GuildChannelWithPermissions {
-                        user: guild.user_permissions_in(&channel, &member),
+                        user: user_perms,
                         bot: guild.user_permissions_in(&channel, &bot_user),
                         channel: ApiPartialGuildChannel {
                             id: channel.id,

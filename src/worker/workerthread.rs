@@ -2,6 +2,7 @@ use khronos_runtime::utils::khronos_value::KhronosValue;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender as OneShotSender;
 use std::panic::AssertUnwindSafe;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 
 use crate::geese::tenantstate::TenantState;
@@ -9,6 +10,9 @@ use crate::worker::limits::MAX_VM_THREAD_STACK_SIZE;
 use crate::worker::workerdispatch::SimpleEvent;
 use crate::worker::workerstate::WorkerState;
 use super::{worker::Worker, workervmmanager::Id};
+
+/// An event queued for a specific tenant along with its (optional) response channel
+type TenantQueueItem = (SimpleEvent, Option<OneShotSender<Result<KhronosValue, crate::Error>>>);
 
 /// WorkerThreadMessage is the message type that is sent to the worker thread
 enum WorkerThreadMessage {
@@ -69,6 +73,15 @@ impl WorkerThread {
                     rt.block_on(async move {
                         let worker = Worker::new(state).await.expect("Failed to setup worker");
 
+                        // Per-tenant event queues
+                        //
+                        // Events for the same tenant are still handled strictly one after another (in order),
+                        // but a slow event handler for one tenant no longer blocks the events of every other
+                        // tenant on this worker. Each queue's drain task removes its entry from the map once it
+                        // finds its queue empty, which happens without an await point in between, so a sender
+                        // present in the map always has a live receiver (this runtime is single-threaded).
+                        let tenant_queues: Rc<RefCell<HashMap<Id, UnboundedSender<TenantQueueItem>>>> = Rc::new(RefCell::new(HashMap::new()));
+
                         // Listen to messages and handle them
                         while let Some(msg) = rx.recv().await {
                             match msg {
@@ -78,10 +91,34 @@ impl WorkerThread {
                                     return; // Exitting the loop will stop the thread automatically
                                 }
                                 WorkerThreadMessage::DispatchEvent { id, event, tx } => {
-                                    let res = worker.dispatch.dispatch_event(id, event).await;
-                                    if let Some(tx) = tx {
-                                        let _ = tx.send(res.map_err(|e| e.to_string().into()));
-                                    }
+                                    let existing = tenant_queues.borrow().get(&id).cloned();
+                                    let item = match existing {
+                                        Some(queue) => match queue.send((event, tx)) {
+                                            Ok(()) => continue,
+                                            // Unreachable in practice (see above), but never drop the event
+                                            Err(e) => e.0,
+                                        },
+                                        None => (event, tx),
+                                    };
+
+                                    let (queue_tx, mut queue_rx) = tokio::sync::mpsc::unbounded_channel::<TenantQueueItem>();
+                                    let _ = queue_tx.send(item); // Cannot fail, queue_rx is alive
+                                    tenant_queues.borrow_mut().insert(id, queue_tx);
+
+                                    let dispatch = worker.dispatch.clone();
+                                    let tenant_queues = tenant_queues.clone();
+                                    tokio::task::spawn_local(async move {
+                                        loop {
+                                            let Ok((event, tx)) = queue_rx.try_recv() else {
+                                                tenant_queues.borrow_mut().remove(&id);
+                                                break;
+                                            };
+                                            let res = dispatch.dispatch_event(id, event).await;
+                                            if let Some(tx) = tx {
+                                                let _ = tx.send(res.map_err(|e| e.to_string().into()));
+                                            }
+                                        }
+                                    });
                                 }
                                 WorkerThreadMessage::DropTenant { id, tx } => {
                                     let res = worker.vm_manager.remove_vm_for(id);

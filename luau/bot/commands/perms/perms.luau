@@ -28,7 +28,7 @@ local function run(data: data.CommandContext): nil
     local cmdname = data.command.nameList[2]
 
     if cmdname == "listmembers" then
-        verifyMemberPermOverrideChange({op = "View"})
+        verifyMemberPermOverrideChange({op = "View" :: "View", author = data.interaction.userid(), authorUserInfo = data.interaction.userinfo()})
 
         local memberPerms = data.framework.userinfomanager.getMemberPermissionOverrides()
 

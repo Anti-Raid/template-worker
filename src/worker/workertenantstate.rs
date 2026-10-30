@@ -51,8 +51,8 @@ impl WorkerTenantState {
         let mut startup_events = HashSet::new();  
         let ts = self.tenant_state_cache.borrow();
         for (id, ts) in ts.iter() {
-            // Track startup events
-            if ts.events.contains_key("OnStartup") {
+            // Track startup events (banned tenants never get a VM started)
+            if ts.events.contains_key("OnStartup") && !ts.modflags.contains(ModFlags::BANNED) {
                 startup_events.insert(*id);
             }
         }

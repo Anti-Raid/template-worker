@@ -7,6 +7,7 @@ use khronos_runtime::{utils::khronos_value::KhronosValue};
 use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
 use crate::geese::state::{StateDbFlags, StateOp};
+use crate::geese::tenantstate::ModFlags;
 use crate::{geese::tenantstate::DEFAULT_EVENTS, worker::{workerstate::WorkerState, workertenantstate::WorkerTenantState}};
 
 use super::workervmmanager::{Id, WorkerVmManager};
@@ -26,6 +27,8 @@ pub struct WorkerDispatch {
 
 impl WorkerDispatch {
     const ERR_SCOPE: &str = "#err";
+    /// Maximum length (in bytes) of a stored error string
+    const MAX_ERR_LEN: usize = 4096;
 
     /// Creates a new WorkerDispatch with the given WorkerVmManager
     pub fn new(vm_manager: WorkerVmManager, worker_state: WorkerState, tenant_state: WorkerTenantState) -> Self {
@@ -65,6 +68,12 @@ impl WorkerDispatch {
         let tenant_state = self.tenant_state.get_cached_tenant_state_for(id)
             .map_err(|e| mlua::Error::external(format!("Failed to get tenant state for ID {id:?}: {e}")))?;
 
+        if tenant_state.modflags.contains(ModFlags::BANNED) {
+            // Banned tenants must not have VMs (re)created or receive any events
+            log::debug!("Skipping event {name} for banned tenant {id:?}");
+            return Ok(KhronosValue::Null(()));
+        }
+
         if !tenant_state.events.contains_key(name) && !DEFAULT_EVENTS.contains(&name) {
             // Event not registered for this tenant, skip
             return Ok(KhronosValue::Null(()));
@@ -80,9 +89,14 @@ impl WorkerDispatch {
         match vm_data.runtime.call_in_scheduler::<_, KhronosValue>(vm_data.dispatch_func, Event { name, author, data }).await {
             Ok(result) => Ok(result),
             Err(e) => {
-                let err_str = e.to_string();
-                if let Err(e) = self.save_error(id, err_str).await {
-                    log::error!("Failed to log error for ID {id:?}: {}", e);
+                // Errors from Web* events are returned to the (external) caller directly and are
+                // routinely used to report validation failures, so don't persist them to the
+                // tenant's error log (any session user would otherwise be able to grow it)
+                if !name.starts_with("Web") {
+                    let err_str = e.to_string();
+                    if let Err(e) = self.save_error(id, err_str).await {
+                        log::error!("Failed to log error for ID {id:?}: {}", e);
+                    }
                 }
                 Err(e)
             },
@@ -90,7 +104,16 @@ impl WorkerDispatch {
     }
 
     /// Saves a error directly to key-value API
-    async fn save_error(&self, id: Id, error: String) -> Result<(), crate::Error> {
+    async fn save_error(&self, id: Id, mut error: String) -> Result<(), crate::Error> {
+        // Bound the stored error size so a single failing event cannot persist an arbitrarily large row
+        if error.len() > Self::MAX_ERR_LEN {
+            let mut end = Self::MAX_ERR_LEN;
+            while !error.is_char_boundary(end) {
+                end -= 1;
+            }
+            error.truncate(end);
+            error.push_str("... (truncated)");
+        }
         let key = Alphanumeric.sample_string(&mut rand::rng(), 64);
         let ops = vec![StateOp::KvSet { key, scope: Self::ERR_SCOPE.into(), value: KhronosValue::Text(error.into()), blob: None }];
         let res = self.worker_state.mesophyll_client.exec_state_op(id, ops, StateDbFlags::WORKER_INITIATED).await?;

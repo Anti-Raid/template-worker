@@ -8,6 +8,9 @@ use tokio::net::UnixListener;
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::Status;
 
+/// Maximum size of a single message received from the mesophyll master
+const MAX_MESOPHYLL_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
+
 /// Mesophyll client
 #[derive(Clone)]
 pub struct MesophyllClient {
@@ -20,7 +23,11 @@ pub struct MesophyllClient {
 impl MesophyllClient {
     pub async fn new(worker_id: u64, master_sockfile: Arc<SockFile>) -> Result<Self, crate::Error> {
         let uri = tonic::transport::Endpoint::from_shared(format!("unix://{}", master_sockfile.sock.display()))?;
-        let mut client = pb::mesophyll_master_client::MesophyllMasterClient::connect(uri).await?;
+        // State op responses (e.g. KvFind over a whole scope) can exceed tonic's default 4 MiB
+        // receive limit, which would make the request fail outright. The master is trusted and the
+        // transport is a local Unix socket, so allow larger messages.
+        let mut client = pb::mesophyll_master_client::MesophyllMasterClient::connect(uri).await?
+            .max_decoding_message_size(MAX_MESOPHYLL_MESSAGE_SIZE);
 
         let s = Self {
             sock_file: Arc::new(new_sockfile_rooted(master_sockfile.dir.clone(), Alphanumeric.sample_string(&mut rand::rng(), 16))?),

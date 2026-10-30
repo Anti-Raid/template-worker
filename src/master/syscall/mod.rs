@@ -188,8 +188,11 @@ impl MSyscallHandler {
             reqwest,
             stratum,
             worker_pool,
-            bot_has_guild_cache: Cache::builder().time_to_idle(Duration::from_secs(60)).build(),
-            guild_members_cache: Cache::builder().time_to_idle(Duration::from_mins(5)).build(),
+            // A hard time-to-live is required in addition to time-to-idle: with only a time-to-idle,
+            // a client polling more often than the idle window keeps a stale entry (e.g. a removed
+            // admin role) alive forever
+            bot_has_guild_cache: Cache::builder().time_to_idle(Duration::from_secs(60)).time_to_live(Duration::from_secs(60)).build(),
+            guild_members_cache: Cache::builder().time_to_idle(Duration::from_mins(5)).time_to_live(Duration::from_mins(5)).build(),
             oauth2_code_cache: Cache::builder().time_to_live(Duration::from_secs(60 * 10)).build(),
             user_rl: Self::user_limits().expect("Failed to build user limits").into(),
             status_cache: Cache::builder().time_to_live(Duration::from_secs(100)).build(),
@@ -217,6 +220,12 @@ impl MSyscallHandler {
         let lb1 = Ratelimiter::limit(3, Duration::from_secs(5));
         let gbu1 = Ratelimiter::limit(5, Duration::from_secs(30));
 
+        // Web event dispatch (DispatchEvent/DispatchCEvent share this bucket)
+        let de1 = Ratelimiter::limit(30, Duration::from_secs(10));
+
+        // FeedTicket
+        let ft1 = Ratelimiter::limit(5, Duration::from_secs(30));
+
         // Create the clock
         let clock = QuantaClock::default();
 
@@ -228,7 +237,9 @@ impl MSyscallHandler {
                 "SearchGuildMembers" => vec![sgm1, sgm2],
                 "ListLockdowns" => vec![ll1],
                 "ListBackups" => vec![lb1],
-                "GetBackupUrl" => vec![gbu1]
+                "GetBackupUrl" => vec![gbu1],
+                "DispatchEvent" => vec![de1],
+                "FeedTicket" => vec![ft1]
             ),
             clock,
         })
@@ -274,6 +285,17 @@ impl MSyscallHandler {
         })
         .await?;
         Ok(hb)
+    }
+
+    /// Ensures the user is a current member of the guild (and that the bot is in the guild)
+    async fn ensure_guild_member(&self, guild_id: GuildId, user_id: UserId) -> Result<Member, MSyscallError> {
+        if !self.has_bot_single(guild_id).await? {
+            return Err(MSyscallError::BotNotOnGuild);
+        }
+        match self.guild_member(guild_id, user_id).await? {
+            Some(member) => Ok(member),
+            None => Err(MSyscallError::Unauthorized { reason: "You are potentially not a member of this server! If you recently joined the server, you may need to wait up to 5 minutes." }),
+        }
     }
 
     pub(super) fn limit(&self, ctx: &MSyscallContext, op: &'static str) -> Result<(), MSyscallError> {

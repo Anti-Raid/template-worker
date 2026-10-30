@@ -10,7 +10,8 @@ export type PaginationOpts = {
     id: string,
     embed: (currentIdx: number) -> apitypes.EmbedObject,
     numPages: number,
-    timeToExpiry: number? -- Optional, defaults to 120 seconds
+    timeToExpiry: number?, -- Optional, defaults to 120 seconds
+    ephemeral: boolean? -- Optional, if true only the invoking user can see the paginated message
 }
 
 local TIME_TO_EXPIRY = datetime.timedelta_seconds(120)
@@ -111,6 +112,7 @@ local function paginate(ctx: context.CommandContext, opts: PaginationOpts): ()
     end
 
     ctx.interaction.reply({
+        ephemeral = opts.ephemeral,
         embeds = {embed},
         components = {
             ActionRowBuilder.new()

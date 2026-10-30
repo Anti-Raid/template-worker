@@ -1,5 +1,6 @@
 local data = require"@antiraid-ext/frameworkv2/context"
 local units = require"@antiraid-ext/frameworkv2/unit"
+local modhierarchy = require"@antiraid-ext/utils/modhierarchy"
 
 local function kick(data: data.CommandContext): nil
     local modinfo = data.interaction.assertpermission("moderation.kick")
@@ -10,6 +11,10 @@ local function kick(data: data.CommandContext): nil
     if not userid then
         return data.interaction.replysimpleembed("Cannot kick unknown user!", "No user specified", units.RED_COLOR)
     end
+
+    -- Ensure the moderator is allowed to act on this specific target (self/owner/role hierarchy),
+    -- matching the dashboard moderation path
+    modhierarchy.canModeratorAffectTarget(data.ctx, modinfo, userid, "moderation.kick")
 
     if not reason or reason == "" then
         return data.interaction.replysimpleembed("Cannot kick user without a reason!", "Please provide a reason for kicking this user", units.RED_COLOR)

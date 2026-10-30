@@ -234,7 +234,7 @@ local function backups(ctx: Primitives.TemplateContext, author: string, req: Req
             },
         }
     elseif op == "restore" then
-        require_perm(ctx, author, "backups.restore")
+        modhierarchy.assertDiscordAdministrator(require_perm(ctx, author, "backups.restore"))
         local password = str(req, "password", true)
         m.backupcheckpointmanager.new({
             opts = {

@@ -140,10 +140,17 @@ pub fn create(handler: MSyscallHandler) -> axum::routing::IntoMakeService<Router
                 match self {
                     Resp::Err(e) => (StatusCode::BAD_REQUEST, Json(e)).into_response(),
                     Resp::Data { data, filename } => {
+                        // The stored key is tenant-controlled, so only allow a safe character set
+                        // inside the quoted filename parameter
+                        let filename: String = filename.chars()
+                            .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '_' })
+                            .collect();
                         let resp = Response::builder()
                             .header(header::CONTENT_TYPE, "application/octet-stream")
                             .header(header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", filename))
-                            .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
+                            // Signed URLs expire after a few minutes and blobs can be deleted, so the
+                            // response must never be stored by shared or browser caches
+                            .header(header::CACHE_CONTROL, "private, no-store")
                             .header(header::CONTENT_LENGTH, data.len())
                             .body(axum::body::Body::from(data));
 

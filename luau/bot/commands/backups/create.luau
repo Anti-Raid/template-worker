@@ -75,7 +75,18 @@ local function create(data: data.CommandContext): nil
             }
         end
     })
-    data.interaction.replysimpleembed("Creating backup", "Please wait...", units.GREEN_COLOR, {tempbutton.actionrow})
+    -- Ephemeral: this response is later edited to include a signed download link for the backup
+    data.interaction.reply({
+        embeds = {
+            {
+                title = "Creating backup",
+                description = "Please wait...",
+                color = units.GREEN_COLOR,
+            }
+        },
+        components = {tempbutton.actionrow},
+        ephemeral = true,
+    })
 
     local built = createBackup(data.ctx, opts, enckey, buf)
 
