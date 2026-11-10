@@ -17,7 +17,7 @@ same kittycat permission checks (none where the command has none).
                 { op = "removeall" }                -> { ok, removed = number }
   WebBackups    { op = "list" }                     -> { ok, backups = {{ id, created_by, created_at, last_updated_at }} }
                 { op = "url", id = string }         -> { ok, url, expiry }
-                { op = "create", messages = boolean?, channels = {string}?, assets = {string}?,
+                { op = "create", messages = boolean?, channels = {string}?, assets = {string}?, no_assets = boolean?,
                   max_messages = number?, per_channel = number?, special_allocations = {[string]: number}?,
                   password = string? } -> { ok, id }
                 { op = "delete", id = string }      -> { ok }
@@ -201,7 +201,8 @@ local function backups(ctx: Primitives.TemplateContext, author: string, req: Req
             perChannel = num(req, "per_channel") or DEFAULT_PER_CHANNEL,
             maxMessages = num(req, "max_messages") or DEFAULT_MAX_MESSAGES,
             backupMessages = req.messages == true,
-            backupGuildAssets = (if req.assets == nil then {"icon", "splash", "banner"} else strlist(req, "assets")) :: any,
+            -- no_assets: the dashboard drops empty lists before sending, so "none" needs its own flag
+            backupGuildAssets = (if req.no_assets == true then {} elseif req.assets == nil then {"icon", "splash", "banner"} else strlist(req, "assets")) :: any,
             rolloverLeftovers = true,
             specialAllocations = {},
         }
