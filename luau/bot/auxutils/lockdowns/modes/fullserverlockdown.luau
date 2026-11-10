@@ -43,6 +43,11 @@ local function FullServerLockdown(): mode.LockdownMode
         return 0
     end
 
+    --- Discord sends role permissions as a decimal string; the permission helpers need an integer
+    local function roleperms(role: discord.GuildRoleObject): integer
+        return integer.fromstring(role.permissions) or error(`Role {role.id} has invalid permissions "{role.permissions}"`)
+    end
+
     -- Internal method to collect needed role changes
     local function _test(data: mode.BaseLockdownModeData): {RoleChange}
         assert(data.guild.roles, "Internal error: Guild roles not found")
@@ -51,7 +56,7 @@ local function FullServerLockdown(): mode.LockdownMode
 
         for _, role in data.guild.roles do 
             if data.critical_roles.exists(role.id) then
-                local rolePerms = permissions.fromBitFlagToSet(role.permissions)
+                local rolePerms = permissions.fromBitFlagToSet(roleperms(role))
 
                 local neededPerms = {}
                 for _, perm in BASE_PERMS do
@@ -68,7 +73,7 @@ local function FullServerLockdown(): mode.LockdownMode
                     })
                 end
             else 
-                local rolePerms = permissions.fromBitFlagToSet(role.permissions)
+                local rolePerms = permissions.fromBitFlagToSet(roleperms(role))
 
                 local neededPerms = {}
                 for _, perm in BASE_PERMS do
@@ -109,9 +114,9 @@ local function FullServerLockdown(): mode.LockdownMode
         for _, change in changeset do 
             local newperms = change.role.permissions
             if change.op == "Add" then 
-                newperms = permissions.addToPerms(change.role.permissions, change.perms)
+                newperms = permissions.addToPerms(roleperms(change.role), change.perms)
             else 
-                newperms = permissions.removeFromPerms(change.role.permissions, change.perms)
+                newperms = permissions.removeFromPerms(roleperms(change.role), change.perms)
             end
             
             local role = data.ctx.discord:modify_guild_role({ reason = "Autofix attempted", role_id = change.role.id, data = { permissions = tostring(newperms) } }).data

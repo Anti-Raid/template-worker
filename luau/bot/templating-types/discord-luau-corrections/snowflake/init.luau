@@ -2,11 +2,22 @@
 	Wrapper around Discord snowflakes, allwowing developers to query information about a snowflake
 ]]
 
-local u64 = require"@antiraid/typesext".U64
-local bit = require"@antiraid/typesext".bitu64
 local datetime = require"@antiraid/datetime"
 
 local DISCORD_EPOCH = 1420070400000
+
+-- Snowflakes are 64-bit, so they are parsed with Luau's built-in integer library
+-- (typesext no longer provides U64/bitu64). Every integer.* argument must be an integer.
+local function parse(snowflake: string): integer
+	return integer.fromstring(snowflake) or error(`Invalid snowflake "{snowflake}"`)
+end
+
+local function field(snowflake: string, mask: number?, shift: number): number
+	local n = parse(snowflake)
+	if mask then n = integer.band(n, integer.create(mask)) end
+	if shift > 0 then n = integer.rshift(n, integer.create(shift)) end
+	return integer.tonumber(n)
+end
 
 local Snowflake = {}
 
@@ -17,8 +28,7 @@ Snowflake.Prototype = {}
 	Returns the timestamp of the snowflake
 ]]
 function Snowflake.Prototype.getTimestamp(self: Snowflake)
-	local snowflake = u64(self.snowflake)
-	local timestamp = bit.rshift(snowflake, 22) + DISCORD_EPOCH
+	local timestamp = field(self.snowflake, nil, 22) + DISCORD_EPOCH
 
 	return datetime.UTC:fromTime((timestamp / 1000))
 end
@@ -27,30 +37,21 @@ end
 	Returns the internal worker ID of the snowflake
 ]]
 function Snowflake.Prototype.getInternalWorkerId(self: Snowflake)
-	local snowflake = u64(self.snowflake)
-	local internalWorkerId = bit.rshift(bit.band(snowflake, 0x3E0000), 17)
-
-	return tonumber(tostring(internalWorkerId))
+	return field(self.snowflake, 0x3E0000, 17)
 end
 
 --[[
 	Returns the internal process ID of the snowflake
 ]]
 function Snowflake.Prototype.getInternalProcessId(self: Snowflake)
-	local snowflake = u64(self.snowflake)
-	local internalProcessId = bit.rshift(bit.band(snowflake, 0x1F0000), 12)
-
-	return tonumber(tostring(internalProcessId))
+	return field(self.snowflake, 0x1F000, 12)
 end
 
 --[[
 	Returns the increment of the snowflake
 ]]
 function Snowflake.Prototype.getIncrement(self: Snowflake)
-	local snowflake = u64(self.snowflake)
-	local internalProcessId = bit.band(snowflake, 0xFFF)
-
-	return tonumber(tostring(internalProcessId))
+	return field(self.snowflake, 0xFFF, 0)
 end
 
 --[[

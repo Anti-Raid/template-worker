@@ -1,16 +1,5 @@
-export type TarArchive = {
-    --- Takes out an entry from the tar archive by file name returning nil if not found
-    takefile: (self: TarArchive, name: string) -> buffer?,
-    --- Adds an entry to the tar archive with the given file name and contents
-    addfile: (self: TarArchive, name: string, contents: buffer | string) -> nil,
-    --- Returns the names of all entries in the tar archive
-    entries: (self: TarArchive) -> { string },
-    --- Converts the tar archive to a Blob
-    ---
-    --- This will destroy the tar archive (hence making it unusable for future Luau operations) 
-    --- and return a Blob containing the tar archive data
-    toblob: (self: TarArchive) -> buffer,
-}
+--- The files of a tar archive, mapping each path to its contents
+export type TarFiles = { [string]: buffer | string }
 
 --- Encodes a Blob to a base64 string
 local function base64encode(data: buffer | string): string
@@ -22,8 +11,15 @@ local function base64decode(str: string): buffer
     error("Implemented internally in AntiRaid runtime!")
 end
 
---- Creates a new TarArchive with an optional initial data Blob to load the initial TarArchive's contents from
-local function TarArchive(buf: (buffer | string)?): TarArchive
+--- Reads a tar archive into a table of path -> file contents
+---
+--- Only regular files are read. Errors on more than 64 entries or over 2 MiB of file data in total
+local function loadtar(data: buffer | string): { [string]: buffer }
+    error("Implemented internally in AntiRaid runtime!")
+end
+
+--- Builds a tar archive from a table of path -> file contents
+local function maketar(files: TarFiles): buffer
     error("Implemented internally in AntiRaid runtime!")
 end
 
@@ -52,7 +48,8 @@ end
 return {
     base64encode = base64encode,
     base64decode = base64decode,
-    TarArchive = TarArchive,
+    loadtar = loadtar,
+    maketar = maketar,
     aes256encrypt = aes256encrypt,
     aes256decrypt = aes256decrypt,
     compressgzip = compressgzip,

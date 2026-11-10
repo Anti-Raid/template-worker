@@ -57,20 +57,27 @@ local function loadBackupBlob(src: types.RestoreSource, blob: blob.Blob, enckey:
     end
 
     local blobsize = buffer.len(blob)
-    local tarArchive = datamgmt.TarArchive(data)
+    local files = datamgmt.loadtar(data)
+    --- Returns and removes a file, so the asset loop below only sees the remaining entries
+    local function takefile(name: string): buffer?
+        local f = files[name]
+        files[name] = nil
+        return f
+    end
 
     local coreData: types.CoreBackupData
     if format == "arb1" then 
-        local coreDataBlob = tarArchive:takefile("core.json")
+        local coreDataBlob = takefile("core.json")
         assert(coreDataBlob, "Core (core.json) backup data not found in backup archive")
         coreData = json.fromjsonstring(coreDataBlob)
     elseif format == "arb2" then
         if dbg_entryDebugTest then 
-            local e = tarArchive:entries()   
+            local e = {}
+            for name in files do table.insert(e, name) end
             error(`Entries in archive: {table.concat(e, ", ")}, sizeof blob: {blobsize}`) 
         end
 
-        local coreDataBlob = tarArchive:takefile("core.json.gz")
+        local coreDataBlob = takefile("core.json.gz")
         assert(coreDataBlob, "Core (core.json.gz) backup data not found in backup archive")
         local decompressedblob = datamgmt.decompressgzip(coreDataBlob) -- this creates a blob owned by rust containing the decompressed data
         coreData = json.fromjsonstring(decompressedblob) -- creates the luau value from this rust-owned blob without any copying to luau
@@ -92,10 +99,11 @@ local function loadBackupBlob(src: types.RestoreSource, blob: blob.Blob, enckey:
     end
 
     local assets = {}
-    for _, assetEntry in tarArchive:entries() do
+    for assetEntry, fileData in files do
         -- Split the `assets/` prefix
         local split = assetEntry:split("assets/")
         local assetPath = split[2]
+        if not assetPath then continue end -- Not under assets/
         -- Remove the file extension
         local asplit = assetPath:split(".")
         local assetName = asplit[1]
@@ -104,7 +112,7 @@ local function loadBackupBlob(src: types.RestoreSource, blob: blob.Blob, enckey:
             continue -- Skip if the asset is not recognized
         end
 
-        assets[assetName :: assetfetch.Asset] = tarArchive:takefile(assetEntry)
+        assets[assetName :: assetfetch.Asset] = fileData
     end
 
     return {

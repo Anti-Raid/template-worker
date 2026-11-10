@@ -16,16 +16,16 @@ local function createBackup(ctx: Primitives.TemplateContext, opts: types.BackupC
     updater.addStatus("Collecting core backup data with perChannel of " .. opts.perChannel .. " and maxMessages of " .. opts.maxMessages)
     local coreBackup = coreBackup(ctx, opts, updater)
     updater.addStatus("Generating backup archive")
-    local tararchive = datamgmt.TarArchive()
+    -- datamgmt.maketar takes a table of path -> file data
+    local tararchive: datamgmt.TarFiles = {}
     local encoded = json.tojsonstring(coreBackup)
-    local gzippedblob = datamgmt.compressgzip(encoded)
-    tararchive:addfile("core.json.gz", gzippedblob)
+    tararchive["core.json.gz"] = datamgmt.compressgzip(encoded)
 
     -- Add assets
     for _, asset in opts.backupGuildAssets do
         local assetBlob = assetfetch.fetchAsset(ctx, coreBackup.guild, asset)
         if assetBlob then
-            tararchive:addfile(`assets/{asset}.jpg`, assetBlob)
+            tararchive[`assets/{asset}.jpg`] = assetBlob
         end
     end
 
