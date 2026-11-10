@@ -3,7 +3,6 @@ import { type MAuthSyscall, type MAuthSyscallRet } from './auth'
 import { type MBotSyscall, type MBotSyscallRet } from './bot'
 import { type MDiscordSyscall, type MDiscordSyscallRet } from './discord'
 import { type MGkvSyscall, type MGkvSyscallRet } from './gkv'
-import { type MGuildSyscall, type MGuildSyscallRet } from './guild'
 
 /**
  * All possible top-level msyscall operation types
@@ -37,8 +36,7 @@ export type MSyscallArgs =
       op: "Gkv"; 
       /** The global key-value request payload */
       req: MGkvSyscall 
-    }
-  | { op: "Guild"; req: MGuildSyscall };
+    };
 
 /**
  * Outer wrapper for all successful msyscall returns
@@ -67,8 +65,7 @@ export type MSyscallRet =
       op: "Gkv"; 
       /** The global key-value response data */
       data: MGkvSyscallRet 
-    }
-  | { op: "Guild"; data: MGuildSyscallRet };
+    };
 
 /**
  * Outer wrapper for all msyscall errors

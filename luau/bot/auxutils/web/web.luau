@@ -6,15 +6,20 @@ msyscall `DispatchEvent` call, which sets `event.author` to the signed-in user)
 and always answers `{ ok = true, ... }` or `{ ok = false, error = string }` so the
 dashboard can show the reason without parsing a Lua traceback.
 
-Permission checks are the same kittycat permissions the slash commands use.
+Each op mirrors its slash command: same manager functions, same defaults and the
+same kittycat permission checks (none where the command has none).
 
-  WebLockdowns  { op = "create", kind = "full" | "channel" | "role", target = string?, reason = string }
+  WebLockdowns  { op = "list" }                     -> { ok, lockdowns = {{ id, type, reason, created_at }} }
+                { op = "create", kind = "full" | "channel" | "role", target = string?, reason = string }
                     -> { ok, lockdown = { id, type, reason } } or { ok = false, needs_autofix = true, error }
                 { op = "autofix", kind, target? }   -> { ok }
                 { op = "remove", id = string }      -> { ok }
                 { op = "removeall" }                -> { ok, removed = number }
-  WebBackups    { op = "create", messages = boolean?, channels = {string}?, assets = {string}?, no_assets = boolean?,
-                  max_messages = number?, per_channel = number?, password = string? } -> { ok, id }
+  WebBackups    { op = "list" }                     -> { ok, backups = {{ id, created_by, created_at, last_updated_at }} }
+                { op = "url", id = string }         -> { ok, url, expiry }
+                { op = "create", messages = boolean?, channels = {string}?, assets = {string}?,
+                  max_messages = number?, per_channel = number?, special_allocations = {[string]: number}?,
+                  password = string? } -> { ok, id }
                 { op = "delete", id = string }      -> { ok }
                 { op = "inspect", id = string, password = string? } -> { ok, backup = {...} }
                 { op = "restore", id = string, password = string?, protected_channels = {string}?, protected_roles = {string}? } -> { ok }
@@ -137,7 +142,14 @@ local LOCKDOWN_PERMS = { full = "lockdowns.full", channel = "lockdowns.scl", rol
 local function lockdowns(ctx: Primitives.TemplateContext, author: string, req: Req): Res
     local lockdownset = managers.getmanagers(ctx).lockdownset
     local op = req.op
-    if op == "create" then
+    if op == "list" then
+        -- Same as /lockdowns list, which has no permission check
+        local out = {}
+        for _, l in lockdownset.manager.list() do
+            table.insert(out, { id = l.id, type = l.type.string_form(), reason = l.reason, created_at = ms(l.created_at) })
+        end
+        return { ok = true, lockdowns = out }
+    elseif op == "create" then
         require_perm(ctx, author, LOCKDOWN_PERMS[req.kind] or "lockdowns.full")
         local reason = str(req, "reason")
         local m = lockdownmode(req)
@@ -168,20 +180,41 @@ local function backups(ctx: Primitives.TemplateContext, author: string, req: Req
     local m = managers.getmanagers(ctx)
     local mdm = m.backupmetadata
     local op = req.op
-    if op == "create" then
-        require_perm(ctx, author, "backups.create")
-        local assets = strlist(req, "assets")
-        for _, a in assets do
-            if a ~= "icon" and a ~= "splash" and a ~= "banner" then error(`Unknown asset "{a}"`, 0) end
+    if op == "list" then
+        -- Same as /backups list, which has no permission check
+        local out = {}
+        for _, b in mdm.listarr() do
+            table.insert(out, { id = b.key, created_by = if b.value then b.value.createdby else nil, created_at = ms(b.createdat), last_updated_at = ms(b.lastupdatedat) })
         end
+        return { ok = true, backups = out }
+    elseif op == "url" then
+        -- /backups list hands out these download links with no permission check
+        local id = str(req, "id")
+        if not mdm.get(id) then error(`Backup "{id}" does not exist`, 0) end
+        local signed = mdm.signbloburl(id)
+        return { ok = true, url = signed.url, expiry = signed.expiry }
+    elseif op == "create" then
+        require_perm(ctx, author, "backups.create")
+        -- Same defaults as /backups create
         local opts: backupTypes.BackupCreateOpts = {
             channels = strlist(req, "channels"),
             perChannel = num(req, "per_channel") or DEFAULT_PER_CHANNEL,
             maxMessages = num(req, "max_messages") or DEFAULT_MAX_MESSAGES,
             backupMessages = req.messages == true,
-            backupGuildAssets = (if req.no_assets == true then {} elseif req.assets == nil then {"icon", "splash", "banner"} else assets) :: any,
+            backupGuildAssets = (if req.assets == nil then {"icon", "splash", "banner"} else strlist(req, "assets")) :: any,
+            rolloverLeftovers = true,
             specialAllocations = {},
         }
+        local allocs = req.special_allocations
+        if allocs ~= nil then
+            if type(allocs) ~= "table" then error(`"special_allocations" must be a map of channel ID to number`, 0) end
+            for channelid, count in allocs do
+                if type(channelid) ~= "string" or not string.match(channelid, "^%d+$") or type(count) ~= "number" then
+                    error(`Invalid special allocation for "{tostring(channelid)}"`, 0)
+                end
+                opts.specialAllocations[channelid] = count
+            end
+        end
         local password = str(req, "password", true)
         local built = createBackup(ctx, opts, if password ~= "" then password else nil, sb.StatusBuffer())
         mdm.set(built.filename, { createdby = author }, built.backup)
@@ -193,7 +226,7 @@ local function backups(ctx: Primitives.TemplateContext, author: string, req: Req
         mdm.remove(id)
         return { ok = true }
     elseif op == "inspect" then
-        require_perm(ctx, author, "backups.create", "backups.restore")
+        -- Same as /backups inspect, which has no permission check
         local password = str(req, "password", true)
         local loaded = inspectimpl(
             ctx,
@@ -265,8 +298,6 @@ local function honeypots(ctx: Primitives.TemplateContext, author: string, req: R
         local punishment = str(req, "punishment")
         if punishment ~= "ban" and punishment ~= "kick" then error("Punishment must be ban or kick", 0) end
         local channelid = snowflake(req, "channel_id")
-        -- Updating an existing honeypot should not count against the limit
-        if hm.has(channelid) then hm.delete(channelid) end
         hm.set({ channelid = channelid, botallowed = req.bots_allowed == true, punishment = punishment :: any })
         return { ok = true }
     elseif op == "remove" then
@@ -314,14 +345,12 @@ local function moderation(ctx: Primitives.TemplateContext, author: string, req: 
     local userid = snowflake(req, "user_id")
     local reason = str(req, "reason")
     if op == "kick" then
-        local info = userinfo(ctx, author)
-        modhierarchy.canModeratorAffectTarget(ctx, info, userid, "moderation.kick")
+        local info = require_perm(ctx, author, "moderation.kick")
         ctx.discord:remove_guild_member({ reason = reason, user_id = userid })
         ctx.loop.dispatch({ name = "AntiraidKick", author = info.userid, data = { userid = userid, reason = reason } })
         return { ok = true }
     elseif op == "ban" then
-        local info = userinfo(ctx, author)
-        modhierarchy.canModeratorAffectTarget(ctx, info, userid, "moderation.ban")
+        local info = require_perm(ctx, author, "moderation.ban")
         local tempbankex = managers.getmanagers(ctx).tempbankex
         if tempbankex.get(userid) then error("This user already has an active tempban", 0) end
         local delete_message_seconds = num(req, "delete_message_seconds")
