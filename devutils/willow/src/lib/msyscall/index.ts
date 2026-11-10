@@ -91,11 +91,20 @@ export const msyscall = async (instanceUrl: string, auth: string | undefined, ca
                 }
             }
 
-            const json = await resp.json()
-            return new Result({ok: false, res: json})
         }
-        const json = await resp.json()
-        return new Result({ok: true, res: json})
+
+        // Read as text first: axum rejections (bad body, failed serialization) and proxy
+        // error pages are not JSON, and resp.json() would hide them behind a SyntaxError
+        const body = await resp.text()
+        let json: any
+        try {
+            json = JSON.parse(body)
+        } catch {
+            const e: MSyscallError = {op: "Generic", message: `${resp.status} ${resp.statusText}: ${body.slice(0, 500) || "(empty response)"}`}
+            console.error("msyscall returned non-JSON", call, resp.status, body)
+            return new Result({ok: false, res: e as any})
+        }
+        return new Result({ok: resp.ok, res: json})
     } catch (err) {
         let e: MSyscallError = {op: "Generic", message: err?.toString() || "Unknown error"}
         return new Result({ok: false, res: e as any})
